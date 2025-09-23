@@ -1,3 +1,4 @@
+
 import { Stack, useGlobalSearchParams } from 'expo-router';
 import { SafeAreaProvider, useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { Platform } from 'react-native';
@@ -50,9 +51,17 @@ export default function RootLayout() {
           <Stack
             screenOptions={{
               headerShown: false,
-              animation: 'default',
+              animation: 'slide_from_right',
+              animationDuration: 200,
             }}
-          />
+          >
+            <Stack.Screen name="index" />
+            <Stack.Screen name="upcoming" />
+            <Stack.Screen name="archive" />
+            <Stack.Screen name="players" />
+            <Stack.Screen name="coaches" />
+            <Stack.Screen name="tournaments" />
+          </Stack>
         </GestureHandlerRootView>
     </SafeAreaProvider>
   );
