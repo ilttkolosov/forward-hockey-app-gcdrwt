@@ -1,8 +1,9 @@
 
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Game } from '../types';
 import { colors, commonStyles } from '../styles/commonStyles';
+import { useRouter } from 'expo-router';
 
 interface GameCardProps {
   game: Game;
@@ -10,6 +11,13 @@ interface GameCardProps {
 }
 
 export default function GameCard({ game, showScore = true }: GameCardProps) {
+  const router = useRouter();
+
+  const handlePress = () => {
+    console.log('GameCard pressed, navigating to game:', game.id);
+    router.push(`/game/${game.id}`);
+  };
+
   const getStatusColor = (status: Game['status']) => {
     switch (status) {
       case 'live':
@@ -45,43 +53,45 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
   };
 
   return (
-    <View style={commonStyles.gameCard}>
-      <View style={styles.header}>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(game.status) }]}>
-          <Text style={styles.statusText}>{getStatusText(game.status)}</Text>
+    <TouchableOpacity onPress={handlePress} activeOpacity={0.7}>
+      <View style={commonStyles.gameCard}>
+        <View style={styles.header}>
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(game.status) }]}>
+            <Text style={styles.statusText}>{getStatusText(game.status)}</Text>
+          </View>
+          <Text style={commonStyles.textSecondary}>{formatDate(game.date)} • {game.time}</Text>
         </View>
-        <Text style={commonStyles.textSecondary}>{formatDate(game.date)} • {game.time}</Text>
-      </View>
 
-      <View style={styles.teamsContainer}>
-        <View style={styles.teamSection}>
-          <Text style={styles.teamName}>{game.homeTeam}</Text>
-          {showScore && game.homeScore !== undefined && (
-            <Text style={styles.score}>{game.homeScore}</Text>
+        <View style={styles.teamsContainer}>
+          <View style={styles.teamSection}>
+            <Text style={styles.teamName}>{game.homeTeam}</Text>
+            {showScore && game.homeScore !== undefined && (
+              <Text style={styles.score}>{game.homeScore}</Text>
+            )}
+          </View>
+
+          <View style={styles.vsSection}>
+            <Text style={styles.vsText}>VS</Text>
+          </View>
+
+          <View style={styles.teamSection}>
+            <Text style={styles.teamName}>{game.awayTeam}</Text>
+            {showScore && game.awayScore !== undefined && (
+              <Text style={styles.score}>{game.awayScore}</Text>
+            )}
+          </View>
+        </View>
+
+        <View style={styles.footer}>
+          <Text style={commonStyles.textSecondary}>{game.venue}</Text>
+          {game.tournament && (
+            <Text style={[commonStyles.textSecondary, styles.tournament]}>
+              {game.tournament}
+            </Text>
           )}
         </View>
-
-        <View style={styles.vsSection}>
-          <Text style={styles.vsText}>VS</Text>
-        </View>
-
-        <View style={styles.teamSection}>
-          <Text style={styles.teamName}>{game.awayTeam}</Text>
-          {showScore && game.awayScore !== undefined && (
-            <Text style={styles.score}>{game.awayScore}</Text>
-          )}
-        </View>
       </View>
-
-      <View style={styles.footer}>
-        <Text style={commonStyles.textSecondary}>{game.venue}</Text>
-        {game.tournament && (
-          <Text style={[commonStyles.textSecondary, styles.tournament]}>
-            {game.tournament}
-          </Text>
-        )}
-      </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 

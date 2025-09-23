@@ -10,6 +10,7 @@ export interface Game {
   venue: string;
   status: 'upcoming' | 'live' | 'finished';
   tournament?: string;
+  videoUrl?: string;
 }
 
 export interface Player {
@@ -22,6 +23,30 @@ export interface Player {
   weight?: string;
   nationality?: string;
   photo?: string;
+}
+
+export interface GamePlayerStats {
+  playerId: string;
+  playerName: string;
+  position: string;
+  number: number;
+  goals: number;
+  assists: number;
+  points: number;
+  penaltyMinutes: number;
+  shots: number;
+  hits: number;
+  blockedShots: number;
+  faceoffWins?: number;
+  faceoffLosses?: number;
+  timeOnIce: string;
+}
+
+export interface GameStats {
+  gameId: string;
+  homeTeamStats: GamePlayerStats[];
+  awayTeamStats: GamePlayerStats[];
+  gameHighlights?: string[];
 }
 
 export interface Coach {

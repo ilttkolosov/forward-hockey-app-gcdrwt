@@ -1,5 +1,5 @@
 
-import { Game, Player, Coach, Tournament, TeamStats } from '../types';
+import { Game, Player, Coach, Tournament, TeamStats, GameStats, GamePlayerStats } from '../types';
 
 export const mockCurrentGame: Game = {
   id: '1',
@@ -12,6 +12,7 @@ export const mockCurrentGame: Game = {
   venue: 'Forward Arena',
   status: 'live',
   tournament: 'Championship League',
+  videoUrl: 'https://www.hc-forward.com/broadcast/live-stream',
 };
 
 export const mockUpcomingGames: Game[] = [
@@ -24,6 +25,7 @@ export const mockUpcomingGames: Game[] = [
     venue: 'Spartak Ice Palace',
     status: 'upcoming',
     tournament: 'Championship League',
+    videoUrl: 'https://www.hc-forward.com/broadcast/upcoming-stream',
   },
   {
     id: '3',
@@ -34,6 +36,7 @@ export const mockUpcomingGames: Game[] = [
     venue: 'Forward Arena',
     status: 'upcoming',
     tournament: 'Championship League',
+    videoUrl: 'https://www.hc-forward.com/broadcast/upcoming-stream-2',
   },
   {
     id: '4',
@@ -44,6 +47,7 @@ export const mockUpcomingGames: Game[] = [
     venue: 'Torpedo Stadium',
     status: 'upcoming',
     tournament: 'Championship League',
+    videoUrl: 'https://www.hc-forward.com/broadcast/upcoming-stream-3',
   },
 ];
 
@@ -59,6 +63,7 @@ export const mockGameArchive: Game[] = [
     venue: 'Forward Arena',
     status: 'finished',
     tournament: 'Championship League',
+    videoUrl: 'https://www.hc-forward.com/broadcast/replay-1',
   },
   {
     id: '6',
@@ -71,6 +76,7 @@ export const mockGameArchive: Game[] = [
     venue: 'Metallurg Arena',
     status: 'finished',
     tournament: 'Championship League',
+    videoUrl: 'https://www.hc-forward.com/broadcast/replay-2',
   },
   {
     id: '7',
@@ -83,6 +89,7 @@ export const mockGameArchive: Game[] = [
     venue: 'Forward Arena',
     status: 'finished',
     tournament: 'New Year Cup',
+    videoUrl: 'https://www.hc-forward.com/broadcast/replay-3',
   },
 ];
 
@@ -195,4 +202,235 @@ export const mockTeamStats: TeamStats = {
   goalsAgainst: 67,
   points: 58,
   position: 3,
+};
+
+// Mock game statistics for different games
+export const mockGameStats: { [gameId: string]: GameStats } = {
+  '1': {
+    gameId: '1',
+    homeTeamStats: [
+      {
+        playerId: '1',
+        playerName: 'Alexander Petrov',
+        position: 'Forward',
+        number: 10,
+        goals: 1,
+        assists: 1,
+        points: 2,
+        penaltyMinutes: 2,
+        shots: 4,
+        hits: 3,
+        blockedShots: 0,
+        faceoffWins: 8,
+        faceoffLosses: 5,
+        timeOnIce: '18:45',
+      },
+      {
+        playerId: '4',
+        playerName: 'Pavel Kozlov',
+        position: 'Forward',
+        number: 17,
+        goals: 1,
+        assists: 0,
+        points: 1,
+        penaltyMinutes: 0,
+        shots: 3,
+        hits: 2,
+        blockedShots: 1,
+        faceoffWins: 6,
+        faceoffLosses: 4,
+        timeOnIce: '16:22',
+      },
+      {
+        playerId: '2',
+        playerName: 'Dmitry Volkov',
+        position: 'Defenseman',
+        number: 5,
+        goals: 0,
+        assists: 1,
+        points: 1,
+        penaltyMinutes: 0,
+        shots: 2,
+        hits: 5,
+        blockedShots: 3,
+        timeOnIce: '22:15',
+      },
+      {
+        playerId: '5',
+        playerName: 'Sergey Morozov',
+        position: 'Defenseman',
+        number: 3,
+        goals: 0,
+        assists: 0,
+        points: 0,
+        penaltyMinutes: 4,
+        shots: 1,
+        hits: 4,
+        blockedShots: 2,
+        timeOnIce: '19:33',
+      },
+      {
+        playerId: '3',
+        playerName: 'Igor Smirnov',
+        position: 'Goaltender',
+        number: 1,
+        goals: 0,
+        assists: 0,
+        points: 0,
+        penaltyMinutes: 0,
+        shots: 0,
+        hits: 0,
+        blockedShots: 0,
+        timeOnIce: '60:00',
+      },
+    ],
+    awayTeamStats: [
+      {
+        playerId: 'dyn1',
+        playerName: 'Viktor Orlov',
+        position: 'Forward',
+        number: 9,
+        goals: 1,
+        assists: 0,
+        points: 1,
+        penaltyMinutes: 0,
+        shots: 5,
+        hits: 2,
+        blockedShots: 0,
+        faceoffWins: 7,
+        faceoffLosses: 8,
+        timeOnIce: '17:28',
+      },
+      {
+        playerId: 'dyn2',
+        playerName: 'Mikhail Fedorov',
+        position: 'Defenseman',
+        number: 4,
+        goals: 0,
+        assists: 1,
+        points: 1,
+        penaltyMinutes: 2,
+        shots: 1,
+        hits: 6,
+        blockedShots: 4,
+        timeOnIce: '21:45',
+      },
+      {
+        playerId: 'dyn3',
+        playerName: 'Andrei Vasiliev',
+        position: 'Goaltender',
+        number: 30,
+        goals: 0,
+        assists: 0,
+        points: 0,
+        penaltyMinutes: 0,
+        shots: 0,
+        hits: 0,
+        blockedShots: 0,
+        timeOnIce: '60:00',
+      },
+    ],
+    gameHighlights: [
+      'Alexander Petrov opens scoring at 8:23 of the first period',
+      'Viktor Orlov equalizes at 14:45 of the second period',
+      'Pavel Kozlov scores the game-winner at 3:12 of the third period',
+    ],
+  },
+  '5': {
+    gameId: '5',
+    homeTeamStats: [
+      {
+        playerId: '1',
+        playerName: 'Alexander Petrov',
+        position: 'Forward',
+        number: 10,
+        goals: 2,
+        assists: 1,
+        points: 3,
+        penaltyMinutes: 0,
+        shots: 6,
+        hits: 2,
+        blockedShots: 0,
+        faceoffWins: 12,
+        faceoffLosses: 8,
+        timeOnIce: '19:45',
+      },
+      {
+        playerId: '4',
+        playerName: 'Pavel Kozlov',
+        position: 'Forward',
+        number: 17,
+        goals: 1,
+        assists: 2,
+        points: 3,
+        penaltyMinutes: 2,
+        shots: 4,
+        hits: 1,
+        blockedShots: 0,
+        faceoffWins: 5,
+        faceoffLosses: 7,
+        timeOnIce: '17:33',
+      },
+      {
+        playerId: '2',
+        playerName: 'Dmitry Volkov',
+        position: 'Defenseman',
+        number: 5,
+        goals: 0,
+        assists: 2,
+        points: 2,
+        penaltyMinutes: 0,
+        shots: 3,
+        hits: 4,
+        blockedShots: 5,
+        timeOnIce: '23:12',
+      },
+    ],
+    awayTeamStats: [
+      {
+        playerId: 'lok1',
+        playerName: 'Roman Petrov',
+        position: 'Forward',
+        number: 11,
+        goals: 1,
+        assists: 1,
+        points: 2,
+        penaltyMinutes: 4,
+        shots: 3,
+        hits: 3,
+        blockedShots: 0,
+        timeOnIce: '16:22',
+      },
+      {
+        playerId: 'lok2',
+        playerName: 'Denis Kuznetsov',
+        position: 'Forward',
+        number: 7,
+        goals: 1,
+        assists: 0,
+        points: 1,
+        penaltyMinutes: 0,
+        shots: 4,
+        hits: 2,
+        blockedShots: 1,
+        timeOnIce: '15:45',
+      },
+    ],
+    gameHighlights: [
+      'Alexander Petrov hat-trick performance',
+      'Pavel Kozlov with 3 points (1G, 2A)',
+      'Thrilling overtime finish',
+    ],
+  },
+};
+
+// Helper function to get game by ID
+export const getGameById = (gameId: string): Game | undefined => {
+  const allGames = [mockCurrentGame, ...mockUpcomingGames, ...mockGameArchive];
+  return allGames.find(game => game.id === gameId);
+};
+
+// Helper function to get game stats by ID
+export const getGameStatsById = (gameId: string): GameStats | undefined => {
+  return mockGameStats[gameId];
 };
