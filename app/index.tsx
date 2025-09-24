@@ -1,15 +1,15 @@
 
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Link } from 'expo-router';
+import { Game, TeamStats } from '../types';
+import { getCurrentGame, getFutureGames } from '../data/gameData';
+import { mockTeamStats } from '../data/mockData';
 import { commonStyles, colors } from '../styles/commonStyles';
-import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
-import { Game, TeamStats } from '../types';
-import { mockCurrentGame, mockUpcomingGames, mockTeamStats } from '../data/mockData';
-import { Link } from 'expo-router';
-import { TouchableOpacity } from 'react-native';
+import GameCard from '../components/GameCard';
 import Icon from '../components/Icon';
 
 export default function HomeScreen() {
@@ -20,31 +20,38 @@ export default function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const loadData = async () => {
-    try {
-      setError(null);
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      setCurrentGame(mockCurrentGame);
-      setUpcomingGames(mockUpcomingGames.slice(0, 2)); // Show only next 2 games
-      setTeamStats(mockTeamStats);
-    } catch (err) {
-      console.log('Error loading home data:', err);
-      setError('Failed to load team data. Please try again.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
   useEffect(() => {
     loadData();
   }, []);
 
-  const onRefresh = () => {
+  const loadData = async () => {
+    try {
+      console.log('Loading home screen data...');
+      setLoading(true);
+      setError(null);
+
+      const [currentGameData, upcomingGamesData] = await Promise.all([
+        getCurrentGame(),
+        getFutureGames()
+      ]);
+
+      setCurrentGame(currentGameData);
+      setUpcomingGames(upcomingGamesData.slice(0, 3)); // Show only first 3 upcoming games
+      setTeamStats(mockTeamStats); // Keep using mock data for team stats
+      
+      console.log('Home screen data loaded successfully');
+    } catch (err) {
+      console.error('Error loading home screen data:', err);
+      setError('Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    loadData();
+    await loadData();
+    setRefreshing(false);
   };
 
   if (loading) {
@@ -58,7 +65,7 @@ export default function HomeScreen() {
   if (error) {
     return (
       <SafeAreaView style={commonStyles.container}>
-        <ErrorMessage message={error} onRetry={loadData} />
+        <ErrorMessage message={error} />
       </SafeAreaView>
     );
   }
@@ -66,83 +73,61 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={commonStyles.container}>
       <ScrollView
-        style={commonStyles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        showsVerticalScrollIndicator={false}
+        style={commonStyles.container}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {/* Header */}
-        <View style={{ marginBottom: 24 }}>
-          <Text style={commonStyles.title}>HC Forward</Text>
-          <Text style={commonStyles.textSecondary}>Official Mobile App</Text>
+        <View style={commonStyles.header}>
+          <Text style={commonStyles.headerTitle}>HC Forward</Text>
         </View>
 
         {/* Current Game */}
         {currentGame && (
           <View style={commonStyles.section}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-              <Text style={commonStyles.subtitle}>Current Game</Text>
-              {currentGame.status === 'live' && (
-                <View style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: 4,
-                  backgroundColor: colors.error,
-                  marginLeft: 8,
-                }} />
-              )}
-            </View>
-            <GameCard game={currentGame} />
+            <Text style={commonStyles.sectionTitle}>Current Game</Text>
+            <GameCard game={currentGame} showScore={true} />
           </View>
         )}
 
-        {/* Team Stats */}
-        {teamStats && (
-          <View style={commonStyles.section}>
-            <Text style={commonStyles.subtitle}>Season Stats</Text>
-            <View style={commonStyles.card}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 24, fontWeight: '700', color: colors.primary }}>
-                    {teamStats.position}
-                  </Text>
-                  <Text style={commonStyles.textSecondary}>Position</Text>
-                </View>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 24, fontWeight: '700', color: colors.success }}>
-                    {teamStats.wins}
-                  </Text>
-                  <Text style={commonStyles.textSecondary}>Wins</Text>
-                </View>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 24, fontWeight: '700', color: colors.primary }}>
-                    {teamStats.points}
-                  </Text>
-                  <Text style={commonStyles.textSecondary}>Points</Text>
-                </View>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 24, fontWeight: '700', color: colors.text }}>
-                    {teamStats.goalsFor}-{teamStats.goalsAgainst}
-                  </Text>
-                  <Text style={commonStyles.textSecondary}>Goals</Text>
-                </View>
-              </View>
-            </View>
+        {/* Quick Navigation */}
+        <View style={commonStyles.section}>
+          <Text style={commonStyles.sectionTitle}>Quick Access</Text>
+          <View style={quickNavStyles.container}>
+            <Link href="/upcoming" asChild>
+              <TouchableOpacity style={quickNavStyles.item}>
+                <Icon name="calendar" size={24} color={colors.primary} />
+                <Text style={quickNavStyles.text}>Upcoming Games</Text>
+              </TouchableOpacity>
+            </Link>
+            <Link href="/archive" asChild>
+              <TouchableOpacity style={quickNavStyles.item}>
+                <Icon name="archive" size={24} color={colors.primary} />
+                <Text style={quickNavStyles.text}>Game Archive</Text>
+              </TouchableOpacity>
+            </Link>
+            <Link href="/players" asChild>
+              <TouchableOpacity style={quickNavStyles.item}>
+                <Icon name="users" size={24} color={colors.primary} />
+                <Text style={quickNavStyles.text}>Players</Text>
+              </TouchableOpacity>
+            </Link>
+            <Link href="/tournaments" asChild>
+              <TouchableOpacity style={quickNavStyles.item}>
+                <Icon name="trophy" size={24} color={colors.primary} />
+                <Text style={quickNavStyles.text}>Tournaments</Text>
+              </TouchableOpacity>
+            </Link>
           </View>
-        )}
+        </View>
 
-        {/* Upcoming Games */}
+        {/* Upcoming Games Preview */}
         {upcomingGames.length > 0 && (
           <View style={commonStyles.section}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <Text style={commonStyles.subtitle}>Next Games</Text>
+            <View style={commonStyles.sectionHeader}>
+              <Text style={commonStyles.sectionTitle}>Next Games</Text>
               <Link href="/upcoming" asChild>
-                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '500', marginRight: 4 }}>
-                    View All
-                  </Text>
-                  <Icon name="chevron-forward" size={16} color={colors.primary} />
+                <TouchableOpacity>
+                  <Text style={commonStyles.seeAllText}>See All</Text>
                 </TouchableOpacity>
               </Link>
             </View>
@@ -152,60 +137,65 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Quick Navigation */}
-        <View style={commonStyles.section}>
-          <Text style={commonStyles.subtitle}>Quick Access</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
-            <Link href="/archive" asChild>
-              <TouchableOpacity style={quickNavStyles.button}>
-                <Icon name="archive" size={24} color={colors.primary} />
-                <Text style={quickNavStyles.buttonText}>Game Archive</Text>
-              </TouchableOpacity>
-            </Link>
-            <Link href="/players" asChild>
-              <TouchableOpacity style={quickNavStyles.button}>
-                <Icon name="people" size={24} color={colors.primary} />
-                <Text style={quickNavStyles.buttonText}>Players</Text>
-              </TouchableOpacity>
-            </Link>
-            <Link href="/tournaments" asChild>
-              <TouchableOpacity style={quickNavStyles.button}>
-                <Icon name="trophy" size={24} color={colors.primary} />
-                <Text style={quickNavStyles.buttonText}>Tournaments</Text>
-              </TouchableOpacity>
-            </Link>
-            <Link href="/coaches" asChild>
-              <TouchableOpacity style={quickNavStyles.button}>
-                <Icon name="school" size={24} color={colors.primary} />
-                <Text style={quickNavStyles.buttonText}>Coaches</Text>
-              </TouchableOpacity>
-            </Link>
+        {/* Team Stats */}
+        {teamStats && (
+          <View style={commonStyles.section}>
+            <Text style={commonStyles.sectionTitle}>Season Stats</Text>
+            <View style={commonStyles.statsGrid}>
+              <View style={commonStyles.statItem}>
+                <Text style={commonStyles.statValue}>{teamStats.wins}</Text>
+                <Text style={commonStyles.statLabel}>Wins</Text>
+              </View>
+              <View style={commonStyles.statItem}>
+                <Text style={commonStyles.statValue}>{teamStats.losses}</Text>
+                <Text style={commonStyles.statLabel}>Losses</Text>
+              </View>
+              <View style={commonStyles.statItem}>
+                <Text style={commonStyles.statValue}>{teamStats.draws}</Text>
+                <Text style={commonStyles.statLabel}>Draws</Text>
+              </View>
+              <View style={commonStyles.statItem}>
+                <Text style={commonStyles.statValue}>{teamStats.points}</Text>
+                <Text style={commonStyles.statLabel}>Points</Text>
+              </View>
+              <View style={commonStyles.statItem}>
+                <Text style={commonStyles.statValue}>{teamStats.goalsFor}</Text>
+                <Text style={commonStyles.statLabel}>Goals For</Text>
+              </View>
+              <View style={commonStyles.statItem}>
+                <Text style={commonStyles.statValue}>{teamStats.goalsAgainst}</Text>
+                <Text style={commonStyles.statLabel}>Goals Against</Text>
+              </View>
+            </View>
           </View>
-        </View>
-
-        {/* Bottom spacing */}
-        <View style={{ height: 32 }} />
+        )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const quickNavStyles = {
-  button: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
+  container: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  item: {
+    flex: 1,
+    minWidth: '45%',
+    backgroundColor: colors.surface,
     padding: 16,
+    borderRadius: 12,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
-    minWidth: '45%',
-    borderWidth: 1,
-    borderColor: colors.border,
+    minHeight: 80,
   },
-  buttonText: {
-    fontSize: 14,
-    fontWeight: '500' as const,
-    color: colors.text,
+  text: {
     marginTop: 8,
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: colors.text,
     textAlign: 'center' as const,
   },
 };

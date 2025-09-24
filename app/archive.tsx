@@ -1,15 +1,14 @@
 
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Link } from 'expo-router';
+import { Game } from '../types';
+import { getPastGames } from '../data/gameData';
 import { commonStyles, colors } from '../styles/commonStyles';
-import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
-import { Game } from '../types';
-import { mockGameArchive } from '../data/mockData';
-import { Link } from 'expo-router';
-import { TouchableOpacity } from 'react-native';
+import GameCard from '../components/GameCard';
 import Icon from '../components/Icon';
 
 export default function GameArchiveScreen() {
@@ -18,29 +17,36 @@ export default function GameArchiveScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const loadData = async () => {
-    try {
-      setError(null);
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
-      setGames(mockGameArchive);
-    } catch (err) {
-      console.log('Error loading game archive:', err);
-      setError('Failed to load game archive. Please try again.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
   useEffect(() => {
     loadData();
   }, []);
 
-  const onRefresh = () => {
+  const loadData = async () => {
+    try {
+      console.log('Loading game archive...');
+      setLoading(true);
+      setError(null);
+
+      const gamesData = await getPastGames();
+      // Sort by date descending (most recent first)
+      const sortedGames = gamesData.sort((a, b) => 
+        new Date(b.date).getTime() - new Date(a.date).getTime()
+      );
+      setGames(sortedGames);
+      
+      console.log('Game archive loaded successfully');
+    } catch (err) {
+      console.error('Error loading game archive:', err);
+      setError('Failed to load game archive');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    loadData();
+    await loadData();
+    setRefreshing(false);
   };
 
   if (loading) {
@@ -54,46 +60,46 @@ export default function GameArchiveScreen() {
   if (error) {
     return (
       <SafeAreaView style={commonStyles.container}>
-        <ErrorMessage message={error} onRetry={loadData} />
+        <View style={commonStyles.header}>
+          <Link href="/" asChild>
+            <TouchableOpacity style={commonStyles.backButton}>
+              <Icon name="arrow-left" size={24} color={colors.text} />
+            </TouchableOpacity>
+          </Link>
+          <Text style={commonStyles.headerTitle}>Game Archive</Text>
+        </View>
+        <ErrorMessage message={error} />
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={commonStyles.container}>
+      <View style={commonStyles.header}>
+        <Link href="/" asChild>
+          <TouchableOpacity style={commonStyles.backButton}>
+            <Icon name="arrow-left" size={24} color={colors.text} />
+          </TouchableOpacity>
+        </Link>
+        <Text style={commonStyles.headerTitle}>Game Archive</Text>
+      </View>
+
       <ScrollView
-        style={commonStyles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        showsVerticalScrollIndicator={false}
+        style={commonStyles.container}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* Header */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24 }}>
-          <Link href="/" asChild>
-            <TouchableOpacity style={{ marginRight: 16 }}>
-              <Icon name="chevron-back" size={24} color={colors.text} />
-            </TouchableOpacity>
-          </Link>
-          <View>
-            <Text style={commonStyles.title}>Game Archive</Text>
-            <Text style={commonStyles.textSecondary}>{games.length} games played</Text>
-          </View>
+        <View style={commonStyles.section}>
+          {games.length > 0 ? (
+            games.map((game) => (
+              <GameCard key={game.id} game={game} showScore={true} />
+            ))
+          ) : (
+            <View style={commonStyles.emptyState}>
+              <Icon name="archive" size={48} color={colors.textSecondary} />
+              <Text style={commonStyles.emptyStateText}>No games in archive</Text>
+            </View>
+          )}
         </View>
-
-        {/* Games List */}
-        {games.length > 0 ? (
-          games.map((game) => (
-            <GameCard key={game.id} game={game} showScore={true} />
-          ))
-        ) : (
-          <View style={commonStyles.errorContainer}>
-            <Text style={commonStyles.text}>No games in archive.</Text>
-          </View>
-        )}
-
-        {/* Bottom spacing */}
-        <View style={{ height: 32 }} />
       </ScrollView>
     </SafeAreaView>
   );

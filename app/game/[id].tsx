@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import { Game, GameStats, GamePlayerStats } from '../../types';
-import { getGameById, getGameStatsById } from '../../data/mockData';
+import { getGameById, getGameStatsById } from '../../data/gameData';
 import { colors, commonStyles } from '../../styles/commonStyles';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
@@ -32,7 +32,9 @@ export default function GameDetailsScreen() {
   const [selectedTab, setSelectedTab] = useState<'home' | 'away'>('home');
 
   useEffect(() => {
-    loadGameData();
+    if (id) {
+      loadGameData();
+    }
   }, [id]);
 
   const loadGameData = async () => {
@@ -41,11 +43,10 @@ export default function GameDetailsScreen() {
       setLoading(true);
       setError(null);
 
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      const gameData = getGameById(id);
-      const statsData = getGameStatsById(id);
+      const [gameData, statsData] = await Promise.all([
+        getGameById(id),
+        Promise.resolve(getGameStatsById(id)) // This is synchronous for now
+      ]);
 
       if (!gameData) {
         setError('Game not found');
@@ -54,6 +55,8 @@ export default function GameDetailsScreen() {
 
       setGame(gameData);
       setGameStats(statsData || null);
+      
+      console.log('Game data loaded successfully');
     } catch (err) {
       console.error('Error loading game data:', err);
       setError('Failed to load game data');
@@ -224,8 +227,16 @@ export default function GameDetailsScreen() {
                 domStorageEnabled={true}
                 startInLoadingState={true}
                 scalesPageToFit={true}
-                allowsInlineMediaPlayback={true}
+                allowsInlineMediaPlaybook={true}
                 mediaPlaybackRequiresUserAction={false}
+                onError={(syntheticEvent) => {
+                  const { nativeEvent } = syntheticEvent;
+                  console.error('WebView error: ', nativeEvent);
+                }}
+                onHttpError={(syntheticEvent) => {
+                  const { nativeEvent } = syntheticEvent;
+                  console.error('WebView HTTP error: ', nativeEvent);
+                }}
               />
             </View>
           </View>
