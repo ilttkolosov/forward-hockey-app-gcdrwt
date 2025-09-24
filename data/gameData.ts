@@ -18,18 +18,25 @@ const isCacheValid = () => {
 export const getAllGames = async (): Promise<Game[]> => {
   try {
     if (isCacheValid() && futureGamesCache && pastGamesCache) {
+      console.log('Returning cached games');
       return [...futureGamesCache, ...pastGamesCache];
     }
 
     console.log('Fetching all games from API...');
-    const [futureGamesApi, pastGamesApi] = await Promise.all([
+    const [futureEventsApi, pastEventsApi] = await Promise.all([
       apiService.fetchFutureGames(),
       apiService.fetchPastGames()
     ]);
 
-    futureGamesCache = futureGamesApi.map(apiGame => apiService.convertApiGameToGame(apiGame));
-    pastGamesCache = pastGamesApi.map(apiGame => apiService.convertApiGameToGame(apiGame));
+    futureGamesCache = futureEventsApi.map(event => 
+      apiService.convertCalendarEventToGame(event, false)
+    );
+    pastGamesCache = pastEventsApi.map(event => 
+      apiService.convertCalendarEventToGame(event, true)
+    );
+    
     cacheTimestamp = Date.now();
+    console.log('Games cached successfully');
 
     return [...futureGamesCache, ...pastGamesCache];
   } catch (error) {
@@ -43,13 +50,17 @@ export const getAllGames = async (): Promise<Game[]> => {
 export const getFutureGames = async (): Promise<Game[]> => {
   try {
     if (isCacheValid() && futureGamesCache) {
+      console.log('Returning cached future games');
       return futureGamesCache;
     }
 
     console.log('Fetching future games from API...');
-    const futureGamesApi = await apiService.fetchFutureGames();
-    futureGamesCache = futureGamesApi.map(apiGame => apiService.convertApiGameToGame(apiGame));
+    const futureEventsApi = await apiService.fetchFutureGames();
+    futureGamesCache = futureEventsApi.map(event => 
+      apiService.convertCalendarEventToGame(event, false)
+    );
     cacheTimestamp = Date.now();
+    console.log('Future games cached successfully');
 
     return futureGamesCache;
   } catch (error) {
@@ -62,13 +73,17 @@ export const getFutureGames = async (): Promise<Game[]> => {
 export const getPastGames = async (): Promise<Game[]> => {
   try {
     if (isCacheValid() && pastGamesCache) {
+      console.log('Returning cached past games');
       return pastGamesCache;
     }
 
     console.log('Fetching past games from API...');
-    const pastGamesApi = await apiService.fetchPastGames();
-    pastGamesCache = pastGamesApi.map(apiGame => apiService.convertApiGameToGame(apiGame));
+    const pastEventsApi = await apiService.fetchPastGames();
+    pastGamesCache = pastEventsApi.map(event => 
+      apiService.convertCalendarEventToGame(event, true)
+    );
     cacheTimestamp = Date.now();
+    console.log('Past games cached successfully');
 
     return pastGamesCache;
   } catch (error) {
@@ -85,6 +100,7 @@ export const getCurrentGame = async (): Promise<Game | null> => {
     // First, look for live games
     const liveGame = allGames.find(game => game.status === 'live');
     if (liveGame) {
+      console.log('Found live game:', liveGame);
       return liveGame;
     }
 
@@ -94,6 +110,7 @@ export const getCurrentGame = async (): Promise<Game | null> => {
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     
     if (upcomingGames.length > 0) {
+      console.log('Found upcoming game:', upcomingGames[0]);
       return upcomingGames[0];
     }
 
@@ -102,7 +119,9 @@ export const getCurrentGame = async (): Promise<Game | null> => {
       .filter(game => game.status === 'finished')
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     
-    return finishedGames.length > 0 ? finishedGames[0] : null;
+    const currentGame = finishedGames.length > 0 ? finishedGames[0] : null;
+    console.log('Found current game:', currentGame);
+    return currentGame;
   } catch (error) {
     console.error('Error fetching current game:', error);
     return getFallbackCurrentGame();
@@ -114,15 +133,17 @@ export const getGameById = async (gameId: string): Promise<Game | null> => {
   try {
     // Check cache first
     if (gameDetailsCache[gameId]) {
+      console.log('Returning cached game details for ID:', gameId);
       return gameDetailsCache[gameId];
     }
 
     console.log('Fetching game details from API for ID:', gameId);
-    const gameDetailsApi = await apiService.fetchGameDetails(gameId);
-    const game = apiService.convertApiGameDetailsToGame(gameDetailsApi);
+    const eventDetailsApi = await apiService.fetchEventDetails(gameId);
+    const game = apiService.convertEventDetailsToGame(eventDetailsApi);
     
     // Cache the result
     gameDetailsCache[gameId] = game;
+    console.log('Game details cached for ID:', gameId);
     
     return game;
   } catch (error) {
@@ -133,6 +154,7 @@ export const getGameById = async (gameId: string): Promise<Game | null> => {
     const cachedGame = allCachedGames.find(game => game.id === gameId);
     
     if (cachedGame) {
+      console.log('Found game in cache:', cachedGame);
       return cachedGame;
     }
     
@@ -141,8 +163,9 @@ export const getGameById = async (gameId: string): Promise<Game | null> => {
   }
 };
 
-// Mock game statistics (since the API doesn't provide detailed player stats)
+// Mock game statistics (since the API structure for detailed stats is not fully defined)
 export const getGameStatsById = (gameId: string): GameStats | null => {
+  console.log('Getting game stats for ID:', gameId);
   // This would need to be implemented based on the actual API structure
   // For now, return mock data for demonstration
   return getFallbackGameStats(gameId);
@@ -151,68 +174,66 @@ export const getGameStatsById = (gameId: string): GameStats | null => {
 // Fallback data when API is unavailable
 const getFallbackCurrentGame = (): Game => ({
   id: '1',
-  homeTeam: 'HC Forward',
-  awayTeam: 'HC Dynamo',
+  homeTeam: 'Динамо-Форвард',
+  awayTeam: 'Варяги',
   homeScore: 2,
   awayScore: 1,
   date: '2024-01-15',
   time: '19:30',
-  venue: 'Forward Arena',
+  venue: 'Арена Форвард',
   status: 'live',
-  tournament: 'Championship League',
+  tournament: 'Чемпионат',
   videoUrl: 'https://www.hc-forward.com/broadcast/live-stream',
 });
 
 const getFallbackUpcomingGames = (): Game[] => [
   {
     id: '2',
-    homeTeam: 'HC Spartak',
-    awayTeam: 'HC Forward',
+    homeTeam: 'Спартак',
+    awayTeam: 'Форвард',
     date: '2024-01-18',
     time: '20:00',
-    venue: 'Spartak Ice Palace',
+    venue: 'Ледовый дворец Спартак',
     status: 'upcoming',
-    tournament: 'Championship League',
-    videoUrl: 'https://www.hc-forward.com/broadcast/upcoming-stream',
+    tournament: 'Чемпионат',
   },
   {
     id: '3',
-    homeTeam: 'HC Forward',
-    awayTeam: 'HC CSKA',
+    homeTeam: 'Форвард',
+    awayTeam: 'ЦСКА',
     date: '2024-01-22',
     time: '19:30',
-    venue: 'Forward Arena',
+    venue: 'Арена Форвард',
     status: 'upcoming',
-    tournament: 'Championship League',
-    videoUrl: 'https://www.hc-forward.com/broadcast/upcoming-stream-2',
+    tournament: 'Чемпионат',
   },
 ];
 
 const getFallbackPastGames = (): Game[] => [
   {
     id: '5',
-    homeTeam: 'HC Forward',
-    awayTeam: 'HC Lokomotiv',
+    homeTeam: 'Форвард',
+    awayTeam: 'Локомотив',
     homeScore: 3,
     awayScore: 2,
     date: '2024-01-10',
     time: '19:30',
-    venue: 'Forward Arena',
+    venue: 'Арена Форвард',
     status: 'finished',
-    tournament: 'Championship League',
+    tournament: 'Чемпионат',
     videoUrl: 'https://www.hc-forward.com/broadcast/replay-1',
   },
   {
     id: '6',
-    homeTeam: 'HC Metallurg',
-    awayTeam: 'HC Forward',
+    homeTeam: 'Металлург',
+    awayTeam: 'Форвард',
     homeScore: 1,
     awayScore: 4,
     date: '2024-01-05',
     time: '20:00',
-    venue: 'Metallurg Arena',
+    venue: 'Арена Металлург',
     status: 'finished',
-    tournament: 'Championship League',
+    tournament: 'Чемпионат',
     videoUrl: 'https://www.hc-forward.com/broadcast/replay-2',
   },
 ];
@@ -236,8 +257,8 @@ const getFallbackGameStats = (gameId: string): GameStats | null => {
       homeTeamStats: [
         {
           playerId: '1',
-          playerName: 'Alexander Petrov',
-          position: 'Forward',
+          playerName: 'Александр Петров',
+          position: 'Нападающий',
           number: 10,
           goals: 1,
           assists: 1,
@@ -252,8 +273,8 @@ const getFallbackGameStats = (gameId: string): GameStats | null => {
         },
         {
           playerId: '4',
-          playerName: 'Pavel Kozlov',
-          position: 'Forward',
+          playerName: 'Павел Козлов',
+          position: 'Нападающий',
           number: 17,
           goals: 1,
           assists: 0,
@@ -270,8 +291,8 @@ const getFallbackGameStats = (gameId: string): GameStats | null => {
       awayTeamStats: [
         {
           playerId: 'away1',
-          playerName: 'Viktor Orlov',
-          position: 'Forward',
+          playerName: 'Виктор Орлов',
+          position: 'Нападающий',
           number: 9,
           goals: 1,
           assists: 0,
@@ -286,9 +307,9 @@ const getFallbackGameStats = (gameId: string): GameStats | null => {
         },
       ],
       gameHighlights: [
-        'Exciting match with great plays from both teams',
-        'Strong defensive performance',
-        'Excellent goaltending throughout the game',
+        'Захватывающий матч с отличными играми от обеих команд',
+        'Сильная защитная игра',
+        'Отличная игра вратарей на протяжении всего матча',
       ],
     };
   }

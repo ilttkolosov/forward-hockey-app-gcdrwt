@@ -1,96 +1,196 @@
 
-export interface ApiGame {
+export interface ApiCalendarResponse {
+  data: ApiCalendarEvent[];
+}
+
+export interface ApiCalendarEvent {
+  ID: number;
+  title: string;
+  post_date?: string;
+  post_title?: string;
+}
+
+export interface ApiEventDetails {
   id: number;
   title: {
     rendered: string;
   };
   date: string;
-  meta: {
-    sp_date?: string;
-    sp_time?: string;
-    sp_venue?: string;
-    sp_event?: string;
-    sp_video?: string;
-  };
-  acf?: {
-    [key: string]: any;
-  };
+  sp_video?: string;
+  leagues?: any[];
+  teams?: any[];
+  main_results?: string;
+  outcome?: string;
+  winner?: string;
+  players?: any[];
+  offense?: any[];
+  defense?: any[];
+  results?: any[];
+  performance?: any[];
 }
 
-export interface ApiGameDetails {
+export interface ApiTeam {
   id: number;
   title: {
     rendered: string;
   };
-  content: {
+  team_logo?: string;
+}
+
+export interface ApiPlayer {
+  id: number;
+  title: {
     rendered: string;
   };
-  meta: {
-    sp_video?: string;
-    sp_date?: string;
-    sp_time?: string;
-    sp_venue?: string;
-    sp_event?: string;
-    [key: string]: any;
-  };
-  acf?: {
-    [key: string]: any;
+  number?: number;
+  metrics?: string[];
+  player_image?: string;
+}
+
+export interface ApiLeague {
+  id: number;
+  title: {
+    rendered: string;
   };
 }
 
 class ApiService {
   private baseUrl = 'https://www.hc-forward.com/wp-json/wp/v2';
+  private username = 'mobile_app';
+  private password = '1234567890';
 
-  async fetchFutureGames(): Promise<ApiGame[]> {
+  private getAuthHeaders(): HeadersInit {
+    const credentials = btoa(`${this.username}:${this.password}`);
+    return {
+      'Authorization': `Basic ${credentials}`,
+      'Content-Type': 'application/json',
+    };
+  }
+
+  async fetchFutureGames(): Promise<ApiCalendarEvent[]> {
     try {
-      console.log('Fetching future games...');
-      const response = await fetch(`${this.baseUrl}/calendars/467`);
+      console.log('Fetching future games from calendar 467...');
+      const response = await fetch(`${this.baseUrl}/calendars/467`, {
+        headers: this.getAuthHeaders(),
+      });
+      
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      const data = await response.json();
-      console.log('Future games fetched:', data);
-      return Array.isArray(data) ? data : [data];
+      
+      const result: ApiCalendarResponse = await response.json();
+      console.log('Future games response:', result);
+      
+      return result.data || [];
     } catch (error) {
       console.error('Error fetching future games:', error);
       throw error;
     }
   }
 
-  async fetchPastGames(): Promise<ApiGame[]> {
+  async fetchPastGames(): Promise<ApiCalendarEvent[]> {
     try {
-      console.log('Fetching past games...');
+      console.log('Fetching past games from calendar 466...');
       const response = await fetch(`${this.baseUrl}/calendars/466`);
+      
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      const data = await response.json();
-      console.log('Past games fetched:', data);
-      return Array.isArray(data) ? data : [data];
+      
+      const result: ApiCalendarResponse = await response.json();
+      console.log('Past games response:', result);
+      
+      return result.data || [];
     } catch (error) {
       console.error('Error fetching past games:', error);
       throw error;
     }
   }
 
-  async fetchGameDetails(gameId: string): Promise<ApiGameDetails> {
+  async fetchEventDetails(eventId: string): Promise<ApiEventDetails> {
     try {
-      console.log('Fetching game details for ID:', gameId);
-      const response = await fetch(`${this.baseUrl}/events/${gameId}`);
+      console.log('Fetching event details for ID:', eventId);
+      const response = await fetch(`${this.baseUrl}/events/${eventId}`, {
+        headers: this.getAuthHeaders(),
+      });
+      
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
+      
       const data = await response.json();
-      console.log('Game details fetched:', data);
+      console.log('Event details fetched:', data);
       return data;
     } catch (error) {
-      console.error('Error fetching game details:', error);
+      console.error('Error fetching event details:', error);
+      throw error;
+    }
+  }
+
+  async fetchTeam(teamId: string): Promise<ApiTeam> {
+    try {
+      console.log('Fetching team details for ID:', teamId);
+      const response = await fetch(`${this.baseUrl}/teams/${teamId}`, {
+        headers: this.getAuthHeaders(),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('Team details fetched:', data);
+      return data;
+    } catch (error) {
+      console.error('Error fetching team details:', error);
+      throw error;
+    }
+  }
+
+  async fetchPlayer(playerId: string): Promise<ApiPlayer> {
+    try {
+      console.log('Fetching player details for ID:', playerId);
+      const response = await fetch(`${this.baseUrl}/players/${playerId}`, {
+        headers: this.getAuthHeaders(),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('Player details fetched:', data);
+      return data;
+    } catch (error) {
+      console.error('Error fetching player details:', error);
+      throw error;
+    }
+  }
+
+  async fetchLeague(leagueId: string): Promise<ApiLeague> {
+    try {
+      console.log('Fetching league details for ID:', leagueId);
+      const response = await fetch(`${this.baseUrl}/leagues/${leagueId}`, {
+        headers: this.getAuthHeaders(),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('League details fetched:', data);
+      return data;
+    } catch (error) {
+      console.error('Error fetching league details:', error);
       throw error;
     }
   }
 
   // Helper method to parse game title and extract teams
   parseGameTitle(title: string): { homeTeam: string; awayTeam: string } {
+    console.log('Parsing game title:', title);
+    
     // Try to parse titles like "Team A vs Team B" or "Team A - Team B"
     const vsMatch = title.match(/(.+?)\s+vs\s+(.+)/i);
     const dashMatch = title.match(/(.+?)\s+-\s+(.+)/i);
@@ -114,15 +214,17 @@ class ApiService {
     };
   }
 
-  // Helper method to extract score from title or content
-  parseScore(title: string, content?: string): { homeScore?: number; awayScore?: number } {
+  // Helper method to extract score from main_results
+  parseScore(mainResults?: string): { homeScore?: number; awayScore?: number } {
+    if (!mainResults) {
+      return {};
+    }
+    
+    console.log('Parsing score from main_results:', mainResults);
+    
     // Look for score patterns like "3:2", "3-2", or "3 - 2"
     const scorePattern = /(\d+)[\s\-:]+(\d+)/;
-    
-    let match = title.match(scorePattern);
-    if (!match && content) {
-      match = content.match(scorePattern);
-    }
+    const match = mainResults.match(scorePattern);
     
     if (match) {
       return {
@@ -135,13 +237,13 @@ class ApiService {
   }
 
   // Helper method to determine game status
-  determineGameStatus(date: string, hasScore: boolean): 'upcoming' | 'live' | 'finished' {
-    const gameDate = new Date(date);
-    const now = new Date();
-    
-    if (hasScore) {
+  determineGameStatus(date: string, hasScore: boolean, isFromPastCalendar: boolean = false): 'upcoming' | 'live' | 'finished' {
+    if (isFromPastCalendar || hasScore) {
       return 'finished';
     }
+    
+    const gameDate = new Date(date);
+    const now = new Date();
     
     if (gameDate > now) {
       return 'upcoming';
@@ -156,62 +258,62 @@ class ApiService {
     return 'finished';
   }
 
-  // Convert API game to our Game interface
-  convertApiGameToGame(apiGame: ApiGame): import('../types').Game {
-    const title = apiGame.title.rendered;
+  // Convert API calendar event to our Game interface
+  convertCalendarEventToGame(event: ApiCalendarEvent, isFromPastCalendar: boolean = false): import('../types').Game {
+    const title = event.post_title || event.title;
     const { homeTeam, awayTeam } = this.parseGameTitle(title);
-    const { homeScore, awayScore } = this.parseScore(title);
     
-    const date = apiGame.meta.sp_date || apiGame.date;
-    const time = apiGame.meta.sp_time || '19:00';
-    const venue = apiGame.meta.sp_venue || 'TBD';
-    const tournament = apiGame.meta.sp_event || 'Championship';
-    const videoUrl = apiGame.meta.sp_video;
-    
-    const status = this.determineGameStatus(date, homeScore !== undefined);
+    const date = event.post_date || new Date().toISOString();
+    const status = this.determineGameStatus(date, false, isFromPastCalendar);
     
     return {
-      id: apiGame.id.toString(),
+      id: event.ID.toString(),
       homeTeam,
       awayTeam,
-      homeScore,
-      awayScore,
-      date,
-      time,
-      venue,
+      date: date.split('T')[0], // Extract date part
+      time: '19:00', // Default time
+      venue: 'TBD',
       status,
-      tournament,
-      videoUrl
+      tournament: 'Чемпионат',
     };
   }
 
-  // Convert API game details to our Game interface with additional details
-  convertApiGameDetailsToGame(apiGameDetails: ApiGameDetails): import('../types').Game {
-    const title = apiGameDetails.title.rendered;
-    const content = apiGameDetails.content.rendered;
+  // Convert API event details to our Game interface with full details
+  convertEventDetailsToGame(eventDetails: ApiEventDetails): import('../types').Game {
+    const title = eventDetails.title.rendered;
     const { homeTeam, awayTeam } = this.parseGameTitle(title);
-    const { homeScore, awayScore } = this.parseScore(title, content);
+    const { homeScore, awayScore } = this.parseScore(eventDetails.main_results);
     
-    const date = apiGameDetails.meta.sp_date || apiGameDetails.date;
-    const time = apiGameDetails.meta.sp_time || '19:00';
-    const venue = apiGameDetails.meta.sp_venue || 'TBD';
-    const tournament = apiGameDetails.meta.sp_event || 'Championship';
-    const videoUrl = apiGameDetails.meta.sp_video;
-    
+    const date = eventDetails.date;
     const status = this.determineGameStatus(date, homeScore !== undefined);
     
     return {
-      id: apiGameDetails.id.toString(),
+      id: eventDetails.id.toString(),
       homeTeam,
       awayTeam,
       homeScore,
       awayScore,
-      date,
-      time,
-      venue,
+      date: date.split('T')[0], // Extract date part
+      time: date.split('T')[1]?.split(':').slice(0, 2).join(':') || '19:00', // Extract time part
+      venue: 'TBD',
       status,
-      tournament,
-      videoUrl
+      tournament: 'Чемпионат',
+      videoUrl: eventDetails.sp_video,
+    };
+  }
+
+  // Convert API player to our Player interface
+  convertApiPlayerToPlayer(apiPlayer: ApiPlayer): import('../types').Player {
+    const metrics = apiPlayer.metrics || [];
+    
+    return {
+      id: apiPlayer.id.toString(),
+      name: apiPlayer.title.rendered,
+      position: 'Игрок',
+      number: apiPlayer.number || 0,
+      height: metrics[2] || undefined, // Рост
+      weight: metrics[1] || undefined, // Вес
+      photo: apiPlayer.player_image,
     };
   }
 }

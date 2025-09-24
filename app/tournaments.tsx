@@ -1,42 +1,43 @@
 
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { commonStyles, colors } from '../styles/commonStyles';
-import TournamentCard from '../components/TournamentCard';
-import LoadingSpinner from '../components/LoadingSpinner';
-import ErrorMessage from '../components/ErrorMessage';
+import { Link } from 'expo-router';
+import Icon from '../components/Icon';
 import { Tournament } from '../types';
 import { mockTournaments } from '../data/mockData';
-import { Link } from 'expo-router';
-import { TouchableOpacity } from 'react-native';
-import Icon from '../components/Icon';
+import TournamentCard from '../components/TournamentCard';
+import { commonStyles, colors } from '../styles/commonStyles';
+import LoadingSpinner from '../components/LoadingSpinner';
+import ErrorMessage from '../components/ErrorMessage';
 
-export default function TournamentsScreen() {
+const TournamentsScreen: React.FC = () => {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadData();
+  }, []);
 
   const loadData = async () => {
     try {
       setError(null);
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
+      console.log('Loading tournaments...');
+      // For now, using mock data. In the future, this could fetch from the API
+      // when league endpoints are fully implemented
+      await new Promise(resolve => setTimeout(resolve, 500)); // Simulate API call
       setTournaments(mockTournaments);
+      console.log('Tournaments loaded successfully');
     } catch (err) {
-      console.log('Error loading tournaments:', err);
-      setError('Failed to load tournaments. Please try again.');
+      console.error('Error loading tournaments:', err);
+      setError('Ошибка загрузки турниров. Проверьте подключение к интернету.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
-
-  useEffect(() => {
-    loadData();
-  }, []);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -46,84 +47,56 @@ export default function TournamentsScreen() {
   if (loading) {
     return (
       <SafeAreaView style={commonStyles.container}>
+        <View style={commonStyles.header}>
+          <Link href="/" asChild>
+            <TouchableOpacity style={{ marginRight: 16 }}>
+              <Icon name="arrow-left" size={24} color={colors.text} />
+            </TouchableOpacity>
+          </Link>
+          <Text style={commonStyles.title}>Турниры</Text>
+        </View>
         <LoadingSpinner />
       </SafeAreaView>
     );
   }
 
-  if (error) {
-    return (
-      <SafeAreaView style={commonStyles.container}>
-        <ErrorMessage message={error} onRetry={loadData} />
-      </SafeAreaView>
-    );
-  }
-
-  const activeTournaments = tournaments.filter(t => t.status === 'active');
-  const upcomingTournaments = tournaments.filter(t => t.status === 'upcoming');
-  const finishedTournaments = tournaments.filter(t => t.status === 'finished');
-
   return (
     <SafeAreaView style={commonStyles.container}>
+      <View style={commonStyles.header}>
+        <Link href="/" asChild>
+          <TouchableOpacity style={{ marginRight: 16 }}>
+            <Icon name="arrow-left" size={24} color={colors.text} />
+          </TouchableOpacity>
+        </Link>
+        <Text style={commonStyles.title}>Турниры</Text>
+      </View>
+
       <ScrollView
-        style={commonStyles.content}
+        style={commonStyles.container}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
-        showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24 }}>
-          <Link href="/" asChild>
-            <TouchableOpacity style={{ marginRight: 16 }}>
-              <Icon name="chevron-back" size={24} color={colors.text} />
-            </TouchableOpacity>
-          </Link>
-          <View>
-            <Text style={commonStyles.title}>Tournaments</Text>
-            <Text style={commonStyles.textSecondary}>{tournaments.length} tournaments</Text>
-          </View>
-        </View>
+        {error && <ErrorMessage message={error} />}
 
-        {/* Active Tournaments */}
-        {activeTournaments.length > 0 && (
-          <View style={commonStyles.section}>
-            <Text style={commonStyles.subtitle}>Active Tournaments</Text>
-            {activeTournaments.map((tournament) => (
+        {tournaments.length === 0 ? (
+          <View style={commonStyles.emptyState}>
+            <Icon name="trophy" size={64} color={colors.textSecondary} />
+            <Text style={commonStyles.emptyStateTitle}>Нет турниров</Text>
+            <Text style={commonStyles.emptyStateText}>
+              Информация о турнирах будет добавлена в ближайшее время
+            </Text>
+          </View>
+        ) : (
+          <View style={{ padding: 8 }}>
+            {tournaments.map((tournament) => (
               <TournamentCard key={tournament.id} tournament={tournament} />
             ))}
           </View>
         )}
-
-        {/* Upcoming Tournaments */}
-        {upcomingTournaments.length > 0 && (
-          <View style={commonStyles.section}>
-            <Text style={commonStyles.subtitle}>Upcoming Tournaments</Text>
-            {upcomingTournaments.map((tournament) => (
-              <TournamentCard key={tournament.id} tournament={tournament} />
-            ))}
-          </View>
-        )}
-
-        {/* Finished Tournaments */}
-        {finishedTournaments.length > 0 && (
-          <View style={commonStyles.section}>
-            <Text style={commonStyles.subtitle}>Finished Tournaments</Text>
-            {finishedTournaments.map((tournament) => (
-              <TournamentCard key={tournament.id} tournament={tournament} />
-            ))}
-          </View>
-        )}
-
-        {tournaments.length === 0 && (
-          <View style={commonStyles.errorContainer}>
-            <Text style={commonStyles.text}>No tournaments information available.</Text>
-          </View>
-        )}
-
-        {/* Bottom spacing */}
-        <View style={{ height: 32 }} />
       </ScrollView>
     </SafeAreaView>
   );
-}
+};
+
+export default TournamentsScreen;

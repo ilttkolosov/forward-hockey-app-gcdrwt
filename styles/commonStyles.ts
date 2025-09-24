@@ -2,156 +2,233 @@
 import { StyleSheet, ViewStyle, TextStyle } from 'react-native';
 
 export const colors = {
-  primary: '#1B365D',      // HC Forward Blue
-  secondary: '#FF6B35',    // Orange accent
-  accent: '#4A90E2',       // Light Blue
-  background: '#FFFFFF',   // White background for light theme
-  backgroundAlt: '#F8F9FA', // Light grey background
-  text: '#2C3E50',         // Dark text
-  textSecondary: '#7F8C8D', // Grey text
-  success: '#27AE60',      // Green
-  warning: '#F39C12',      // Orange
-  error: '#E74C3C',        // Red
-  card: '#FFFFFF',         // White card background
-  border: '#E1E8ED',       // Light border
-  shadow: 'rgba(0, 0, 0, 0.1)',
+  primary: '#1E40AF',
+  secondary: '#3B82F6',
+  success: '#10B981',
+  warning: '#F59E0B',
+  error: '#EF4444',
+  background: '#F8FAFC',
+  surface: '#FFFFFF',
+  text: '#1F2937',
+  textSecondary: '#6B7280',
+  border: '#E5E7EB',
+  shadow: '#000000',
 };
 
-export const buttonStyles = StyleSheet.create({
-  primary: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  secondary: {
-    backgroundColor: colors.secondary,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  outline: {
-    backgroundColor: 'transparent',
-    borderWidth: 2,
-    borderColor: colors.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
-
 export const commonStyles = StyleSheet.create({
-  wrapper: {
-    backgroundColor: colors.background,
-    width: '100%',
-    height: '100%',
-  },
   container: {
     flex: 1,
     backgroundColor: colors.background,
-    width: '100%',
-    height: '100%',
   },
-  content: {
-    flex: 1,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
   title: {
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: colors.text,
+    flex: 1,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginTop: 4,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginTop: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  sectionLink: {
+    fontSize: 14,
+    color: colors.primary,
+    fontWeight: '500',
+  },
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 16,
+    marginVertical: 8,
+    shadowColor: colors.shadow,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
     color: colors.text,
     marginBottom: 8,
   },
-  subtitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 16,
-  },
-  text: {
-    fontSize: 16,
-    fontWeight: '400',
-    color: colors.text,
-    lineHeight: 24,
-  },
-  textSecondary: {
+  cardText: {
     fontSize: 14,
-    fontWeight: '400',
     color: colors.textSecondary,
     lineHeight: 20,
   },
-  section: {
-    marginBottom: 24,
-  },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    boxShadow: `0px 2px 8px ${colors.shadow}`,
-    elevation: 3,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  gameCard: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    boxShadow: `0px 4px 12px ${colors.shadow}`,
-    elevation: 4,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  centerRow: {
-    flexDirection: 'row',
+  button: {
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  badge: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
-  },
-  badgeText: {
-    color: colors.background,
-    fontSize: 12,
+  buttonText: {
+    color: colors.surface,
+    fontSize: 16,
     fontWeight: '600',
+  },
+  buttonSecondary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  buttonSecondaryText: {
+    color: colors.primary,
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 32,
+  },
+  emptyStateTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: colors.textSecondary,
+    marginTop: 16,
+  },
+  errorContainer: {
+    backgroundColor: colors.error,
+    margin: 16,
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  errorText: {
+    color: colors.surface,
+    fontSize: 14,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: colors.text,
+    backgroundColor: colors.surface,
+  },
+  inputFocused: {
+    borderColor: colors.primary,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.text,
+    marginBottom: 6,
   },
   divider: {
     height: 1,
     backgroundColor: colors.border,
     marginVertical: 16,
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  row: {
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
+  spaceBetween: {
+    justifyContent: 'space-between',
   },
-  errorText: {
-    fontSize: 16,
-    color: colors.error,
+  textCenter: {
     textAlign: 'center',
+  },
+  textRight: {
+    textAlign: 'right',
+  },
+  flex1: {
+    flex: 1,
+  },
+  mt8: {
+    marginTop: 8,
+  },
+  mt16: {
+    marginTop: 16,
+  },
+  mb8: {
+    marginBottom: 8,
+  },
+  mb16: {
     marginBottom: 16,
+  },
+  ml8: {
+    marginLeft: 8,
+  },
+  ml16: {
+    marginLeft: 16,
+  },
+  mr8: {
+    marginRight: 8,
+  },
+  mr16: {
+    marginRight: 16,
+  },
+  p8: {
+    padding: 8,
+  },
+  p16: {
+    padding: 16,
+  },
+  px8: {
+    paddingHorizontal: 8,
+  },
+  px16: {
+    paddingHorizontal: 16,
+  },
+  py8: {
+    paddingVertical: 8,
+  },
+  py16: {
+    paddingVertical: 16,
   },
 });

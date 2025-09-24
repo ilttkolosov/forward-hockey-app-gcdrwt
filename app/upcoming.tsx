@@ -4,18 +4,18 @@ import { View, Text, ScrollView, RefreshControl, TouchableOpacity } from 'react-
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
 import { Game } from '../types';
+import Icon from '../components/Icon';
+import GameCard from '../components/GameCard';
 import { getFutureGames } from '../data/gameData';
 import { commonStyles, colors } from '../styles/commonStyles';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
-import GameCard from '../components/GameCard';
-import Icon from '../components/Icon';
 
-export default function UpcomingGamesScreen() {
+const UpcomingGamesScreen: React.FC = () => {
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -23,48 +23,37 @@ export default function UpcomingGamesScreen() {
 
   const loadData = async () => {
     try {
-      console.log('Loading upcoming games...');
-      setLoading(true);
       setError(null);
-
-      const gamesData = await getFutureGames();
-      setGames(gamesData);
-      
+      console.log('Loading upcoming games...');
+      const upcomingGames = await getFutureGames();
+      setGames(upcomingGames);
       console.log('Upcoming games loaded successfully');
     } catch (err) {
       console.error('Error loading upcoming games:', err);
-      setError('Failed to load upcoming games');
+      setError('Ошибка загрузки предстоящих игр. Проверьте подключение к интернету.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  const onRefresh = async () => {
+  const onRefresh = () => {
     setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
+    loadData();
   };
 
   if (loading) {
     return (
       <SafeAreaView style={commonStyles.container}>
-        <LoadingSpinner />
-      </SafeAreaView>
-    );
-  }
-
-  if (error) {
-    return (
-      <SafeAreaView style={commonStyles.container}>
         <View style={commonStyles.header}>
           <Link href="/" asChild>
-            <TouchableOpacity style={commonStyles.backButton}>
+            <TouchableOpacity style={{ marginRight: 16 }}>
               <Icon name="arrow-left" size={24} color={colors.text} />
             </TouchableOpacity>
           </Link>
-          <Text style={commonStyles.headerTitle}>Upcoming Games</Text>
+          <Text style={commonStyles.title}>Предстоящие игры</Text>
         </View>
-        <ErrorMessage message={error} />
+        <LoadingSpinner />
       </SafeAreaView>
     );
   }
@@ -73,30 +62,37 @@ export default function UpcomingGamesScreen() {
     <SafeAreaView style={commonStyles.container}>
       <View style={commonStyles.header}>
         <Link href="/" asChild>
-          <TouchableOpacity style={commonStyles.backButton}>
+          <TouchableOpacity style={{ marginRight: 16 }}>
             <Icon name="arrow-left" size={24} color={colors.text} />
           </TouchableOpacity>
         </Link>
-        <Text style={commonStyles.headerTitle}>Upcoming Games</Text>
+        <Text style={commonStyles.title}>Предстоящие игры</Text>
       </View>
 
       <ScrollView
         style={commonStyles.container}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
       >
-        <View style={commonStyles.section}>
-          {games.length > 0 ? (
-            games.map((game) => (
-              <GameCard key={game.id} game={game} showScore={false} />
-            ))
-          ) : (
-            <View style={commonStyles.emptyState}>
-              <Icon name="calendar" size={48} color={colors.textSecondary} />
-              <Text style={commonStyles.emptyStateText}>No upcoming games scheduled</Text>
-            </View>
-          )}
-        </View>
+        {error && <ErrorMessage message={error} />}
+
+        {games.length === 0 ? (
+          <View style={commonStyles.emptyState}>
+            <Icon name="calendar" size={64} color={colors.textSecondary} />
+            <Text style={commonStyles.emptyStateTitle}>Нет предстоящих игр</Text>
+            <Text style={commonStyles.emptyStateText}>
+              Расписание игр будет обновлено в ближайшее время
+            </Text>
+          </View>
+        ) : (
+          games.map((game) => (
+            <GameCard key={game.id} game={game} showScore={false} />
+          ))
+        )}
       </ScrollView>
     </SafeAreaView>
   );
-}
+};
+
+export default UpcomingGamesScreen;

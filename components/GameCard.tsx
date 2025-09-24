@@ -1,124 +1,57 @@
 
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Game } from '../types';
-import { colors, commonStyles } from '../styles/commonStyles';
 import { useRouter } from 'expo-router';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { colors, commonStyles } from '../styles/commonStyles';
 
 interface GameCardProps {
   game: Game;
   showScore?: boolean;
 }
 
-export default function GameCard({ game, showScore = true }: GameCardProps) {
-  const router = useRouter();
-
-  const handlePress = () => {
-    console.log('GameCard pressed, navigating to game:', game.id);
-    router.push(`/game/${game.id}`);
-  };
-
-  const getStatusColor = (status: Game['status']) => {
-    switch (status) {
-      case 'live':
-        return colors.error;
-      case 'upcoming':
-        return colors.warning;
-      case 'finished':
-        return colors.textSecondary;
-      default:
-        return colors.textSecondary;
-    }
-  };
-
-  const getStatusText = (status: Game['status']) => {
-    switch (status) {
-      case 'live':
-        return 'LIVE';
-      case 'upcoming':
-        return 'UPCOMING';
-      case 'finished':
-        return 'FINISHED';
-      default:
-        return '';
-    }
-  };
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-    });
-  };
-
-  return (
-    <TouchableOpacity onPress={handlePress} activeOpacity={0.7}>
-      <View style={commonStyles.gameCard}>
-        <View style={styles.header}>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(game.status) }]}>
-            <Text style={styles.statusText}>{getStatusText(game.status)}</Text>
-          </View>
-          <Text style={commonStyles.textSecondary}>{formatDate(game.date)} • {game.time}</Text>
-        </View>
-
-        <View style={styles.teamsContainer}>
-          <View style={styles.teamSection}>
-            <Text style={styles.teamName}>{game.homeTeam}</Text>
-            {showScore && game.homeScore !== undefined && (
-              <Text style={styles.score}>{game.homeScore}</Text>
-            )}
-          </View>
-
-          <View style={styles.vsSection}>
-            <Text style={styles.vsText}>VS</Text>
-          </View>
-
-          <View style={styles.teamSection}>
-            <Text style={styles.teamName}>{game.awayTeam}</Text>
-            {showScore && game.awayScore !== undefined && (
-              <Text style={styles.score}>{game.awayScore}</Text>
-            )}
-          </View>
-        </View>
-
-        <View style={styles.footer}>
-          <Text style={commonStyles.textSecondary}>{game.venue}</Text>
-          {game.tournament && (
-            <Text style={[commonStyles.textSecondary, styles.tournament]}>
-              {game.tournament}
-            </Text>
-          )}
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-}
-
 const styles = StyleSheet.create({
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 16,
+    marginVertical: 8,
+    marginHorizontal: 16,
+    shadowColor: colors.shadow,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  statusBadge: {
+  tournament: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontWeight: '500',
+  },
+  status: {
+    fontSize: 12,
+    fontWeight: '600',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: 6,
+    overflow: 'hidden',
   },
-  statusText: {
-    color: colors.background,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  teamsContainer: {
+  matchup: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  teamSection: {
+  team: {
     flex: 1,
     alignItems: 'center',
   },
@@ -127,27 +60,116 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.text,
     textAlign: 'center',
-    marginBottom: 8,
   },
   score: {
     fontSize: 24,
-    fontWeight: '800',
+    fontWeight: 'bold',
     color: colors.primary,
+    marginHorizontal: 20,
   },
-  vsSection: {
-    paddingHorizontal: 16,
-  },
-  vsText: {
+  vs: {
     fontSize: 14,
-    fontWeight: '600',
     color: colors.textSecondary,
+    marginHorizontal: 20,
   },
-  footer: {
+  details: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  tournament: {
-    fontStyle: 'italic',
+  dateTime: {
+    fontSize: 14,
+    color: colors.textSecondary,
+  },
+  venue: {
+    fontSize: 12,
+    color: colors.textSecondary,
   },
 });
+
+const GameCard: React.FC<GameCardProps> = ({ game, showScore = true }) => {
+  const router = useRouter();
+
+  const handlePress = () => {
+    console.log('Navigating to game details:', game.id);
+    router.push(`/game/${game.id}`);
+  };
+
+  const getStatusColor = (status: Game['status']) => {
+    switch (status) {
+      case 'live':
+        return { backgroundColor: colors.success, color: colors.surface };
+      case 'upcoming':
+        return { backgroundColor: colors.warning, color: colors.surface };
+      case 'finished':
+        return { backgroundColor: colors.textSecondary, color: colors.surface };
+      default:
+        return { backgroundColor: colors.textSecondary, color: colors.surface };
+    }
+  };
+
+  const getStatusText = (status: Game['status']) => {
+    switch (status) {
+      case 'live':
+        return 'В ЭФИРЕ';
+      case 'upcoming':
+        return 'ПРЕДСТОЯЩИЙ';
+      case 'finished':
+        return 'ЗАВЕРШЕН';
+      default:
+        return 'НЕИЗВЕСТНО';
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return dateString;
+    }
+  };
+
+  return (
+    <TouchableOpacity style={styles.card} onPress={handlePress}>
+      <View style={styles.header}>
+        <Text style={styles.tournament}>{game.tournament || 'Чемпионат'}</Text>
+        <Text style={[styles.status, getStatusColor(game.status)]}>
+          {getStatusText(game.status)}
+        </Text>
+      </View>
+
+      <View style={styles.matchup}>
+        <View style={styles.team}>
+          <Text style={styles.teamName}>{game.homeTeam}</Text>
+        </View>
+
+        {showScore && game.homeScore !== undefined && game.awayScore !== undefined ? (
+          <Text style={styles.score}>
+            {game.homeScore} : {game.awayScore}
+          </Text>
+        ) : (
+          <Text style={styles.vs}>VS</Text>
+        )}
+
+        <View style={styles.team}>
+          <Text style={styles.teamName}>{game.awayTeam}</Text>
+        </View>
+      </View>
+
+      <View style={styles.details}>
+        <Text style={styles.dateTime}>
+          {formatDate(game.date)} • {game.time}
+        </Text>
+        <Text style={styles.venue}>{game.venue}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+export default GameCard;
