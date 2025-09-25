@@ -1,4 +1,6 @@
 
+import { ApiPlayerResponse } from '../types';
+
 export interface ApiCalendarResponse {
   data: ApiCalendarEvent[];
 }
@@ -35,24 +37,6 @@ export interface ApiTeam {
     rendered: string;
   };
   team_logo?: string;
-}
-
-export interface ApiPlayerResponse {
-  id: string;
-  sp_current_team?: number;
-  post_date: string;
-  post_title: string;
-  sp_number: number | string;
-  sp_metrics: {
-    ka?: string;
-    onetwofive?: string;
-    height?: string;
-    weight?: string;
-  };
-  sp_nationality?: string;
-  position: string; // Используем position как основное поле
-  positions?: string; // Добавляем positions как альтернативное поле
-  player_image?: string;
 }
 
 export interface ApiLeague {
@@ -162,7 +146,6 @@ class ApiService {
           id: player.id,
           name: player.post_title,
           position: player.position,
-          positions: player.positions,
           number: player.sp_number
         });
       });

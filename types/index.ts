@@ -84,7 +84,7 @@ export interface ApiPlayerResponse {
   sp_current_team?: number;
   post_date: string;
   post_title: string;
-  sp_number: number;
+  sp_number: number | string;
   sp_metrics: {
     ka?: string;
     onetwofive?: string;

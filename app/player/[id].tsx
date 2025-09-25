@@ -231,14 +231,14 @@ const PlayerDetailsScreen: React.FC = () => {
   const getPositionColor = (position: string) => {
     const pos = position.toLowerCase();
     
-    // Обрабатываем как старые, так и новые названия позиций
-    if (pos.includes('нападающ') || pos === 'нападающие') {
+    // Обрабатываем позиции из API
+    if (pos.includes('нападающ')) {
       return colors.error;
     }
-    if (pos.includes('защитник') || pos === 'защитники') {
+    if (pos.includes('защитник')) {
       return colors.primary;
     }
-    if (pos.includes('вратар') || pos === 'вратари') {
+    if (pos.includes('вратар')) {
       return colors.warning;
     }
     

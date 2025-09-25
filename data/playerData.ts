@@ -49,63 +49,6 @@ function calculateAge(birthDate: string): number | undefined {
   return age > 0 ? age : undefined;
 }
 
-function mapPositionFromApi(positions: string): string {
-  if (!positions) {
-    console.log('Позиция пустая, возвращаем "Игрок"');
-    return 'Игрок';
-  }
-  
-  const pos = positions.toLowerCase().trim();
-  
-  console.log('Маппинг позиции из API:', `"${positions}"`, '-> нормализованная:', `"${pos}"`);
-  
-  // Точное соответствие для основных позиций
-  if (pos === 'вратарь') {
-    console.log('Точное соответствие: Вратарь -> Вратари');
-    return 'Вратари';
-  }
-  if (pos === 'защитник') {
-    console.log('Точное соответствие: Защитник -> Защитники');
-    return 'Защитники';
-  }
-  if (pos === 'нападающий') {
-    console.log('Точное соответствие: Нападающий -> Нападающие');
-    return 'Нападающие';
-  }
-  
-  // Поиск по вхождению подстроки
-  if (pos.includes('вратар')) {
-    console.log('Найдено вхождение "вратар" -> Вратари');
-    return 'Вратари';
-  }
-  if (pos.includes('защитник')) {
-    console.log('Найдено вхождение "защитник" -> Защитники');
-    return 'Защитники';
-  }
-  if (pos.includes('нападающ')) {
-    console.log('Найдено вхождение "нападающ" -> Нападающие');
-    return 'Нападающие';
-  }
-  
-  // Дополнительные варианты
-  if (pos.includes('голкипер') || pos.includes('goalkeeper') || pos.includes('goalie')) {
-    console.log('Найдено альтернативное название вратаря -> Вратари');
-    return 'Вратари';
-  }
-  if (pos.includes('защита') || pos.includes('defense') || pos.includes('defender')) {
-    console.log('Найдено альтернативное название защитника -> Защитники');
-    return 'Защитники';
-  }
-  if (pos.includes('нападение') || pos.includes('forward') || pos.includes('attacker')) {
-    console.log('Найдено альтернативное название нападающего -> Нападающие');
-    return 'Нападающие';
-  }
-  
-  console.warn('Позиция не распознана, возвращаем как есть:', `"${positions}"`);
-  // Если позиция не распознана, возвращаем как есть
-  return positions;
-}
-
 async function cachePlayerImage(imageUrl: string): Promise<string> {
   try {
     if (!imageUrl) return '';
@@ -136,7 +79,8 @@ async function cachePlayerImage(imageUrl: string): Promise<string> {
 
 function convertApiPlayerToPlayer(apiPlayer: ApiPlayerResponse): Player {
   const name = removePatronymic(apiPlayer.post_title);
-  const position = mapPositionFromApi(apiPlayer.positions); // Используем поле positions из API
+  // Используем поле position из API (не positions)
+  const position = apiPlayer.position || 'Игрок';
   const birthDate = apiPlayer.post_date ? apiPlayer.post_date.split('T')[0] : undefined;
   const age = calculateAge(apiPlayer.post_date);
   
@@ -149,7 +93,7 @@ function convertApiPlayerToPlayer(apiPlayer: ApiPlayerResponse): Player {
     ? parseInt(apiPlayer.sp_number) || 0 
     : apiPlayer.sp_number || 0;
   
-  console.log(`Конвертация игрока: ${name}, позиция API: "${apiPlayer.positions}", категория: "${position}", номер: ${number}`);
+  console.log(`Конвертация игрока: ${name}, позиция API: "${apiPlayer.position}", отображаемая позиция: "${position}", номер: ${number}`);
   
   return {
     id: apiPlayer.id,
@@ -195,11 +139,27 @@ export async function getPlayers(): Promise<Player[]> {
   try {
     console.log('Получение игроков...');
     
-    // Очищаем кэш для отладки
-    console.log('Очищаем кэш для получения свежих данных...');
-    playersMemoryCache = [];
-    playersCacheTimestamp = 0;
-    await AsyncStorage.removeItem(PLAYERS_CACHE_KEY);
+    // Проверяем кэш в памяти
+    if (playersMemoryCache.length > 0 && isCacheValid(playersCacheTimestamp)) {
+      console.log('Используется кэш в памяти');
+      return playersMemoryCache;
+    }
+    
+    // Проверяем кэш в AsyncStorage
+    try {
+      const cachedDataJson = await AsyncStorage.getItem(PLAYERS_CACHE_KEY);
+      if (cachedDataJson) {
+        const cachedData: CachedData<Player[]> = JSON.parse(cachedDataJson);
+        if (isCacheValid(cachedData.timestamp)) {
+          console.log('Используется кэш AsyncStorage');
+          playersMemoryCache = cachedData.data;
+          playersCacheTimestamp = cachedData.timestamp;
+          return cachedData.data;
+        }
+      }
+    } catch (cacheError) {
+      console.error('Ошибка чтения кэша:', cacheError);
+    }
     
     const apiPlayers = await apiService.fetchPlayers();
     console.log(`Получено ${apiPlayers.length} игроков из API`);
@@ -209,7 +169,7 @@ export async function getPlayers(): Promise<Player[]> {
       console.log(`Игрок ${index + 1}:`, {
         id: player.id,
         name: player.post_title,
-        positions: player.positions,
+        position: player.position,
         number: player.sp_number
       });
     });
@@ -225,13 +185,7 @@ export async function getPlayers(): Promise<Player[]> {
       return acc;
     }, {} as Record<string, number>);
     
-    console.log('Распределение игроков по позициям после конвертации:', positionCounts);
-    
-    // Логируем примеры игроков по каждой позиции
-    ['Вратари', 'Защитники', 'Нападающие'].forEach(position => {
-      const playersInPosition = players.filter(p => p.position === position);
-      console.log(`Игроки в категории "${position}":`, playersInPosition.map(p => `${p.name} (#${p.number})`));
-    });
+    console.log('Распределение игроков по позициям:', positionCounts);
     
     playersMemoryCache = players;
     playersCacheTimestamp = Date.now();
@@ -314,7 +268,7 @@ function getFallbackPlayers(): Player[] {
     {
       id: '1',
       name: 'Александр Петров',
-      position: 'Нападающие',
+      position: 'Нападающий',
       number: 10,
       age: 28,
       height: 185,
@@ -324,7 +278,7 @@ function getFallbackPlayers(): Player[] {
     {
       id: '2',
       name: 'Дмитрий Иванов',
-      position: 'Защитники',
+      position: 'Защитник',
       number: 5,
       age: 26,
       height: 190,
@@ -334,7 +288,7 @@ function getFallbackPlayers(): Player[] {
     {
       id: '3',
       name: 'Сергей Козлов',
-      position: 'Вратари',
+      position: 'Вратарь',
       number: 1,
       age: 30,
       height: 188,
