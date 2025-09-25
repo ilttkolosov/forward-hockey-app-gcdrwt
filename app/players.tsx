@@ -81,7 +81,7 @@ const PlayersScreen: React.FC = () => {
 
         {players.length === 0 ? (
           <View style={commonStyles.emptyState}>
-            <Icon name="users" size={64} color={colors.textSecondary} />
+            <Icon name="people" size={64} color={colors.textSecondary} />
             <Text style={commonStyles.emptyStateTitle}>Нет данных об игроках</Text>
             <Text style={commonStyles.emptyStateText}>
               Информация об игроках будет добавлена в ближайшее время

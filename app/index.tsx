@@ -161,7 +161,7 @@ const HomeScreen: React.FC = () => {
           
           <Link href="/players" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
-              <Icon name="users" size={24} color={colors.primary} />
+              <Icon name="people" size={24} color={colors.primary} />
               <Text style={quickNavStyles.text}>Игроки</Text>
             </TouchableOpacity>
           </Link>
