@@ -1,93 +1,46 @@
 
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Link } from 'expo-router';
-import { getCurrentGame, getFutureGames, getUpcomingGamesCount, getPastGamesCount } from '../data/gameData';
-import Icon from '../components/Icon';
-import { Game, TeamStats } from '../types';
-import GameCard from '../components/GameCard';
-import { mockTeamStats } from '../data/mockData';
 import { commonStyles, colors } from '../styles/commonStyles';
+import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
+import { Game, TeamStats } from '../types';
+import { mockCurrentGame, mockUpcomingGames, mockTeamStats } from '../data/mockData';
+import { Link } from 'expo-router';
+import { TouchableOpacity } from 'react-native';
+import Icon from '../components/Icon';
 
-const quickNavStyles = {
-  container: {
-    flexDirection: 'row' as const,
-    justifyContent: 'space-around' as const,
-    paddingVertical: 20,
-    paddingHorizontal: 16,
-    backgroundColor: colors.surface,
-    marginHorizontal: 16,
-    marginVertical: 8,
-    borderRadius: 12,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  item: {
-    alignItems: 'center' as const,
-    flex: 1,
-  },
-  text: {
-    marginTop: 8,
-    fontSize: 12,
-    color: colors.text,
-    textAlign: 'center' as const,
-  },
-  count: {
-    marginTop: 2,
-    fontSize: 10,
-    color: colors.textSecondary,
-    textAlign: 'center' as const,
-  },
-};
-
-const HomeScreen: React.FC = () => {
+export default function HomeScreen() {
   const [currentGame, setCurrentGame] = useState<Game | null>(null);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
-  const [teamStats] = useState<TeamStats>(mockTeamStats);
+  const [teamStats, setTeamStats] = useState<TeamStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [upcomingCount, setUpcomingCount] = useState<number>(0);
-  const [pastCount, setPastCount] = useState<number>(0);
-
-  useEffect(() => {
-    loadData();
-  }, []);
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadData = async () => {
     try {
       setError(null);
-      console.log('Loading home screen data...');
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      const [current, upcoming] = await Promise.all([
-        getCurrentGame(),
-        getFutureGames()
-      ]);
-
-      setCurrentGame(current);
-      setUpcomingGames(upcoming.slice(0, 3)); // Show only first 3 upcoming games
-      
-      // Get counts from the new API
-      setUpcomingCount(getUpcomingGamesCount());
-      setPastCount(getPastGamesCount());
-      
-      console.log('Home screen data loaded successfully');
-      console.log('Upcoming games count:', getUpcomingGamesCount());
-      console.log('Past games count:', getPastGamesCount());
+      setCurrentGame(mockCurrentGame);
+      setUpcomingGames(mockUpcomingGames.slice(0, 2)); // Show only next 2 games
+      setTeamStats(mockTeamStats);
     } catch (err) {
-      console.error('Error loading home screen data:', err);
-      setError('Ошибка загрузки данных. Проверьте подключение к интернету.');
+      console.log('Error loading home data:', err);
+      setError('Failed to load team data. Please try again.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
+
+  useEffect(() => {
+    loadData();
+  }, []);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -102,116 +55,157 @@ const HomeScreen: React.FC = () => {
     );
   }
 
+  if (error) {
+    return (
+      <SafeAreaView style={commonStyles.container}>
+        <ErrorMessage message={error} onRetry={loadData} />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={commonStyles.container}>
       <ScrollView
-        style={commonStyles.container}
+        style={commonStyles.content}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
+        showsVerticalScrollIndicator={false}
       >
-        <View style={commonStyles.header}>
-          <Text style={commonStyles.title}>ХК Форвард 2014</Text>
-          <Text style={commonStyles.subtitle}>Санкт-Петербург</Text>
-        </View>
-
-        {error && <ErrorMessage message={error} />}
-
-        {/* Team Stats */}
-        <View style={[commonStyles.card, { marginHorizontal: 16, marginVertical: 8 }]}>
-          <Text style={commonStyles.cardTitle}>Статистика сезона</Text>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }}>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontSize: 24, fontWeight: 'bold', color: colors.primary }}>
-                {teamStats.wins}
-              </Text>
-              <Text style={{ fontSize: 12, color: colors.textSecondary }}>Победы</Text>
-            </View>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontSize: 24, fontWeight: 'bold', color: colors.error }}>
-                {teamStats.losses}
-              </Text>
-              <Text style={{ fontSize: 12, color: colors.textSecondary }}>Поражения</Text>
-            </View>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontSize: 24, fontWeight: 'bold', color: colors.warning }}>
-                {teamStats.draws}
-              </Text>
-              <Text style={{ fontSize: 12, color: colors.textSecondary }}>Ничьи</Text>
-            </View>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontSize: 24, fontWeight: 'bold', color: colors.text }}>
-                {teamStats.points}
-              </Text>
-              <Text style={{ fontSize: 12, color: colors.textSecondary }}>Очки</Text>
-            </View>
-          </View>
+        {/* Header */}
+        <View style={{ marginBottom: 24 }}>
+          <Text style={commonStyles.title}>HC Forward</Text>
+          <Text style={commonStyles.textSecondary}>Official Mobile App</Text>
         </View>
 
         {/* Current Game */}
         {currentGame && (
-          <View>
-            <View style={commonStyles.sectionHeader}>
-              <Text style={commonStyles.sectionTitle}>Текущая игра</Text>
+          <View style={commonStyles.section}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={commonStyles.subtitle}>Current Game</Text>
+              {currentGame.status === 'live' && (
+                <View style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: 4,
+                  backgroundColor: colors.error,
+                  marginLeft: 8,
+                }} />
+              )}
             </View>
-            <GameCard game={currentGame} showScore={true} hideSeasonInfo={true} />
+            <GameCard game={currentGame} />
           </View>
         )}
 
-        {/* Quick Navigation */}
-        <View style={quickNavStyles.container}>
-          <Link href="/upcoming" asChild>
-            <TouchableOpacity style={quickNavStyles.item}>
-              <Icon name="calendar" size={24} color={colors.primary} />
-              <Text style={quickNavStyles.text}>
-                Предстоящие игры {upcomingCount > 0 ? `(${upcomingCount})` : ''}
-              </Text>
-            </TouchableOpacity>
-          </Link>
-          
-          <Link href="/archive" asChild>
-            <TouchableOpacity style={quickNavStyles.item}>
-              <Icon name="archive" size={24} color={colors.primary} />
-              <Text style={quickNavStyles.text}>
-                Архив игр {pastCount > 0 ? `(${pastCount})` : ''}
-              </Text>
-            </TouchableOpacity>
-          </Link>
-          
-          <Link href="/players" asChild>
-            <TouchableOpacity style={quickNavStyles.item}>
-              <Icon name="people" size={24} color={colors.primary} />
-              <Text style={quickNavStyles.text}>Игроки</Text>
-            </TouchableOpacity>
-          </Link>
-          
-          <Link href="/tournaments" asChild>
-            <TouchableOpacity style={quickNavStyles.item}>
-              <Icon name="trophy" size={24} color={colors.primary} />
-              <Text style={quickNavStyles.text}>Турниры</Text>
-            </TouchableOpacity>
-          </Link>
-        </View>
+        {/* Team Stats */}
+        {teamStats && (
+          <View style={commonStyles.section}>
+            <Text style={commonStyles.subtitle}>Season Stats</Text>
+            <View style={commonStyles.card}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 24, fontWeight: '700', color: colors.primary }}>
+                    {teamStats.position}
+                  </Text>
+                  <Text style={commonStyles.textSecondary}>Position</Text>
+                </View>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 24, fontWeight: '700', color: colors.success }}>
+                    {teamStats.wins}
+                  </Text>
+                  <Text style={commonStyles.textSecondary}>Wins</Text>
+                </View>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 24, fontWeight: '700', color: colors.primary }}>
+                    {teamStats.points}
+                  </Text>
+                  <Text style={commonStyles.textSecondary}>Points</Text>
+                </View>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 24, fontWeight: '700', color: colors.text }}>
+                    {teamStats.goalsFor}-{teamStats.goalsAgainst}
+                  </Text>
+                  <Text style={commonStyles.textSecondary}>Goals</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* Upcoming Games */}
         {upcomingGames.length > 0 && (
-          <View>
-            <View style={commonStyles.sectionHeader}>
-              <Text style={commonStyles.sectionTitle}>Ближайшие игры</Text>
+          <View style={commonStyles.section}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={commonStyles.subtitle}>Next Games</Text>
               <Link href="/upcoming" asChild>
-                <TouchableOpacity>
-                  <Text style={commonStyles.sectionLink}>Все игры</Text>
+                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '500', marginRight: 4 }}>
+                    View All
+                  </Text>
+                  <Icon name="chevron-forward" size={16} color={colors.primary} />
                 </TouchableOpacity>
               </Link>
             </View>
             {upcomingGames.map((game) => (
-              <GameCard key={game.id} game={game} showScore={false} hideSeasonInfo={true} />
+              <GameCard key={game.id} game={game} showScore={false} />
             ))}
           </View>
         )}
+
+        {/* Quick Navigation */}
+        <View style={commonStyles.section}>
+          <Text style={commonStyles.subtitle}>Quick Access</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+            <Link href="/archive" asChild>
+              <TouchableOpacity style={quickNavStyles.button}>
+                <Icon name="archive" size={24} color={colors.primary} />
+                <Text style={quickNavStyles.buttonText}>Game Archive</Text>
+              </TouchableOpacity>
+            </Link>
+            <Link href="/players" asChild>
+              <TouchableOpacity style={quickNavStyles.button}>
+                <Icon name="people" size={24} color={colors.primary} />
+                <Text style={quickNavStyles.buttonText}>Players</Text>
+              </TouchableOpacity>
+            </Link>
+            <Link href="/tournaments" asChild>
+              <TouchableOpacity style={quickNavStyles.button}>
+                <Icon name="trophy" size={24} color={colors.primary} />
+                <Text style={quickNavStyles.buttonText}>Tournaments</Text>
+              </TouchableOpacity>
+            </Link>
+            <Link href="/coaches" asChild>
+              <TouchableOpacity style={quickNavStyles.button}>
+                <Icon name="school" size={24} color={colors.primary} />
+                <Text style={quickNavStyles.buttonText}>Coaches</Text>
+              </TouchableOpacity>
+            </Link>
+          </View>
+        </View>
+
+        {/* Bottom spacing */}
+        <View style={{ height: 32 }} />
       </ScrollView>
     </SafeAreaView>
   );
-};
+}
 
-export default HomeScreen;
+const quickNavStyles = {
+  button: {
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    minWidth: '45%',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  buttonText: {
+    fontSize: 14,
+    fontWeight: '500' as const,
+    color: colors.text,
+    marginTop: 8,
+    textAlign: 'center' as const,
+  },
+};

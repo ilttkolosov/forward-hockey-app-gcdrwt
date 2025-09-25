@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { View, Text, StyleSheet, Image } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { Coach } from '../types';
 import { colors, commonStyles } from '../styles/commonStyles';
 
@@ -8,70 +8,61 @@ interface CoachCardProps {
   coach: Coach;
 }
 
+export default function CoachCard({ coach }: CoachCardProps) {
+  const getRoleColor = (role: string) => {
+    if (role.toLowerCase().includes('head')) {
+      return colors.primary;
+    } else if (role.toLowerCase().includes('assistant')) {
+      return colors.secondary;
+    } else {
+      return colors.accent;
+    }
+  };
+
+  return (
+    <View style={commonStyles.card}>
+      <View style={styles.header}>
+        <View style={[styles.roleIndicator, { backgroundColor: getRoleColor(coach.role) }]} />
+        <View style={styles.coachInfo}>
+          <Text style={styles.name}>{coach.name}</Text>
+          <Text style={styles.role}>{coach.role}</Text>
+          {coach.experience && (
+            <Text style={styles.experience}>{coach.experience} experience</Text>
+          )}
+        </View>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    padding: 16,
-    marginVertical: 8,
-    marginHorizontal: 8,
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: colors.shadow,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
-  photo: {
-    width: 60,
+  roleIndicator: {
+    width: 4,
     height: 60,
-    borderRadius: 30,
+    borderRadius: 2,
     marginRight: 16,
-    backgroundColor: colors.background,
   },
-  info: {
+  coachInfo: {
     flex: 1,
   },
   name: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
     color: colors.text,
     marginBottom: 4,
   },
   role: {
-    fontSize: 14,
-    color: colors.primary,
+    fontSize: 16,
     fontWeight: '500',
-    marginBottom: 4,
+    color: colors.primary,
+    marginBottom: 2,
   },
   experience: {
-    fontSize: 12,
+    fontSize: 14,
     color: colors.textSecondary,
   },
 });
-
-const CoachCard: React.FC<CoachCardProps> = ({ coach }) => {
-  return (
-    <View style={styles.card}>
-      {coach.photo ? (
-        <Image source={{ uri: coach.photo }} style={styles.photo} />
-      ) : (
-        <View style={styles.photo} />
-      )}
-      
-      <View style={styles.info}>
-        <Text style={styles.name}>{coach.name}</Text>
-        <Text style={styles.role}>{coach.role}</Text>
-        {coach.experience && (
-          <Text style={styles.experience}>Опыт: {coach.experience}</Text>
-        )}
-      </View>
-    </View>
-  );
-};
-
-export default CoachCard;

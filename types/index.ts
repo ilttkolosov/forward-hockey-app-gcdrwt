@@ -10,27 +10,6 @@ export interface Game {
   venue: string;
   status: 'upcoming' | 'live' | 'finished';
   tournament?: string;
-  videoUrl?: string;
-  // API fields
-  event_id: string;
-  event_date: string;
-  homeTeamId?: string;
-  awayTeamId?: string;
-  homeTeamLogo?: string;
-  awayTeamLogo?: string;
-  sp_results?: string;
-  // Enhanced game details
-  homeOutcome?: 'win' | 'loss' | 'nich';
-  awayOutcome?: 'win' | 'loss' | 'nich';
-  homeFirstPeriod?: number;
-  homeSecondPeriod?: number;
-  homeThirdPeriod?: number;
-  awayFirstPeriod?: number;
-  awaySecondPeriod?: number;
-  awayThirdPeriod?: number;
-  league?: string;
-  season?: string;
-  sp_video?: string;
 }
 
 export interface Player {
@@ -38,38 +17,11 @@ export interface Player {
   name: string;
   position: string;
   number: number;
-  birthDate?: string;
   age?: number;
-  height?: number;
-  weight?: number;
-  handedness?: string;
-  captainStatus?: string;
+  height?: string;
+  weight?: string;
   nationality?: string;
   photo?: string;
-}
-
-export interface GamePlayerStats {
-  playerId: string;
-  playerName: string;
-  position: string;
-  number: number;
-  goals: number;
-  assists: number;
-  points: number;
-  penaltyMinutes: number;
-  shots: number;
-  hits: number;
-  blockedShots: number;
-  faceoffWins?: number;
-  faceoffLosses?: number;
-  timeOnIce: string;
-}
-
-export interface GameStats {
-  gameId: string;
-  homeTeamStats: GamePlayerStats[];
-  awayTeamStats: GamePlayerStats[];
-  gameHighlights?: string[];
 }
 
 export interface Coach {
@@ -97,85 +49,4 @@ export interface TeamStats {
   goalsAgainst: number;
   points: number;
   position: number;
-}
-
-export interface ApiPlayerResponse {
-  id: string;
-  sp_current_team?: number;
-  post_date: string;
-  post_title: string;
-  sp_number: number | string;
-  sp_metrics: {
-    ka?: string;
-    onetwofive?: string;
-    height?: string;
-    weight?: string;
-  };
-  sp_nationality?: string;
-  position: string;
-  player_image?: string;
-}
-
-// API interfaces for events
-export interface ApiUpcomingEventsResponse {
-  data: ApiEvent[];
-  count: number;
-}
-
-export interface ApiPastEventsResponse {
-  data: ApiEvent[];
-  count: number;
-}
-
-export interface ApiEvent {
-  event_id: string;
-  event_date: string;
-  sp_teams: string; // comma-separated team IDs
-  Leagues: string; // "id:name" format
-  seasons: string; // "id:name" format
-  venues: string; // "id:name" format
-  sp_results?: string; // PHP serialized array for past events
-}
-
-// Detailed game event from /events/{id} endpoint
-export interface ApiGameDetails {
-  id: string;
-  date: string; // date and time separated by space
-  teams: string; // comma-separated team IDs
-  Leagues: string; // "id:name" format
-  seasons: string; // "id:name" format
-  venues: string; // "id:name" format
-  results: string; // serialized results with period details
-  sp_video?: string; // VK video link
-}
-
-// Parsed results structure
-export interface GameResult {
-  teamId: string;
-  first: number;
-  second: number;
-  third: number;
-  goals: number;
-  outcome: 'win' | 'loss' | 'nich';
-}
-
-export interface ApiTeam {
-  id: string;
-  name: string;
-  logo_url: string;
-}
-
-export interface ApiLeague {
-  id: string;
-  name: string;
-}
-
-export interface ApiSeason {
-  id: string;
-  name: string;
-}
-
-export interface ApiVenue {
-  id: string;
-  name: string;
 }
