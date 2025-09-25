@@ -28,6 +28,23 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
   },
+  videoPlaceholder: {
+    height: 200,
+    backgroundColor: colors.surface,
+    marginHorizontal: 16,
+    marginVertical: 8,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.background,
+  },
+  videoPlaceholderText: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 8,
+  },
   gameInfo: {
     backgroundColor: colors.surface,
     marginHorizontal: 16,
@@ -64,6 +81,80 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     marginBottom: 8,
+  },
+  periodsContainer: {
+    backgroundColor: colors.surface,
+    marginHorizontal: 16,
+    marginVertical: 8,
+    borderRadius: 12,
+    padding: 16,
+  },
+  periodsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  periodsTable: {
+    borderWidth: 1,
+    borderColor: colors.background,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  tableRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.background,
+  },
+  tableHeader: {
+    backgroundColor: colors.background,
+  },
+  tableCell: {
+    flex: 1,
+    padding: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tableCellText: {
+    fontSize: 14,
+    color: colors.text,
+    textAlign: 'center',
+  },
+  tableCellHeader: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  outcomeContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.background,
+  },
+  outcomeItem: {
+    alignItems: 'center',
+  },
+  outcomeLabel: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: 4,
+  },
+  outcomeText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  winText: {
+    color: colors.success,
+  },
+  lossText: {
+    color: colors.error,
+  },
+  drawText: {
+    color: colors.warning,
   },
   statsSection: {
     backgroundColor: colors.surface,
@@ -117,7 +208,7 @@ const GameDetailsScreen: React.FC = () => {
   const loadGameData = async () => {
     try {
       setError(null);
-      console.log('Loading game data for ID:', id);
+      console.log('Loading enhanced game data for ID:', id);
       
       const [gameData, statsData] = await Promise.all([
         getGameById(id!),
@@ -179,6 +270,32 @@ const GameDetailsScreen: React.FC = () => {
     });
   };
 
+  const getOutcomeText = (outcome: 'win' | 'loss' | 'nich' | undefined) => {
+    switch (outcome) {
+      case 'win':
+        return 'ПОБЕДА';
+      case 'loss':
+        return 'ПОРАЖЕНИЕ';
+      case 'nich':
+        return 'НИЧЬЯ';
+      default:
+        return 'НЕТ ДАННЫХ';
+    }
+  };
+
+  const getOutcomeStyle = (outcome: 'win' | 'loss' | 'nich' | undefined) => {
+    switch (outcome) {
+      case 'win':
+        return styles.winText;
+      case 'loss':
+        return styles.lossText;
+      case 'nich':
+        return styles.drawText;
+      default:
+        return { color: colors.textSecondary };
+    }
+  };
+
   const renderPlayerStats = (stats: GamePlayerStats[]) => {
     if (!stats || stats.length === 0) {
       return (
@@ -198,6 +315,104 @@ const GameDetailsScreen: React.FC = () => {
         <Text style={styles.playerStat}>{player.points}О</Text>
       </View>
     ));
+  };
+
+  const renderPeriodsTable = () => {
+    if (!game || game.homeScore === undefined || game.awayScore === undefined) {
+      return null;
+    }
+
+    const hasPeriodsData = game.homeFirstPeriod !== undefined || 
+                          game.homeSecondPeriod !== undefined || 
+                          game.homeThirdPeriod !== undefined;
+
+    if (!hasPeriodsData) {
+      return null;
+    }
+
+    return (
+      <View style={styles.periodsContainer}>
+        <Text style={styles.periodsTitle}>Счет по периодам</Text>
+        <View style={styles.periodsTable}>
+          {/* Header */}
+          <View style={[styles.tableRow, styles.tableHeader]}>
+            <View style={styles.tableCell}>
+              <Text style={styles.tableCellHeader}>Команда</Text>
+            </View>
+            <View style={styles.tableCell}>
+              <Text style={styles.tableCellHeader}>1 период</Text>
+            </View>
+            <View style={styles.tableCell}>
+              <Text style={styles.tableCellHeader}>2 период</Text>
+            </View>
+            <View style={styles.tableCell}>
+              <Text style={styles.tableCellHeader}>3 период</Text>
+            </View>
+            <View style={styles.tableCell}>
+              <Text style={styles.tableCellHeader}>Итого</Text>
+            </View>
+          </View>
+          
+          {/* Home team */}
+          <View style={styles.tableRow}>
+            <View style={styles.tableCell}>
+              <Text style={styles.tableCellText} numberOfLines={1}>
+                {game.homeTeam}
+              </Text>
+            </View>
+            <View style={styles.tableCell}>
+              <Text style={styles.tableCellText}>
+                {game.homeFirstPeriod ?? 0}
+              </Text>
+            </View>
+            <View style={styles.tableCell}>
+              <Text style={styles.tableCellText}>
+                {game.homeSecondPeriod ?? 0}
+              </Text>
+            </View>
+            <View style={styles.tableCell}>
+              <Text style={styles.tableCellText}>
+                {game.homeThirdPeriod ?? 0}
+              </Text>
+            </View>
+            <View style={styles.tableCell}>
+              <Text style={[styles.tableCellText, { fontWeight: 'bold', color: colors.primary }]}>
+                {game.homeScore}
+              </Text>
+            </View>
+          </View>
+          
+          {/* Away team */}
+          <View style={styles.tableRow}>
+            <View style={styles.tableCell}>
+              <Text style={styles.tableCellText} numberOfLines={1}>
+                {game.awayTeam}
+              </Text>
+            </View>
+            <View style={styles.tableCell}>
+              <Text style={styles.tableCellText}>
+                {game.awayFirstPeriod ?? 0}
+              </Text>
+            </View>
+            <View style={styles.tableCell}>
+              <Text style={styles.tableCellText}>
+                {game.awaySecondPeriod ?? 0}
+              </Text>
+            </View>
+            <View style={styles.tableCell}>
+              <Text style={styles.tableCellText}>
+                {game.awayThirdPeriod ?? 0}
+              </Text>
+            </View>
+            <View style={styles.tableCell}>
+              <Text style={[styles.tableCellText, { fontWeight: 'bold', color: colors.primary }]}>
+                {game.awayScore}
+              </Text>
+            </View>
+          </View>
+        </View>
+      </View>
+    );
   };
 
   if (loading) {
@@ -244,14 +459,25 @@ const GameDetailsScreen: React.FC = () => {
         }
       >
         {/* Video Player */}
-        {game.videoUrl && (
+        {game.videoUrl || game.sp_video ? (
           <View style={styles.videoContainer}>
             <WebView
-              source={{ uri: game.videoUrl }}
+              source={{ uri: game.videoUrl || game.sp_video || '' }}
               style={{ flex: 1 }}
               allowsFullscreenVideo={true}
               mediaPlaybackRequiresUserAction={false}
+              onError={(syntheticEvent) => {
+                const { nativeEvent } = syntheticEvent;
+                console.error('WebView error: ', nativeEvent);
+              }}
             />
+          </View>
+        ) : (
+          <View style={styles.videoPlaceholder}>
+            <Icon name="play-circle-outline" size={48} color={colors.textSecondary} />
+            <Text style={styles.videoPlaceholderText}>
+              Видео трансляции недоступно
+            </Text>
           </View>
         )}
 
@@ -280,7 +506,35 @@ const GameDetailsScreen: React.FC = () => {
             <Text style={styles.gameDetail}>Место: {game.venue}</Text>
             <Text style={styles.gameDetail}>Турнир: {game.tournament}</Text>
           </View>
+
+          {game.league && (
+            <View style={styles.gameDetails}>
+              <Text style={styles.gameDetail}>Лига: {game.league}</Text>
+              {game.season && <Text style={styles.gameDetail}>Сезон: {game.season}</Text>}
+            </View>
+          )}
+
+          {/* Outcome for finished games */}
+          {game.status === 'finished' && (game.homeOutcome || game.awayOutcome) && (
+            <View style={styles.outcomeContainer}>
+              <View style={styles.outcomeItem}>
+                <Text style={styles.outcomeLabel}>{game.homeTeam}</Text>
+                <Text style={[styles.outcomeText, getOutcomeStyle(game.homeOutcome)]}>
+                  {getOutcomeText(game.homeOutcome)}
+                </Text>
+              </View>
+              <View style={styles.outcomeItem}>
+                <Text style={styles.outcomeLabel}>{game.awayTeam}</Text>
+                <Text style={[styles.outcomeText, getOutcomeStyle(game.awayOutcome)]}>
+                  {getOutcomeText(game.awayOutcome)}
+                </Text>
+              </View>
+            </View>
+          )}
         </View>
+
+        {/* Periods Table */}
+        {renderPeriodsTable()}
 
         {/* Game Statistics */}
         {gameStats && (

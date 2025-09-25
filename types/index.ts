@@ -19,6 +19,18 @@ export interface Game {
   homeTeamLogo?: string;
   awayTeamLogo?: string;
   sp_results?: string;
+  // Enhanced game details
+  homeOutcome?: 'win' | 'loss' | 'nich';
+  awayOutcome?: 'win' | 'loss' | 'nich';
+  homeFirstPeriod?: number;
+  homeSecondPeriod?: number;
+  homeThirdPeriod?: number;
+  awayFirstPeriod?: number;
+  awaySecondPeriod?: number;
+  awayThirdPeriod?: number;
+  league?: string;
+  season?: string;
+  sp_video?: string;
 }
 
 export interface Player {
@@ -123,6 +135,28 @@ export interface ApiEvent {
   seasons: string; // "id:name" format
   venues: string; // "id:name" format
   sp_results?: string; // PHP serialized array for past events
+}
+
+// Detailed game event from /events/{id} endpoint
+export interface ApiGameDetails {
+  id: string;
+  date: string; // date and time separated by space
+  teams: string; // comma-separated team IDs
+  Leagues: string; // "id:name" format
+  seasons: string; // "id:name" format
+  venues: string; // "id:name" format
+  results: string; // serialized results with period details
+  sp_video?: string; // VK video link
+}
+
+// Parsed results structure
+export interface GameResult {
+  teamId: string;
+  first: number;
+  second: number;
+  third: number;
+  goals: number;
+  outcome: 'win' | 'loss' | 'nich';
 }
 
 export interface ApiTeam {

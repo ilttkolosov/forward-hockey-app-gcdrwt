@@ -98,6 +98,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSecondary,
   },
+  outcomeContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.background,
+  },
+  outcomeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    flex: 1,
+  },
+  winText: {
+    color: colors.success,
+  },
+  lossText: {
+    color: colors.error,
+  },
+  drawText: {
+    color: colors.warning,
+  },
 });
 
 const GameCard: React.FC<GameCardProps> = ({ game, showScore = true, hideSeasonInfo = false }) => {
@@ -160,19 +183,51 @@ const GameCard: React.FC<GameCardProps> = ({ game, showScore = true, hideSeasonI
   };
 
   const getTournamentName = () => {
-    console.log('Getting tournament name for game (default logic):', {
+    console.log('Getting tournament name for game:', {
       id: game.id,
-      tournament: game.tournament
+      tournament: game.tournament,
+      league: game.league
     });
     
-    // Simple default logic: use tournament field or default to "Чемпионат"
+    // Use league name if available, otherwise use tournament field
+    if (game.league && game.league.trim() !== '') {
+      console.log('Using league field:', game.league);
+      return game.league;
+    }
+    
     if (game.tournament && game.tournament.trim() !== '') {
       console.log('Using tournament field:', game.tournament);
       return game.tournament;
     }
     
-    console.log('No tournament info found, using default "Чемпионат"');
-    return 'Чемпионат';
+    console.log('No tournament/league info found, using default "Товарищеский матч"');
+    return 'Товарищеский матч';
+  };
+
+  const getOutcomeText = (outcome: 'win' | 'loss' | 'nich' | undefined) => {
+    switch (outcome) {
+      case 'win':
+        return 'ПОБЕДА';
+      case 'loss':
+        return 'ПОРАЖЕНИЕ';
+      case 'nich':
+        return 'НИЧЬЯ';
+      default:
+        return '';
+    }
+  };
+
+  const getOutcomeStyle = (outcome: 'win' | 'loss' | 'nich' | undefined) => {
+    switch (outcome) {
+      case 'win':
+        return styles.winText;
+      case 'loss':
+        return styles.lossText;
+      case 'nich':
+        return styles.drawText;
+      default:
+        return {};
+    }
   };
 
   const renderTeamWithLogo = (teamName: string, teamLogo?: string) => {
@@ -191,6 +246,8 @@ const GameCard: React.FC<GameCardProps> = ({ game, showScore = true, hideSeasonI
       </View>
     );
   };
+
+  const shouldShowOutcome = game.status === 'finished' && (game.homeOutcome || game.awayOutcome);
 
   return (
     <TouchableOpacity style={styles.card} onPress={handlePress}>
@@ -220,6 +277,18 @@ const GameCard: React.FC<GameCardProps> = ({ game, showScore = true, hideSeasonI
           {renderTeamWithLogo(game.awayTeam, game.awayTeamLogo)}
         </View>
       </View>
+
+      {/* Show outcome for finished games */}
+      {shouldShowOutcome && (
+        <View style={styles.outcomeContainer}>
+          <Text style={[styles.outcomeText, getOutcomeStyle(game.homeOutcome)]}>
+            {getOutcomeText(game.homeOutcome)}
+          </Text>
+          <Text style={[styles.outcomeText, getOutcomeStyle(game.awayOutcome)]}>
+            {getOutcomeText(game.awayOutcome)}
+          </Text>
+        </View>
+      )}
 
       <View style={styles.details}>
         <Text style={styles.dateTime}>

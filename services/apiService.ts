@@ -1,5 +1,5 @@
 
-import { ApiPlayerResponse, ApiUpcomingEventsResponse, ApiPastEventsResponse, ApiTeam, ApiLeague, ApiSeason, ApiVenue } from '../types';
+import { ApiPlayerResponse, ApiUpcomingEventsResponse, ApiPastEventsResponse, ApiTeam, ApiLeague, ApiSeason, ApiVenue, ApiGameDetails, GameResult } from '../types';
 
 class ApiService {
   private baseUrl = 'https://www.hc-forward.com/wp-json/app/v1';
@@ -10,6 +10,7 @@ class ApiService {
   private leagueCache: { [key: string]: ApiLeague } = {};
   private seasonCache: { [key: string]: ApiSeason } = {};
   private venueCache: { [key: string]: ApiVenue } = {};
+  private gameDetailsCache: { [key: string]: ApiGameDetails } = {};
 
   async fetchUpcomingEvents(): Promise<ApiUpcomingEventsResponse> {
     try {
@@ -48,6 +49,34 @@ class ApiService {
     } catch (error) {
       console.error('Error fetching past events:', error);
       throw error;
+    }
+  }
+
+  async fetchGameDetails(gameId: string): Promise<ApiGameDetails | null> {
+    // Check cache first
+    if (this.gameDetailsCache[gameId]) {
+      console.log('Returning cached game details for ID:', gameId);
+      return this.gameDetailsCache[gameId];
+    }
+
+    try {
+      console.log('Fetching detailed game data for ID:', gameId);
+      const response = await fetch(`${this.baseUrl}/events/${gameId}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const gameDetails: ApiGameDetails = await response.json();
+      console.log('Game details fetched:', gameDetails);
+      
+      // Cache the result
+      this.gameDetailsCache[gameId] = gameDetails;
+      
+      return gameDetails;
+    } catch (error) {
+      console.error('Error fetching game details:', error);
+      return null;
     }
   }
 
@@ -245,14 +274,84 @@ class ApiService {
     };
   }
 
-  // Helper function to parse PHP serialized results
-  parsePhpSerializedResults(serializedString: string): { homeScore?: number; awayScore?: number } {
+  // Enhanced function to parse PHP serialized results with detailed period information
+  parseDetailedResults(serializedString: string): GameResult[] {
     try {
+      console.log('Parsing detailed PHP serialized results:', serializedString);
+      
       // This is a simplified parser for PHP serialized arrays
       // In a real implementation, you might want to use a proper PHP serialization parser
-      console.log('Parsing PHP serialized results:', serializedString);
+      const results: GameResult[] = [];
       
-      // Look for score patterns in the serialized string
+      // Look for patterns like: teamId => array with goals, outcome, periods
+      // This is a basic implementation - you may need to adjust based on actual data format
+      const teamPattern = /(\d+)[^{]*{[^}]*"goals";i:(\d+);[^}]*"outcome";s:\d+:"([^"]+)";[^}]*"first";i:(\d+);[^}]*"second";i:(\d+);[^}]*"third";i:(\d+);[^}]*}/g;
+      
+      let match;
+      while ((match = teamPattern.exec(serializedString)) !== null) {
+        const [, teamId, goals, outcome, first, second, third] = match;
+        results.push({
+          teamId: teamId.trim(),
+          goals: parseInt(goals),
+          outcome: outcome as 'win' | 'loss' | 'nich',
+          first: parseInt(first),
+          second: parseInt(second),
+          third: parseInt(third)
+        });
+      }
+      
+      // Fallback: try to extract basic score information
+      if (results.length === 0) {
+        const scorePattern = /(\d+)[\s\-:]+(\d+)/;
+        const scoreMatch = serializedString.match(scorePattern);
+        
+        if (scoreMatch) {
+          // Create basic results without period details
+          results.push(
+            {
+              teamId: '1',
+              goals: parseInt(scoreMatch[1]),
+              outcome: parseInt(scoreMatch[1]) > parseInt(scoreMatch[2]) ? 'win' : 
+                      parseInt(scoreMatch[1]) < parseInt(scoreMatch[2]) ? 'loss' : 'nich',
+              first: 0,
+              second: 0,
+              third: 0
+            },
+            {
+              teamId: '2',
+              goals: parseInt(scoreMatch[2]),
+              outcome: parseInt(scoreMatch[2]) > parseInt(scoreMatch[1]) ? 'win' : 
+                      parseInt(scoreMatch[2]) < parseInt(scoreMatch[1]) ? 'loss' : 'nich',
+              first: 0,
+              second: 0,
+              third: 0
+            }
+          );
+        }
+      }
+      
+      console.log('Parsed detailed results:', results);
+      return results;
+    } catch (error) {
+      console.error('Error parsing detailed PHP serialized results:', error);
+      return [];
+    }
+  }
+
+  // Helper function to parse PHP serialized results (legacy method for backward compatibility)
+  parsePhpSerializedResults(serializedString: string): { homeScore?: number; awayScore?: number } {
+    try {
+      console.log('Parsing PHP serialized results (legacy):', serializedString);
+      
+      const results = this.parseDetailedResults(serializedString);
+      if (results.length >= 2) {
+        return {
+          homeScore: results[0].goals,
+          awayScore: results[1].goals
+        };
+      }
+      
+      // Fallback to simple score pattern
       const scorePattern = /(\d+)[\s\-:]+(\d+)/;
       const match = serializedString.match(scorePattern);
       
