@@ -2,7 +2,7 @@
 import React from 'react';
 import { Game } from '../types';
 import { useRouter } from 'expo-router';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { colors, commonStyles } from '../styles/commonStyles';
 
 interface GameCardProps {
@@ -55,11 +55,23 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
   },
+  teamContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  teamLogo: {
+    width: 24,
+    height: 24,
+    marginRight: 8,
+    borderRadius: 12,
+  },
   teamName: {
     fontSize: 16,
     fontWeight: '600',
     color: colors.text,
     textAlign: 'center',
+    flex: 1,
   },
   score: {
     fontSize: 24,
@@ -84,6 +96,26 @@ const styles = StyleSheet.create({
   venue: {
     fontSize: 12,
     color: colors.textSecondary,
+  },
+  additionalInfo: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  infoLabel: {
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  infoValue: {
+    fontSize: 12,
+    color: colors.text,
+    fontWeight: '500',
   },
 });
 
@@ -135,10 +167,29 @@ const GameCard: React.FC<GameCardProps> = ({ game, showScore = true }) => {
     }
   };
 
+  const renderTeamWithLogo = (teamName: string, teamLogo?: string) => {
+    return (
+      <View style={styles.teamContainer}>
+        {teamLogo && (
+          <Image 
+            source={{ uri: teamLogo }} 
+            style={styles.teamLogo}
+            onError={() => console.log('Failed to load team logo:', teamLogo)}
+          />
+        )}
+        <Text style={styles.teamName} numberOfLines={2}>
+          {teamName}
+        </Text>
+      </View>
+    );
+  };
+
   return (
     <TouchableOpacity style={styles.card} onPress={handlePress}>
       <View style={styles.header}>
-        <Text style={styles.tournament}>{game.tournament || 'Чемпионат'}</Text>
+        <Text style={styles.tournament}>
+          {game.league_name || game.tournament || 'Чемпионат'}
+        </Text>
         <Text style={[styles.status, getStatusColor(game.status)]}>
           {getStatusText(game.status)}
         </Text>
@@ -146,7 +197,7 @@ const GameCard: React.FC<GameCardProps> = ({ game, showScore = true }) => {
 
       <View style={styles.matchup}>
         <View style={styles.team}>
-          <Text style={styles.teamName}>{game.homeTeam}</Text>
+          {renderTeamWithLogo(game.homeTeam, game.homeTeamLogo)}
         </View>
 
         {showScore && game.homeScore !== undefined && game.awayScore !== undefined ? (
@@ -158,7 +209,7 @@ const GameCard: React.FC<GameCardProps> = ({ game, showScore = true }) => {
         )}
 
         <View style={styles.team}>
-          <Text style={styles.teamName}>{game.awayTeam}</Text>
+          {renderTeamWithLogo(game.awayTeam, game.awayTeamLogo)}
         </View>
       </View>
 
@@ -166,8 +217,28 @@ const GameCard: React.FC<GameCardProps> = ({ game, showScore = true }) => {
         <Text style={styles.dateTime}>
           {formatDate(game.date)} • {game.time}
         </Text>
-        <Text style={styles.venue}>{game.venue}</Text>
+        <Text style={styles.venue}>
+          {game.venue_name || game.venue}
+        </Text>
       </View>
+
+      {/* Additional info for detailed view */}
+      {(game.season_name || game.league_name) && (
+        <View style={styles.additionalInfo}>
+          {game.season_name && (
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Сезон:</Text>
+              <Text style={styles.infoValue}>{game.season_name}</Text>
+            </View>
+          )}
+          {game.league_name && game.league_name !== (game.tournament || 'Чемпионат') && (
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Лига:</Text>
+              <Text style={styles.infoValue}>{game.league_name}</Text>
+            </View>
+          )}
+        </View>
+      )}
     </TouchableOpacity>
   );
 };

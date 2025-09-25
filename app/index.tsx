@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
-import { getCurrentGame, getFutureGames } from '../data/gameData';
+import { getCurrentGame, getFutureGames, getUpcomingGamesCount, getPastGamesCount } from '../data/gameData';
 import Icon from '../components/Icon';
 import { Game, TeamStats } from '../types';
 import GameCard from '../components/GameCard';
@@ -38,6 +38,12 @@ const quickNavStyles = {
     color: colors.text,
     textAlign: 'center' as const,
   },
+  count: {
+    marginTop: 2,
+    fontSize: 10,
+    color: colors.textSecondary,
+    textAlign: 'center' as const,
+  },
 };
 
 const HomeScreen: React.FC = () => {
@@ -47,6 +53,8 @@ const HomeScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [upcomingCount, setUpcomingCount] = useState<number>(0);
+  const [pastCount, setPastCount] = useState<number>(0);
 
   useEffect(() => {
     loadData();
@@ -64,7 +72,14 @@ const HomeScreen: React.FC = () => {
 
       setCurrentGame(current);
       setUpcomingGames(upcoming.slice(0, 3)); // Show only first 3 upcoming games
+      
+      // Get counts from the new API
+      setUpcomingCount(getUpcomingGamesCount());
+      setPastCount(getPastGamesCount());
+      
       console.log('Home screen data loaded successfully');
+      console.log('Upcoming games count:', getUpcomingGamesCount());
+      console.log('Past games count:', getPastGamesCount());
     } catch (err) {
       console.error('Error loading home screen data:', err);
       setError('Ошибка загрузки данных. Проверьте подключение к интернету.');
@@ -149,6 +164,9 @@ const HomeScreen: React.FC = () => {
             <TouchableOpacity style={quickNavStyles.item}>
               <Icon name="calendar" size={24} color={colors.primary} />
               <Text style={quickNavStyles.text}>Предстоящие игры</Text>
+              {upcomingCount > 0 && (
+                <Text style={quickNavStyles.count}>({upcomingCount})</Text>
+              )}
             </TouchableOpacity>
           </Link>
           
@@ -156,6 +174,9 @@ const HomeScreen: React.FC = () => {
             <TouchableOpacity style={quickNavStyles.item}>
               <Icon name="archive" size={24} color={colors.primary} />
               <Text style={quickNavStyles.text}>Архив игр</Text>
+              {pastCount > 0 && (
+                <Text style={quickNavStyles.count}>({pastCount})</Text>
+              )}
             </TouchableOpacity>
           </Link>
           

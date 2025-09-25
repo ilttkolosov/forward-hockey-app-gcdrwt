@@ -1,10 +1,12 @@
 
-import { Game, GameStats } from '../types';
+import { Game, GameStats, ApiEvent } from '../types';
 import { apiService } from '../services/apiService';
 
 // Cache for API data
-let futureGamesCache: Game[] | null = null;
+let upcomingGamesCache: Game[] | null = null;
 let pastGamesCache: Game[] | null = null;
+let upcomingCountCache: number = 0;
+let pastCountCache: number = 0;
 let gameDetailsCache: { [key: string]: Game } = {};
 let cacheTimestamp = 0;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
@@ -14,57 +16,115 @@ const isCacheValid = () => {
   return Date.now() - cacheTimestamp < CACHE_DURATION;
 };
 
-// Get all games (future + past)
-export const getAllGames = async (): Promise<Game[]> => {
+// Convert API event to Game object
+const convertApiEventToGame = async (apiEvent: ApiEvent, isPastEvent: boolean = false): Promise<Game> => {
+  console.log('Converting API event to game:', apiEvent);
+  
+  // Parse team IDs
+  const teamIds = apiEvent.sp_teams.split(',').map(id => id.trim());
+  const homeTeamId = teamIds[0] || '';
+  const awayTeamId = teamIds[1] || '';
+  
+  // Parse league, season, venue info
+  const league = apiService.parseIdNameString(apiEvent.Leagues || '');
+  const season = apiService.parseIdNameString(apiEvent.seasons || '');
+  const venue = apiService.parseIdNameString(apiEvent.venues || '');
+  
+  // Fetch team details
+  let homeTeam = 'Home Team';
+  let awayTeam = 'Away Team';
+  let homeTeamLogo = '';
+  let awayTeamLogo = '';
+  
   try {
-    if (isCacheValid() && futureGamesCache && pastGamesCache) {
-      console.log('Returning cached games');
-      return [...futureGamesCache, ...pastGamesCache];
-    }
-
-    console.log('Fetching all games from API...');
-    const [futureEventsApi, pastEventsApi] = await Promise.all([
-      apiService.fetchFutureGames(),
-      apiService.fetchPastGames()
+    const [homeTeamData, awayTeamData] = await Promise.all([
+      homeTeamId ? apiService.fetchTeam(homeTeamId) : null,
+      awayTeamId ? apiService.fetchTeam(awayTeamId) : null
     ]);
-
-    futureGamesCache = futureEventsApi.map(event => 
-      apiService.convertCalendarEventToGame(event, false)
-    );
-    pastGamesCache = pastEventsApi.map(event => 
-      apiService.convertCalendarEventToGame(event, true)
-    );
     
-    cacheTimestamp = Date.now();
-    console.log('Games cached successfully');
-
-    return [...futureGamesCache, ...pastGamesCache];
+    if (homeTeamData) {
+      homeTeam = homeTeamData.name;
+      homeTeamLogo = homeTeamData.logo_url;
+    }
+    
+    if (awayTeamData) {
+      awayTeam = awayTeamData.name;
+      awayTeamLogo = awayTeamData.logo_url;
+    }
   } catch (error) {
-    console.error('Error fetching all games:', error);
-    // Return fallback mock data if API fails
-    return getFallbackGames();
+    console.error('Error fetching team details:', error);
   }
+  
+  // Parse results for past events
+  let homeScore: number | undefined;
+  let awayScore: number | undefined;
+  
+  if (isPastEvent && apiEvent.sp_results) {
+    const scores = apiService.parsePhpSerializedResults(apiEvent.sp_results);
+    homeScore = scores.homeScore;
+    awayScore = scores.awayScore;
+  }
+  
+  // Format date and time
+  const { date, time } = apiService.formatDateTime(apiEvent.event_date);
+  
+  // Determine status
+  const status = apiService.determineGameStatus(apiEvent.event_date, isPastEvent || (homeScore !== undefined && awayScore !== undefined));
+  
+  const game: Game = {
+    id: apiEvent.event_id,
+    event_id: apiEvent.event_id,
+    event_date: apiEvent.event_date,
+    homeTeam,
+    awayTeam,
+    homeTeamId,
+    awayTeamId,
+    homeTeamLogo,
+    awayTeamLogo,
+    homeScore,
+    awayScore,
+    date,
+    time,
+    venue: venue.name,
+    venue_id: venue.id,
+    venue_name: venue.name,
+    status,
+    tournament: league.name,
+    league_id: league.id,
+    league_name: league.name,
+    season_id: season.id,
+    season_name: season.name,
+    sp_results: apiEvent.sp_results
+  };
+  
+  console.log('Converted game:', game);
+  return game;
 };
 
-// Get future games
+// Get upcoming games
 export const getFutureGames = async (): Promise<Game[]> => {
   try {
-    if (isCacheValid() && futureGamesCache) {
-      console.log('Returning cached future games');
-      return futureGamesCache;
+    if (isCacheValid() && upcomingGamesCache) {
+      console.log('Returning cached upcoming games');
+      return upcomingGamesCache;
     }
 
-    console.log('Fetching future games from API...');
-    const futureEventsApi = await apiService.fetchFutureGames();
-    futureGamesCache = futureEventsApi.map(event => 
-      apiService.convertCalendarEventToGame(event, false)
+    console.log('Fetching upcoming games from new API...');
+    const response = await apiService.fetchUpcomingEvents();
+    
+    // Convert API events to Game objects
+    const games = await Promise.all(
+      response.data.map(event => convertApiEventToGame(event, false))
     );
+    
+    upcomingGamesCache = games;
+    upcomingCountCache = response.count;
     cacheTimestamp = Date.now();
-    console.log('Future games cached successfully');
+    console.log('Upcoming games cached successfully. Count:', response.count);
 
-    return futureGamesCache;
+    return games;
   } catch (error) {
-    console.error('Error fetching future games:', error);
+    console.error('Error fetching upcoming games:', error);
     return getFallbackUpcomingGames();
   }
 };
@@ -77,18 +137,39 @@ export const getPastGames = async (): Promise<Game[]> => {
       return pastGamesCache;
     }
 
-    console.log('Fetching past games from API...');
-    const pastEventsApi = await apiService.fetchPastGames();
-    pastGamesCache = pastEventsApi.map(event => 
-      apiService.convertCalendarEventToGame(event, true)
+    console.log('Fetching past games from new API...');
+    const response = await apiService.fetchPastEvents();
+    
+    // Convert API events to Game objects
+    const games = await Promise.all(
+      response.data.map(event => convertApiEventToGame(event, true))
     );
+    
+    pastGamesCache = games;
+    pastCountCache = response.count;
     cacheTimestamp = Date.now();
-    console.log('Past games cached successfully');
+    console.log('Past games cached successfully. Count:', response.count);
 
-    return pastGamesCache;
+    return games;
   } catch (error) {
     console.error('Error fetching past games:', error);
     return getFallbackPastGames();
+  }
+};
+
+// Get all games (future + past)
+export const getAllGames = async (): Promise<Game[]> => {
+  try {
+    console.log('Fetching all games...');
+    const [upcomingGames, pastGames] = await Promise.all([
+      getFutureGames(),
+      getPastGames()
+    ]);
+
+    return [...upcomingGames, ...pastGames];
+  } catch (error) {
+    console.error('Error fetching all games:', error);
+    return getFallbackGames();
   }
 };
 
@@ -107,7 +188,7 @@ export const getCurrentGame = async (): Promise<Game | null> => {
     // Then, look for the next upcoming game
     const upcomingGames = allGames
       .filter(game => game.status === 'upcoming')
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      .sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
     
     if (upcomingGames.length > 0) {
       console.log('Found upcoming game:', upcomingGames[0]);
@@ -117,7 +198,7 @@ export const getCurrentGame = async (): Promise<Game | null> => {
     // Finally, return the most recent finished game
     const finishedGames = allGames
       .filter(game => game.status === 'finished')
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      .sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
     
     const currentGame = finishedGames.length > 0 ? finishedGames[0] : null;
     console.log('Found current game:', currentGame);
@@ -137,30 +218,43 @@ export const getGameById = async (gameId: string): Promise<Game | null> => {
       return gameDetailsCache[gameId];
     }
 
-    console.log('Fetching game details from API for ID:', gameId);
-    const eventDetailsApi = await apiService.fetchEventDetails(gameId);
-    const game = apiService.convertEventDetailsToGame(eventDetailsApi);
+    console.log('Searching for game with ID:', gameId);
     
-    // Cache the result
-    gameDetailsCache[gameId] = game;
-    console.log('Game details cached for ID:', gameId);
-    
-    return game;
-  } catch (error) {
-    console.error('Error fetching game details:', error);
-    
-    // Try to find the game in cached data
-    const allCachedGames = [...(futureGamesCache || []), ...(pastGamesCache || [])];
-    const cachedGame = allCachedGames.find(game => game.id === gameId);
+    // Try to find the game in cached data first
+    const allCachedGames = [...(upcomingGamesCache || []), ...(pastGamesCache || [])];
+    const cachedGame = allCachedGames.find(game => game.id === gameId || game.event_id === gameId);
     
     if (cachedGame) {
       console.log('Found game in cache:', cachedGame);
+      gameDetailsCache[gameId] = cachedGame;
       return cachedGame;
     }
     
-    // Return fallback mock data
+    // If not in cache, fetch all games and search
+    const allGames = await getAllGames();
+    const game = allGames.find(game => game.id === gameId || game.event_id === gameId);
+    
+    if (game) {
+      gameDetailsCache[gameId] = game;
+      console.log('Found game in all games:', game);
+      return game;
+    }
+    
+    console.log('Game not found, returning fallback');
+    return getFallbackGameById(gameId);
+  } catch (error) {
+    console.error('Error fetching game details:', error);
     return getFallbackGameById(gameId);
   }
+};
+
+// Get counts for display on main screen
+export const getUpcomingGamesCount = (): number => {
+  return upcomingCountCache;
+};
+
+export const getPastGamesCount = (): number => {
+  return pastCountCache;
 };
 
 // Mock game statistics (since the API structure for detailed stats is not fully defined)
@@ -174,6 +268,8 @@ export const getGameStatsById = (gameId: string): GameStats | null => {
 // Fallback data when API is unavailable
 const getFallbackCurrentGame = (): Game => ({
   id: '1',
+  event_id: '1',
+  event_date: '2024-01-15 19:30:00',
   homeTeam: 'Динамо-Форвард',
   awayTeam: 'Варяги',
   homeScore: 2,
@@ -189,6 +285,8 @@ const getFallbackCurrentGame = (): Game => ({
 const getFallbackUpcomingGames = (): Game[] => [
   {
     id: '2',
+    event_id: '2',
+    event_date: '2024-01-18 20:00:00',
     homeTeam: 'Спартак',
     awayTeam: 'Форвард',
     date: '2024-01-18',
@@ -199,6 +297,8 @@ const getFallbackUpcomingGames = (): Game[] => [
   },
   {
     id: '3',
+    event_id: '3',
+    event_date: '2024-01-22 19:30:00',
     homeTeam: 'Форвард',
     awayTeam: 'ЦСКА',
     date: '2024-01-22',
@@ -212,6 +312,8 @@ const getFallbackUpcomingGames = (): Game[] => [
 const getFallbackPastGames = (): Game[] => [
   {
     id: '5',
+    event_id: '5',
+    event_date: '2024-01-10 19:30:00',
     homeTeam: 'Форвард',
     awayTeam: 'Локомотив',
     homeScore: 3,
@@ -225,6 +327,8 @@ const getFallbackPastGames = (): Game[] => [
   },
   {
     id: '6',
+    event_id: '6',
+    event_date: '2024-01-05 20:00:00',
     homeTeam: 'Металлург',
     awayTeam: 'Форвард',
     homeScore: 1,
@@ -246,7 +350,7 @@ const getFallbackGames = (): Game[] => [
 
 const getFallbackGameById = (gameId: string): Game | null => {
   const allFallbackGames = getFallbackGames();
-  return allFallbackGames.find(game => game.id === gameId) || null;
+  return allFallbackGames.find(game => game.id === gameId || game.event_id === gameId) || null;
 };
 
 const getFallbackGameStats = (gameId: string): GameStats | null => {

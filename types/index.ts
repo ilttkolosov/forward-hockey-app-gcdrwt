@@ -11,6 +11,20 @@ export interface Game {
   status: 'upcoming' | 'live' | 'finished';
   tournament?: string;
   videoUrl?: string;
+  // New fields for the updated API
+  event_id: string;
+  event_date: string;
+  league_id?: string;
+  league_name?: string;
+  season_id?: string;
+  season_name?: string;
+  venue_id?: string;
+  venue_name?: string;
+  homeTeamId?: string;
+  awayTeamId?: string;
+  homeTeamLogo?: string;
+  awayTeamLogo?: string;
+  sp_results?: string;
 }
 
 export interface Player {
@@ -94,4 +108,46 @@ export interface ApiPlayerResponse {
   sp_nationality?: string;
   position: string;
   player_image?: string;
+}
+
+// New API interfaces for the updated endpoints
+export interface ApiUpcomingEventsResponse {
+  data: ApiEvent[];
+  count: number;
+}
+
+export interface ApiPastEventsResponse {
+  data: ApiEvent[];
+  count: number;
+}
+
+export interface ApiEvent {
+  event_id: string;
+  event_date: string;
+  sp_teams: string; // comma-separated team IDs
+  Leagues: string; // "id:name" format
+  seasons: string; // "id:name" format
+  venues: string; // "id:name" format
+  sp_results?: string; // PHP serialized array for past events
+}
+
+export interface ApiTeam {
+  id: string;
+  name: string;
+  logo_url: string;
+}
+
+export interface ApiLeague {
+  id: string;
+  name: string;
+}
+
+export interface ApiSeason {
+  id: string;
+  name: string;
+}
+
+export interface ApiVenue {
+  id: string;
+  name: string;
 }

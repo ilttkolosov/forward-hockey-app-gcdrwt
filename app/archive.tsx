@@ -3,19 +3,20 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
-import { getPastGames } from '../data/gameData';
-import GameCard from '../components/GameCard';
+import { getPastGames, getPastGamesCount } from '../data/gameData';
 import Icon from '../components/Icon';
 import { Game } from '../types';
+import GameCard from '../components/GameCard';
 import { commonStyles, colors } from '../styles/commonStyles';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 
-const GameArchiveScreen: React.FC = () => {
+const ArchiveGamesScreen: React.FC = () => {
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState<number>(0);
 
   useEffect(() => {
     loadData();
@@ -26,10 +27,16 @@ const GameArchiveScreen: React.FC = () => {
       setError(null);
       console.log('Loading past games...');
       
-      const gamesData = await getPastGames();
-      setGames(gamesData);
+      const pastGames = await getPastGames();
+      // Sort by date descending (most recent first)
+      const sortedGames = pastGames.sort((a, b) => 
+        new Date(b.event_date || b.date).getTime() - new Date(a.event_date || a.date).getTime()
+      );
       
-      console.log(`Successfully loaded ${gamesData.length} past games`);
+      setGames(sortedGames);
+      setTotalCount(getPastGamesCount());
+      
+      console.log('Past games loaded successfully. Count:', sortedGames.length);
     } catch (err) {
       console.error('Error loading past games:', err);
       setError('Ошибка загрузки архива игр. Проверьте подключение к интернету.');
@@ -47,14 +54,6 @@ const GameArchiveScreen: React.FC = () => {
   if (loading) {
     return (
       <SafeAreaView style={commonStyles.container}>
-        <View style={commonStyles.header}>
-          <Link href="/" asChild>
-            <TouchableOpacity style={{ marginRight: 16 }}>
-              <Icon name="arrow-back" size={24} color={colors.text} />
-            </TouchableOpacity>
-          </Link>
-          <Text style={commonStyles.title}>Архив игр</Text>
-        </View>
         <LoadingSpinner />
       </SafeAreaView>
     );
@@ -63,13 +62,22 @@ const GameArchiveScreen: React.FC = () => {
   return (
     <SafeAreaView style={commonStyles.container}>
       <View style={commonStyles.header}>
-        <Link href="/" asChild>
-          <TouchableOpacity style={{ marginRight: 16 }}>
-            <Icon name="arrow-back" size={24} color={colors.text} />
-          </TouchableOpacity>
-        </Link>
-        <Text style={commonStyles.title}>Архив игр</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Link href="/" asChild>
+            <TouchableOpacity style={{ marginRight: 16 }}>
+              <Icon name="arrow-back" size={24} color={colors.text} />
+            </TouchableOpacity>
+          </Link>
+          <View>
+            <Text style={commonStyles.title}>Архив игр</Text>
+            {totalCount > 0 && (
+              <Text style={commonStyles.subtitle}>Всего: {totalCount}</Text>
+            )}
+          </View>
+        </View>
       </View>
+
+      {error && <ErrorMessage message={error} />}
 
       <ScrollView
         style={commonStyles.container}
@@ -77,26 +85,24 @@ const GameArchiveScreen: React.FC = () => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {error && <ErrorMessage message={error} />}
-
         {games.length === 0 ? (
           <View style={commonStyles.emptyState}>
-            <Icon name="archive" size={64} color={colors.textSecondary} />
-            <Text style={commonStyles.emptyStateTitle}>Нет завершенных игр</Text>
+            <Icon name="archive" size={48} color={colors.textSecondary} />
             <Text style={commonStyles.emptyStateText}>
-              Архив игр будет пополняться по мере проведения матчей
+              Нет архивных игр
+            </Text>
+            <Text style={commonStyles.emptyStateSubtext}>
+              История игр будет доступна позже
             </Text>
           </View>
         ) : (
-          <View style={{ padding: 8 }}>
-            {games.map((game) => (
-              <GameCard key={game.id} game={game} showScore={true} />
-            ))}
-          </View>
+          games.map((game) => (
+            <GameCard key={game.id} game={game} showScore={true} />
+          ))
         )}
       </ScrollView>
     </SafeAreaView>
   );
 };
 
-export default GameArchiveScreen;
+export default ArchiveGamesScreen;
