@@ -1,8 +1,10 @@
 
 import React from 'react';
-import { View, Text, StyleSheet, Image } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
+import { useRouter } from 'expo-router';
 import { Player } from '../types';
 import { colors, commonStyles } from '../styles/commonStyles';
+import Icon from './Icon';
 
 interface PlayerCardProps {
   player: Player;
@@ -32,6 +34,15 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     marginRight: 16,
     backgroundColor: colors.background,
+  },
+  photoPlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    marginRight: 16,
+    backgroundColor: colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   info: {
     flex: 1,
@@ -72,6 +83,8 @@ const styles = StyleSheet.create({
 });
 
 const PlayerCard: React.FC<PlayerCardProps> = ({ player }) => {
+  const router = useRouter();
+
   const getPositionColor = (position: string) => {
     switch (position.toLowerCase()) {
       case 'нападающий':
@@ -85,12 +98,19 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player }) => {
     }
   };
 
+  const handlePress = () => {
+    console.log('Navigating to player details:', player.id);
+    router.push(`/player/${player.id}`);
+  };
+
   return (
-    <View style={styles.card}>
+    <TouchableOpacity style={styles.card} onPress={handlePress}>
       {player.photo ? (
         <Image source={{ uri: player.photo }} style={styles.photo} />
       ) : (
-        <View style={styles.photo} />
+        <View style={styles.photoPlaceholder}>
+          <Icon name="user" size={24} color={colors.textSecondary} />
+        </View>
       )}
       
       <View style={styles.info}>
@@ -118,7 +138,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player }) => {
       <View style={styles.numberContainer}>
         <Text style={styles.number}>#{player.number}</Text>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 };
 

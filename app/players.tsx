@@ -6,7 +6,7 @@ import { Link } from 'expo-router';
 import PlayerCard from '../components/PlayerCard';
 import Icon from '../components/Icon';
 import { Player } from '../types';
-import { mockPlayers } from '../data/mockData';
+import { getPlayers } from '../data/playerData';
 import { commonStyles, colors } from '../styles/commonStyles';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
@@ -24,12 +24,12 @@ const PlayersScreen: React.FC = () => {
   const loadData = async () => {
     try {
       setError(null);
-      console.log('Loading players...');
-      // For now, using mock data. In the future, this could fetch from the API
-      // when player endpoints are fully implemented
-      await new Promise(resolve => setTimeout(resolve, 500)); // Simulate API call
-      setPlayers(mockPlayers);
-      console.log('Players loaded successfully');
+      console.log('Loading players from API...');
+      
+      const playersData = await getPlayers();
+      setPlayers(playersData);
+      
+      console.log(`Successfully loaded ${playersData.length} players`);
     } catch (err) {
       console.error('Error loading players:', err);
       setError('Ошибка загрузки списка игроков. Проверьте подключение к интернету.');

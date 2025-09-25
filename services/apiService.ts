@@ -38,13 +38,17 @@ export interface ApiTeam {
 }
 
 export interface ApiPlayer {
-  id: number;
+  ID?: number;
+  id?: number;
   title: {
     rendered: string;
-  };
+  } | string;
   number?: number;
   metrics?: string[];
   player_image?: string;
+  current_teams?: number[] | string | number;
+  positions?: number[] | number;
+  date?: string;
 }
 
 export interface ApiLeague {
@@ -143,6 +147,26 @@ class ApiService {
       return data;
     } catch (error) {
       console.error('Error fetching team details:', error);
+      throw error;
+    }
+  }
+
+  async fetchPlayers(): Promise<ApiPlayer[]> {
+    try {
+      console.log('Fetching players list...');
+      const response = await fetch(`${this.baseUrl}/players/`, {
+        headers: this.getAuthHeaders(),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('Players list fetched:', data);
+      return data;
+    } catch (error) {
+      console.error('Error fetching players list:', error);
       throw error;
     }
   }
@@ -305,10 +329,11 @@ class ApiService {
   // Convert API player to our Player interface
   convertApiPlayerToPlayer(apiPlayer: ApiPlayer): import('../types').Player {
     const metrics = apiPlayer.metrics || [];
+    const title = typeof apiPlayer.title === 'string' ? apiPlayer.title : apiPlayer.title.rendered;
     
     return {
-      id: apiPlayer.id.toString(),
-      name: apiPlayer.title.rendered,
+      id: (apiPlayer.ID || apiPlayer.id || 0).toString(),
+      name: title,
       position: 'Игрок',
       number: apiPlayer.number || 0,
       height: metrics[2] || undefined, // Рост
