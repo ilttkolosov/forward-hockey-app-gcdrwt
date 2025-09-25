@@ -1,5 +1,5 @@
 
-import { ApiPlayerResponse, ApiUpcomingEventsResponse, ApiPastEventsResponse, ApiTeam, ApiLeague, ApiSeason, ApiVenue, ApiGameDetails, GameResult } from '../types';
+import { ApiPlayerResponse, ApiUpcomingEventsResponse, ApiPastEventsResponse, ApiTeam, ApiLeague, ApiSeason, ApiVenue } from '../types';
 
 class ApiService {
   private baseUrl = 'https://www.hc-forward.com/wp-json/app/v1';
@@ -10,7 +10,6 @@ class ApiService {
   private leagueCache: { [key: string]: ApiLeague } = {};
   private seasonCache: { [key: string]: ApiSeason } = {};
   private venueCache: { [key: string]: ApiVenue } = {};
-  private gameDetailsCache: { [key: string]: ApiGameDetails } = {};
 
   async fetchUpcomingEvents(): Promise<ApiUpcomingEventsResponse> {
     try {
@@ -49,34 +48,6 @@ class ApiService {
     } catch (error) {
       console.error('Error fetching past events:', error);
       throw error;
-    }
-  }
-
-  async fetchGameDetails(gameId: string): Promise<ApiGameDetails | null> {
-    // Check cache first
-    if (this.gameDetailsCache[gameId]) {
-      console.log('Returning cached game details for ID:', gameId);
-      return this.gameDetailsCache[gameId];
-    }
-
-    try {
-      console.log('Fetching detailed game data for ID:', gameId);
-      const response = await fetch(`${this.baseUrl}/events/${gameId}`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const gameDetails: ApiGameDetails = await response.json();
-      console.log('Game details fetched:', gameDetails);
-      
-      // Cache the result
-      this.gameDetailsCache[gameId] = gameDetails;
-      
-      return gameDetails;
-    } catch (error) {
-      console.error('Error fetching game details:', error);
-      return null;
     }
   }
 
@@ -274,198 +245,14 @@ class ApiService {
     };
   }
 
-  // Enhanced function to parse PHP serialized sp_results with proper structure parsing
-  parseSpResults(serializedString: string): GameResult[] {
-    try {
-      console.log('Parsing sp_results PHP serialized data:', serializedString);
-      
-      if (!serializedString || serializedString.trim() === '') {
-        console.log('Empty sp_results string');
-        return [];
-      }
-
-      const results: GameResult[] = [];
-      
-      // Parse PHP serialized array structure: a:2:{i:0;a:3:{...}i:1;a:3:{...}}
-      // Look for array patterns with team data
-      const arrayPattern = /a:\d+:\{([^}]+)\}/g;
-      const matches = serializedString.match(arrayPattern);
-      
-      if (matches) {
-        console.log('Found array matches:', matches.length);
-        
-        // For each array match, extract team data
-        matches.forEach((match, index) => {
-          console.log(`Processing array ${index}:`, match);
-          
-          // Extract team ID (first number in the array)
-          const teamIdMatch = match.match(/i:(\d+);/);
-          const teamId = teamIdMatch ? teamIdMatch[1] : index.toString();
-          
-          // Extract goals value
-          const goalsMatch = match.match(/"goals";i:(\d+);/);
-          const goals = goalsMatch ? parseInt(goalsMatch[1]) : 0;
-          
-          // Extract outcome value
-          const outcomeMatch = match.match(/"outcome";s:\d+:"([^"]+)";/);
-          const outcome = outcomeMatch ? outcomeMatch[1] as 'win' | 'loss' | 'nich' : 'nich';
-          
-          console.log(`Team ${teamId}: goals=${goals}, outcome=${outcome}`);
-          
-          results.push({
-            teamId,
-            goals,
-            outcome,
-            first: 0,
-            second: 0,
-            third: 0
-          });
-        });
-      } else {
-        // Fallback: try to parse as simple structure
-        console.log('No array matches found, trying fallback parsing');
-        
-        // Look for team IDs and their data
-        const teamDataPattern = /(\d+)[^{]*\{[^}]*"goals";i:(\d+);[^}]*"outcome";s:\d+:"([^"]+)";[^}]*\}/g;
-        let match;
-        
-        while ((match = teamDataPattern.exec(serializedString)) !== null) {
-          const [, teamId, goals, outcome] = match;
-          console.log(`Fallback parsing - Team ${teamId}: goals=${goals}, outcome=${outcome}`);
-          
-          results.push({
-            teamId: teamId.trim(),
-            goals: parseInt(goals),
-            outcome: outcome as 'win' | 'loss' | 'nich',
-            first: 0,
-            second: 0,
-            third: 0
-          });
-        }
-        
-        // If still no results, try simple score extraction
-        if (results.length === 0) {
-          const scorePattern = /(\d+)[\s\-:]+(\d+)/;
-          const scoreMatch = serializedString.match(scorePattern);
-          
-          if (scoreMatch) {
-            const score1 = parseInt(scoreMatch[1]);
-            const score2 = parseInt(scoreMatch[2]);
-            
-            console.log(`Simple score parsing: ${score1} - ${score2}`);
-            
-            results.push(
-              {
-                teamId: '1',
-                goals: score1,
-                outcome: score1 > score2 ? 'win' : score1 < score2 ? 'loss' : 'nich',
-                first: 0,
-                second: 0,
-                third: 0
-              },
-              {
-                teamId: '2',
-                goals: score2,
-                outcome: score2 > score1 ? 'win' : score2 < score1 ? 'loss' : 'nich',
-                first: 0,
-                second: 0,
-                third: 0
-              }
-            );
-          }
-        }
-      }
-      
-      console.log('Final parsed sp_results:', results);
-      return results;
-    } catch (error) {
-      console.error('Error parsing sp_results:', error);
-      return [];
-    }
-  }
-
-  // Enhanced function to parse detailed results from /events/{id} endpoint
-  parseDetailedResults(serializedString: string): GameResult[] {
-    try {
-      console.log('Parsing detailed results from events endpoint:', serializedString);
-      
-      if (!serializedString || serializedString.trim() === '') {
-        console.log('Empty results string');
-        return [];
-      }
-
-      const results: GameResult[] = [];
-      
-      // Parse PHP serialized array with period details
-      // Look for team data with first, second, third period information
-      const teamPattern = /(\d+)[^{]*\{[^}]*"first";i:(\d+);[^}]*"second";i:(\d+);[^}]*"third";i:(\d+);[^}]*"goals";i:(\d+);[^}]*"outcome";s:\d+:"([^"]+)";[^}]*\}/g;
-      
-      let match;
-      while ((match = teamPattern.exec(serializedString)) !== null) {
-        const [, teamId, first, second, third, goals, outcome] = match;
-        
-        console.log(`Detailed team ${teamId}: P1=${first}, P2=${second}, P3=${third}, Total=${goals}, Outcome=${outcome}`);
-        
-        results.push({
-          teamId: teamId.trim(),
-          first: parseInt(first),
-          second: parseInt(second),
-          third: parseInt(third),
-          goals: parseInt(goals),
-          outcome: outcome as 'win' | 'loss' | 'nich'
-        });
-      }
-      
-      // Fallback: try alternative pattern without period details
-      if (results.length === 0) {
-        console.log('No detailed results found, trying fallback pattern');
-        
-        const simplePattern = /(\d+)[^{]*\{[^}]*"goals";i:(\d+);[^}]*"outcome";s:\d+:"([^"]+)";[^}]*\}/g;
-        
-        while ((match = simplePattern.exec(serializedString)) !== null) {
-          const [, teamId, goals, outcome] = match;
-          
-          console.log(`Simple team ${teamId}: Total=${goals}, Outcome=${outcome}`);
-          
-          results.push({
-            teamId: teamId.trim(),
-            first: 0,
-            second: 0,
-            third: 0,
-            goals: parseInt(goals),
-            outcome: outcome as 'win' | 'loss' | 'nich'
-          });
-        }
-      }
-      
-      // Final fallback: use sp_results parsing method
-      if (results.length === 0) {
-        console.log('Using sp_results parsing as final fallback');
-        return this.parseSpResults(serializedString);
-      }
-      
-      console.log('Final parsed detailed results:', results);
-      return results;
-    } catch (error) {
-      console.error('Error parsing detailed results:', error);
-      return [];
-    }
-  }
-
-  // Helper function to parse PHP serialized results (legacy method for backward compatibility)
+  // Helper function to parse PHP serialized results
   parsePhpSerializedResults(serializedString: string): { homeScore?: number; awayScore?: number } {
     try {
-      console.log('Parsing PHP serialized results (legacy):', serializedString);
+      // This is a simplified parser for PHP serialized arrays
+      // In a real implementation, you might want to use a proper PHP serialization parser
+      console.log('Parsing PHP serialized results:', serializedString);
       
-      const results = this.parseSpResults(serializedString);
-      if (results.length >= 2) {
-        return {
-          homeScore: results[0].goals,
-          awayScore: results[1].goals
-        };
-      }
-      
-      // Fallback to simple score pattern
+      // Look for score patterns in the serialized string
       const scorePattern = /(\d+)[\s\-:]+(\d+)/;
       const match = serializedString.match(scorePattern);
       
