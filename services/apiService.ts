@@ -38,27 +38,19 @@ export interface ApiTeam {
 }
 
 export interface ApiPlayer {
-  ID?: number;
-  id?: number;
-  post_title?: string;
-  post_date?: string;
-  sp_current_team?: string | number;
-  sp_number?: number;
-  sp_metrics?: {
+  id: string;
+  post_title: string;
+  post_date: string;
+  sp_current_team?: string;
+  sp_number: string;
+  sp_metrics: {
     ka?: string;
     onetwofive?: string;
     height?: string;
     weight?: string;
   };
-  positions?: string;
-  player_image?: string;
-  title?: {
-    rendered: string;
-  } | string;
-  number?: number;
-  metrics?: string[];
-  current_teams?: number[] | string | number;
-  date?: string;
+  positions: string[];
+  player_image: string;
 }
 
 export interface ApiLeague {
@@ -84,107 +76,118 @@ class ApiService {
 
   async fetchFutureGames(): Promise<ApiCalendarEvent[]> {
     try {
-      console.log('Fetching future games from calendar 467...');
+      console.log('Получение будущих игр из календаря 467...');
       const response = await fetch(`${this.baseUrl}/wp/v2/calendars/467`, {
         headers: this.getAuthHeaders(),
       });
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`HTTP ошибка! статус: ${response.status}`);
       }
       
       const result: ApiCalendarResponse = await response.json();
-      console.log('Future games response:', result);
+      console.log('Ответ будущих игр:', result);
       
       return result.data || [];
     } catch (error) {
-      console.error('Error fetching future games:', error);
+      console.error('Ошибка получения будущих игр:', error);
       throw error;
     }
   }
 
   async fetchPastGames(): Promise<ApiCalendarEvent[]> {
     try {
-      console.log('Fetching past games from calendar 466...');
+      console.log('Получение прошедших игр из календаря 466...');
       const response = await fetch(`${this.baseUrl}/wp/v2/calendars/466`);
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`HTTP ошибка! статус: ${response.status}`);
       }
       
       const result: ApiCalendarResponse = await response.json();
-      console.log('Past games response:', result);
+      console.log('Ответ прошедших игр:', result);
       
       return result.data || [];
     } catch (error) {
-      console.error('Error fetching past games:', error);
+      console.error('Ошибка получения прошедших игр:', error);
       throw error;
     }
   }
 
   async fetchEventDetails(eventId: string): Promise<ApiEventDetails> {
     try {
-      console.log('Fetching event details for ID:', eventId);
+      console.log('Получение деталей события для ID:', eventId);
       const response = await fetch(`${this.baseUrl}/wp/v2/events/${eventId}`, {
         headers: this.getAuthHeaders(),
       });
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`HTTP ошибка! статус: ${response.status}`);
       }
       
       const data = await response.json();
-      console.log('Event details fetched:', data);
+      console.log('Детали события получены:', data);
       return data;
     } catch (error) {
-      console.error('Error fetching event details:', error);
+      console.error('Ошибка получения деталей события:', error);
       throw error;
     }
   }
 
   async fetchPlayers(): Promise<ApiPlayer[]> {
     try {
-      console.log('Fetching all players from single API endpoint:', this.playersUrl);
+      console.log('Получение всех игроков из единого API эндпоинта:', this.playersUrl);
+      
+      // Проверяем доступность эндпоинта
       const response = await fetch(this.playersUrl);
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorMessage = `Ошибка доступа к API игроков! Статус: ${response.status}`;
+        console.error(errorMessage);
+        throw new Error(errorMessage);
       }
       
       const data = await response.json();
-      console.log('All players data fetched from single endpoint:', data);
+      console.log('Данные всех игроков получены из единого эндпоинта:', data);
+      
+      // Проверяем, что данные являются массивом
+      if (!Array.isArray(data)) {
+        console.error('Полученные данные не являются массивом:', data);
+        throw new Error('Неверный формат данных от API');
+      }
+      
       return data;
     } catch (error) {
-      console.error('Error fetching players from single endpoint:', error);
+      console.error('Ошибка получения игроков из единого эндпоинта:', error);
       throw error;
     }
   }
 
   async fetchLeague(leagueId: string): Promise<ApiLeague> {
     try {
-      console.log('Fetching league details for ID:', leagueId);
+      console.log('Получение деталей лиги для ID:', leagueId);
       const response = await fetch(`${this.baseUrl}/wp/v2/leagues/${leagueId}`, {
         headers: this.getAuthHeaders(),
       });
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`HTTP ошибка! статус: ${response.status}`);
       }
       
       const data = await response.json();
-      console.log('League details fetched:', data);
+      console.log('Детали лиги получены:', data);
       return data;
     } catch (error) {
-      console.error('Error fetching league details:', error);
+      console.error('Ошибка получения деталей лиги:', error);
       throw error;
     }
   }
 
-  // Helper method to parse game title and extract teams
+  // Вспомогательный метод для парсинга названия игры и извлечения команд
   parseGameTitle(title: string): { homeTeam: string; awayTeam: string } {
-    console.log('Parsing game title:', title);
+    console.log('Парсинг названия игры:', title);
     
-    // Try to parse titles like "Team A vs Team B" or "Team A - Team B"
+    // Пытаемся парсить названия вида "Команда А vs Команда Б" или "Команда А - Команда Б"
     const vsMatch = title.match(/(.+?)\s+vs\s+(.+)/i);
     const dashMatch = title.match(/(.+?)\s+-\s+(.+)/i);
     
@@ -200,22 +203,22 @@ class ApiService {
       };
     }
     
-    // Fallback if parsing fails
+    // Резервный вариант, если парсинг не удался
     return {
-      homeTeam: 'HC Forward',
+      homeTeam: 'ХК Форвард 2014',
       awayTeam: title.trim()
     };
   }
 
-  // Helper method to extract score from main_results
+  // Вспомогательный метод для извлечения счета из main_results
   parseScore(mainResults?: string): { homeScore?: number; awayScore?: number } {
     if (!mainResults) {
       return {};
     }
     
-    console.log('Parsing score from main_results:', mainResults);
+    console.log('Парсинг счета из main_results:', mainResults);
     
-    // Look for score patterns like "3:2", "3-2", or "3 - 2"
+    // Ищем паттерны счета вида "3:2", "3-2", или "3 - 2"
     const scorePattern = /(\d+)[\s\-:]+(\d+)/;
     const match = mainResults.match(scorePattern);
     
@@ -229,7 +232,7 @@ class ApiService {
     return {};
   }
 
-  // Helper method to determine game status
+  // Вспомогательный метод для определения статуса игры
   determineGameStatus(date: string, hasScore: boolean, isFromPastCalendar: boolean = false): 'upcoming' | 'live' | 'finished' {
     if (isFromPastCalendar || hasScore) {
       return 'finished';
@@ -242,7 +245,7 @@ class ApiService {
       return 'upcoming';
     }
     
-    // If the game is today or in the past but no score, it might be live
+    // Если игра сегодня или в прошлом, но нет счета, она может быть в прямом эфире
     const diffInHours = (now.getTime() - gameDate.getTime()) / (1000 * 60 * 60);
     if (diffInHours >= 0 && diffInHours <= 3) {
       return 'live';
@@ -251,7 +254,7 @@ class ApiService {
     return 'finished';
   }
 
-  // Convert API calendar event to our Game interface
+  // Конвертация API события календаря в наш интерфейс Game
   convertCalendarEventToGame(event: ApiCalendarEvent, isFromPastCalendar: boolean = false): import('../types').Game {
     const title = event.post_title || event.title;
     const { homeTeam, awayTeam } = this.parseGameTitle(title);
@@ -263,15 +266,15 @@ class ApiService {
       id: event.ID.toString(),
       homeTeam,
       awayTeam,
-      date: date.split('T')[0], // Extract date part
-      time: '19:00', // Default time
+      date: date.split('T')[0], // Извлекаем часть с датой
+      time: '19:00', // Время по умолчанию
       venue: 'TBD',
       status,
       tournament: 'Чемпионат',
     };
   }
 
-  // Convert API event details to our Game interface with full details
+  // Конвертация деталей API события в наш интерфейс Game с полными деталями
   convertEventDetailsToGame(eventDetails: ApiEventDetails): import('../types').Game {
     const title = eventDetails.title.rendered;
     const { homeTeam, awayTeam } = this.parseGameTitle(title);
@@ -286,8 +289,8 @@ class ApiService {
       awayTeam,
       homeScore,
       awayScore,
-      date: date.split('T')[0], // Extract date part
-      time: date.split('T')[1]?.split(':').slice(0, 2).join(':') || '19:00', // Extract time part
+      date: date.split('T')[0], // Извлекаем часть с датой
+      time: date.split('T')[1]?.split(':').slice(0, 2).join(':') || '19:00', // Извлекаем часть с временем
       venue: 'TBD',
       status,
       tournament: 'Чемпионат',
@@ -295,20 +298,62 @@ class ApiService {
     };
   }
 
-  // Convert API player to our Player interface
+  // Конвертация API игрока в наш интерфейс Player
   convertApiPlayerToPlayer(apiPlayer: ApiPlayer): import('../types').Player {
-    const metrics = apiPlayer.metrics || [];
-    const title = typeof apiPlayer.title === 'string' ? apiPlayer.title : apiPlayer.title?.rendered || '';
+    console.log('Конвертация API игрока:', apiPlayer);
+    
+    // Убираем отчество из имени (последнее слово)
+    const fullName = apiPlayer.post_title || '';
+    const nameParts = fullName.trim().split(' ');
+    const nameWithoutPatronymic = nameParts.length > 2 
+      ? nameParts.slice(0, -1).join(' ') 
+      : fullName;
+    
+    // Извлекаем дату рождения без времени
+    const birthDate = apiPlayer.post_date ? apiPlayer.post_date.split('T')[0] : '';
+    
+    // Определяем позицию на русском языке
+    let position = 'Игрок';
+    if (apiPlayer.positions && apiPlayer.positions.length > 0) {
+      const pos = apiPlayer.positions[0].toLowerCase();
+      if (pos.includes('вратарь') || pos.includes('goalkeeper')) {
+        position = 'Вратарь';
+      } else if (pos.includes('защитник') || pos.includes('defense')) {
+        position = 'Защитник';
+      } else if (pos.includes('нападающий') || pos.includes('forward')) {
+        position = 'Нападающий';
+      }
+    }
+    
+    // Извлекаем метрики
+    const metrics = apiPlayer.sp_metrics || {};
     
     return {
-      id: (apiPlayer.ID || apiPlayer.id || 0).toString(),
-      name: title,
-      position: 'Игрок',
-      number: apiPlayer.number || 0,
-      height: metrics[2] || undefined, // Рост
-      weight: metrics[1] || undefined, // Вес
+      id: apiPlayer.id,
+      name: nameWithoutPatronymic,
+      position: position,
+      number: parseInt(apiPlayer.sp_number) || 0,
+      birthDate: birthDate,
+      height: metrics.height ? parseInt(metrics.height) : undefined,
+      weight: metrics.weight ? parseInt(metrics.weight) : undefined,
       photo: apiPlayer.player_image,
+      captainStatus: metrics.ka || '',
+      handedness: metrics.onetwofive || '',
     };
+  }
+
+  // Проверка доступности API эндпоинта игроков
+  async checkPlayersApiAvailability(): Promise<boolean> {
+    try {
+      console.log('Проверка доступности API эндпоинта игроков...');
+      const response = await fetch(this.playersUrl, { method: 'HEAD' });
+      const isAvailable = response.ok;
+      console.log('API эндпоинт игроков доступен:', isAvailable);
+      return isAvailable;
+    } catch (error) {
+      console.error('Ошибка проверки доступности API эндпоинта игроков:', error);
+      return false;
+    }
   }
 }
 
