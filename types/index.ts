@@ -80,16 +80,17 @@ export interface TeamStats {
 
 export interface ApiPlayerResponse {
   id: string;
-  sp_current_team?: string;
+  sp_current_team?: number;
   post_date: string;
   post_title: string;
-  sp_number: string;
+  sp_number: number;
   sp_metrics: {
     ka?: string;
     onetwofive?: string;
     height?: string;
     weight?: string;
   };
-  positions: string;
+  sp_nationality?: string;
+  position: string;
   player_image?: string;
 }

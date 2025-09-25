@@ -57,7 +57,18 @@ const styles = StyleSheet.create({
     minWidth: 20,
     alignItems: 'center',
   },
-  captainText: {
+  assistantBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: colors.warning,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    minWidth: 20,
+    alignItems: 'center',
+  },
+  badgeText: {
     fontSize: 10,
     fontWeight: 'bold',
     color: colors.surface,
@@ -116,10 +127,16 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player }) => {
     }
   };
 
-  const getCaptainBadgeText = (captainStatus?: string) => {
+  const getCaptainBadgeInfo = (captainStatus?: string) => {
     if (!captainStatus) return null;
-    if (captainStatus.toLowerCase().includes('k')) return 'К';
-    if (captainStatus.toLowerCase().includes('a')) return 'А';
+    
+    const status = captainStatus.toLowerCase();
+    if (status === 'k') {
+      return { text: 'К', style: styles.captainBadge, title: 'Капитан' };
+    }
+    if (status === 'a') {
+      return { text: 'А', style: styles.assistantBadge, title: 'Ассистент' };
+    }
     return null;
   };
 
@@ -128,7 +145,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player }) => {
     router.push(`/player/${player.id}`);
   };
 
-  const captainBadgeText = getCaptainBadgeText(player.captainStatus);
+  const captainBadgeInfo = getCaptainBadgeInfo(player.captainStatus);
 
   return (
     <TouchableOpacity style={styles.card} onPress={handlePress}>
@@ -141,9 +158,9 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player }) => {
           </View>
         )}
         
-        {captainBadgeText && (
-          <View style={styles.captainBadge}>
-            <Text style={styles.captainText}>{captainBadgeText}</Text>
+        {captainBadgeInfo && (
+          <View style={captainBadgeInfo.style}>
+            <Text style={styles.badgeText}>{captainBadgeInfo.text}</Text>
           </View>
         )}
       </View>

@@ -4,11 +4,11 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, RefreshCon
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getPlayerById } from '../../data/playerData';
-import { colors, commonStyles } from '../../styles/commonStyles';
-import Icon from '../../components/Icon';
 import { Player } from '../../types';
+import { colors, commonStyles } from '../../styles/commonStyles';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
+import Icon from '../../components/Icon';
 
 const styles = StyleSheet.create({
   container: {
@@ -24,16 +24,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  backButton: {
-    padding: 8,
-    borderRadius: 8,
-  },
   title: {
     fontSize: 20,
     fontWeight: '600',
     color: colors.text,
     marginLeft: 16,
     flex: 1,
+  },
+  backButton: {
+    padding: 8,
+    borderRadius: 8,
   },
   content: {
     flex: 1,
@@ -73,8 +73,19 @@ const styles = StyleSheet.create({
     minWidth: 32,
     alignItems: 'center',
   },
-  captainText: {
-    fontSize: 14,
+  assistantBadge: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: colors.warning,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    minWidth: 32,
+    alignItems: 'center',
+  },
+  badgeText: {
+    fontSize: 12,
     fontWeight: 'bold',
     color: colors.surface,
   },
@@ -87,7 +98,7 @@ const styles = StyleSheet.create({
   },
   playerPosition: {
     fontSize: 18,
-    fontWeight: '500',
+    fontWeight: '600',
     textAlign: 'center',
     marginBottom: 8,
   },
@@ -104,7 +115,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
   },
-  statsTitle: {
+  sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: colors.text,
@@ -134,6 +145,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
+    paddingVertical: 64,
+  },
+  emptyStateIcon: {
+    marginBottom: 16,
   },
   emptyStateTitle: {
     fontSize: 18,
@@ -141,7 +156,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     textAlign: 'center',
     marginBottom: 8,
-    marginTop: 16,
   },
   emptyStateText: {
     fontSize: 14,
@@ -152,13 +166,12 @@ const styles = StyleSheet.create({
 });
 
 const PlayerDetailsScreen: React.FC = () => {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const [player, setPlayer] = useState<Player | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
-  const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
 
   useEffect(() => {
     if (id) {
@@ -169,17 +182,18 @@ const PlayerDetailsScreen: React.FC = () => {
   const loadPlayerData = async () => {
     try {
       setError(null);
-      console.log('Загрузка данных игрока с ID:', id);
+      console.log('Загрузка данных игрока:', id);
       
-      const playerData = await getPlayerById(id!);
-      setPlayer(playerData);
-      
-      if (!playerData) {
+      const playerData = await getPlayerById(id);
+      if (playerData) {
+        setPlayer(playerData);
+        console.log('Данные игрока загружены:', playerData);
+      } else {
         setError('Игрок не найден');
       }
     } catch (err) {
       console.error('Ошибка загрузки данных игрока:', err);
-      setError('Ошибка загрузки данных игрока. Попробуйте обновить страницу.');
+      setError('Ошибка загрузки данных игрока');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -204,25 +218,31 @@ const PlayerDetailsScreen: React.FC = () => {
     }
   };
 
-  const getCaptainBadgeText = (captainStatus?: string) => {
+  const getCaptainBadgeInfo = (captainStatus?: string) => {
     if (!captainStatus) return null;
-    if (captainStatus.toLowerCase().includes('k')) return 'Капитан';
-    if (captainStatus.toLowerCase().includes('a')) return 'Ассистент';
+    
+    const status = captainStatus.toLowerCase();
+    if (status === 'k') {
+      return { text: 'Капитан', style: styles.captainBadge };
+    }
+    if (status === 'a') {
+      return { text: 'Ассистент', style: styles.assistantBadge };
+    }
     return null;
   };
 
-  const formatBirthDate = (birthDate?: string) => {
-    if (!birthDate) return null;
+  const formatBirthDate = (dateString?: string) => {
+    if (!dateString) return 'Не указано';
     
     try {
-      const date = new Date(birthDate);
+      const date = new Date(dateString);
       return date.toLocaleDateString('ru-RU', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric'
       });
     } catch {
-      return birthDate;
+      return 'Не указано';
     }
   };
 
@@ -233,7 +253,7 @@ const PlayerDetailsScreen: React.FC = () => {
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <Icon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.title}>Игрок</Text>
+          <Text style={styles.title}>Загрузка...</Text>
         </View>
         <View style={styles.content}>
           <LoadingSpinner />
@@ -249,7 +269,7 @@ const PlayerDetailsScreen: React.FC = () => {
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <Icon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.title}>Игрок</Text>
+          <Text style={styles.title}>Ошибка</Text>
         </View>
         <ScrollView
           style={styles.content}
@@ -257,20 +277,20 @@ const PlayerDetailsScreen: React.FC = () => {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
         >
-          {error && <ErrorMessage message={error} />}
           <View style={styles.emptyState}>
-            <Icon name="person" size={64} color={colors.textSecondary} />
+            <Icon name="person" size={64} color={colors.textSecondary} style={styles.emptyStateIcon} />
             <Text style={styles.emptyStateTitle}>Игрок не найден</Text>
             <Text style={styles.emptyStateText}>
-              Информация об этом игроке недоступна
+              {error || 'Информация об игроке недоступна. Попробуйте обновить страницу.'}
             </Text>
           </View>
+          {error && <ErrorMessage message={error} />}
         </ScrollView>
       </SafeAreaView>
     );
   }
 
-  const captainBadgeText = getCaptainBadgeText(player.captainStatus);
+  const captainBadgeInfo = getCaptainBadgeInfo(player.captainStatus);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -278,7 +298,7 @@ const PlayerDetailsScreen: React.FC = () => {
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.title}>{player.name}</Text>
+        <Text style={styles.title} numberOfLines={1}>{player.name}</Text>
       </View>
 
       <ScrollView
@@ -297,11 +317,9 @@ const PlayerDetailsScreen: React.FC = () => {
               </View>
             )}
             
-            {captainBadgeText && (
-              <View style={styles.captainBadge}>
-                <Text style={styles.captainText}>
-                  {captainBadgeText === 'Капитан' ? 'К' : 'А'}
-                </Text>
+            {captainBadgeInfo && (
+              <View style={captainBadgeInfo.style}>
+                <Text style={styles.badgeText}>{captainBadgeInfo.text}</Text>
               </View>
             )}
           </View>
@@ -309,20 +327,18 @@ const PlayerDetailsScreen: React.FC = () => {
           <Text style={styles.playerName}>{player.name}</Text>
           <Text style={[styles.playerPosition, { color: getPositionColor(player.position) }]}>
             {player.position}
-            {captainBadgeText && ` • ${captainBadgeText}`}
           </Text>
           <Text style={styles.playerNumber}>#{player.number}</Text>
         </View>
 
         <View style={styles.statsContainer}>
-          <Text style={styles.statsTitle}>Информация</Text>
+          <Text style={styles.sectionTitle}>Информация об игроке</Text>
+          
           <View style={styles.statsGrid}>
-            {player.birthDate && (
-              <View style={styles.statItem}>
-                <Text style={styles.statLabel}>Дата рождения</Text>
-                <Text style={styles.statValue}>{formatBirthDate(player.birthDate)}</Text>
-              </View>
-            )}
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Дата рождения</Text>
+              <Text style={styles.statValue}>{formatBirthDate(player.birthDate)}</Text>
+            </View>
             
             {player.age && (
               <View style={styles.statItem}>

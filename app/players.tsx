@@ -1,12 +1,13 @@
 
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, RefreshControl, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, ScrollView, RefreshControl, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
 import PlayerCard from '../components/PlayerCard';
+import PlayerSearchBar from '../components/PlayerSearchBar';
 import Icon from '../components/Icon';
 import { Player } from '../types';
-import { getPlayers, checkApiAvailability } from '../data/playerData';
+import { getPlayers, checkApiAvailability, searchPlayers } from '../data/playerData';
 import { commonStyles, colors } from '../styles/commonStyles';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
@@ -38,6 +39,9 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
+  searchContainer: {
+    overflow: 'hidden',
+  },
   playersContainer: {
     padding: 8,
   },
@@ -64,18 +68,39 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
+  searchResultsInfo: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  searchResultsText: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
 });
 
 const PlayersScreen: React.FC = () => {
-  const [players, setPlayers] = useState<Player[]>([]);
+  const [allPlayers, setAllPlayers] = useState<Player[]>([]);
+  const [filteredPlayers, setFilteredPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [apiAvailable, setApiAvailable] = useState<boolean | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  
+  const searchHeight = useRef(new Animated.Value(0)).current;
+  const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     initializeScreen();
   }, []);
+
+  useEffect(() => {
+    // Фильтруем игроков при изменении поискового запроса
+    const filtered = searchPlayers(allPlayers, searchQuery);
+    setFilteredPlayers(filtered);
+  }, [searchQuery, allPlayers]);
 
   const initializeScreen = async () => {
     console.log('Инициализация экрана игроков...');
@@ -99,7 +124,8 @@ const PlayersScreen: React.FC = () => {
       console.log('Загрузка игроков...');
       
       const playersData = await getPlayers();
-      setPlayers(playersData);
+      setAllPlayers(playersData);
+      setFilteredPlayers(playersData);
       
       console.log(`Успешно загружено ${playersData.length} игроков`);
     } catch (err) {
@@ -114,6 +140,35 @@ const PlayersScreen: React.FC = () => {
   const onRefresh = async () => {
     setRefreshing(true);
     await loadPlayers();
+  };
+
+  const handleScroll = (event: any) => {
+    const { contentOffset } = event.nativeEvent;
+    
+    // Показываем поиск при прокрутке вниз
+    if (contentOffset.y < -50 && !showSearch) {
+      setShowSearch(true);
+      Animated.timing(searchHeight, {
+        toValue: 80,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+    }
+  };
+
+  const handleSearchChange = (query: string) => {
+    console.log('Поиск игроков:', query);
+    setSearchQuery(query);
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    setShowSearch(false);
+    Animated.timing(searchHeight, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
   };
 
   if (loading) {
@@ -145,30 +200,64 @@ const PlayersScreen: React.FC = () => {
         <Text style={styles.title}>Игроки</Text>
       </View>
 
+      <Animated.View style={[styles.searchContainer, { height: searchHeight }]}>
+        {showSearch && (
+          <PlayerSearchBar
+            searchQuery={searchQuery}
+            onSearchChange={handleSearchChange}
+            onClear={handleClearSearch}
+            placeholder="Поиск по имени, позиции или номеру..."
+          />
+        )}
+      </Animated.View>
+
       <ScrollView
+        ref={scrollViewRef}
         style={styles.content}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
         {error && <ErrorMessage message={error} />}
 
-        {players.length === 0 ? (
+        {searchQuery.length > 0 && (
+          <View style={styles.searchResultsInfo}>
+            <Text style={styles.searchResultsText}>
+              Найдено игроков: {filteredPlayers.length} из {allPlayers.length}
+            </Text>
+          </View>
+        )}
+
+        {filteredPlayers.length === 0 ? (
           <View style={styles.emptyState}>
-            <Icon name="people" size={64} color={colors.textSecondary} style={styles.emptyStateIcon} />
+            <Icon 
+              name={searchQuery.length > 0 ? "search" : "people"} 
+              size={64} 
+              color={colors.textSecondary} 
+              style={styles.emptyStateIcon} 
+            />
             <Text style={styles.emptyStateTitle}>
-              {apiAvailable === false ? 'API недоступен' : 'Нет игроков'}
+              {searchQuery.length > 0 
+                ? 'Игроки не найдены' 
+                : apiAvailable === false 
+                  ? 'API недоступен' 
+                  : 'Нет игроков'
+              }
             </Text>
             <Text style={styles.emptyStateText}>
-              {apiAvailable === false 
-                ? 'Не удается подключиться к серверу. Проверьте подключение к интернету и попробуйте снова.'
-                : 'Информация об игроках будет добавлена в ближайшее время'
+              {searchQuery.length > 0 
+                ? `По запросу "${searchQuery}" игроки не найдены. Попробуйте изменить поисковый запрос.`
+                : apiAvailable === false 
+                  ? 'Не удается подключиться к серверу. Проверьте подключение к интернету и попробуйте снова.'
+                  : 'Информация об игроках будет добавлена в ближайшее время'
               }
             </Text>
           </View>
         ) : (
           <View style={styles.playersContainer}>
-            {players.map((player) => (
+            {filteredPlayers.map((player) => (
               <PlayerCard key={player.id} player={player} />
             ))}
           </View>

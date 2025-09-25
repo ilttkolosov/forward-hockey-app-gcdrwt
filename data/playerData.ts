@@ -49,21 +49,6 @@ function calculateAge(birthDate: string): number | undefined {
   return age > 0 ? age : undefined;
 }
 
-function mapPositionToRussian(position: string): string {
-  if (!position) return 'Игрок';
-  
-  const pos = position.toLowerCase();
-  if (pos.includes('вратарь') || pos.includes('goalkeeper')) {
-    return 'Вратарь';
-  } else if (pos.includes('защитник') || pos.includes('defender')) {
-    return 'Защитник';
-  } else if (pos.includes('нападающий') || pos.includes('forward')) {
-    return 'Нападающий';
-  }
-  
-  return position;
-}
-
 async function cachePlayerImage(imageUrl: string): Promise<string> {
   try {
     if (!imageUrl) return '';
@@ -94,7 +79,7 @@ async function cachePlayerImage(imageUrl: string): Promise<string> {
 
 function convertApiPlayerToPlayer(apiPlayer: ApiPlayerResponse): Player {
   const name = removePatronymic(apiPlayer.post_title);
-  const position = mapPositionToRussian(apiPlayer.positions);
+  const position = apiPlayer.position || 'Игрок'; // Используем поле position напрямую
   const birthDate = apiPlayer.post_date ? apiPlayer.post_date.split('T')[0] : undefined;
   const age = calculateAge(apiPlayer.post_date);
   
@@ -106,7 +91,7 @@ function convertApiPlayerToPlayer(apiPlayer: ApiPlayerResponse): Player {
     id: apiPlayer.id,
     name,
     position,
-    number: parseInt(apiPlayer.sp_number) || 0,
+    number: apiPlayer.sp_number || 0,
     birthDate,
     age,
     height,
@@ -222,6 +207,24 @@ export async function getPlayerById(playerId: string): Promise<Player | null> {
     console.error('Ошибка получения игрока по ID:', error);
     return null;
   }
+}
+
+export function searchPlayers(players: Player[], searchQuery: string): Player[] {
+  if (!searchQuery || searchQuery.length < 1) {
+    return players;
+  }
+  
+  const query = searchQuery.toLowerCase().trim();
+  
+  return players.filter(player => {
+    const name = player.name.toLowerCase();
+    const position = player.position.toLowerCase();
+    const number = player.number.toString();
+    
+    return name.includes(query) || 
+           position.includes(query) || 
+           number.includes(query);
+  });
 }
 
 function getFallbackPlayers(): Player[] {
