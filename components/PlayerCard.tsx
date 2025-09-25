@@ -127,10 +127,11 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player }) => {
     }
   };
 
-  const getCaptainBadgeInfo = (captainStatus?: string) => {
-    if (!captainStatus) return null;
+  const getCaptainBadgeInfo = () => {
+    const ka = player.captainStatus;
+    if (!ka) return null;
     
-    const status = captainStatus.toLowerCase();
+    const status = ka.toLowerCase();
     if (status === 'k') {
       return { text: 'К', style: styles.captainBadge, title: 'Капитан' };
     }
@@ -145,7 +146,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player }) => {
     router.push(`/player/${player.id}`);
   };
 
-  const captainBadgeInfo = getCaptainBadgeInfo(player.captainStatus);
+  const captainBadgeInfo = getCaptainBadgeInfo();
 
   return (
     <TouchableOpacity style={styles.card} onPress={handlePress}>

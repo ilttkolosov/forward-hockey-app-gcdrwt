@@ -36,6 +36,37 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 8,
   },
+  tabsContainer: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 12,
+    padding: 4,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  activeTab: {
+    backgroundColor: colors.primary,
+  },
+  inactiveTab: {
+    backgroundColor: 'transparent',
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  activeTabText: {
+    color: colors.surface,
+  },
+  inactiveTabText: {
+    color: colors.textSecondary,
+  },
   content: {
     flex: 1,
   },
@@ -79,6 +110,8 @@ const styles = StyleSheet.create({
   },
 });
 
+type PlayerPosition = 'Вратарь' | 'Защитник' | 'Нападающий';
+
 const PlayersScreen: React.FC = () => {
   const [allPlayers, setAllPlayers] = useState<Player[]>([]);
   const [filteredPlayers, setFilteredPlayers] = useState<Player[]>([]);
@@ -88,19 +121,34 @@ const PlayersScreen: React.FC = () => {
   const [apiAvailable, setApiAvailable] = useState<boolean | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
+  const [activeTab, setActiveTab] = useState<PlayerPosition>('Вратарь');
   
   const searchHeight = useRef(new Animated.Value(0)).current;
   const scrollViewRef = useRef<ScrollView>(null);
+
+  const tabs: PlayerPosition[] = ['Вратарь', 'Защитник', 'Нападающий'];
 
   useEffect(() => {
     initializeScreen();
   }, []);
 
   useEffect(() => {
-    // Фильтруем игроков при изменении поискового запроса
-    const filtered = searchPlayers(allPlayers, searchQuery);
+    // Фильтруем игроков при изменении поискового запроса или активной вкладки
+    let filtered = allPlayers;
+    
+    // Фильтруем по позиции
+    filtered = filtered.filter(player => player.position === activeTab);
+    
+    // Фильтруем по поисковому запросу
+    if (searchQuery) {
+      filtered = searchPlayers(filtered, searchQuery);
+    }
+    
+    // Сортируем по игровому номеру
+    filtered = filtered.sort((a, b) => a.number - b.number);
+    
     setFilteredPlayers(filtered);
-  }, [searchQuery, allPlayers]);
+  }, [searchQuery, allPlayers, activeTab]);
 
   const initializeScreen = async () => {
     console.log('Инициализация экрана игроков...');
@@ -125,7 +173,6 @@ const PlayersScreen: React.FC = () => {
       
       const playersData = await getPlayers();
       setAllPlayers(playersData);
-      setFilteredPlayers(playersData);
       
       console.log(`Успешно загружено ${playersData.length} игроков`);
     } catch (err) {
@@ -171,6 +218,12 @@ const PlayersScreen: React.FC = () => {
     }).start();
   };
 
+  const handleTabPress = (tab: PlayerPosition) => {
+    console.log('Переключение на вкладку:', tab);
+    setActiveTab(tab);
+    setSearchQuery(''); // Очищаем поиск при смене вкладки
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -200,6 +253,29 @@ const PlayersScreen: React.FC = () => {
         <Text style={styles.title}>Игроки</Text>
       </View>
 
+      {/* Вкладки позиций */}
+      <View style={styles.tabsContainer}>
+        {tabs.map((tab) => (
+          <TouchableOpacity
+            key={tab}
+            style={[
+              styles.tab,
+              activeTab === tab ? styles.activeTab : styles.inactiveTab,
+            ]}
+            onPress={() => handleTabPress(tab)}
+          >
+            <Text
+              style={[
+                styles.tabText,
+                activeTab === tab ? styles.activeTabText : styles.inactiveTabText,
+              ]}
+            >
+              {tab}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <Animated.View style={[styles.searchContainer, { height: searchHeight }]}>
         {showSearch && (
           <PlayerSearchBar
@@ -225,7 +301,7 @@ const PlayersScreen: React.FC = () => {
         {searchQuery.length > 0 && (
           <View style={styles.searchResultsInfo}>
             <Text style={styles.searchResultsText}>
-              Найдено игроков: {filteredPlayers.length} из {allPlayers.length}
+              Найдено игроков: {filteredPlayers.length}
             </Text>
           </View>
         )}
@@ -243,7 +319,7 @@ const PlayersScreen: React.FC = () => {
                 ? 'Игроки не найдены' 
                 : apiAvailable === false 
                   ? 'API недоступен' 
-                  : 'Нет игроков'
+                  : `Нет игроков в категории "${activeTab}"`
               }
             </Text>
             <Text style={styles.emptyStateText}>
@@ -251,7 +327,7 @@ const PlayersScreen: React.FC = () => {
                 ? `По запросу "${searchQuery}" игроки не найдены. Попробуйте изменить поисковый запрос.`
                 : apiAvailable === false 
                   ? 'Не удается подключиться к серверу. Проверьте подключение к интернету и попробуйте снова.'
-                  : 'Информация об игроках будет добавлена в ближайшее время'
+                  : `Информация об игроках в категории "${activeTab}" будет добавлена в ближайшее время`
               }
             </Text>
           </View>

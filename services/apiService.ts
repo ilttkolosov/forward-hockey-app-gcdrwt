@@ -39,17 +39,18 @@ export interface ApiTeam {
 
 export interface ApiPlayerResponse {
   id: string;
-  sp_current_team?: string;
+  sp_current_team?: number;
   post_date: string;
   post_title: string;
-  sp_number: string;
+  sp_number: number | string;
   sp_metrics: {
     ka?: string;
     onetwofive?: string;
     height?: string;
     weight?: string;
   };
-  positions: string;
+  sp_nationality?: string;
+  positions: string; // Изменено с position на positions
   player_image?: string;
 }
 

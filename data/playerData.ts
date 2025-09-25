@@ -49,6 +49,26 @@ function calculateAge(birthDate: string): number | undefined {
   return age > 0 ? age : undefined;
 }
 
+function mapPositionFromApi(positions: string): string {
+  if (!positions) return 'Игрок';
+  
+  const pos = positions.toLowerCase();
+  
+  // Маппинг позиций из API
+  if (pos.includes('вратарь') || pos === 'вратарь') {
+    return 'Вратарь';
+  }
+  if (pos.includes('защитник') || pos === 'защитник') {
+    return 'Защитник';
+  }
+  if (pos.includes('нападающий') || pos === 'нападающий') {
+    return 'Нападающий';
+  }
+  
+  // Если позиция не распознана, возвращаем как есть
+  return positions;
+}
+
 async function cachePlayerImage(imageUrl: string): Promise<string> {
   try {
     if (!imageUrl) return '';
@@ -79,7 +99,7 @@ async function cachePlayerImage(imageUrl: string): Promise<string> {
 
 function convertApiPlayerToPlayer(apiPlayer: ApiPlayerResponse): Player {
   const name = removePatronymic(apiPlayer.post_title);
-  const position = apiPlayer.position || 'Игрок'; // Используем поле position напрямую
+  const position = mapPositionFromApi(apiPlayer.positions); // Используем поле positions из API
   const birthDate = apiPlayer.post_date ? apiPlayer.post_date.split('T')[0] : undefined;
   const age = calculateAge(apiPlayer.post_date);
   
@@ -87,17 +107,22 @@ function convertApiPlayerToPlayer(apiPlayer: ApiPlayerResponse): Player {
   const height = metrics.height ? parseInt(metrics.height) : undefined;
   const weight = metrics.weight ? parseInt(metrics.weight) : undefined;
   
+  // Преобразуем sp_number в число
+  const number = typeof apiPlayer.sp_number === 'string' 
+    ? parseInt(apiPlayer.sp_number) || 0 
+    : apiPlayer.sp_number || 0;
+  
   return {
     id: apiPlayer.id,
     name,
     position,
-    number: apiPlayer.sp_number || 0,
+    number,
     birthDate,
     age,
     height,
     weight,
     handedness: metrics.onetwofive || undefined,
-    captainStatus: metrics.ka || undefined,
+    captainStatus: metrics.ka || undefined, // Используем поле ka из sp_metrics
     nationality: apiPlayer.sp_nationality || undefined,
     photo: apiPlayer.player_image || undefined,
   };
@@ -151,6 +176,9 @@ export async function getPlayers(): Promise<Player[]> {
     console.log(`Получено ${apiPlayers.length} игроков из API`);
     
     const players = apiPlayers.map(convertApiPlayerToPlayer);
+    
+    // Сортируем игроков по номеру
+    players.sort((a, b) => a.number - b.number);
     
     playersMemoryCache = players;
     playersCacheTimestamp = Date.now();

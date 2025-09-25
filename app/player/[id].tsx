@@ -241,10 +241,11 @@ const PlayerDetailsScreen: React.FC = () => {
     }
   };
 
-  const getCaptainBadgeInfo = (captainStatus?: string) => {
-    if (!captainStatus) return null;
+  const getCaptainBadgeInfo = () => {
+    const ka = player?.captainStatus;
+    if (!ka) return null;
     
-    const status = captainStatus.toLowerCase();
+    const status = ka.toLowerCase();
     if (status === 'k') {
       return { text: 'К', style: styles.captainBadge, fullText: 'Капитан' };
     }
@@ -326,7 +327,7 @@ const PlayerDetailsScreen: React.FC = () => {
     );
   }
 
-  const captainBadgeInfo = getCaptainBadgeInfo(player.captainStatus);
+  const captainBadgeInfo = getCaptainBadgeInfo();
   const nationalityInfo = getNationalityInfo(player.nationality);
 
   return (
