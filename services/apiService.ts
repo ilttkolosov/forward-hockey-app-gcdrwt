@@ -50,7 +50,8 @@ export interface ApiPlayerResponse {
     weight?: string;
   };
   sp_nationality?: string;
-  positions: string; // Изменено с position на positions
+  position: string; // Используем position как основное поле
+  positions?: string; // Добавляем positions как альтернативное поле
   player_image?: string;
 }
 
@@ -137,7 +138,7 @@ class ApiService {
 
   async fetchPlayers(): Promise<ApiPlayerResponse[]> {
     try {
-      console.log('Получение всех игроков из нового API эндпоинта:', this.playersUrl);
+      console.log('Получение всех игроков из API эндпоинта:', this.playersUrl);
       
       const response = await fetch(this.playersUrl);
       
@@ -148,12 +149,23 @@ class ApiService {
       }
       
       const data = await response.json();
-      console.log('Данные всех игроков получены:', data);
+      console.log('Данные всех игроков получены. Количество:', data.length);
       
       if (!Array.isArray(data)) {
         console.error('Полученные данные не являются массивом:', data);
         throw new Error('Неверный формат данных от API');
       }
+      
+      // Логируем первые несколько игроков для отладки
+      data.slice(0, 3).forEach((player: any, index: number) => {
+        console.log(`Игрок ${index + 1} из API:`, {
+          id: player.id,
+          name: player.post_title,
+          position: player.position,
+          positions: player.positions,
+          number: player.sp_number
+        });
+      });
       
       return data;
     } catch (error) {
