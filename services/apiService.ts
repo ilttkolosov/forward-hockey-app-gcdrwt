@@ -69,8 +69,8 @@ export interface ApiLeague {
 }
 
 class ApiService {
-  private baseUrl = 'https://www.hc-forward.com/wp-json/wp/v2';
-  private newPlayersUrl = 'https://www.hc-forward.com/wp-json/app/v1/players';
+  private baseUrl = 'https://www.hc-forward.com/wp-json';
+  private playersUrl = 'https://www.hc-forward.com/wp-json/app/v1/players';
   private username = 'mobile_app';
   private password = '1234567890';
 
@@ -85,7 +85,7 @@ class ApiService {
   async fetchFutureGames(): Promise<ApiCalendarEvent[]> {
     try {
       console.log('Fetching future games from calendar 467...');
-      const response = await fetch(`${this.baseUrl}/calendars/467`, {
+      const response = await fetch(`${this.baseUrl}/wp/v2/calendars/467`, {
         headers: this.getAuthHeaders(),
       });
       
@@ -106,7 +106,7 @@ class ApiService {
   async fetchPastGames(): Promise<ApiCalendarEvent[]> {
     try {
       console.log('Fetching past games from calendar 466...');
-      const response = await fetch(`${this.baseUrl}/calendars/466`);
+      const response = await fetch(`${this.baseUrl}/wp/v2/calendars/466`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -125,7 +125,7 @@ class ApiService {
   async fetchEventDetails(eventId: string): Promise<ApiEventDetails> {
     try {
       console.log('Fetching event details for ID:', eventId);
-      const response = await fetch(`${this.baseUrl}/events/${eventId}`, {
+      const response = await fetch(`${this.baseUrl}/wp/v2/events/${eventId}`, {
         headers: this.getAuthHeaders(),
       });
       
@@ -142,58 +142,20 @@ class ApiService {
     }
   }
 
-  async fetchTeam(teamId: string): Promise<ApiTeam> {
-    try {
-      console.log('Fetching team details for ID:', teamId);
-      const response = await fetch(`${this.baseUrl}/teams/${teamId}`, {
-        headers: this.getAuthHeaders(),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      console.log('Team details fetched:', data);
-      return data;
-    } catch (error) {
-      console.error('Error fetching team details:', error);
-      throw error;
-    }
-  }
-
   async fetchPlayers(): Promise<ApiPlayer[]> {
     try {
-      console.log('Fetching players from new API endpoint...');
-      const response = await fetch(this.newPlayersUrl);
+      console.log('Fetching all players from single API endpoint:', this.playersUrl);
+      const response = await fetch(this.playersUrl);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       
       const data = await response.json();
-      console.log('Players list fetched from new API:', data);
+      console.log('All players data fetched from single endpoint:', data);
       return data;
     } catch (error) {
-      console.error('Error fetching players list:', error);
-      throw error;
-    }
-  }
-
-  async fetchPlayer(playerId: string): Promise<ApiPlayer> {
-    try {
-      console.log('Fetching player details for ID:', playerId);
-      const response = await fetch(`${this.newPlayersUrl}/${playerId}`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      console.log('Player details fetched:', data);
-      return data;
-    } catch (error) {
-      console.error('Error fetching player details:', error);
+      console.error('Error fetching players from single endpoint:', error);
       throw error;
     }
   }
@@ -201,7 +163,7 @@ class ApiService {
   async fetchLeague(leagueId: string): Promise<ApiLeague> {
     try {
       console.log('Fetching league details for ID:', leagueId);
-      const response = await fetch(`${this.baseUrl}/leagues/${leagueId}`, {
+      const response = await fetch(`${this.baseUrl}/wp/v2/leagues/${leagueId}`, {
         headers: this.getAuthHeaders(),
       });
       

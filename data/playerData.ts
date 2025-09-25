@@ -18,6 +18,10 @@ interface CachedImage {
   timestamp: number;
 }
 
+// Store all players data in memory for quick access
+let allPlayersCache: Player[] = [];
+let allPlayersCacheTimestamp = 0;
+
 function isCacheValid(timestamp: number): boolean {
   return Date.now() - timestamp < CACHE_DURATION;
 }
@@ -102,24 +106,32 @@ async function cachePlayerImage(imageUrl: string): Promise<string> {
 
 export async function getPlayers(): Promise<Player[]> {
   try {
-    console.log('Fetching players from new API...');
+    console.log('Fetching players from single API endpoint...');
     
-    // Check cache first
+    // Check memory cache first
+    if (allPlayersCache.length > 0 && isCacheValid(allPlayersCacheTimestamp)) {
+      console.log('Using memory cached players data');
+      return allPlayersCache;
+    }
+    
+    // Check AsyncStorage cache
     const cachedDataJson = await AsyncStorage.getItem(PLAYERS_CACHE_KEY);
     if (cachedDataJson) {
       const cachedData: CachedData<Player[]> = JSON.parse(cachedDataJson);
       if (isCacheValid(cachedData.timestamp)) {
-        console.log('Using cached players data');
+        console.log('Using AsyncStorage cached players data');
+        allPlayersCache = cachedData.data;
+        allPlayersCacheTimestamp = cachedData.timestamp;
         return cachedData.data;
       }
     }
     
-    // Fetch from new API using apiService
+    // Fetch from single API endpoint using apiService
     const apiPlayers = await apiService.fetchPlayers();
     console.log('Raw API players response:', apiPlayers);
     
     // No filtering needed as per new specification - API already returns only needed players
-    console.log(`Processing ${apiPlayers.length} players from new API`);
+    console.log(`Processing ${apiPlayers.length} players from single API endpoint`);
     
     // Convert API data to our Player interface
     const players: Player[] = await Promise.all(
@@ -155,25 +167,33 @@ export async function getPlayers(): Promise<Player[]> {
       })
     );
     
-    // Cache the processed data
+    // Cache the processed data in both memory and AsyncStorage
+    allPlayersCache = players;
+    allPlayersCacheTimestamp = Date.now();
+    
     const cacheData: CachedData<Player[]> = {
       data: players,
       timestamp: Date.now()
     };
     await AsyncStorage.setItem(PLAYERS_CACHE_KEY, JSON.stringify(cacheData));
     
-    console.log(`Successfully processed ${players.length} players`);
+    console.log(`Successfully processed ${players.length} players from single endpoint`);
     return players;
     
   } catch (error) {
-    console.error('Error fetching players:', error);
+    console.error('Error fetching players from single endpoint:', error);
     
     // Return cached data if available, even if expired
+    if (allPlayersCache.length > 0) {
+      console.log('Using expired memory cached data as fallback');
+      return allPlayersCache;
+    }
+    
     try {
       const cachedDataJson = await AsyncStorage.getItem(PLAYERS_CACHE_KEY);
       if (cachedDataJson) {
         const cachedData: CachedData<Player[]> = JSON.parse(cachedDataJson);
-        console.log('Using expired cached data as fallback');
+        console.log('Using expired AsyncStorage cached data as fallback');
         return cachedData.data;
       }
     } catch (cacheError) {
@@ -187,42 +207,24 @@ export async function getPlayers(): Promise<Player[]> {
 
 export async function getPlayerById(playerId: string): Promise<Player | null> {
   try {
-    console.log('Fetching player details for ID:', playerId);
+    console.log('Getting player details for ID from single endpoint data:', playerId);
     
-    const apiPlayer = await apiService.fetchPlayer(playerId);
-    console.log('Player details fetched:', apiPlayer);
+    // Get all players from the single endpoint
+    const allPlayers = await getPlayers();
     
-    const title = apiPlayer.post_title || '';
-    const name = removePatronymic(title);
-    const position = mapPositionToRussian(apiPlayer.positions || '');
-    const age = calculateAge(apiPlayer.post_date || '');
+    // Find the specific player by ID
+    const player = allPlayers.find(p => p.id === playerId);
     
-    // Parse sp_metrics object
-    const metrics = apiPlayer.sp_metrics || {};
-    const weight = metrics.weight ? `${metrics.weight} кг` : undefined;
-    const height = metrics.height ? `${metrics.height} см` : undefined;
-    const grip = metrics.onetwofive || undefined;
-    const captainStatus = metrics.ka || '';
-    
-    // Cache player image
-    const cachedImageUrl = await cachePlayerImage(apiPlayer.player_image || '');
-    
-    return {
-      id: (apiPlayer.ID || playerId).toString(),
-      name,
-      position,
-      number: apiPlayer.sp_number || 0,
-      age,
-      height,
-      weight,
-      grip,
-      captainStatus,
-      nationality: 'Россия', // Default nationality
-      photo: cachedImageUrl,
-    };
+    if (player) {
+      console.log('Player found in single endpoint data:', player);
+      return player;
+    } else {
+      console.log('Player not found in single endpoint data for ID:', playerId);
+      return null;
+    }
     
   } catch (error) {
-    console.error('Error fetching player details:', error);
+    console.error('Error getting player details from single endpoint:', error);
     return null;
   }
 }
