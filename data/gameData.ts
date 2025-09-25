@@ -16,9 +16,9 @@ const isCacheValid = () => {
   return Date.now() - cacheTimestamp < CACHE_DURATION;
 };
 
-// Convert API event to Game object with enhanced result parsing
+// Convert API event to Game object with enhanced result parsing for sp_results
 const convertApiEventToGame = async (apiEvent: ApiEvent, isPastEvent: boolean = false): Promise<Game> => {
-  console.log('Converting API event to game with enhanced results:', apiEvent);
+  console.log('Converting API event to game with enhanced sp_results parsing:', apiEvent);
   
   // Parse team IDs
   const teamIds = apiEvent.sp_teams.split(',').map(id => id.trim());
@@ -50,30 +50,50 @@ const convertApiEventToGame = async (apiEvent: ApiEvent, isPastEvent: boolean = 
     console.error('Error fetching team details:', error);
   }
   
-  // Parse enhanced results for past events
+  // Parse enhanced results for past events using sp_results
   let homeScore: number | undefined;
   let awayScore: number | undefined;
   let homeOutcome: 'win' | 'loss' | 'nich' | undefined;
   let awayOutcome: 'win' | 'loss' | 'nich' | undefined;
   
   if (isPastEvent && apiEvent.sp_results) {
-    const detailedResults = apiService.parseDetailedResults(apiEvent.sp_results);
-    console.log('Detailed results parsed:', detailedResults);
+    console.log('Parsing sp_results for past event:', apiEvent.sp_results);
+    const spResults = apiService.parseSpResults(apiEvent.sp_results);
+    console.log('Parsed sp_results:', spResults);
     
-    if (detailedResults.length >= 2) {
-      // Map results to home/away teams based on team IDs
-      const homeResult = detailedResults.find(r => r.teamId === homeTeamId) || detailedResults[0];
-      const awayResult = detailedResults.find(r => r.teamId === awayTeamId) || detailedResults[1];
+    if (spResults.length >= 2) {
+      // Map results to home/away teams based on team IDs or order
+      let homeResult = spResults.find(r => r.teamId === homeTeamId);
+      let awayResult = spResults.find(r => r.teamId === awayTeamId);
+      
+      // If no exact match by team ID, use order (first result = home, second = away)
+      if (!homeResult || !awayResult) {
+        homeResult = spResults[0];
+        awayResult = spResults[1];
+      }
       
       homeScore = homeResult.goals;
       awayScore = awayResult.goals;
       homeOutcome = homeResult.outcome;
       awayOutcome = awayResult.outcome;
-    } else {
-      // Fallback to simple score parsing
-      const scores = apiService.parsePhpSerializedResults(apiEvent.sp_results);
-      homeScore = scores.homeScore;
-      awayScore = scores.awayScore;
+      
+      console.log(`Mapped results: Home(${homeTeam}): ${homeScore} goals, ${homeOutcome}; Away(${awayTeam}): ${awayScore} goals, ${awayOutcome}`);
+    } else if (spResults.length === 1) {
+      // Only one result found, try to determine which team it belongs to
+      const result = spResults[0];
+      if (result.teamId === homeTeamId) {
+        homeScore = result.goals;
+        homeOutcome = result.outcome;
+        // Infer away team result
+        awayScore = 0; // Default, might need adjustment based on actual data
+        awayOutcome = result.outcome === 'win' ? 'loss' : result.outcome === 'loss' ? 'win' : 'nich';
+      } else {
+        awayScore = result.goals;
+        awayOutcome = result.outcome;
+        // Infer home team result
+        homeScore = 0; // Default, might need adjustment based on actual data
+        homeOutcome = result.outcome === 'win' ? 'loss' : result.outcome === 'loss' ? 'win' : 'nich';
+      }
     }
   }
   
@@ -112,14 +132,14 @@ const convertApiEventToGame = async (apiEvent: ApiEvent, isPastEvent: boolean = 
     sp_results: apiEvent.sp_results
   };
   
-  console.log('Converted game with enhanced results:', game);
+  console.log('Converted game with enhanced sp_results:', game);
   return game;
 };
 
-// Enhanced function to get detailed game information
+// Enhanced function to get detailed game information from /events/{id} endpoint
 const getEnhancedGameDetails = async (gameId: string): Promise<Game | null> => {
   try {
-    console.log('Fetching enhanced game details for ID:', gameId);
+    console.log('Fetching enhanced game details from /events/{id} for ID:', gameId);
     
     // Fetch detailed game data from /events/{id} endpoint
     const gameDetails = await apiService.fetchGameDetails(gameId);
@@ -128,10 +148,14 @@ const getEnhancedGameDetails = async (gameId: string): Promise<Game | null> => {
       return null;
     }
     
+    console.log('Raw game details from API:', gameDetails);
+    
     // Parse team IDs
     const teamIds = gameDetails.teams.split(',').map(id => id.trim());
     const homeTeamId = teamIds[0] || '';
     const awayTeamId = teamIds[1] || '';
+    
+    console.log('Team IDs:', { homeTeamId, awayTeamId });
     
     // Fetch team details
     let homeTeam = 'Home Team';
@@ -148,17 +172,19 @@ const getEnhancedGameDetails = async (gameId: string): Promise<Game | null> => {
       if (homeTeamData) {
         homeTeam = homeTeamData.name;
         homeTeamLogo = homeTeamData.logo_url;
+        console.log('Home team data:', homeTeamData);
       }
       
       if (awayTeamData) {
         awayTeam = awayTeamData.name;
         awayTeamLogo = awayTeamData.logo_url;
+        console.log('Away team data:', awayTeamData);
       }
     } catch (error) {
       console.error('Error fetching team details for enhanced game:', error);
     }
     
-    // Parse detailed results with period information
+    // Parse detailed results with period information from the results field
     const detailedResults = apiService.parseDetailedResults(gameDetails.results);
     console.log('Enhanced game detailed results:', detailedResults);
     
@@ -174,9 +200,16 @@ const getEnhancedGameDetails = async (gameId: string): Promise<Game | null> => {
     let awayThirdPeriod: number | undefined;
     
     if (detailedResults.length >= 2) {
-      // Map results to home/away teams based on team IDs
-      const homeResult = detailedResults.find(r => r.teamId === homeTeamId) || detailedResults[0];
-      const awayResult = detailedResults.find(r => r.teamId === awayTeamId) || detailedResults[1];
+      // Map results to home/away teams based on team IDs or order
+      let homeResult = detailedResults.find(r => r.teamId === homeTeamId);
+      let awayResult = detailedResults.find(r => r.teamId === awayTeamId);
+      
+      // If no exact match by team ID, use order (first result = home, second = away)
+      if (!homeResult || !awayResult) {
+        console.log('No exact team ID match, using order-based mapping');
+        homeResult = detailedResults[0];
+        awayResult = detailedResults[1];
+      }
       
       homeScore = homeResult.goals;
       awayScore = awayResult.goals;
@@ -188,6 +221,29 @@ const getEnhancedGameDetails = async (gameId: string): Promise<Game | null> => {
       awayFirstPeriod = awayResult.first;
       awaySecondPeriod = awayResult.second;
       awayThirdPeriod = awayResult.third;
+      
+      console.log('Mapped detailed results:', {
+        home: { team: homeTeam, score: homeScore, outcome: homeOutcome, periods: [homeFirstPeriod, homeSecondPeriod, homeThirdPeriod] },
+        away: { team: awayTeam, score: awayScore, outcome: awayOutcome, periods: [awayFirstPeriod, awaySecondPeriod, awayThirdPeriod] }
+      });
+    } else if (detailedResults.length === 1) {
+      // Only one result found
+      const result = detailedResults[0];
+      console.log('Only one detailed result found:', result);
+      
+      if (result.teamId === homeTeamId) {
+        homeScore = result.goals;
+        homeOutcome = result.outcome;
+        homeFirstPeriod = result.first;
+        homeSecondPeriod = result.second;
+        homeThirdPeriod = result.third;
+      } else {
+        awayScore = result.goals;
+        awayOutcome = result.outcome;
+        awayFirstPeriod = result.first;
+        awaySecondPeriod = result.second;
+        awayThirdPeriod = result.third;
+      }
     }
     
     // Format date and time
@@ -197,6 +253,8 @@ const getEnhancedGameDetails = async (gameId: string): Promise<Game | null> => {
     const venue = apiService.parseIdNameString(gameDetails.venues || '');
     const league = apiService.parseIdNameString(gameDetails.Leagues || '');
     const season = apiService.parseIdNameString(gameDetails.seasons || '');
+    
+    console.log('Parsed metadata:', { venue: venue.name, league: league.name, season: season.name });
     
     // Determine status
     const status = apiService.determineGameStatus(gameDetails.date, homeScore !== undefined && awayScore !== undefined);
@@ -268,7 +326,7 @@ export const getFutureGames = async (): Promise<Game[]> => {
   }
 };
 
-// Get past games with enhanced results
+// Get past games with enhanced sp_results parsing
 export const getPastGames = async (): Promise<Game[]> => {
   try {
     if (isCacheValid() && pastGamesCache) {
@@ -276,10 +334,10 @@ export const getPastGames = async (): Promise<Game[]> => {
       return pastGamesCache;
     }
 
-    console.log('Fetching past games from API with enhanced results...');
+    console.log('Fetching past games from API with enhanced sp_results parsing...');
     const response = await apiService.fetchPastEvents();
     
-    // Convert API events to Game objects with enhanced result parsing
+    // Convert API events to Game objects with enhanced sp_results parsing
     const games = await Promise.all(
       response.data.map(event => convertApiEventToGame(event, true))
     );
@@ -287,7 +345,7 @@ export const getPastGames = async (): Promise<Game[]> => {
     pastGamesCache = games;
     pastCountCache = response.count;
     cacheTimestamp = Date.now();
-    console.log('Past games cached successfully with enhanced results. Count:', response.count);
+    console.log('Past games cached successfully with enhanced sp_results. Count:', response.count);
 
     return games;
   } catch (error) {
@@ -348,7 +406,7 @@ export const getCurrentGame = async (): Promise<Game | null> => {
   }
 };
 
-// Enhanced function to get game by ID with detailed information
+// Enhanced function to get game by ID with detailed information from /events/{id}
 export const getGameById = async (gameId: string): Promise<Game | null> => {
   try {
     // Check cache first
@@ -357,13 +415,13 @@ export const getGameById = async (gameId: string): Promise<Game | null> => {
       return gameDetailsCache[gameId];
     }
 
-    console.log('Searching for game with ID:', gameId);
+    console.log('Searching for game with ID using /events/{id} endpoint:', gameId);
     
     // First, try to get enhanced details from /events/{id} endpoint
     const enhancedGame = await getEnhancedGameDetails(gameId);
     if (enhancedGame) {
       gameDetailsCache[gameId] = enhancedGame;
-      console.log('Found enhanced game details:', enhancedGame);
+      console.log('Found enhanced game details from /events/{id}:', enhancedGame);
       return enhancedGame;
     }
     

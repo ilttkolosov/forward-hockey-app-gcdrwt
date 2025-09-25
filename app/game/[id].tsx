@@ -208,12 +208,15 @@ const GameDetailsScreen: React.FC = () => {
   const loadGameData = async () => {
     try {
       setError(null);
-      console.log('Loading enhanced game data for ID:', id);
+      console.log('Loading enhanced game data from /events/{id} for ID:', id);
       
       const [gameData, statsData] = await Promise.all([
         getGameById(id!),
         getGameStatsById(id!).catch(() => null) // Stats might not be available
       ]);
+      
+      console.log('Loaded game data:', gameData);
+      console.log('Loaded stats data:', statsData);
       
       setGame(gameData);
       setGameStats(statsData);
@@ -324,7 +327,10 @@ const GameDetailsScreen: React.FC = () => {
 
     const hasPeriodsData = game.homeFirstPeriod !== undefined || 
                           game.homeSecondPeriod !== undefined || 
-                          game.homeThirdPeriod !== undefined;
+                          game.homeThirdPeriod !== undefined ||
+                          game.awayFirstPeriod !== undefined || 
+                          game.awaySecondPeriod !== undefined || 
+                          game.awayThirdPeriod !== undefined;
 
     if (!hasPeriodsData) {
       return null;
@@ -458,18 +464,23 @@ const GameDetailsScreen: React.FC = () => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {/* Video Player */}
-        {game.videoUrl || game.sp_video ? (
+        {/* Video Player from sp_video field */}
+        {(game.videoUrl || game.sp_video) ? (
           <View style={styles.videoContainer}>
             <WebView
               source={{ uri: game.videoUrl || game.sp_video || '' }}
               style={{ flex: 1 }}
               allowsFullscreenVideo={true}
               mediaPlaybackRequiresUserAction={false}
+              javaScriptEnabled={true}
+              domStorageEnabled={true}
+              startInLoadingState={true}
               onError={(syntheticEvent) => {
                 const { nativeEvent } = syntheticEvent;
                 console.error('WebView error: ', nativeEvent);
               }}
+              onLoadStart={() => console.log('WebView loading started')}
+              onLoadEnd={() => console.log('WebView loading ended')}
             />
           </View>
         ) : (
@@ -481,7 +492,7 @@ const GameDetailsScreen: React.FC = () => {
           </View>
         )}
 
-        {/* Game Information */}
+        {/* Game Information from /events/{id} endpoint */}
         <View style={styles.gameInfo}>
           <Text style={styles.gameTitle}>
             {game.homeTeam} vs {game.awayTeam}
@@ -499,22 +510,25 @@ const GameDetailsScreen: React.FC = () => {
 
           <View style={styles.gameDetails}>
             <Text style={styles.gameDetail}>Дата: {formatDate(game.date)}</Text>
-            <Text style={styles.gameDetail}>Время: {game.time}</Text>
+            <Text style={styles.gameDetail}>
+              Время: {game.time === '00:00' ? 'Уточняется' : game.time}
+            </Text>
           </View>
 
           <View style={styles.gameDetails}>
             <Text style={styles.gameDetail}>Место: {game.venue}</Text>
-            <Text style={styles.gameDetail}>Турнир: {game.tournament}</Text>
+            <Text style={styles.gameDetail}>
+              Турнир: {game.league || game.tournament || 'Товарищеский матч'}
+            </Text>
           </View>
 
-          {game.league && (
+          {game.season && (
             <View style={styles.gameDetails}>
-              <Text style={styles.gameDetail}>Лига: {game.league}</Text>
-              {game.season && <Text style={styles.gameDetail}>Сезон: {game.season}</Text>}
+              <Text style={styles.gameDetail}>Сезон: {game.season}</Text>
             </View>
           )}
 
-          {/* Outcome for finished games */}
+          {/* Outcome for finished games with results */}
           {game.status === 'finished' && (game.homeOutcome || game.awayOutcome) && (
             <View style={styles.outcomeContainer}>
               <View style={styles.outcomeItem}>
@@ -533,7 +547,7 @@ const GameDetailsScreen: React.FC = () => {
           )}
         </View>
 
-        {/* Periods Table */}
+        {/* Periods Table with detailed period scores */}
         {renderPeriodsTable()}
 
         {/* Game Statistics */}
