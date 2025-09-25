@@ -64,10 +64,9 @@ const UpcomingGamesScreen: React.FC = () => {
             </TouchableOpacity>
           </Link>
           <View>
-            <Text style={commonStyles.title}>Предстоящие игры</Text>
-            {totalCount > 0 && (
-              <Text style={commonStyles.subtitle}>Всего: {totalCount}</Text>
-            )}
+            <Text style={commonStyles.title}>
+              Предстоящие игры {totalCount > 0 ? `(${totalCount})` : ''}
+            </Text>
           </View>
         </View>
       </View>
@@ -92,7 +91,7 @@ const UpcomingGamesScreen: React.FC = () => {
           </View>
         ) : (
           games.map((game) => (
-            <GameCard key={game.id} game={game} showScore={false} />
+            <GameCard key={game.id} game={game} showScore={false} hideSeasonInfo={true} />
           ))
         )}
       </ScrollView>

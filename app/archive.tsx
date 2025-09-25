@@ -25,20 +25,15 @@ const ArchiveGamesScreen: React.FC = () => {
   const loadData = async () => {
     try {
       setError(null);
-      console.log('Loading past games...');
+      console.log('Loading archive games...');
       
       const pastGames = await getPastGames();
-      // Sort by date descending (most recent first)
-      const sortedGames = pastGames.sort((a, b) => 
-        new Date(b.event_date || b.date).getTime() - new Date(a.event_date || a.date).getTime()
-      );
-      
-      setGames(sortedGames);
+      setGames(pastGames);
       setTotalCount(getPastGamesCount());
       
-      console.log('Past games loaded successfully. Count:', sortedGames.length);
+      console.log('Archive games loaded successfully. Count:', pastGames.length);
     } catch (err) {
-      console.error('Error loading past games:', err);
+      console.error('Error loading archive games:', err);
       setError('Ошибка загрузки архива игр. Проверьте подключение к интернету.');
     } finally {
       setLoading(false);
@@ -69,10 +64,9 @@ const ArchiveGamesScreen: React.FC = () => {
             </TouchableOpacity>
           </Link>
           <View>
-            <Text style={commonStyles.title}>Архив игр</Text>
-            {totalCount > 0 && (
-              <Text style={commonStyles.subtitle}>Всего: {totalCount}</Text>
-            )}
+            <Text style={commonStyles.title}>
+              Архив игр {totalCount > 0 ? `(${totalCount})` : ''}
+            </Text>
           </View>
         </View>
       </View>
@@ -92,7 +86,7 @@ const ArchiveGamesScreen: React.FC = () => {
               Нет архивных игр
             </Text>
             <Text style={commonStyles.emptyStateSubtext}>
-              История игр будет доступна позже
+              Архив игр будет пополняться после проведения матчей
             </Text>
           </View>
         ) : (

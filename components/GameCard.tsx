@@ -8,6 +8,7 @@ import { colors, commonStyles } from '../styles/commonStyles';
 interface GameCardProps {
   game: Game;
   showScore?: boolean;
+  hideSeasonInfo?: boolean; // New prop to control season display
 }
 
 const styles = StyleSheet.create({
@@ -119,7 +120,7 @@ const styles = StyleSheet.create({
   },
 });
 
-const GameCard: React.FC<GameCardProps> = ({ game, showScore = true }) => {
+const GameCard: React.FC<GameCardProps> = ({ game, showScore = true, hideSeasonInfo = false }) => {
   const router = useRouter();
 
   const handlePress = () => {
@@ -167,6 +168,32 @@ const GameCard: React.FC<GameCardProps> = ({ game, showScore = true }) => {
     }
   };
 
+  const formatDateTime = (dateString: string, timeString: string) => {
+    const formattedDate = formatDate(dateString);
+    
+    // If time is 00:00, don't display it at all
+    if (timeString === '00:00') {
+      return formattedDate;
+    }
+    
+    return `${formattedDate} • ${timeString}`;
+  };
+
+  const getTournamentName = () => {
+    // If league_name exists and is not empty, use it as tournament name
+    if (game.league_name && game.league_name.trim()) {
+      return game.league_name;
+    }
+    
+    // If tournament exists and is not empty, use it
+    if (game.tournament && game.tournament.trim()) {
+      return game.tournament;
+    }
+    
+    // If no league/tournament info, it's a friendly match
+    return 'Товарищеский матч';
+  };
+
   const renderTeamWithLogo = (teamName: string, teamLogo?: string) => {
     return (
       <View style={styles.teamContainer}>
@@ -188,7 +215,7 @@ const GameCard: React.FC<GameCardProps> = ({ game, showScore = true }) => {
     <TouchableOpacity style={styles.card} onPress={handlePress}>
       <View style={styles.header}>
         <Text style={styles.tournament}>
-          {game.league_name || game.tournament || 'Чемпионат'}
+          {getTournamentName()}
         </Text>
         <Text style={[styles.status, getStatusColor(game.status)]}>
           {getStatusText(game.status)}
@@ -215,28 +242,20 @@ const GameCard: React.FC<GameCardProps> = ({ game, showScore = true }) => {
 
       <View style={styles.details}>
         <Text style={styles.dateTime}>
-          {formatDate(game.date)} • {game.time}
+          {formatDateTime(game.date, game.time)}
         </Text>
         <Text style={styles.venue}>
           {game.venue_name || game.venue}
         </Text>
       </View>
 
-      {/* Additional info for detailed view */}
-      {(game.season_name || game.league_name) && (
+      {/* Additional info for detailed view - only show season if not hidden */}
+      {!hideSeasonInfo && game.season_name && (
         <View style={styles.additionalInfo}>
-          {game.season_name && (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Сезон:</Text>
-              <Text style={styles.infoValue}>{game.season_name}</Text>
-            </View>
-          )}
-          {game.league_name && game.league_name !== (game.tournament || 'Чемпионат') && (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Лига:</Text>
-              <Text style={styles.infoValue}>{game.league_name}</Text>
-            </View>
-          )}
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Сезон:</Text>
+            <Text style={styles.infoValue}>{game.season_name}</Text>
+          </View>
         </View>
       )}
     </TouchableOpacity>

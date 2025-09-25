@@ -154,7 +154,7 @@ const HomeScreen: React.FC = () => {
             <View style={commonStyles.sectionHeader}>
               <Text style={commonStyles.sectionTitle}>Текущая игра</Text>
             </View>
-            <GameCard game={currentGame} showScore={true} />
+            <GameCard game={currentGame} showScore={true} hideSeasonInfo={true} />
           </View>
         )}
 
@@ -163,20 +163,18 @@ const HomeScreen: React.FC = () => {
           <Link href="/upcoming" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
               <Icon name="calendar" size={24} color={colors.primary} />
-              <Text style={quickNavStyles.text}>Предстоящие игры</Text>
-              {upcomingCount > 0 && (
-                <Text style={quickNavStyles.count}>({upcomingCount})</Text>
-              )}
+              <Text style={quickNavStyles.text}>
+                Предстоящие игры {upcomingCount > 0 ? `(${upcomingCount})` : ''}
+              </Text>
             </TouchableOpacity>
           </Link>
           
           <Link href="/archive" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
               <Icon name="archive" size={24} color={colors.primary} />
-              <Text style={quickNavStyles.text}>Архив игр</Text>
-              {pastCount > 0 && (
-                <Text style={quickNavStyles.count}>({pastCount})</Text>
-              )}
+              <Text style={quickNavStyles.text}>
+                Архив игр {pastCount > 0 ? `(${pastCount})` : ''}
+              </Text>
             </TouchableOpacity>
           </Link>
           
@@ -207,7 +205,7 @@ const HomeScreen: React.FC = () => {
               </Link>
             </View>
             {upcomingGames.map((game) => (
-              <GameCard key={game.id} game={game} showScore={false} />
+              <GameCard key={game.id} game={game} showScore={false} hideSeasonInfo={true} />
             ))}
           </View>
         )}
