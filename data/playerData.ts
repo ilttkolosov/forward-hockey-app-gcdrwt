@@ -50,21 +50,58 @@ function calculateAge(birthDate: string): number | undefined {
 }
 
 function mapPositionFromApi(positions: string): string {
-  if (!positions) return 'Игрок';
-  
-  const pos = positions.toLowerCase();
-  
-  // Маппинг позиций из API
-  if (pos.includes('вратарь') || pos === 'вратарь') {
-    return 'Вратарь';
-  }
-  if (pos.includes('защитник') || pos === 'защитник') {
-    return 'Защитник';
-  }
-  if (pos.includes('нападающий') || pos === 'нападающий') {
-    return 'Нападающий';
+  if (!positions) {
+    console.log('Позиция пустая, возвращаем "Игрок"');
+    return 'Игрок';
   }
   
+  const pos = positions.toLowerCase().trim();
+  
+  console.log('Маппинг позиции из API:', `"${positions}"`, '-> нормализованная:', `"${pos}"`);
+  
+  // Точное соответствие для основных позиций
+  if (pos === 'вратарь') {
+    console.log('Точное соответствие: Вратарь -> Вратари');
+    return 'Вратари';
+  }
+  if (pos === 'защитник') {
+    console.log('Точное соответствие: Защитник -> Защитники');
+    return 'Защитники';
+  }
+  if (pos === 'нападающий') {
+    console.log('Точное соответствие: Нападающий -> Нападающие');
+    return 'Нападающие';
+  }
+  
+  // Поиск по вхождению подстроки
+  if (pos.includes('вратар')) {
+    console.log('Найдено вхождение "вратар" -> Вратари');
+    return 'Вратари';
+  }
+  if (pos.includes('защитник')) {
+    console.log('Найдено вхождение "защитник" -> Защитники');
+    return 'Защитники';
+  }
+  if (pos.includes('нападающ')) {
+    console.log('Найдено вхождение "нападающ" -> Нападающие');
+    return 'Нападающие';
+  }
+  
+  // Дополнительные варианты
+  if (pos.includes('голкипер') || pos.includes('goalkeeper') || pos.includes('goalie')) {
+    console.log('Найдено альтернативное название вратаря -> Вратари');
+    return 'Вратари';
+  }
+  if (pos.includes('защита') || pos.includes('defense') || pos.includes('defender')) {
+    console.log('Найдено альтернативное название защитника -> Защитники');
+    return 'Защитники';
+  }
+  if (pos.includes('нападение') || pos.includes('forward') || pos.includes('attacker')) {
+    console.log('Найдено альтернативное название нападающего -> Нападающие');
+    return 'Нападающие';
+  }
+  
+  console.warn('Позиция не распознана, возвращаем как есть:', `"${positions}"`);
   // Если позиция не распознана, возвращаем как есть
   return positions;
 }
@@ -112,6 +149,8 @@ function convertApiPlayerToPlayer(apiPlayer: ApiPlayerResponse): Player {
     ? parseInt(apiPlayer.sp_number) || 0 
     : apiPlayer.sp_number || 0;
   
+  console.log(`Конвертация игрока: ${name}, позиция API: "${apiPlayer.positions}", категория: "${position}", номер: ${number}`);
+  
   return {
     id: apiPlayer.id,
     name,
@@ -156,29 +195,43 @@ export async function getPlayers(): Promise<Player[]> {
   try {
     console.log('Получение игроков...');
     
-    if (playersMemoryCache.length > 0 && isCacheValid(playersCacheTimestamp)) {
-      console.log('Используется кэш в памяти');
-      return playersMemoryCache;
-    }
-    
-    const cachedDataJson = await AsyncStorage.getItem(PLAYERS_CACHE_KEY);
-    if (cachedDataJson) {
-      const cachedData: CachedData<Player[]> = JSON.parse(cachedDataJson);
-      if (isCacheValid(cachedData.timestamp)) {
-        console.log('Используется кэш AsyncStorage');
-        playersMemoryCache = cachedData.data;
-        playersCacheTimestamp = cachedData.timestamp;
-        return cachedData.data;
-      }
-    }
+    // Очищаем кэш для отладки
+    console.log('Очищаем кэш для получения свежих данных...');
+    playersMemoryCache = [];
+    playersCacheTimestamp = 0;
+    await AsyncStorage.removeItem(PLAYERS_CACHE_KEY);
     
     const apiPlayers = await apiService.fetchPlayers();
     console.log(`Получено ${apiPlayers.length} игроков из API`);
+    
+    // Логируем первые несколько игроков для отладки
+    apiPlayers.slice(0, 3).forEach((player, index) => {
+      console.log(`Игрок ${index + 1}:`, {
+        id: player.id,
+        name: player.post_title,
+        positions: player.positions,
+        number: player.sp_number
+      });
+    });
     
     const players = apiPlayers.map(convertApiPlayerToPlayer);
     
     // Сортируем игроков по номеру
     players.sort((a, b) => a.number - b.number);
+    
+    // Логируем распределение игроков по позициям
+    const positionCounts = players.reduce((acc, player) => {
+      acc[player.position] = (acc[player.position] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    
+    console.log('Распределение игроков по позициям после конвертации:', positionCounts);
+    
+    // Логируем примеры игроков по каждой позиции
+    ['Вратари', 'Защитники', 'Нападающие'].forEach(position => {
+      const playersInPosition = players.filter(p => p.position === position);
+      console.log(`Игроки в категории "${position}":`, playersInPosition.map(p => `${p.name} (#${p.number})`));
+    });
     
     playersMemoryCache = players;
     playersCacheTimestamp = Date.now();
@@ -261,7 +314,7 @@ function getFallbackPlayers(): Player[] {
     {
       id: '1',
       name: 'Александр Петров',
-      position: 'Нападающий',
+      position: 'Нападающие',
       number: 10,
       age: 28,
       height: 185,
@@ -271,7 +324,7 @@ function getFallbackPlayers(): Player[] {
     {
       id: '2',
       name: 'Дмитрий Иванов',
-      position: 'Защитник',
+      position: 'Защитники',
       number: 5,
       age: 26,
       height: 190,
@@ -281,7 +334,7 @@ function getFallbackPlayers(): Player[] {
     {
       id: '3',
       name: 'Сергей Козлов',
-      position: 'Вратарь',
+      position: 'Вратари',
       number: 1,
       age: 30,
       height: 188,

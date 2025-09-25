@@ -110,7 +110,7 @@ const styles = StyleSheet.create({
   },
 });
 
-type PlayerPosition = 'Вратарь' | 'Защитник' | 'Нападающий';
+type PlayerPosition = 'Вратари' | 'Защитники' | 'Нападающие';
 
 const PlayersScreen: React.FC = () => {
   const [allPlayers, setAllPlayers] = useState<Player[]>([]);
@@ -121,12 +121,12 @@ const PlayersScreen: React.FC = () => {
   const [apiAvailable, setApiAvailable] = useState<boolean | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
-  const [activeTab, setActiveTab] = useState<PlayerPosition>('Вратарь');
+  const [activeTab, setActiveTab] = useState<PlayerPosition>('Вратари');
   
   const searchHeight = useRef(new Animated.Value(0)).current;
   const scrollViewRef = useRef<ScrollView>(null);
 
-  const tabs: PlayerPosition[] = ['Вратарь', 'Защитник', 'Нападающий'];
+  const tabs: PlayerPosition[] = ['Вратари', 'Защитники', 'Нападающие'];
 
   useEffect(() => {
     initializeScreen();
@@ -136,12 +136,25 @@ const PlayersScreen: React.FC = () => {
     // Фильтруем игроков при изменении поискового запроса или активной вкладки
     let filtered = allPlayers;
     
+    console.log('Фильтрация игроков. Всего игроков:', allPlayers.length);
+    console.log('Активная вкладка:', activeTab);
+    console.log('Поисковый запрос:', searchQuery);
+    
     // Фильтруем по позиции
-    filtered = filtered.filter(player => player.position === activeTab);
+    filtered = filtered.filter(player => {
+      const matches = player.position === activeTab;
+      if (!matches) {
+        console.log(`Игрок ${player.name} (позиция: ${player.position}) не подходит для вкладки ${activeTab}`);
+      }
+      return matches;
+    });
+    
+    console.log(`После фильтрации по позиции осталось ${filtered.length} игроков`);
     
     // Фильтруем по поисковому запросу
     if (searchQuery) {
       filtered = searchPlayers(filtered, searchQuery);
+      console.log(`После поиска по запросу "${searchQuery}" осталось ${filtered.length} игроков`);
     }
     
     // Сортируем по игровому номеру
@@ -175,6 +188,15 @@ const PlayersScreen: React.FC = () => {
       setAllPlayers(playersData);
       
       console.log(`Успешно загружено ${playersData.length} игроков`);
+      
+      // Логируем распределение по позициям для отладки
+      const positionCounts = playersData.reduce((acc, player) => {
+        acc[player.position] = (acc[player.position] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      
+      console.log('Распределение игроков по позициям в UI:', positionCounts);
+      
     } catch (err) {
       console.error('Ошибка загрузки игроков:', err);
       setError('Ошибка загрузки списка игроков. Попробуйте обновить страницу.');

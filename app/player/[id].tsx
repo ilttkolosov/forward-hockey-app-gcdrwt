@@ -229,16 +229,20 @@ const PlayerDetailsScreen: React.FC = () => {
   };
 
   const getPositionColor = (position: string) => {
-    switch (position.toLowerCase()) {
-      case 'нападающий':
-        return colors.error;
-      case 'защитник':
-        return colors.primary;
-      case 'вратарь':
-        return colors.warning;
-      default:
-        return colors.textSecondary;
+    const pos = position.toLowerCase();
+    
+    // Обрабатываем как старые, так и новые названия позиций
+    if (pos.includes('нападающ') || pos === 'нападающие') {
+      return colors.error;
     }
+    if (pos.includes('защитник') || pos === 'защитники') {
+      return colors.primary;
+    }
+    if (pos.includes('вратар') || pos === 'вратари') {
+      return colors.warning;
+    }
+    
+    return colors.textSecondary;
   };
 
   const getCaptainBadgeInfo = () => {
