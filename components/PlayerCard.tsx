@@ -28,29 +28,28 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  photoContainer: {
+    position: 'relative',
+    marginRight: 16,
+  },
   photo: {
     width: 60,
     height: 60,
     borderRadius: 30,
-    marginRight: 16,
     backgroundColor: colors.background,
   },
   photoPlaceholder: {
     width: 60,
     height: 60,
     borderRadius: 30,
-    marginRight: 16,
     backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  photoContainer: {
-    position: 'relative',
-  },
   captainBadge: {
     position: 'absolute',
     top: -4,
-    right: 12,
+    right: -4,
     backgroundColor: colors.primary,
     borderRadius: 10,
     paddingHorizontal: 6,
@@ -74,7 +73,7 @@ const styles = StyleSheet.create({
   },
   position: {
     fontSize: 14,
-    color: colors.textSecondary,
+    fontWeight: '500',
     marginBottom: 8,
   },
   details: {
@@ -87,17 +86,17 @@ const styles = StyleSheet.create({
     marginRight: 12,
     marginBottom: 2,
   },
+  numberContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 16,
+  },
   number: {
     fontSize: 24,
     fontWeight: 'bold',
     color: colors.primary,
     minWidth: 40,
     textAlign: 'center',
-  },
-  numberContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 16,
   },
 });
 
@@ -117,18 +116,19 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player }) => {
     }
   };
 
-  const getCaptainBadgeText = (captainStatus: string) => {
-    if (captainStatus?.toLowerCase().includes('k')) return 'К';
-    if (captainStatus?.toLowerCase().includes('a')) return 'А';
+  const getCaptainBadgeText = (captainStatus?: string) => {
+    if (!captainStatus) return null;
+    if (captainStatus.toLowerCase().includes('k')) return 'К';
+    if (captainStatus.toLowerCase().includes('a')) return 'А';
     return null;
   };
 
   const handlePress = () => {
-    console.log('Navigating to player details:', player.id);
+    console.log('Переход к деталям игрока:', player.id);
     router.push(`/player/${player.id}`);
   };
 
-  const captainBadgeText = getCaptainBadgeText(player.captainStatus || '');
+  const captainBadgeText = getCaptainBadgeText(player.captainStatus);
 
   return (
     <TouchableOpacity style={styles.card} onPress={handlePress}>
@@ -159,13 +159,13 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player }) => {
             <Text style={styles.detail}>Возраст: {player.age}</Text>
           )}
           {player.height && (
-            <Text style={styles.detail}>Рост: {player.height}</Text>
+            <Text style={styles.detail}>Рост: {player.height} см</Text>
           )}
           {player.weight && (
-            <Text style={styles.detail}>Вес: {player.weight}</Text>
+            <Text style={styles.detail}>Вес: {player.weight} кг</Text>
           )}
-          {player.grip && (
-            <Text style={styles.detail}>Хват: {player.grip}</Text>
+          {player.handedness && (
+            <Text style={styles.detail}>Хват: {player.handedness}</Text>
           )}
         </View>
       </View>

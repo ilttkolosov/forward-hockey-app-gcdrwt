@@ -1,62 +1,68 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, ScrollView, RefreshControl, TouchableOpacity, TextInput, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, ScrollView, RefreshControl, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
 import PlayerCard from '../components/PlayerCard';
 import Icon from '../components/Icon';
 import { Player } from '../types';
-import { getPlayers } from '../data/playerData';
+import { getPlayers, checkApiAvailability } from '../data/playerData';
 import { commonStyles, colors } from '../styles/commonStyles';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 
-type PlayerTab = 'Вратари' | 'Защитники' | 'Нападающие';
-
 const styles = StyleSheet.create({
-  tabContainer: {
-    flexDirection: 'row',
-    backgroundColor: colors.surface,
-    marginHorizontal: 16,
-    marginVertical: 8,
-    borderRadius: 12,
-    padding: 4,
-  },
-  tab: {
+  container: {
     flex: 1,
-    paddingVertical: 12,
+    backgroundColor: colors.background,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
-    borderRadius: 8,
-    alignItems: 'center',
+    paddingVertical: 12,
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  activeTab: {
-    backgroundColor: colors.primary,
-  },
-  tabText: {
-    fontSize: 14,
+  title: {
+    fontSize: 20,
     fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  activeTabText: {
-    color: colors.surface,
-  },
-  searchContainer: {
-    backgroundColor: colors.surface,
-    marginHorizontal: 16,
-    marginVertical: 8,
-    borderRadius: 12,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
     color: colors.text,
-    marginLeft: 12,
+    marginLeft: 16,
   },
-  searchPlaceholder: {
+  backButton: {
+    padding: 8,
+    borderRadius: 8,
+  },
+  content: {
+    flex: 1,
+  },
+  playersContainer: {
+    padding: 8,
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    paddingVertical: 64,
+  },
+  emptyStateIcon: {
+    marginBottom: 16,
+  },
+  emptyStateTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  emptyStateText: {
+    fontSize: 14,
     color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
 
@@ -65,162 +71,104 @@ const PlayersScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<PlayerTab>('Вратари');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showSearch, setShowSearch] = useState(false);
+  const [apiAvailable, setApiAvailable] = useState<boolean | null>(null);
 
   useEffect(() => {
-    loadData();
+    initializeScreen();
   }, []);
 
-  const loadData = async () => {
+  const initializeScreen = async () => {
+    console.log('Инициализация экрана игроков...');
+    
+    // Проверяем доступность API при запуске
+    const isApiAvailable = await checkApiAvailability();
+    setApiAvailable(isApiAvailable);
+    
+    if (!isApiAvailable) {
+      setError('Ошибка доступа к API игроков. Проверьте подключение к интернету.');
+      setLoading(false);
+      return;
+    }
+    
+    await loadPlayers();
+  };
+
+  const loadPlayers = async () => {
     try {
       setError(null);
-      console.log('Loading players from API...');
+      console.log('Загрузка игроков...');
       
       const playersData = await getPlayers();
       setPlayers(playersData);
       
-      console.log(`Successfully loaded ${playersData.length} players`);
+      console.log(`Успешно загружено ${playersData.length} игроков`);
     } catch (err) {
-      console.error('Error loading players:', err);
-      setError('Ошибка загрузки списка игроков. Проверьте подключение к интернету.');
+      console.error('Ошибка загрузки игроков:', err);
+      setError('Ошибка загрузки списка игроков. Попробуйте обновить страницу.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
     setRefreshing(true);
-    setShowSearch(true); // Show search when pulling down
-    loadData();
+    await loadPlayers();
   };
-
-  // Group players by position
-  const playersByPosition = useMemo(() => {
-    const grouped = {
-      'Вратари': [] as Player[],
-      'Защитники': [] as Player[],
-      'Нападающие': [] as Player[],
-    };
-
-    players.forEach(player => {
-      const position = player.position;
-      if (position === 'Вратарь') {
-        grouped['Вратари'].push(player);
-      } else if (position === 'Защитник') {
-        grouped['Защитники'].push(player);
-      } else if (position === 'Нападающий') {
-        grouped['Нападающие'].push(player);
-      }
-    });
-
-    return grouped;
-  }, [players]);
-
-  // Filter players based on search query
-  const filteredPlayers = useMemo(() => {
-    const playersInTab = playersByPosition[activeTab];
-    
-    if (!searchQuery.trim()) {
-      return playersInTab;
-    }
-
-    const query = searchQuery.toLowerCase().trim();
-    return playersInTab.filter(player => 
-      player.name.toLowerCase().includes(query)
-    );
-  }, [playersByPosition, activeTab, searchQuery]);
-
-  const tabs: PlayerTab[] = ['Вратари', 'Защитники', 'Нападающие'];
 
   if (loading) {
     return (
-      <SafeAreaView style={commonStyles.container}>
-        <View style={commonStyles.header}>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
           <Link href="/" asChild>
-            <TouchableOpacity style={{ marginRight: 16 }}>
+            <TouchableOpacity style={styles.backButton}>
               <Icon name="arrow-back" size={24} color={colors.text} />
             </TouchableOpacity>
           </Link>
-          <Text style={commonStyles.title}>Игроки</Text>
+          <Text style={styles.title}>Игроки</Text>
         </View>
-        <LoadingSpinner />
+        <View style={styles.content}>
+          <LoadingSpinner />
+        </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={commonStyles.container}>
-      <View style={commonStyles.header}>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
         <Link href="/" asChild>
-          <TouchableOpacity style={{ marginRight: 16 }}>
+          <TouchableOpacity style={styles.backButton}>
             <Icon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
         </Link>
-        <Text style={commonStyles.title}>Игроки</Text>
+        <Text style={styles.title}>Игроки</Text>
       </View>
-
-      {/* Position Tabs */}
-      <View style={styles.tabContainer}>
-        {tabs.map((tab) => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tab, activeTab === tab && styles.activeTab]}
-            onPress={() => setActiveTab(tab)}
-          >
-            <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
-              {tab}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Search Bar */}
-      {showSearch && (
-        <View style={styles.searchContainer}>
-          <Icon name="search" size={20} color={colors.textSecondary} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Поиск по имени или фамилии..."
-            placeholderTextColor={colors.textSecondary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            autoCapitalize="words"
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Icon name="close-circle" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
 
       <ScrollView
-        style={commonStyles.container}
+        style={styles.content}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
         {error && <ErrorMessage message={error} />}
 
-        {filteredPlayers.length === 0 ? (
-          <View style={commonStyles.emptyState}>
-            <Icon name="people" size={64} color={colors.textSecondary} />
-            <Text style={commonStyles.emptyStateTitle}>
-              {searchQuery ? 'Игроки не найдены' : `Нет ${activeTab.toLowerCase()}`}
+        {players.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Icon name="people" size={64} color={colors.textSecondary} style={styles.emptyStateIcon} />
+            <Text style={styles.emptyStateTitle}>
+              {apiAvailable === false ? 'API недоступен' : 'Нет игроков'}
             </Text>
-            <Text style={commonStyles.emptyStateText}>
-              {searchQuery 
-                ? 'Попробуйте изменить поисковый запрос'
-                : `Информация о ${activeTab.toLowerCase()} будет добавлена в ближайшее время`
+            <Text style={styles.emptyStateText}>
+              {apiAvailable === false 
+                ? 'Не удается подключиться к серверу. Проверьте подключение к интернету и попробуйте снова.'
+                : 'Информация об игроках будет добавлена в ближайшее время'
               }
             </Text>
           </View>
         ) : (
-          <View style={{ padding: 8 }}>
-            {filteredPlayers.map((player) => (
+          <View style={styles.playersContainer}>
+            {players.map((player) => (
               <PlayerCard key={player.id} player={player} />
             ))}
           </View>

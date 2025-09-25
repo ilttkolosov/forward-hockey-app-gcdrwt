@@ -18,14 +18,13 @@ export interface Player {
   name: string;
   position: string;
   number: number;
-  age?: number;
-  height?: string;
-  weight?: string;
-  grip?: string;
-  captainStatus?: string;
-  nationality?: string;
-  photo?: string;
   birthDate?: string;
+  age?: number;
+  height?: number;
+  weight?: number;
+  handedness?: string;
+  captainStatus?: string;
+  photo?: string;
 }
 
 export interface GamePlayerStats {
@@ -84,7 +83,7 @@ export interface ApiPlayerResponse {
   sp_current_team?: string;
   post_date: string;
   post_title: string;
-  sp_number: number;
+  sp_number: string;
   sp_metrics: {
     ka?: string;
     onetwofive?: string;

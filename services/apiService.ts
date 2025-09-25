@@ -37,11 +37,11 @@ export interface ApiTeam {
   team_logo?: string;
 }
 
-export interface ApiPlayer {
+export interface ApiPlayerResponse {
   id: string;
-  post_title: string;
-  post_date: string;
   sp_current_team?: string;
+  post_date: string;
+  post_title: string;
   sp_number: string;
   sp_metrics: {
     ka?: string;
@@ -49,8 +49,8 @@ export interface ApiPlayer {
     height?: string;
     weight?: string;
   };
-  positions: string[];
-  player_image: string;
+  positions: string;
+  player_image?: string;
 }
 
 export interface ApiLeague {
@@ -134,11 +134,10 @@ class ApiService {
     }
   }
 
-  async fetchPlayers(): Promise<ApiPlayer[]> {
+  async fetchPlayers(): Promise<ApiPlayerResponse[]> {
     try {
-      console.log('Получение всех игроков из единого API эндпоинта:', this.playersUrl);
+      console.log('Получение всех игроков из нового API эндпоинта:', this.playersUrl);
       
-      // Проверяем доступность эндпоинта
       const response = await fetch(this.playersUrl);
       
       if (!response.ok) {
@@ -148,9 +147,8 @@ class ApiService {
       }
       
       const data = await response.json();
-      console.log('Данные всех игроков получены из единого эндпоинта:', data);
+      console.log('Данные всех игроков получены:', data);
       
-      // Проверяем, что данные являются массивом
       if (!Array.isArray(data)) {
         console.error('Полученные данные не являются массивом:', data);
         throw new Error('Неверный формат данных от API');
@@ -158,8 +156,21 @@ class ApiService {
       
       return data;
     } catch (error) {
-      console.error('Ошибка получения игроков из единого эндпоинта:', error);
+      console.error('Ошибка получения игроков:', error);
       throw error;
+    }
+  }
+
+  async checkPlayersApiAvailability(): Promise<boolean> {
+    try {
+      console.log('Проверка доступности API эндпоинта игроков...');
+      const response = await fetch(this.playersUrl, { method: 'HEAD' });
+      const isAvailable = response.ok;
+      console.log('API эндпоинт игроков доступен:', isAvailable);
+      return isAvailable;
+    } catch (error) {
+      console.error('Ошибка проверки доступности API эндпоинта игроков:', error);
+      return false;
     }
   }
 
@@ -183,11 +194,9 @@ class ApiService {
     }
   }
 
-  // Вспомогательный метод для парсинга названия игры и извлечения команд
   parseGameTitle(title: string): { homeTeam: string; awayTeam: string } {
     console.log('Парсинг названия игры:', title);
     
-    // Пытаемся парсить названия вида "Команда А vs Команда Б" или "Команда А - Команда Б"
     const vsMatch = title.match(/(.+?)\s+vs\s+(.+)/i);
     const dashMatch = title.match(/(.+?)\s+-\s+(.+)/i);
     
@@ -203,14 +212,12 @@ class ApiService {
       };
     }
     
-    // Резервный вариант, если парсинг не удался
     return {
       homeTeam: 'ХК Форвард 2014',
       awayTeam: title.trim()
     };
   }
 
-  // Вспомогательный метод для извлечения счета из main_results
   parseScore(mainResults?: string): { homeScore?: number; awayScore?: number } {
     if (!mainResults) {
       return {};
@@ -218,7 +225,6 @@ class ApiService {
     
     console.log('Парсинг счета из main_results:', mainResults);
     
-    // Ищем паттерны счета вида "3:2", "3-2", или "3 - 2"
     const scorePattern = /(\d+)[\s\-:]+(\d+)/;
     const match = mainResults.match(scorePattern);
     
@@ -232,7 +238,6 @@ class ApiService {
     return {};
   }
 
-  // Вспомогательный метод для определения статуса игры
   determineGameStatus(date: string, hasScore: boolean, isFromPastCalendar: boolean = false): 'upcoming' | 'live' | 'finished' {
     if (isFromPastCalendar || hasScore) {
       return 'finished';
@@ -245,7 +250,6 @@ class ApiService {
       return 'upcoming';
     }
     
-    // Если игра сегодня или в прошлом, но нет счета, она может быть в прямом эфире
     const diffInHours = (now.getTime() - gameDate.getTime()) / (1000 * 60 * 60);
     if (diffInHours >= 0 && diffInHours <= 3) {
       return 'live';
@@ -254,7 +258,6 @@ class ApiService {
     return 'finished';
   }
 
-  // Конвертация API события календаря в наш интерфейс Game
   convertCalendarEventToGame(event: ApiCalendarEvent, isFromPastCalendar: boolean = false): import('../types').Game {
     const title = event.post_title || event.title;
     const { homeTeam, awayTeam } = this.parseGameTitle(title);
@@ -266,15 +269,14 @@ class ApiService {
       id: event.ID.toString(),
       homeTeam,
       awayTeam,
-      date: date.split('T')[0], // Извлекаем часть с датой
-      time: '19:00', // Время по умолчанию
+      date: date.split('T')[0],
+      time: '19:00',
       venue: 'TBD',
       status,
       tournament: 'Чемпионат',
     };
   }
 
-  // Конвертация деталей API события в наш интерфейс Game с полными деталями
   convertEventDetailsToGame(eventDetails: ApiEventDetails): import('../types').Game {
     const title = eventDetails.title.rendered;
     const { homeTeam, awayTeam } = this.parseGameTitle(title);
@@ -289,71 +291,13 @@ class ApiService {
       awayTeam,
       homeScore,
       awayScore,
-      date: date.split('T')[0], // Извлекаем часть с датой
-      time: date.split('T')[1]?.split(':').slice(0, 2).join(':') || '19:00', // Извлекаем часть с временем
+      date: date.split('T')[0],
+      time: date.split('T')[1]?.split(':').slice(0, 2).join(':') || '19:00',
       venue: 'TBD',
       status,
       tournament: 'Чемпионат',
       videoUrl: eventDetails.sp_video,
     };
-  }
-
-  // Конвертация API игрока в наш интерфейс Player
-  convertApiPlayerToPlayer(apiPlayer: ApiPlayer): import('../types').Player {
-    console.log('Конвертация API игрока:', apiPlayer);
-    
-    // Убираем отчество из имени (последнее слово)
-    const fullName = apiPlayer.post_title || '';
-    const nameParts = fullName.trim().split(' ');
-    const nameWithoutPatronymic = nameParts.length > 2 
-      ? nameParts.slice(0, -1).join(' ') 
-      : fullName;
-    
-    // Извлекаем дату рождения без времени
-    const birthDate = apiPlayer.post_date ? apiPlayer.post_date.split('T')[0] : '';
-    
-    // Определяем позицию на русском языке
-    let position = 'Игрок';
-    if (apiPlayer.positions && apiPlayer.positions.length > 0) {
-      const pos = apiPlayer.positions[0].toLowerCase();
-      if (pos.includes('вратарь') || pos.includes('goalkeeper')) {
-        position = 'Вратарь';
-      } else if (pos.includes('защитник') || pos.includes('defense')) {
-        position = 'Защитник';
-      } else if (pos.includes('нападающий') || pos.includes('forward')) {
-        position = 'Нападающий';
-      }
-    }
-    
-    // Извлекаем метрики
-    const metrics = apiPlayer.sp_metrics || {};
-    
-    return {
-      id: apiPlayer.id,
-      name: nameWithoutPatronymic,
-      position: position,
-      number: parseInt(apiPlayer.sp_number) || 0,
-      birthDate: birthDate,
-      height: metrics.height ? parseInt(metrics.height) : undefined,
-      weight: metrics.weight ? parseInt(metrics.weight) : undefined,
-      photo: apiPlayer.player_image,
-      captainStatus: metrics.ka || '',
-      handedness: metrics.onetwofive || '',
-    };
-  }
-
-  // Проверка доступности API эндпоинта игроков
-  async checkPlayersApiAvailability(): Promise<boolean> {
-    try {
-      console.log('Проверка доступности API эндпоинта игроков...');
-      const response = await fetch(this.playersUrl, { method: 'HEAD' });
-      const isAvailable = response.ok;
-      console.log('API эндпоинт игроков доступен:', isAvailable);
-      return isAvailable;
-    } catch (error) {
-      console.error('Ошибка проверки доступности API эндпоинта игроков:', error);
-      return false;
-    }
   }
 }
 
