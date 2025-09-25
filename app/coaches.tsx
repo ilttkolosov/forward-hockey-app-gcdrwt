@@ -49,7 +49,7 @@ const CoachesScreen: React.FC = () => {
         <View style={commonStyles.header}>
           <Link href="/" asChild>
             <TouchableOpacity style={{ marginRight: 16 }}>
-              <Icon name="arrow-left" size={24} color={colors.text} />
+              <Icon name="arrow-back" size={24} color={colors.text} />
             </TouchableOpacity>
           </Link>
           <Text style={commonStyles.title}>Тренеры</Text>
@@ -64,7 +64,7 @@ const CoachesScreen: React.FC = () => {
       <View style={commonStyles.header}>
         <Link href="/" asChild>
           <TouchableOpacity style={{ marginRight: 16 }}>
-            <Icon name="arrow-left" size={24} color={colors.text} />
+            <Icon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
         </Link>
         <Text style={commonStyles.title}>Тренеры</Text>
@@ -80,7 +80,7 @@ const CoachesScreen: React.FC = () => {
 
         {coaches.length === 0 ? (
           <View style={commonStyles.emptyState}>
-            <Icon name="user" size={64} color={colors.textSecondary} />
+            <Icon name="person" size={64} color={colors.textSecondary} />
             <Text style={commonStyles.emptyStateTitle}>Нет данных о тренерах</Text>
             <Text style={commonStyles.emptyStateText}>
               Информация о тренерском составе будет добавлена в ближайшее время

@@ -3,10 +3,10 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
-import { Game } from '../types';
 import { getPastGames } from '../data/gameData';
-import Icon from '../components/Icon';
 import GameCard from '../components/GameCard';
+import Icon from '../components/Icon';
+import { Game } from '../types';
 import { commonStyles, colors } from '../styles/commonStyles';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
@@ -25,13 +25,11 @@ const GameArchiveScreen: React.FC = () => {
     try {
       setError(null);
       console.log('Loading past games...');
-      const pastGames = await getPastGames();
-      // Sort by date descending (most recent first)
-      const sortedGames = pastGames.sort((a, b) => 
-        new Date(b.date).getTime() - new Date(a.date).getTime()
-      );
-      setGames(sortedGames);
-      console.log('Past games loaded successfully');
+      
+      const gamesData = await getPastGames();
+      setGames(gamesData);
+      
+      console.log(`Successfully loaded ${gamesData.length} past games`);
     } catch (err) {
       console.error('Error loading past games:', err);
       setError('Ошибка загрузки архива игр. Проверьте подключение к интернету.');
@@ -52,7 +50,7 @@ const GameArchiveScreen: React.FC = () => {
         <View style={commonStyles.header}>
           <Link href="/" asChild>
             <TouchableOpacity style={{ marginRight: 16 }}>
-              <Icon name="arrow-left" size={24} color={colors.text} />
+              <Icon name="arrow-back" size={24} color={colors.text} />
             </TouchableOpacity>
           </Link>
           <Text style={commonStyles.title}>Архив игр</Text>
@@ -67,7 +65,7 @@ const GameArchiveScreen: React.FC = () => {
       <View style={commonStyles.header}>
         <Link href="/" asChild>
           <TouchableOpacity style={{ marginRight: 16 }}>
-            <Icon name="arrow-left" size={24} color={colors.text} />
+            <Icon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
         </Link>
         <Text style={commonStyles.title}>Архив игр</Text>
@@ -84,15 +82,17 @@ const GameArchiveScreen: React.FC = () => {
         {games.length === 0 ? (
           <View style={commonStyles.emptyState}>
             <Icon name="archive" size={64} color={colors.textSecondary} />
-            <Text style={commonStyles.emptyStateTitle}>Архив пуст</Text>
+            <Text style={commonStyles.emptyStateTitle}>Нет завершенных игр</Text>
             <Text style={commonStyles.emptyStateText}>
-              Завершенные игры появятся здесь
+              Архив игр будет пополняться по мере проведения матчей
             </Text>
           </View>
         ) : (
-          games.map((game) => (
-            <GameCard key={game.id} game={game} showScore={true} />
-          ))
+          <View style={{ padding: 8 }}>
+            {games.map((game) => (
+              <GameCard key={game.id} game={game} showScore={true} />
+            ))}
+          </View>
         )}
       </ScrollView>
     </SafeAreaView>

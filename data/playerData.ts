@@ -22,24 +22,26 @@ function isCacheValid(timestamp: number): boolean {
   return Date.now() - timestamp < CACHE_DURATION;
 }
 
-// Position mapping according to API specification
-function mapPositionToRussian(positionId: number | string): string {
-  const id = typeof positionId === 'string' ? parseInt(positionId) : positionId;
+// Position mapping according to new API specification
+function mapPositionToRussian(position: string): string {
+  if (!position) return 'Игрок';
   
-  switch (id) {
-    case 8:
-      return 'Нападающий';
-    case 7:
-      return 'Вратарь';
-    case 9:
-      return 'Защитник';
-    default:
-      return 'Игрок';
+  const pos = position.toLowerCase();
+  if (pos.includes('вратарь') || pos.includes('goalkeeper')) {
+    return 'Вратарь';
+  } else if (pos.includes('защитник') || pos.includes('defender')) {
+    return 'Защитник';
+  } else if (pos.includes('нападающий') || pos.includes('forward')) {
+    return 'Нападающий';
   }
+  
+  return position;
 }
 
 // Remove patronymic (third word) from player name
 function removePatronymic(fullName: string): string {
+  if (!fullName) return '';
+  
   const nameParts = fullName.trim().split(/\s+/);
   if (nameParts.length >= 3) {
     // Return first two parts (name and surname), remove patronymic
@@ -100,7 +102,7 @@ async function cachePlayerImage(imageUrl: string): Promise<string> {
 
 export async function getPlayers(): Promise<Player[]> {
   try {
-    console.log('Fetching players from API...');
+    console.log('Fetching players from new API...');
     
     // Check cache first
     const cachedDataJson = await AsyncStorage.getItem(PLAYERS_CACHE_KEY);
@@ -112,49 +114,41 @@ export async function getPlayers(): Promise<Player[]> {
       }
     }
     
-    // Fetch from API using apiService
+    // Fetch from new API using apiService
     const apiPlayers = await apiService.fetchPlayers();
     console.log('Raw API players response:', apiPlayers);
     
-    // Filter players by current_teams = 74 and process data
-    const filteredPlayers = apiPlayers.filter((player: any) => {
-      const currentTeams = player.current_teams;
-      if (Array.isArray(currentTeams)) {
-        return currentTeams.includes(74);
-      } else if (typeof currentTeams === 'string') {
-        return currentTeams.split(',').map(id => parseInt(id.trim())).includes(74);
-      } else if (typeof currentTeams === 'number') {
-        return currentTeams === 74;
-      }
-      return false;
-    });
-    
-    console.log(`Filtered ${filteredPlayers.length} players with team ID 74`);
+    // No filtering needed as per new specification - API already returns only needed players
+    console.log(`Processing ${apiPlayers.length} players from new API`);
     
     // Convert API data to our Player interface
     const players: Player[] = await Promise.all(
-      filteredPlayers.map(async (apiPlayer: any) => {
-        const title = typeof apiPlayer.title === 'string' ? apiPlayer.title : (apiPlayer.title?.rendered || '');
+      apiPlayers.map(async (apiPlayer: any) => {
+        const title = apiPlayer.post_title || '';
         const name = removePatronymic(title);
-        const position = mapPositionToRussian(apiPlayer.positions?.[0] || apiPlayer.positions || 0);
-        const age = calculateAge(apiPlayer.date);
+        const position = mapPositionToRussian(apiPlayer.positions || '');
+        const age = calculateAge(apiPlayer.post_date);
         
-        // Parse metrics array [Хват, Вес, Рост]
-        const metrics = apiPlayer.metrics || [];
-        const weight = metrics[1] ? `${metrics[1]} кг` : undefined;
-        const height = metrics[2] ? `${metrics[2]} см` : undefined;
+        // Parse sp_metrics object
+        const metrics = apiPlayer.sp_metrics || {};
+        const weight = metrics.weight ? `${metrics.weight} кг` : undefined;
+        const height = metrics.height ? `${metrics.height} см` : undefined;
+        const grip = metrics.onetwofive || undefined;
+        const captainStatus = metrics.ka || '';
         
         // Cache player image
         const cachedImageUrl = await cachePlayerImage(apiPlayer.player_image || '');
         
         return {
-          id: (apiPlayer.ID || apiPlayer.id || '').toString(),
+          id: (apiPlayer.ID || '').toString(),
           name,
           position,
-          number: apiPlayer.number || 0,
+          number: apiPlayer.sp_number || 0,
           age,
           height,
           weight,
+          grip,
+          captainStatus,
           nationality: 'Россия', // Default nationality
           photo: cachedImageUrl,
         };
@@ -198,27 +192,31 @@ export async function getPlayerById(playerId: string): Promise<Player | null> {
     const apiPlayer = await apiService.fetchPlayer(playerId);
     console.log('Player details fetched:', apiPlayer);
     
-    const title = typeof apiPlayer.title === 'string' ? apiPlayer.title : (apiPlayer.title?.rendered || '');
+    const title = apiPlayer.post_title || '';
     const name = removePatronymic(title);
-    const position = mapPositionToRussian(apiPlayer.positions?.[0] || apiPlayer.positions || 0);
-    const age = calculateAge(apiPlayer.date || '');
+    const position = mapPositionToRussian(apiPlayer.positions || '');
+    const age = calculateAge(apiPlayer.post_date || '');
     
-    // Parse metrics array [Хват, Вес, Рост]
-    const metrics = apiPlayer.metrics || [];
-    const weight = metrics[1] ? `${metrics[1]} кг` : undefined;
-    const height = metrics[2] ? `${metrics[2]} см` : undefined;
+    // Parse sp_metrics object
+    const metrics = apiPlayer.sp_metrics || {};
+    const weight = metrics.weight ? `${metrics.weight} кг` : undefined;
+    const height = metrics.height ? `${metrics.height} см` : undefined;
+    const grip = metrics.onetwofive || undefined;
+    const captainStatus = metrics.ka || '';
     
     // Cache player image
     const cachedImageUrl = await cachePlayerImage(apiPlayer.player_image || '');
     
     return {
-      id: (apiPlayer.ID || apiPlayer.id || playerId).toString(),
+      id: (apiPlayer.ID || playerId).toString(),
       name,
       position,
-      number: apiPlayer.number || 0,
+      number: apiPlayer.sp_number || 0,
       age,
       height,
       weight,
+      grip,
+      captainStatus,
       nationality: 'Россия', // Default nationality
       photo: cachedImageUrl,
     };

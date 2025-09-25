@@ -40,14 +40,24 @@ export interface ApiTeam {
 export interface ApiPlayer {
   ID?: number;
   id?: number;
-  title: {
+  post_title?: string;
+  post_date?: string;
+  sp_current_team?: string | number;
+  sp_number?: number;
+  sp_metrics?: {
+    ka?: string;
+    onetwofive?: string;
+    height?: string;
+    weight?: string;
+  };
+  positions?: string;
+  player_image?: string;
+  title?: {
     rendered: string;
   } | string;
   number?: number;
   metrics?: string[];
-  player_image?: string;
   current_teams?: number[] | string | number;
-  positions?: number[] | number;
   date?: string;
 }
 
@@ -60,6 +70,7 @@ export interface ApiLeague {
 
 class ApiService {
   private baseUrl = 'https://www.hc-forward.com/wp-json/wp/v2';
+  private newPlayersUrl = 'https://www.hc-forward.com/wp-json/app/v1/players';
   private username = 'mobile_app';
   private password = '1234567890';
 
@@ -153,17 +164,15 @@ class ApiService {
 
   async fetchPlayers(): Promise<ApiPlayer[]> {
     try {
-      console.log('Fetching players list...');
-      const response = await fetch(`${this.baseUrl}/players/`, {
-        headers: this.getAuthHeaders(),
-      });
+      console.log('Fetching players from new API endpoint...');
+      const response = await fetch(this.newPlayersUrl);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       
       const data = await response.json();
-      console.log('Players list fetched:', data);
+      console.log('Players list fetched from new API:', data);
       return data;
     } catch (error) {
       console.error('Error fetching players list:', error);
@@ -174,9 +183,7 @@ class ApiService {
   async fetchPlayer(playerId: string): Promise<ApiPlayer> {
     try {
       console.log('Fetching player details for ID:', playerId);
-      const response = await fetch(`${this.baseUrl}/players/${playerId}`, {
-        headers: this.getAuthHeaders(),
-      });
+      const response = await fetch(`${this.newPlayersUrl}/${playerId}`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -329,7 +336,7 @@ class ApiService {
   // Convert API player to our Player interface
   convertApiPlayerToPlayer(apiPlayer: ApiPlayer): import('../types').Player {
     const metrics = apiPlayer.metrics || [];
-    const title = typeof apiPlayer.title === 'string' ? apiPlayer.title : apiPlayer.title.rendered;
+    const title = typeof apiPlayer.title === 'string' ? apiPlayer.title : apiPlayer.title?.rendered || '';
     
     return {
       id: (apiPlayer.ID || apiPlayer.id || 0).toString(),

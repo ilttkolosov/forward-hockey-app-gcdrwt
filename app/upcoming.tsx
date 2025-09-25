@@ -3,10 +3,10 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
-import { Game } from '../types';
-import Icon from '../components/Icon';
-import GameCard from '../components/GameCard';
 import { getFutureGames } from '../data/gameData';
+import GameCard from '../components/GameCard';
+import Icon from '../components/Icon';
+import { Game } from '../types';
 import { commonStyles, colors } from '../styles/commonStyles';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
@@ -25,9 +25,11 @@ const UpcomingGamesScreen: React.FC = () => {
     try {
       setError(null);
       console.log('Loading upcoming games...');
-      const upcomingGames = await getFutureGames();
-      setGames(upcomingGames);
-      console.log('Upcoming games loaded successfully');
+      
+      const gamesData = await getFutureGames();
+      setGames(gamesData);
+      
+      console.log(`Successfully loaded ${gamesData.length} upcoming games`);
     } catch (err) {
       console.error('Error loading upcoming games:', err);
       setError('Ошибка загрузки предстоящих игр. Проверьте подключение к интернету.');
@@ -48,7 +50,7 @@ const UpcomingGamesScreen: React.FC = () => {
         <View style={commonStyles.header}>
           <Link href="/" asChild>
             <TouchableOpacity style={{ marginRight: 16 }}>
-              <Icon name="arrow-left" size={24} color={colors.text} />
+              <Icon name="arrow-back" size={24} color={colors.text} />
             </TouchableOpacity>
           </Link>
           <Text style={commonStyles.title}>Предстоящие игры</Text>
@@ -63,7 +65,7 @@ const UpcomingGamesScreen: React.FC = () => {
       <View style={commonStyles.header}>
         <Link href="/" asChild>
           <TouchableOpacity style={{ marginRight: 16 }}>
-            <Icon name="arrow-left" size={24} color={colors.text} />
+            <Icon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
         </Link>
         <Text style={commonStyles.title}>Предстоящие игры</Text>
@@ -86,9 +88,11 @@ const UpcomingGamesScreen: React.FC = () => {
             </Text>
           </View>
         ) : (
-          games.map((game) => (
-            <GameCard key={game.id} game={game} showScore={false} />
-          ))
+          <View style={{ padding: 8 }}>
+            {games.map((game) => (
+              <GameCard key={game.id} game={game} showScore={false} />
+            ))}
+          </View>
         )}
       </ScrollView>
     </SafeAreaView>

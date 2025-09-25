@@ -3,10 +3,10 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
+import TournamentCard from '../components/TournamentCard';
 import Icon from '../components/Icon';
 import { Tournament } from '../types';
 import { mockTournaments } from '../data/mockData';
-import TournamentCard from '../components/TournamentCard';
 import { commonStyles, colors } from '../styles/commonStyles';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
@@ -25,11 +25,12 @@ const TournamentsScreen: React.FC = () => {
     try {
       setError(null);
       console.log('Loading tournaments...');
-      // For now, using mock data. In the future, this could fetch from the API
-      // when league endpoints are fully implemented
-      await new Promise(resolve => setTimeout(resolve, 500)); // Simulate API call
+      
+      // For now, using mock data. In a real app, this would be an API call
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate loading
       setTournaments(mockTournaments);
-      console.log('Tournaments loaded successfully');
+      
+      console.log(`Successfully loaded ${mockTournaments.length} tournaments`);
     } catch (err) {
       console.error('Error loading tournaments:', err);
       setError('Ошибка загрузки турниров. Проверьте подключение к интернету.');
@@ -50,7 +51,7 @@ const TournamentsScreen: React.FC = () => {
         <View style={commonStyles.header}>
           <Link href="/" asChild>
             <TouchableOpacity style={{ marginRight: 16 }}>
-              <Icon name="arrow-left" size={24} color={colors.text} />
+              <Icon name="arrow-back" size={24} color={colors.text} />
             </TouchableOpacity>
           </Link>
           <Text style={commonStyles.title}>Турниры</Text>
@@ -65,7 +66,7 @@ const TournamentsScreen: React.FC = () => {
       <View style={commonStyles.header}>
         <Link href="/" asChild>
           <TouchableOpacity style={{ marginRight: 16 }}>
-            <Icon name="arrow-left" size={24} color={colors.text} />
+            <Icon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
         </Link>
         <Text style={commonStyles.title}>Турниры</Text>

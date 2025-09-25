@@ -44,6 +44,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  photoContainer: {
+    position: 'relative',
+  },
+  captainBadge: {
+    position: 'absolute',
+    top: -4,
+    right: 12,
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    minWidth: 20,
+    alignItems: 'center',
+  },
+  captainText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: colors.surface,
+  },
   info: {
     flex: 1,
   },
@@ -98,20 +117,36 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player }) => {
     }
   };
 
+  const getCaptainBadgeText = (captainStatus: string) => {
+    if (captainStatus?.toLowerCase().includes('k')) return 'К';
+    if (captainStatus?.toLowerCase().includes('a')) return 'А';
+    return null;
+  };
+
   const handlePress = () => {
     console.log('Navigating to player details:', player.id);
     router.push(`/player/${player.id}`);
   };
 
+  const captainBadgeText = getCaptainBadgeText(player.captainStatus || '');
+
   return (
     <TouchableOpacity style={styles.card} onPress={handlePress}>
-      {player.photo ? (
-        <Image source={{ uri: player.photo }} style={styles.photo} />
-      ) : (
-        <View style={styles.photoPlaceholder}>
-          <Icon name="user" size={24} color={colors.textSecondary} />
-        </View>
-      )}
+      <View style={styles.photoContainer}>
+        {player.photo ? (
+          <Image source={{ uri: player.photo }} style={styles.photo} />
+        ) : (
+          <View style={styles.photoPlaceholder}>
+            <Icon name="person" size={24} color={colors.textSecondary} />
+          </View>
+        )}
+        
+        {captainBadgeText && (
+          <View style={styles.captainBadge}>
+            <Text style={styles.captainText}>{captainBadgeText}</Text>
+          </View>
+        )}
+      </View>
       
       <View style={styles.info}>
         <Text style={styles.name}>{player.name}</Text>
@@ -129,8 +164,8 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player }) => {
           {player.weight && (
             <Text style={styles.detail}>Вес: {player.weight}</Text>
           )}
-          {player.nationality && (
-            <Text style={styles.detail}>{player.nationality}</Text>
+          {player.grip && (
+            <Text style={styles.detail}>Хват: {player.grip}</Text>
           )}
         </View>
       </View>

@@ -21,6 +21,8 @@ export interface Player {
   age?: number;
   height?: string;
   weight?: string;
+  grip?: string;
+  captainStatus?: string;
   nationality?: string;
   photo?: string;
 }

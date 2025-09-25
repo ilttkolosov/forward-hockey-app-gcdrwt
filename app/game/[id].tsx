@@ -11,181 +11,97 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { WebView } from 'react-native-webview';
+import { getGameById, getGameStatsById } from '../../data/gameData';
+import Icon from '../../components/Icon';
 import { Game, GameStats, GamePlayerStats } from '../../types';
 import { colors, commonStyles } from '../../styles/commonStyles';
-import Icon from '../../components/Icon';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
-import { getGameById, getGameStatsById } from '../../data/gameData';
-
-const { width } = Dimensions.get('window');
+import { WebView } from 'react-native-webview';
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  videoContainer: {
+    height: 200,
     backgroundColor: colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  backButton: {
-    marginRight: 16,
-    padding: 8,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.text,
-    flex: 1,
+    marginHorizontal: 16,
+    marginVertical: 8,
+    borderRadius: 12,
+    overflow: 'hidden',
   },
   gameInfo: {
     backgroundColor: colors.surface,
-    margin: 16,
+    marginHorizontal: 16,
+    marginVertical: 8,
     borderRadius: 12,
-    padding: 20,
-    alignItems: 'center',
+    padding: 16,
   },
-  matchup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  team: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  teamName: {
-    fontSize: 18,
-    fontWeight: '600',
+  gameTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
     color: colors.text,
     textAlign: 'center',
-  },
-  score: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: colors.primary,
-    marginHorizontal: 30,
-  },
-  vs: {
-    fontSize: 18,
-    color: colors.textSecondary,
-    marginHorizontal: 30,
-  },
-  gameDetails: {
-    alignItems: 'center',
-  },
-  status: {
-    fontSize: 14,
-    fontWeight: '600',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
     marginBottom: 8,
   },
-  dateTime: {
-    fontSize: 16,
-    color: colors.text,
-    marginBottom: 4,
+  gameDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginVertical: 8,
   },
-  venue: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: 4,
-  },
-  tournament: {
+  gameDetail: {
     fontSize: 14,
     color: colors.textSecondary,
   },
-  videoContainer: {
-    margin: 16,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: colors.surface,
+  score: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: colors.primary,
+    textAlign: 'center',
+    marginVertical: 16,
   },
-  videoHeader: {
-    padding: 16,
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  videoTitle: {
+  status: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text,
-  },
-  webview: {
-    height: 200,
-  },
-  noVideo: {
-    padding: 40,
-    alignItems: 'center',
-    backgroundColor: colors.background,
-  },
-  noVideoText: {
-    fontSize: 16,
-    color: colors.textSecondary,
     textAlign: 'center',
+    marginBottom: 8,
   },
-  statsContainer: {
-    margin: 16,
+  statsSection: {
+    backgroundColor: colors.surface,
+    marginHorizontal: 16,
+    marginVertical: 8,
+    borderRadius: 12,
+    padding: 16,
   },
-  statsHeader: {
+  sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: colors.text,
-    marginBottom: 16,
-  },
-  teamStatsContainer: {
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    marginBottom: 16,
-    overflow: 'hidden',
-  },
-  teamStatsHeader: {
-    padding: 16,
-    backgroundColor: colors.primary,
-  },
-  teamStatsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.surface,
+    marginBottom: 12,
   },
   playerRow: {
     flexDirection: 'row',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  playerNumber: {
-    width: 30,
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primary,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.background,
   },
   playerName: {
-    flex: 1,
     fontSize: 14,
     color: colors.text,
+    flex: 1,
   },
-  playerStats: {
-    fontSize: 12,
+  playerStat: {
+    fontSize: 14,
     color: colors.textSecondary,
-    width: 80,
-    textAlign: 'right',
+    minWidth: 40,
+    textAlign: 'center',
   },
 });
 
 const GameDetailsScreen: React.FC = () => {
-  const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const [game, setGame] = useState<Game | null>(null);
   const [gameStats, setGameStats] = useState<GameStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -199,20 +115,21 @@ const GameDetailsScreen: React.FC = () => {
   }, [id]);
 
   const loadGameData = async () => {
-    if (!id) return;
-
     try {
       setError(null);
       console.log('Loading game data for ID:', id);
       
       const [gameData, statsData] = await Promise.all([
-        getGameById(id),
-        getGameStatsById(id)
+        getGameById(id!),
+        getGameStatsById(id!).catch(() => null) // Stats might not be available
       ]);
-
+      
       setGame(gameData);
       setGameStats(statsData);
-      console.log('Game data loaded successfully');
+      
+      if (!gameData) {
+        setError('Игра не найдена');
+      }
     } catch (err) {
       console.error('Error loading game data:', err);
       setError('Ошибка загрузки данных игры. Проверьте подключение к интернету.');
@@ -230,200 +147,158 @@ const GameDetailsScreen: React.FC = () => {
   const getStatusColor = (status: Game['status']) => {
     switch (status) {
       case 'live':
-        return { backgroundColor: colors.success, color: colors.surface };
-      case 'upcoming':
-        return { backgroundColor: colors.warning, color: colors.surface };
+        return colors.error;
       case 'finished':
-        return { backgroundColor: colors.textSecondary, color: colors.surface };
+        return colors.textSecondary;
+      case 'upcoming':
+        return colors.primary;
       default:
-        return { backgroundColor: colors.textSecondary, color: colors.surface };
+        return colors.textSecondary;
     }
   };
 
   const getStatusText = (status: Game['status']) => {
     switch (status) {
       case 'live':
-        return 'В ЭФИРЕ';
-      case 'upcoming':
-        return 'ПРЕДСТОЯЩИЙ';
+        return 'В прямом эфире';
       case 'finished':
-        return 'ЗАВЕРШЕН';
+        return 'Завершена';
+      case 'upcoming':
+        return 'Предстоящая';
       default:
-        return 'НЕИЗВЕСТНО';
+        return 'Неизвестно';
     }
   };
 
   const formatDate = (dateString: string) => {
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('ru-RU', {
-        weekday: 'long',
-        day: '2-digit',
-        month: 'long',
-        year: 'numeric',
-      });
-    } catch (error) {
-      console.error('Error formatting date:', error);
-      return dateString;
-    }
+    const date = new Date(dateString);
+    return date.toLocaleDateString('ru-RU', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
   };
 
   const renderPlayerStats = (stats: GamePlayerStats[]) => {
-    return stats.map((player, index) => (
-      <View key={player.playerId} style={styles.playerRow}>
-        <Text style={styles.playerNumber}>#{player.number}</Text>
-        <Text style={styles.playerName}>{player.playerName}</Text>
-        <Text style={styles.playerStats}>
-          {player.goals}Г {player.assists}П {player.points}О
+    if (!stats || stats.length === 0) {
+      return (
+        <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 8 }}>
+          Статистика недоступна
         </Text>
+      );
+    }
+
+    return stats.map((player, index) => (
+      <View key={index} style={styles.playerRow}>
+        <Text style={styles.playerName}>
+          #{player.number} {player.playerName}
+        </Text>
+        <Text style={styles.playerStat}>{player.goals}Г</Text>
+        <Text style={styles.playerStat}>{player.assists}А</Text>
+        <Text style={styles.playerStat}>{player.points}О</Text>
       </View>
     ));
   };
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Icon name="arrow-left" size={24} color={colors.text} />
+      <SafeAreaView style={commonStyles.container}>
+        <View style={commonStyles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 16 }}>
+            <Icon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Загрузка...</Text>
+          <Text style={commonStyles.title}>Игра</Text>
         </View>
         <LoadingSpinner />
       </SafeAreaView>
     );
   }
 
-  if (!game) {
+  if (error || !game) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Icon name="arrow-left" size={24} color={colors.text} />
+      <SafeAreaView style={commonStyles.container}>
+        <View style={commonStyles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 16 }}>
+            <Icon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Игра не найдена</Text>
+          <Text style={commonStyles.title}>Игра</Text>
         </View>
-        <ErrorMessage message="Игра не найдена" />
+        <ErrorMessage message={error || 'Игра не найдена'} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Icon name="arrow-left" size={24} color={colors.text} />
+    <SafeAreaView style={commonStyles.container}>
+      <View style={commonStyles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 16 }}>
+          <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Детали игры</Text>
+        <Text style={commonStyles.title}>Игра</Text>
       </View>
 
       <ScrollView
-        style={styles.container}
+        style={commonStyles.container}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {error && <ErrorMessage message={error} />}
-
-        {/* Game Info */}
-        <View style={styles.gameInfo}>
-          <View style={styles.matchup}>
-            <View style={styles.team}>
-              <Text style={styles.teamName}>{game.homeTeam}</Text>
-            </View>
-
-            {game.homeScore !== undefined && game.awayScore !== undefined ? (
-              <Text style={styles.score}>
-                {game.homeScore} : {game.awayScore}
-              </Text>
-            ) : (
-              <Text style={styles.vs}>VS</Text>
-            )}
-
-            <View style={styles.team}>
-              <Text style={styles.teamName}>{game.awayTeam}</Text>
-            </View>
-          </View>
-
-          <View style={styles.gameDetails}>
-            <Text style={[styles.status, getStatusColor(game.status)]}>
-              {getStatusText(game.status)}
-            </Text>
-            <Text style={styles.dateTime}>
-              {formatDate(game.date)} • {game.time}
-            </Text>
-            <Text style={styles.venue}>{game.venue}</Text>
-            <Text style={styles.tournament}>{game.tournament}</Text>
-          </View>
-        </View>
-
-        {/* Video */}
-        {game.videoUrl ? (
+        {/* Video Player */}
+        {game.videoUrl && (
           <View style={styles.videoContainer}>
-            <View style={styles.videoHeader}>
-              <Text style={styles.videoTitle}>Видео трансляция</Text>
-            </View>
             <WebView
               source={{ uri: game.videoUrl }}
-              style={styles.webview}
-              javaScriptEnabled={true}
-              domStorageEnabled={true}
-              startInLoadingState={true}
-              onError={(syntheticEvent) => {
-                const { nativeEvent } = syntheticEvent;
-                console.error('WebView error: ', nativeEvent);
-              }}
+              style={{ flex: 1 }}
+              allowsFullscreenVideo={true}
+              mediaPlaybackRequiresUserAction={false}
             />
-          </View>
-        ) : (
-          <View style={styles.videoContainer}>
-            <View style={styles.videoHeader}>
-              <Text style={styles.videoTitle}>Видео трансляция</Text>
-            </View>
-            <View style={styles.noVideo}>
-              <Icon name="video-off" size={48} color={colors.textSecondary} />
-              <Text style={styles.noVideoText}>
-                Видео трансляция недоступна для этой игры
-              </Text>
-            </View>
           </View>
         )}
 
-        {/* Player Statistics */}
+        {/* Game Information */}
+        <View style={styles.gameInfo}>
+          <Text style={styles.gameTitle}>
+            {game.homeTeam} vs {game.awayTeam}
+          </Text>
+          
+          <Text style={[styles.status, { color: getStatusColor(game.status) }]}>
+            {getStatusText(game.status)}
+          </Text>
+
+          {(game.homeScore !== undefined && game.awayScore !== undefined) && (
+            <Text style={styles.score}>
+              {game.homeScore} : {game.awayScore}
+            </Text>
+          )}
+
+          <View style={styles.gameDetails}>
+            <Text style={styles.gameDetail}>Дата: {formatDate(game.date)}</Text>
+            <Text style={styles.gameDetail}>Время: {game.time}</Text>
+          </View>
+
+          <View style={styles.gameDetails}>
+            <Text style={styles.gameDetail}>Место: {game.venue}</Text>
+            <Text style={styles.gameDetail}>Турнир: {game.tournament}</Text>
+          </View>
+        </View>
+
+        {/* Game Statistics */}
         {gameStats && (
-          <View style={styles.statsContainer}>
-            <Text style={styles.statsHeader}>Статистика игроков</Text>
-
-            {/* Home Team Stats */}
-            <View style={styles.teamStatsContainer}>
-              <View style={styles.teamStatsHeader}>
-                <Text style={styles.teamStatsTitle}>{game.homeTeam}</Text>
-              </View>
-              {renderPlayerStats(gameStats.homeTeamStats)}
-            </View>
-
-            {/* Away Team Stats */}
-            <View style={styles.teamStatsContainer}>
-              <View style={styles.teamStatsHeader}>
-                <Text style={styles.teamStatsTitle}>{game.awayTeam}</Text>
-              </View>
-              {renderPlayerStats(gameStats.awayTeamStats)}
-            </View>
-
-            {/* Game Highlights */}
-            {gameStats.gameHighlights && gameStats.gameHighlights.length > 0 && (
-              <View style={styles.teamStatsContainer}>
-                <View style={styles.teamStatsHeader}>
-                  <Text style={styles.teamStatsTitle}>Основные моменты</Text>
-                </View>
-                {gameStats.gameHighlights.map((highlight, index) => (
-                  <View key={index} style={styles.playerRow}>
-                    <Text style={[styles.playerName, { flex: 1 }]}>{highlight}</Text>
-                  </View>
-                ))}
+          <>
+            {gameStats.homeTeamStats.length > 0 && (
+              <View style={styles.statsSection}>
+                <Text style={styles.sectionTitle}>{game.homeTeam}</Text>
+                {renderPlayerStats(gameStats.homeTeamStats)}
               </View>
             )}
-          </View>
+
+            {gameStats.awayTeamStats.length > 0 && (
+              <View style={styles.statsSection}>
+                <Text style={styles.sectionTitle}>{game.awayTeam}</Text>
+                {renderPlayerStats(gameStats.awayTeamStats)}
+              </View>
+            )}
+          </>
         )}
       </ScrollView>
     </SafeAreaView>

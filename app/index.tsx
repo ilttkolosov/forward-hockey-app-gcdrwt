@@ -96,8 +96,8 @@ const HomeScreen: React.FC = () => {
         }
       >
         <View style={commonStyles.header}>
-          <Text style={commonStyles.title}>ХК Форвард</Text>
-          <Text style={commonStyles.subtitle}>Официальное приложение</Text>
+          <Text style={commonStyles.title}>ХК Форвард 2014</Text>
+          <Text style={commonStyles.subtitle}>Санкт-Петербург</Text>
         </View>
 
         {error && <ErrorMessage message={error} />}
