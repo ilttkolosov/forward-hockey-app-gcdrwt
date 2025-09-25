@@ -11,15 +11,9 @@ export interface Game {
   status: 'upcoming' | 'live' | 'finished';
   tournament?: string;
   videoUrl?: string;
-  // New fields for the updated API
+  // API fields
   event_id: string;
   event_date: string;
-  league_id?: string;
-  league_name?: string;
-  season_id?: string;
-  season_name?: string;
-  venue_id?: string;
-  venue_name?: string;
   homeTeamId?: string;
   awayTeamId?: string;
   homeTeamLogo?: string;
@@ -110,7 +104,7 @@ export interface ApiPlayerResponse {
   player_image?: string;
 }
 
-// New API interfaces for the updated endpoints
+// API interfaces for events
 export interface ApiUpcomingEventsResponse {
   data: ApiEvent[];
   count: number;

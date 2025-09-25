@@ -16,19 +16,14 @@ const isCacheValid = () => {
   return Date.now() - cacheTimestamp < CACHE_DURATION;
 };
 
-// Convert API event to Game object
+// Convert API event to Game object with simplified logic
 const convertApiEventToGame = async (apiEvent: ApiEvent, isPastEvent: boolean = false): Promise<Game> => {
-  console.log('Converting API event to game:', apiEvent);
+  console.log('Converting API event to game (simplified):', apiEvent);
   
   // Parse team IDs
   const teamIds = apiEvent.sp_teams.split(',').map(id => id.trim());
   const homeTeamId = teamIds[0] || '';
   const awayTeamId = teamIds[1] || '';
-  
-  // Parse league, season, venue info
-  const league = apiService.parseIdNameString(apiEvent.Leagues || '');
-  const season = apiService.parseIdNameString(apiEvent.seasons || '');
-  const venue = apiService.parseIdNameString(apiEvent.venues || '');
   
   // Fetch team details
   let homeTeam = 'Home Team';
@@ -71,6 +66,9 @@ const convertApiEventToGame = async (apiEvent: ApiEvent, isPastEvent: boolean = 
   // Determine status
   const status = apiService.determineGameStatus(apiEvent.event_date, isPastEvent || (homeScore !== undefined && awayScore !== undefined));
   
+  // Simple venue parsing
+  const venue = apiService.parseIdNameString(apiEvent.venues || '');
+  
   const game: Game = {
     id: apiEvent.event_id,
     event_id: apiEvent.event_id,
@@ -85,19 +83,13 @@ const convertApiEventToGame = async (apiEvent: ApiEvent, isPastEvent: boolean = 
     awayScore,
     date,
     time,
-    venue: venue.name,
-    venue_id: venue.id,
-    venue_name: venue.name,
+    venue: venue.name || 'Арена',
     status,
-    tournament: league.name,
-    league_id: league.id,
-    league_name: league.name,
-    season_id: season.id,
-    season_name: season.name,
+    tournament: 'Чемпионат', // Default tournament name
     sp_results: apiEvent.sp_results
   };
   
-  console.log('Converted game:', game);
+  console.log('Converted game (simplified):', game);
   return game;
 };
 
@@ -109,7 +101,7 @@ export const getFutureGames = async (): Promise<Game[]> => {
       return upcomingGamesCache;
     }
 
-    console.log('Fetching upcoming games from new API...');
+    console.log('Fetching upcoming games from API...');
     const response = await apiService.fetchUpcomingEvents();
     
     // Convert API events to Game objects
@@ -137,7 +129,7 @@ export const getPastGames = async (): Promise<Game[]> => {
       return pastGamesCache;
     }
 
-    console.log('Fetching past games from new API...');
+    console.log('Fetching past games from API...');
     const response = await apiService.fetchPastEvents();
     
     // Convert API events to Game objects

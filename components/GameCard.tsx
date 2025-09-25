@@ -8,7 +8,7 @@ import { colors, commonStyles } from '../styles/commonStyles';
 interface GameCardProps {
   game: Game;
   showScore?: boolean;
-  hideSeasonInfo?: boolean; // New prop to control season display
+  hideSeasonInfo?: boolean;
 }
 
 const styles = StyleSheet.create({
@@ -98,26 +98,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSecondary,
   },
-  additionalInfo: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  infoLabel: {
-    fontSize: 12,
-    color: colors.textSecondary,
-  },
-  infoValue: {
-    fontSize: 12,
-    color: colors.text,
-    fontWeight: '500',
-  },
 });
 
 const GameCard: React.FC<GameCardProps> = ({ game, showScore = true, hideSeasonInfo = false }) => {
@@ -180,27 +160,19 @@ const GameCard: React.FC<GameCardProps> = ({ game, showScore = true, hideSeasonI
   };
 
   const getTournamentName = () => {
-    console.log('Getting tournament name for game:', {
+    console.log('Getting tournament name for game (default logic):', {
       id: game.id,
-      league_name: game.league_name,
       tournament: game.tournament
     });
     
-    // Priority 1: Use league_name if it exists and is not empty (Турнир = Лига)
-    if (game.league_name && game.league_name.trim() !== '') {
-      console.log('Using league_name as tournament:', game.league_name);
-      return game.league_name;
-    }
-    
-    // Priority 2: Fall back to tournament field if league_name is not available
+    // Simple default logic: use tournament field or default to "Чемпионат"
     if (game.tournament && game.tournament.trim() !== '') {
       console.log('Using tournament field:', game.tournament);
       return game.tournament;
     }
     
-    // Priority 3: If no league/tournament info, it's a friendly match
-    console.log('No league/tournament info found, using friendly match');
-    return 'Товарищеский матч';
+    console.log('No tournament info found, using default "Чемпионат"');
+    return 'Чемпионат';
   };
 
   const renderTeamWithLogo = (teamName: string, teamLogo?: string) => {
@@ -254,19 +226,9 @@ const GameCard: React.FC<GameCardProps> = ({ game, showScore = true, hideSeasonI
           {formatDateTime(game.date, game.time)}
         </Text>
         <Text style={styles.venue}>
-          {game.venue_name || game.venue}
+          {game.venue}
         </Text>
       </View>
-
-      {/* Additional info for detailed view - only show season if not hidden */}
-      {!hideSeasonInfo && game.season_name && (
-        <View style={styles.additionalInfo}>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Сезон:</Text>
-            <Text style={styles.infoValue}>{game.season_name}</Text>
-          </View>
-        </View>
-      )}
     </TouchableOpacity>
   );
 };
