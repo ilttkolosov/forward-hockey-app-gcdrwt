@@ -98,6 +98,7 @@ function convertApiPlayerToPlayer(apiPlayer: ApiPlayerResponse): Player {
     weight,
     handedness: metrics.onetwofive || undefined,
     captainStatus: metrics.ka || undefined,
+    nationality: apiPlayer.sp_nationality || undefined,
     photo: apiPlayer.player_image || undefined,
   };
 }

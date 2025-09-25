@@ -175,12 +175,6 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player }) => {
           {player.age && (
             <Text style={styles.detail}>Возраст: {player.age}</Text>
           )}
-          {player.height && (
-            <Text style={styles.detail}>Рост: {player.height} см</Text>
-          )}
-          {player.weight && (
-            <Text style={styles.detail}>Вес: {player.weight} кг</Text>
-          )}
           {player.handedness && (
             <Text style={styles.detail}>Хват: {player.handedness}</Text>
           )}

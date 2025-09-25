@@ -108,6 +108,19 @@ const styles = StyleSheet.create({
     color: colors.primary,
     textAlign: 'center',
   },
+  captainStatusContainer: {
+    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    alignSelf: 'center',
+  },
+  captainStatusText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.surface,
+    textAlign: 'center',
+  },
   statsContainer: {
     backgroundColor: colors.surface,
     marginHorizontal: 16,
@@ -139,6 +152,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: colors.text,
+  },
+  nationalityContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  flagImage: {
+    width: 20,
+    height: 15,
+    marginLeft: 8,
+    borderRadius: 2,
   },
   emptyState: {
     flex: 1,
@@ -223,10 +246,23 @@ const PlayerDetailsScreen: React.FC = () => {
     
     const status = captainStatus.toLowerCase();
     if (status === 'k') {
-      return { text: 'Капитан', style: styles.captainBadge };
+      return { text: 'К', style: styles.captainBadge, fullText: 'Капитан' };
     }
     if (status === 'a') {
-      return { text: 'Ассистент', style: styles.assistantBadge };
+      return { text: 'А', style: styles.assistantBadge, fullText: 'Ассистент' };
+    }
+    return null;
+  };
+
+  const getNationalityInfo = (nationality?: string) => {
+    if (!nationality) return null;
+    
+    const nat = nationality.toLowerCase();
+    if (nat === 'rus') {
+      return {
+        name: 'Россия',
+        flagUrl: 'https://flagcdn.com/w40/ru.png'
+      };
     }
     return null;
   };
@@ -291,6 +327,7 @@ const PlayerDetailsScreen: React.FC = () => {
   }
 
   const captainBadgeInfo = getCaptainBadgeInfo(player.captainStatus);
+  const nationalityInfo = getNationalityInfo(player.nationality);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -329,6 +366,12 @@ const PlayerDetailsScreen: React.FC = () => {
             {player.position}
           </Text>
           <Text style={styles.playerNumber}>#{player.number}</Text>
+          
+          {captainBadgeInfo && (
+            <View style={[styles.captainStatusContainer, { backgroundColor: captainBadgeInfo.style.backgroundColor }]}>
+              <Text style={styles.captainStatusText}>{captainBadgeInfo.fullText}</Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.statsContainer}>
@@ -372,6 +415,20 @@ const PlayerDetailsScreen: React.FC = () => {
               <Text style={styles.statLabel}>Позиция</Text>
               <Text style={styles.statValue}>{player.position}</Text>
             </View>
+            
+            {nationalityInfo && (
+              <View style={styles.statItem}>
+                <Text style={styles.statLabel}>Национальность</Text>
+                <View style={styles.nationalityContainer}>
+                  <Text style={styles.statValue}>{nationalityInfo.name}</Text>
+                  <Image 
+                    source={{ uri: nationalityInfo.flagUrl }} 
+                    style={styles.flagImage}
+                    resizeMode="cover"
+                  />
+                </View>
+              </View>
+            )}
           </View>
         </View>
       </ScrollView>
