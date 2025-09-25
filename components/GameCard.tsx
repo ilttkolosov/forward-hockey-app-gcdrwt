@@ -180,17 +180,26 @@ const GameCard: React.FC<GameCardProps> = ({ game, showScore = true, hideSeasonI
   };
 
   const getTournamentName = () => {
-    // If league_name exists and is not empty, use it as tournament name
-    if (game.league_name && game.league_name.trim()) {
+    console.log('Getting tournament name for game:', {
+      id: game.id,
+      league_name: game.league_name,
+      tournament: game.tournament
+    });
+    
+    // Priority 1: Use league_name if it exists and is not empty (Турнир = Лига)
+    if (game.league_name && game.league_name.trim() !== '') {
+      console.log('Using league_name as tournament:', game.league_name);
       return game.league_name;
     }
     
-    // If tournament exists and is not empty, use it
-    if (game.tournament && game.tournament.trim()) {
+    // Priority 2: Fall back to tournament field if league_name is not available
+    if (game.tournament && game.tournament.trim() !== '') {
+      console.log('Using tournament field:', game.tournament);
       return game.tournament;
     }
     
-    // If no league/tournament info, it's a friendly match
+    // Priority 3: If no league/tournament info, it's a friendly match
+    console.log('No league/tournament info found, using friendly match');
     return 'Товарищеский матч';
   };
 
