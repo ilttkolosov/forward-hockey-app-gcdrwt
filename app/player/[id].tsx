@@ -65,11 +65,16 @@ const styles = StyleSheet.create({
     color: colors.text,
     textAlign: 'center',
     marginBottom: 8,
+    paddingHorizontal: 24,
+    flexWrap: 'wrap',
   },
   playerPosition: {
     fontSize: 16,
     color: colors.textSecondary,
     marginBottom: 8,
+  },
+  numberContainer: {
+    alignItems: 'center',
   },
   playerNumber: {
     fontSize: 32,
@@ -78,14 +83,14 @@ const styles = StyleSheet.create({
   },
   captainBadge: {
     backgroundColor: colors.error,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginTop: 8,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginBottom: 8,
   },
   captainBadgeText: {
     color: colors.background,
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: 'bold',
   },
   infoSection: {
@@ -235,12 +240,16 @@ export default function PlayerDetailsScreen() {
           />
           <Text style={styles.playerName}>{player.fullName || player.name}</Text>
           <Text style={styles.playerPosition}>{player.position}</Text>
-          <Text style={styles.playerNumber}>#{player.number}</Text>
-          {captainBadgeText && (
-            <View style={styles.captainBadge}>
-              <Text style={styles.captainBadgeText}>{getCaptainStatusText()}</Text>
-            </View>
-          )}
+          
+          {/* Captain Badge positioned above player number */}
+          <View style={styles.numberContainer}>
+            {captainBadgeText && (
+              <View style={styles.captainBadge}>
+                <Text style={styles.captainBadgeText}>{captainBadgeText}</Text>
+              </View>
+            )}
+            <Text style={styles.playerNumber}>#{player.number}</Text>
+          </View>
         </View>
 
         {/* Personal Information */}

@@ -20,6 +20,7 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
 import Icon from '../../components/Icon';
 import { getCachedTeamLogo } from '../../utils/teamLogos';
+import { formatDateTimeWithoutSeconds } from '../../utils/dateUtils';
 
 const { width } = Dimensions.get('window');
 
@@ -162,29 +163,7 @@ export default function GameDetailsScreen() {
     return undefined;
   };
 
-  const formatDateTimeWithoutSeconds = (dateString: string): { formattedDate: string; formattedTime: string } => {
-    try {
-      const date = new Date(dateString);
-      
-      // Format date in Russian
-      const formattedDate = date.toLocaleDateString('ru-RU', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-      });
 
-      // Format time without seconds
-      const formattedTime = date.toLocaleTimeString('ru-RU', {
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-
-      return { formattedDate, formattedTime };
-    } catch (error) {
-      console.error('Error formatting date:', error);
-      return { formattedDate: dateString, formattedTime: '' };
-    }
-  };
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -270,9 +249,10 @@ export default function GameDetailsScreen() {
                 javaScriptEnabled={true}
                 domStorageEnabled={true}
                 startInLoadingState={true}
-                scalesPageToFit={true}
+                scalesPageToFit={false}
                 allowsInlineMediaPlayback={true}
                 mediaPlaybackRequiresUserAction={false}
+                mixedContentMode="compatibility"
                 onError={(syntheticEvent) => {
                   const { nativeEvent } = syntheticEvent;
                   console.error('WebView error: ', nativeEvent);
@@ -292,48 +272,61 @@ export default function GameDetailsScreen() {
             <Text style={styles.gameDate}>{gameDetails.date} • {gameDetails.time}</Text>
           </View>
 
-          <View style={styles.teamsContainer}>
-            {/* Home Team */}
-            <View style={styles.teamSection}>
-              {gameDetails.homeTeam.logo ? (
-                <Image 
-                  source={{ uri: gameDetails.homeTeam.logo }} 
-                  style={styles.teamLogo}
-                  onError={() => console.log('Failed to load home team logo')}
-                />
-              ) : (
-                <View style={styles.teamLogoPlaceholder}>
-                  <Icon name="shield" size={40} color={colors.textSecondary} />
-                </View>
-              )}
-              <Text style={styles.teamName}>{gameDetails.homeTeam.name}</Text>
-              <Text style={styles.score}>{gameDetails.homeTeam.goals}</Text>
+          {/* Teams and Score in One Line */}
+          <View style={styles.scoreLineContainer}>
+            {/* Home Team Logo */}
+            {gameDetails.homeTeam.logo ? (
+              <Image 
+                source={{ uri: gameDetails.homeTeam.logo }} 
+                style={styles.scoreLineLogo}
+                onError={() => console.log('Failed to load home team logo')}
+              />
+            ) : (
+              <View style={styles.scoreLineLogoPlaceholder}>
+                <Icon name="shield" size={24} color={colors.textSecondary} />
+              </View>
+            )}
+            
+            {/* Home Team Name */}
+            <Text style={styles.scoreLineTeamName} numberOfLines={1}>
+              {gameDetails.homeTeam.name}
+            </Text>
+            
+            {/* Score */}
+            <Text style={styles.scoreLineScore}>
+              {gameDetails.homeTeam.goals} : {gameDetails.awayTeam.goals}
+            </Text>
+            
+            {/* Away Team Name */}
+            <Text style={styles.scoreLineTeamName} numberOfLines={1}>
+              {gameDetails.awayTeam.name}
+            </Text>
+            
+            {/* Away Team Logo */}
+            {gameDetails.awayTeam.logo ? (
+              <Image 
+                source={{ uri: gameDetails.awayTeam.logo }} 
+                style={styles.scoreLineLogo}
+                onError={() => console.log('Failed to load away team logo')}
+              />
+            ) : (
+              <View style={styles.scoreLineLogoPlaceholder}>
+                <Icon name="shield" size={24} color={colors.textSecondary} />
+              </View>
+            )}
+          </View>
+
+          {/* Outcome Badges in One Line */}
+          <View style={styles.outcomesContainer}>
+            <View style={styles.outcomeSection}>
               {gameDetails.homeTeam.outcome && (
                 <View style={[styles.outcomeBadge, { backgroundColor: getOutcomeColor(gameDetails.homeTeam.outcome) }]}>
                   <Text style={styles.outcomeText}>{getOutcomeText(gameDetails.homeTeam.outcome)}</Text>
                 </View>
               )}
             </View>
-
-            <View style={styles.vsSection}>
-              <Text style={styles.vsText}>:</Text>
-            </View>
-
-            {/* Away Team */}
-            <View style={styles.teamSection}>
-              {gameDetails.awayTeam.logo ? (
-                <Image 
-                  source={{ uri: gameDetails.awayTeam.logo }} 
-                  style={styles.teamLogo}
-                  onError={() => console.log('Failed to load away team logo')}
-                />
-              ) : (
-                <View style={styles.teamLogoPlaceholder}>
-                  <Icon name="shield" size={40} color={colors.textSecondary} />
-                </View>
-              )}
-              <Text style={styles.teamName}>{gameDetails.awayTeam.name}</Text>
-              <Text style={styles.score}>{gameDetails.awayTeam.goals}</Text>
+            
+            <View style={styles.outcomeSection}>
               {gameDetails.awayTeam.outcome && (
                 <View style={[styles.outcomeBadge, { backgroundColor: getOutcomeColor(gameDetails.awayTeam.outcome) }]}>
                   <Text style={styles.outcomeText}>{getOutcomeText(gameDetails.awayTeam.outcome)}</Text>
@@ -444,6 +437,7 @@ const styles = StyleSheet.create({
   },
   webview: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   gameInfo: {
     padding: 20,
@@ -460,46 +454,50 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: '500',
   },
-  teamsContainer: {
+  scoreLineContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     marginBottom: 16,
+    paddingHorizontal: 16,
   },
-  teamSection: {
-    flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: 8,
-  },
-  teamLogo: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    marginBottom: 12,
+  scoreLineLogo: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: colors.surface,
   },
-  teamLogoPlaceholder: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+  scoreLineLogoPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
   },
-  teamName: {
+  scoreLineTeamName: {
     fontSize: 16,
     fontWeight: '600',
     color: colors.text,
+    marginHorizontal: 12,
+    flex: 1,
     textAlign: 'center',
-    marginBottom: 8,
-    lineHeight: 20,
   },
-  score: {
-    fontSize: 36,
+  scoreLineScore: {
+    fontSize: 28,
     fontWeight: '800',
     color: colors.primary,
-    marginBottom: 8,
+    marginHorizontal: 16,
+  },
+  outcomesContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    paddingHorizontal: 16,
+  },
+  outcomeSection: {
+    flex: 1,
+    alignItems: 'center',
   },
   outcomeBadge: {
     paddingHorizontal: 12,
@@ -513,15 +511,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     textTransform: 'uppercase',
-  },
-  vsSection: {
-    paddingHorizontal: 20,
-    alignItems: 'center',
-  },
-  vsText: {
-    fontSize: 24,
-    fontWeight: '300',
-    color: colors.textSecondary,
   },
   periodScores: {
     padding: 16,

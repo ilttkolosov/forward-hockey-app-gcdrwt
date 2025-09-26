@@ -5,6 +5,7 @@ import { Game } from '../types';
 import { colors, commonStyles } from '../styles/commonStyles';
 import { useRouter } from 'expo-router';
 import { getCachedTeamLogo } from '../utils/teamLogos';
+import { formatGameDate } from '../utils/dateUtils';
 
 interface GameCardProps {
   game: Game;
@@ -46,26 +47,12 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
   };
 
   const formatDate = (dateString: string, timeString?: string) => {
-    const date = new Date(dateString);
-    const time = timeString || game.time;
+    // Use the centralized date formatting utility
+    const fullDateString = timeString && timeString !== '00:00' 
+      ? `${dateString} ${timeString}:00` 
+      : `${dateString} 00:00:00`;
     
-    // Check if time is "00:00" to format date differently
-    if (time === '00:00') {
-      // Format as "28 сентября 2025 г" (without dot after year)
-      return date.toLocaleDateString('ru-RU', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-      }) + ' г';
-    } else {
-      // Format as "28 сентября 2025 г. • 10:45"
-      const formattedDate = date.toLocaleDateString('ru-RU', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-      }) + ' г.';
-      return time ? `${formattedDate} • ${time}` : formattedDate;
-    }
+    return formatGameDate(fullDateString);
   };
 
   const getOutcomeText = (outcome: string) => {

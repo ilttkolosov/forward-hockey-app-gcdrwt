@@ -112,22 +112,24 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginBottom: 2,
   },
+  numberContainer: {
+    alignItems: 'center',
+  },
   playerNumber: {
     fontSize: 18,
     fontWeight: 'bold',
     color: colors.primary,
-    marginLeft: 12,
   },
   captainBadge: {
     backgroundColor: colors.error,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    marginLeft: 8,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginBottom: 4,
   },
   captainBadgeText: {
     color: colors.background,
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: 'bold',
   },
   emptyContainer: {
@@ -167,12 +169,14 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onPress }) => {
           {player.age ? `${player.age} лет` : 'Возраст не указан'}
         </Text>
       </View>
-      {captainBadgeText && (
-        <View style={styles.captainBadge}>
-          <Text style={styles.captainBadgeText}>{captainBadgeText}</Text>
-        </View>
-      )}
-      <Text style={styles.playerNumber}>#{player.number}</Text>
+      <View style={styles.numberContainer}>
+        {captainBadgeText && (
+          <View style={styles.captainBadge}>
+            <Text style={styles.captainBadgeText}>{captainBadgeText}</Text>
+          </View>
+        )}
+        <Text style={styles.playerNumber}>#{player.number}</Text>
+      </View>
     </TouchableOpacity>
   );
 };

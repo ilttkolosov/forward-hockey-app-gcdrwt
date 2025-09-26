@@ -120,10 +120,7 @@ export default function HomeScreen() {
       >
         {/* Header */}
         <View style={{ marginBottom: 24 }}>
-          <Text style={commonStyles.title}>ХК Форвард</Text>
-          <Text style={commonStyles.textSecondary}>
-            Официальное приложение хоккейного клуба
-          </Text>
+          <Text style={commonStyles.title}>ХК Динамо Форвард 2014 • Санкт-Петербург</Text>
         </View>
 
         {/* Current Game */}

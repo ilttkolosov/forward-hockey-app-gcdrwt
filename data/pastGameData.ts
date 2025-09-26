@@ -4,6 +4,7 @@ import { Game, ApiPastEvent, ApiTeam } from '../types';
 import { colors } from '../styles/commonStyles';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCachedTeamLogo } from '../utils/teamLogos';
+import { formatGameDate } from '../utils/dateUtils';
 
 interface CachedData<T> {
     data: T;
@@ -113,12 +114,24 @@ const parseIdNameString = (idNameString: any): { id: string; name: string } | nu
     return null;
 };
 
-// Updated to use event_date instead of date
+// Updated to use event_date and new date formatting utility
 const formatDateTimeWithoutSeconds = (eventDate: string): { date: string; time: string } => {
-    const date = new Date(eventDate);
-    const dateString = date.toLocaleDateString('ru-RU');
-    const timeString = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-    return { date: dateString, time: timeString };
+    try {
+        const date = new Date(eventDate);
+        
+        // Check if the date is valid
+        if (isNaN(date.getTime())) {
+            console.error('Invalid event date:', eventDate);
+            return { date: eventDate, time: '00:00' };
+        }
+        
+        const dateString = date.toLocaleDateString('ru-RU');
+        const timeString = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        return { date: dateString, time: timeString };
+    } catch (error) {
+        console.error('Error formatting event date:', error);
+        return { date: eventDate, time: '00:00' };
+    }
 };
 
 const fetchTeamSafely = async (teamId: string): Promise<ApiTeam> => {

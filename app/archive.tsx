@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, RefreshControl, TouchableOpacity, Image, StyleSheet, FlatList } from 'react-native';
+import { View, Text, RefreshControl, TouchableOpacity, Image, StyleSheet, FlatList, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { commonStyles, colors } from '../styles/commonStyles';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -9,6 +9,8 @@ import { fetchPastGames, fetchPastGamesCount, getOutcomeText, getOutcomeColor } 
 import { Link, useRouter } from 'expo-router';
 import Icon from '../components/Icon';
 import { getCachedTeamLogo } from '../utils/teamLogos';
+import { formatGameDate, getSeasonFromGameDate } from '../utils/dateUtils';
+import SeasonPill from '../components/SeasonPill';
 
 interface EnrichedPastGame {
   id: string;
@@ -85,8 +87,13 @@ const styles = StyleSheet.create({
   },
   outcomeContainer: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
     marginTop: 8,
+  },
+  teamOutcome: {
+    flex: 1,
+    alignItems: 'center',
   },
   outcomeText: {
     fontSize: 12,
@@ -156,17 +163,29 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 8,
   },
+  seasonFilterContainer: {
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  seasonPillsContainer: {
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+  },
 });
 
 export default function GameArchiveScreen() {
   const [allGames, setAllGames] = useState<EnrichedPastGame[]>([]);
   const [displayedGames, setDisplayedGames] = useState<EnrichedPastGame[]>([]);
+  const [filteredGames, setFilteredGames] = useState<EnrichedPastGame[]>([]);
   const [gamesCount, setGamesCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
+  const [availableSeasons, setAvailableSeasons] = useState<string[]>([]);
+  const [selectedSeason, setSelectedSeason] = useState<string | null>(null);
   const router = useRouter();
 
   const loadData = async () => {
@@ -185,8 +204,19 @@ export default function GameArchiveScreen() {
       setAllGames(pastGames);
       setGamesCount(count);
       
+      // Extract available seasons
+      const seasons = extractAvailableSeasons(pastGames);
+      setAvailableSeasons(seasons);
+      
+      // Set initial filtered games (all games or current season)
+      const currentSeason = seasons.length > 0 ? seasons[0] : null;
+      setSelectedSeason(currentSeason);
+      
+      const gamesToShow = currentSeason ? filterGamesBySeason(pastGames, currentSeason) : pastGames;
+      setFilteredGames(gamesToShow);
+      
       // Load first page
-      const firstPage = pastGames.slice(0, ITEMS_PER_PAGE);
+      const firstPage = gamesToShow.slice(0, ITEMS_PER_PAGE);
       setDisplayedGames(firstPage);
       setCurrentPage(1);
       
@@ -204,7 +234,7 @@ export default function GameArchiveScreen() {
   };
 
   const loadMoreGames = useCallback(() => {
-    if (loadingMore || displayedGames.length >= allGames.length) {
+    if (loadingMore || displayedGames.length >= filteredGames.length) {
       return;
     }
 
@@ -214,15 +244,15 @@ export default function GameArchiveScreen() {
       const nextPage = currentPage + 1;
       const startIndex = currentPage * ITEMS_PER_PAGE;
       const endIndex = startIndex + ITEMS_PER_PAGE;
-      const newGames = allGames.slice(startIndex, endIndex);
+      const newGames = filteredGames.slice(startIndex, endIndex);
       
       setDisplayedGames(prev => [...prev, ...newGames]);
       setCurrentPage(nextPage);
       setLoadingMore(false);
       
-      console.log(`Loaded page ${nextPage}, showing ${displayedGames.length + newGames.length} of ${allGames.length} games`);
+      console.log(`Loaded page ${nextPage}, showing ${displayedGames.length + newGames.length} of ${filteredGames.length} games`);
     }, 500); // Small delay to show loading indicator
-  }, [loadingMore, displayedGames.length, allGames.length, currentPage]);
+  }, [loadingMore, displayedGames.length, filteredGames.length, currentPage]);
 
   useEffect(() => {
     loadData();
@@ -232,6 +262,8 @@ export default function GameArchiveScreen() {
     setRefreshing(true);
     setCurrentPage(0);
     setDisplayedGames([]);
+    setFilteredGames([]);
+    setSelectedSeason(null);
     loadData();
   };
 
@@ -256,26 +288,64 @@ export default function GameArchiveScreen() {
     return leagueName.split(',')[0].trim(); // Fallback
   };
 
-  const formatGameDate = (date: string, time: string): string => {
-    // Check if time is "00:00" to format date differently
-    if (time === '00:00') {
-      // Format as "28 сентября 2025 г" (without dot after year)
-      const dateObj = new Date(date);
-      return dateObj.toLocaleDateString('ru-RU', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-      }) + ' г';
-    } else {
-      // Format as "28 сентября 2025 г. • 10:45"
-      const dateObj = new Date(date);
-      const formattedDate = dateObj.toLocaleDateString('ru-RU', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-      }) + ' г.';
-      return `${formattedDate} • ${time}`;
-    }
+  const extractAvailableSeasons = (games: EnrichedPastGame[]): string[] => {
+    const seasonsSet = new Set<string>();
+    
+    games.forEach(game => {
+      let season: string;
+      
+      // Check if game has explicit season name
+      if (game.seasonName) {
+        // Extract season from format "99: Сезон 2025-2026"
+        const parts = game.seasonName.split(':');
+        if (parts.length > 1) {
+          season = parts[1].trim();
+        } else {
+          season = game.seasonName;
+        }
+      } else {
+        // Calculate season from game date
+        season = getSeasonFromGameDate(game.event_date);
+      }
+      
+      seasonsSet.add(season);
+    });
+    
+    // Sort seasons in descending order (newest first)
+    return Array.from(seasonsSet).sort((a, b) => {
+      // Extract years from season strings like "Сезон 2025-2026"
+      const yearA = parseInt(a.match(/(\d{4})-(\d{4})/)?.[2] || '0');
+      const yearB = parseInt(b.match(/(\d{4})-(\d{4})/)?.[2] || '0');
+      return yearB - yearA;
+    });
+  };
+
+  const filterGamesBySeason = (games: EnrichedPastGame[], season: string): EnrichedPastGame[] => {
+    return games.filter(game => {
+      let gameSeason: string;
+      
+      if (game.seasonName) {
+        const parts = game.seasonName.split(':');
+        gameSeason = parts.length > 1 ? parts[1].trim() : game.seasonName;
+      } else {
+        gameSeason = getSeasonFromGameDate(game.event_date);
+      }
+      
+      return gameSeason === season;
+    });
+  };
+
+  const handleSeasonFilter = (season: string) => {
+    console.log('Filtering by season:', season);
+    setSelectedSeason(season);
+    
+    const filtered = season === 'Все сезоны' ? allGames : filterGamesBySeason(allGames, season);
+    setFilteredGames(filtered);
+    
+    // Reset pagination
+    setCurrentPage(1);
+    const firstPage = filtered.slice(0, ITEMS_PER_PAGE);
+    setDisplayedGames(firstPage);
   };
 
   const renderGameCard = ({ item: game }: { item: EnrichedPastGame }) => {
@@ -288,7 +358,7 @@ export default function GameArchiveScreen() {
         {/* Date and Time */}
         <View style={styles.gameHeader}>
           <Text style={styles.dateTime}>
-            {formatGameDate(game.date, game.time)}
+            {formatGameDate(game.event_date)}
           </Text>
         </View>
 
@@ -334,15 +404,20 @@ export default function GameArchiveScreen() {
           </View>
         </View>
 
-        {/* Outcomes */}
+        {/* Outcomes - Aligned under team names */}
         {(game.homeOutcome || game.awayOutcome) && (
           <View style={styles.outcomeContainer}>
-            <Text style={[styles.outcomeText, { color: getOutcomeColor(game.homeOutcome) }]}>
-              {getOutcomeText(game.homeOutcome)}
-            </Text>
-            <Text style={[styles.outcomeText, { color: getOutcomeColor(game.awayOutcome) }]}>
-              {getOutcomeText(game.awayOutcome)}
-            </Text>
+            <View style={styles.teamOutcome}>
+              <Text style={[styles.outcomeText, { color: getOutcomeColor(game.homeOutcome) }]}>
+                {getOutcomeText(game.homeOutcome)}
+              </Text>
+            </View>
+            <View style={styles.scoreContainer} />
+            <View style={styles.teamOutcome}>
+              <Text style={[styles.outcomeText, { color: getOutcomeColor(game.awayOutcome) }]}>
+                {getOutcomeText(game.awayOutcome)}
+              </Text>
+            </View>
           </View>
         )}
 
@@ -451,6 +526,31 @@ export default function GameArchiveScreen() {
           </Text>
         </View>
       </View>
+
+      {/* Season Filter Pills */}
+      {availableSeasons.length > 0 && (
+        <View style={styles.seasonFilterContainer}>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.seasonPillsContainer}
+          >
+            <SeasonPill
+              season="Все сезоны"
+              isActive={selectedSeason === null || selectedSeason === 'Все сезоны'}
+              onPress={() => handleSeasonFilter('Все сезоны')}
+            />
+            {availableSeasons.map((season) => (
+              <SeasonPill
+                key={season}
+                season={season}
+                isActive={selectedSeason === season}
+                onPress={handleSeasonFilter}
+              />
+            ))}
+          </ScrollView>
+        </View>
+      )}
 
       {/* Games List with Infinite Scroll */}
       <FlatList
