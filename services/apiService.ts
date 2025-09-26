@@ -13,7 +13,7 @@ class ApiService {
 
   async fetchUpcomingEvents(): Promise<ApiUpcomingEventsResponse> {
     try {
-      console.log('Fetching upcoming events from new API...');
+      console.log('Fetching upcoming events from API...');
       const response = await fetch(`${this.baseUrl}/upcoming-events`);
       
       if (!response.ok) {
@@ -31,9 +31,10 @@ class ApiService {
     }
   }
 
+  // NEW API endpoint for past events - completely updated
   async fetchPastEvents(): Promise<ApiPastEventsResponse> {
     try {
-      console.log('Fetching past events from updated API...');
+      console.log('Fetching past events from NEW API endpoint...');
       const response = await fetch(`${this.baseUrl}/past-events`);
       
       if (!response.ok) {
@@ -41,16 +42,23 @@ class ApiService {
       }
       
       const result: ApiPastEventsResponse = await response.json();
-      console.log('Past events response with new structure:', result);
-      console.log('Total past events count:', result.count);
+      console.log('Past events response with NEW structure:', result);
+      console.log('Total past events count from NEW API:', result.count);
+      
+      // Log the structure of the first event for debugging
+      if (result.data && result.data.length > 0) {
+        console.log('First past event structure:', result.data[0]);
+        console.log('Results structure:', result.data[0].Results);
+      }
       
       return result;
     } catch (error) {
-      console.error('Error fetching past events:', error);
+      console.error('Error fetching past events from NEW API:', error);
       throw error;
     }
   }
 
+  // NEW method to fetch team details by ID
   async fetchTeam(teamId: string): Promise<ApiTeam> {
     // Check cache first
     if (this.teamCache[teamId]) {
@@ -74,7 +82,7 @@ class ApiService {
       
       return team;
     } catch (error) {
-      console.error('Error fetching team details:', error);
+      console.error('Error fetching team details for ID:', teamId, error);
       // Return fallback data
       return {
         id: teamId,
@@ -245,54 +253,6 @@ class ApiService {
     };
   }
 
-  // Helper function to parse PHP serialized results (legacy support)
-  parsePhpSerializedResults(serializedString: string): { homeScore?: number; awayScore?: number } {
-    try {
-      // This is a simplified parser for PHP serialized arrays
-      // In a real implementation, you might want to use a proper PHP serialization parser
-      console.log('Parsing PHP serialized results:', serializedString);
-      
-      // Look for score patterns in the serialized string
-      const scorePattern = /(\d+)[\s\-:]+(\d+)/;
-      const match = serializedString.match(scorePattern);
-      
-      if (match) {
-        return {
-          homeScore: parseInt(match[1]),
-          awayScore: parseInt(match[2])
-        };
-      }
-      
-      return {};
-    } catch (error) {
-      console.error('Error parsing PHP serialized results:', error);
-      return {};
-    }
-  }
-
-  // Helper function to parse new results structure
-  parseNewResults(results: { [teamId: string]: { goals: number; outcome: string } }, teamIds: string[]): { homeScore?: number; awayScore?: number; homeOutcome?: string; awayOutcome?: string } {
-    try {
-      console.log('Parsing new results structure:', results, 'for teams:', teamIds);
-      
-      const homeTeamId = teamIds[0];
-      const awayTeamId = teamIds[1];
-      
-      const homeResult = results[homeTeamId];
-      const awayResult = results[awayTeamId];
-      
-      return {
-        homeScore: homeResult?.goals,
-        awayScore: awayResult?.goals,
-        homeOutcome: homeResult?.outcome,
-        awayOutcome: awayResult?.outcome
-      };
-    } catch (error) {
-      console.error('Error parsing new results structure:', error);
-      return {};
-    }
-  }
-
   // Helper function to determine game status
   determineGameStatus(eventDate: string, hasResults: boolean): 'upcoming' | 'live' | 'finished' {
     if (hasResults) {
@@ -314,18 +274,23 @@ class ApiService {
     return 'finished';
   }
 
-  // Helper function to format date and time
+  // Helper function to format date and time - updated to handle time without seconds
   formatDateTime(eventDate: string): { date: string; time: string } {
     try {
       const [datePart, timePart] = eventDate.split(' ');
       
-      // Format time without seconds
+      // Format time without seconds as specified
       let formattedTime = '19:00'; // default
       if (timePart) {
         const timeParts = timePart.split(':');
         if (timeParts.length >= 2) {
           formattedTime = `${timeParts[0]}:${timeParts[1]}`;
         }
+      }
+      
+      // Don't show time if it's 00:00 (unknown time)
+      if (formattedTime === '00:00') {
+        formattedTime = '';
       }
       
       return {
@@ -353,6 +318,16 @@ class ApiService {
       default:
         return outcome;
     }
+  }
+
+  // Helper function to get tournament name from Leagues field
+  getTournamentName(leaguesString: string): string {
+    if (!leaguesString || leaguesString.trim() === '') {
+      return 'Товарищеский матч';
+    }
+    
+    const parsed = this.parseIdNameString(leaguesString);
+    return parsed.name || 'Товарищеский матч';
   }
 }
 

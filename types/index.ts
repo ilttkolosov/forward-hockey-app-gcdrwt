@@ -18,7 +18,18 @@ export interface Game {
   awayTeamId?: string;
   homeTeamLogo?: string;
   awayTeamLogo?: string;
-  results?: { [teamId: string]: { goals: number; outcome: string } };
+  // New fields for leagues, seasons, venues
+  league_id?: string;
+  league_name?: string;
+  season_id?: string;
+  season_name?: string;
+  venue_id?: string;
+  venue_name?: string;
+  // New results structure
+  team1_goals?: number;
+  team2_goals?: number;
+  team1_outcome?: string;
+  team2_outcome?: string;
 }
 
 export interface Player {
@@ -104,7 +115,7 @@ export interface ApiPlayerResponse {
   player_image?: string;
 }
 
-// API interfaces for events
+// NEW API interfaces for events - completely updated structure
 export interface ApiUpcomingEventsResponse {
   data: ApiUpcomingEvent[];
   count: number;
@@ -124,27 +135,24 @@ export interface ApiUpcomingEvent {
   venues: string; // "id:name" format
 }
 
+// NEW structure for past events - completely different from previous
 export interface ApiPastEvent {
   event_id: string;
   event_date: string;
-  teams: string; // comma-separated team IDs (updated field name)
-  Leagues: string; // "id:name" format
+  teams: string; // comma-separated team IDs (NEW field name)
+  Leagues: string; // "id:name" format - maps to tournament in app logic
   seasons: string; // "id:name" format
   venues: string; // "id:name" format
-  results: { [teamId: string]: { goals: number; outcome: string } }; // new results structure
-}
-
-// Legacy interface for backward compatibility
-export interface ApiEvent {
-  event_id: string;
-  event_date: string;
-  sp_teams?: string; // comma-separated team IDs (legacy)
-  teams?: string; // comma-separated team IDs (new)
-  Leagues: string; // "id:name" format
-  seasons: string; // "id:name" format
-  venues: string; // "id:name" format
-  sp_results?: string; // PHP serialized array for past events (legacy)
-  results?: { [teamId: string]: { goals: number; outcome: string } }; // new results structure
+  Results: {
+    homeTeam: {
+      goals: number;
+      outcome: string; // "win", "loss", "nich"
+    };
+    awayTeam: {
+      goals: number;
+      outcome: string; // "win", "loss", "nich"
+    };
+  };
 }
 
 export interface ApiTeam {
