@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput, Dimensions } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Dimensions, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { TabView, SceneMap, TabBar } from 'react-native-tab-view';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
@@ -89,6 +89,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     textTransform: 'none',
+  },
+  animatedContainer: {
+    flex: 1,
   },
   playerCard: {
     backgroundColor: colors.card,
@@ -202,18 +205,35 @@ interface PlayerListProps {
   searchQuery: string;
   onPlayerPress: (player: Player) => void;
   onPullDown: () => void;
+  animatedValue: Animated.Value;
+  isActive: boolean;
 }
 
 const PlayerList: React.FC<PlayerListProps> = ({ 
   players, 
   searchQuery, 
   onPlayerPress,
-  onPullDown
+  onPullDown,
+  animatedValue,
+  isActive
 }) => {
   const filteredPlayers = searchPlayers(players, searchQuery);
 
-  const renderPlayer = ({ item }: { item: Player }) => (
-    <PlayerCard player={item} onPress={onPlayerPress} />
+  const renderPlayer = (player: Player, index: number) => (
+    <Animated.View
+      key={player.id}
+      style={{
+        opacity: animatedValue,
+        transform: [{
+          translateX: animatedValue.interpolate({
+            inputRange: [0, 1],
+            outputRange: [isActive ? 0 : 50, 0],
+          })
+        }]
+      }}
+    >
+      <PlayerCard player={player} onPress={onPlayerPress} />
+    </Animated.View>
   );
 
   const onGestureEvent = (event: any) => {
@@ -233,11 +253,11 @@ const PlayerList: React.FC<PlayerListProps> = ({
 
   if (filteredPlayers.length === 0) {
     return (
-      <View style={styles.emptyContainer}>
+      <Animated.View style={[styles.emptyContainer, { opacity: animatedValue }]}>
         <Text style={styles.emptyText}>
           {searchQuery ? 'Игроки не найдены' : 'Нет игроков в этой позиции'}
         </Text>
-      </View>
+      </Animated.View>
     );
   }
 
@@ -246,14 +266,13 @@ const PlayerList: React.FC<PlayerListProps> = ({
       onGestureEvent={onGestureEvent}
       onHandlerStateChange={onHandlerStateChange}
     >
-      <FlatList
-        data={filteredPlayers}
-        renderItem={renderPlayer}
-        keyExtractor={(item) => item.id}
+      <Animated.ScrollView
+        style={styles.animatedContainer}
         contentContainerStyle={{ paddingVertical: 8 }}
         showsVerticalScrollIndicator={false}
-        scrollEnabled={true}
-      />
+      >
+        {filteredPlayers.map((player, index) => renderPlayer(player, index))}
+      </Animated.ScrollView>
     </PanGestureHandler>
   );
 };
@@ -266,6 +285,13 @@ export default function PlayersScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [index, setIndex] = useState(0);
+
+  // Animation values for smooth transitions
+  const animatedValues = useRef([
+    new Animated.Value(1), // Goalies
+    new Animated.Value(0), // Defense
+    new Animated.Value(0), // Forwards
+  ]).current;
 
   const positions = ['Вратарь', 'Защитник', 'Нападающий'];
   const [routes] = useState(
@@ -294,6 +320,18 @@ export default function PlayersScreen() {
     loadData();
   }, []);
 
+  // Animate tab transitions
+  useEffect(() => {
+    animatedValues.forEach((animValue, i) => {
+      Animated.spring(animValue, {
+        toValue: i === index ? 1 : 0,
+        useNativeDriver: false,
+        tension: 100,
+        friction: 8,
+      }).start();
+    });
+  }, [index, animatedValues]);
+
   const handlePlayerPress = (player: Player) => {
     router.push(`/player/${player.id}`);
   };
@@ -313,19 +351,19 @@ export default function PlayersScreen() {
 
   const groupedPlayers = groupPlayersByPosition(players);
 
-  const renderScene = SceneMap(
-    positions.reduce((acc, position) => {
-      acc[position] = () => (
-        <PlayerList
-          players={groupedPlayers[position] || []}
-          searchQuery={searchQuery}
-          onPlayerPress={handlePlayerPress}
-          onPullDown={handlePullDown}
-        />
-      );
-      return acc;
-    }, {} as any)
-  );
+  const renderScene = ({ route }: { route: { key: string } }) => {
+    const positionIndex = positions.indexOf(route.key);
+    return (
+      <PlayerList
+        players={groupedPlayers[route.key] || []}
+        searchQuery={searchQuery}
+        onPlayerPress={handlePlayerPress}
+        onPullDown={handlePullDown}
+        animatedValue={animatedValues[positionIndex]}
+        isActive={positionIndex === index}
+      />
+    );
+  };
 
   const renderTabBar = (props: any) => (
     <TabBar
@@ -391,13 +429,15 @@ export default function PlayersScreen() {
         </View>
       )}
 
-      {/* Tab View */}
+      {/* Tab View with Smooth Animations */}
       <TabView
         navigationState={{ index, routes }}
         renderScene={renderScene}
         renderTabBar={renderTabBar}
         onIndexChange={setIndex}
         initialLayout={{ width: Dimensions.get('window').width }}
+        animationEnabled={true}
+        swipeEnabled={true}
       />
     </SafeAreaView>
   );

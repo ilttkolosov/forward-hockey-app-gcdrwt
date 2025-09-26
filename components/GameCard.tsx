@@ -117,7 +117,8 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
         </View>
 
         <View style={styles.teamsContainer}>
-          <View style={styles.teamSection}>
+          {/* Home Team Container */}
+          <View style={styles.teamContainer}>
             {game.homeTeamLogo ? (
               <Image 
                 source={{ uri: game.homeTeamLogo }} 
@@ -135,16 +136,17 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
               {game.homeTeam}
             </Text>
             {showScore && game.homeScore !== undefined && (
-              <View style={styles.scoreContainer}>
-                <Text style={styles.score}>{game.homeScore}</Text>
-                {game.team1_outcome && (
-                  <Text style={[styles.outcome, { 
-                    color: game.team1_outcome === 'win' ? colors.success : 
-                           game.team1_outcome === 'loss' ? colors.error : colors.warning 
-                  }]}>
-                    {getOutcomeText(game.team1_outcome)}
-                  </Text>
-                )}
+              <Text style={styles.score}>{game.homeScore}</Text>
+            )}
+            {/* Outcome Badge centered under team name */}
+            {game.team1_outcome && (
+              <View style={styles.outcomeBadgeContainer}>
+                <Text style={[styles.outcomeText, { 
+                  color: game.team1_outcome === 'win' ? colors.success : 
+                         game.team1_outcome === 'loss' ? colors.error : colors.warning 
+                }]}>
+                  {getOutcomeText(game.team1_outcome)}
+                </Text>
               </View>
             )}
           </View>
@@ -153,7 +155,8 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
             <Text style={styles.vsText}>VS</Text>
           </View>
 
-          <View style={styles.teamSection}>
+          {/* Away Team Container */}
+          <View style={styles.teamContainer}>
             {game.awayTeamLogo ? (
               <Image 
                 source={{ uri: game.awayTeamLogo }} 
@@ -171,16 +174,17 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
               {game.awayTeam}
             </Text>
             {showScore && game.awayScore !== undefined && (
-              <View style={styles.scoreContainer}>
-                <Text style={styles.score}>{game.awayScore}</Text>
-                {game.team2_outcome && (
-                  <Text style={[styles.outcome, { 
-                    color: game.team2_outcome === 'win' ? colors.success : 
-                           game.team2_outcome === 'loss' ? colors.error : colors.warning 
-                  }]}>
-                    {getOutcomeText(game.team2_outcome)}
-                  </Text>
-                )}
+              <Text style={styles.score}>{game.awayScore}</Text>
+            )}
+            {/* Outcome Badge centered under team name */}
+            {game.team2_outcome && (
+              <View style={styles.outcomeBadgeContainer}>
+                <Text style={[styles.outcomeText, { 
+                  color: game.team2_outcome === 'win' ? colors.success : 
+                         game.team2_outcome === 'loss' ? colors.error : colors.warning 
+                }]}>
+                  {getOutcomeText(game.team2_outcome)}
+                </Text>
               </View>
             )}
           </View>
@@ -225,11 +229,11 @@ const styles = StyleSheet.create({
   },
   teamsContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     marginBottom: 16,
   },
-  teamSection: {
+  teamContainer: {
     flex: 1,
     alignItems: 'center',
     paddingHorizontal: 8,
@@ -262,21 +266,23 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     minHeight: 36,
   },
-  scoreContainer: {
-    alignItems: 'center',
-  },
   score: {
     fontSize: 24,
     fontWeight: '800',
     color: colors.primary,
+    marginBottom: 4,
   },
-  outcome: {
+  outcomeBadgeContainer: {
+    alignItems: 'center',
+  },
+  outcomeText: {
     fontSize: 12,
-    fontWeight: '600',
-    marginTop: 4,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   vsSection: {
     paddingHorizontal: 16,
+    justifyContent: 'center',
   },
   vsText: {
     fontSize: 14,

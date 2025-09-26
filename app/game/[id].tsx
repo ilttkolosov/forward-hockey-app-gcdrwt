@@ -284,8 +284,8 @@ export default function GameDetailsScreen() {
 
           {/* Teams with Logos Above Names */}
           <View style={styles.teamsContainer}>
-            {/* Home Team */}
-            <View style={styles.teamSection}>
+            {/* Home Team Column */}
+            <View style={styles.teamColumn}>
               {gameDetails.homeTeam.logo ? (
                 <Image 
                   source={{ uri: gameDetails.homeTeam.logo }} 
@@ -300,6 +300,14 @@ export default function GameDetailsScreen() {
               <Text style={styles.teamName} numberOfLines={2}>
                 {gameDetails.homeTeam.name}
               </Text>
+              {/* Outcome Badge centered under team name */}
+              {gameDetails.homeTeam.outcome && (
+                <View style={styles.outcomeBadgeContainer}>
+                  <View style={[styles.outcomeBadge, { backgroundColor: getOutcomeColor(gameDetails.homeTeam.outcome) }]}>
+                    <Text style={styles.outcomeText}>{getOutcomeText(gameDetails.homeTeam.outcome)}</Text>
+                  </View>
+                </View>
+              )}
             </View>
 
             {/* Score */}
@@ -309,8 +317,8 @@ export default function GameDetailsScreen() {
               </Text>
             </View>
 
-            {/* Away Team */}
-            <View style={styles.teamSection}>
+            {/* Away Team Column */}
+            <View style={styles.teamColumn}>
               {gameDetails.awayTeam.logo ? (
                 <Image 
                   source={{ uri: gameDetails.awayTeam.logo }} 
@@ -325,23 +333,12 @@ export default function GameDetailsScreen() {
               <Text style={styles.teamName} numberOfLines={2}>
                 {gameDetails.awayTeam.name}
               </Text>
-            </View>
-          </View>
-
-          {/* Outcome Badges */}
-          <View style={styles.outcomesContainer}>
-            <View style={styles.outcomeSection}>
-              {gameDetails.homeTeam.outcome && (
-                <View style={[styles.outcomeBadge, { backgroundColor: getOutcomeColor(gameDetails.homeTeam.outcome) }]}>
-                  <Text style={styles.outcomeText}>{getOutcomeText(gameDetails.homeTeam.outcome)}</Text>
-                </View>
-              )}
-            </View>
-            
-            <View style={styles.outcomeSection}>
+              {/* Outcome Badge centered under team name */}
               {gameDetails.awayTeam.outcome && (
-                <View style={[styles.outcomeBadge, { backgroundColor: getOutcomeColor(gameDetails.awayTeam.outcome) }]}>
-                  <Text style={styles.outcomeText}>{getOutcomeText(gameDetails.awayTeam.outcome)}</Text>
+                <View style={styles.outcomeBadgeContainer}>
+                  <View style={[styles.outcomeBadge, { backgroundColor: getOutcomeColor(gameDetails.awayTeam.outcome) }]}>
+                    <Text style={styles.outcomeText}>{getOutcomeText(gameDetails.awayTeam.outcome)}</Text>
+                  </View>
                 </View>
               )}
             </View>
@@ -483,12 +480,12 @@ const styles = StyleSheet.create({
   },
   teamsContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     marginBottom: 24,
     paddingHorizontal: 8,
   },
-  teamSection: {
+  teamColumn: {
     flex: 1,
     alignItems: 'center',
     paddingHorizontal: 8,
@@ -515,6 +512,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     textAlign: 'center',
     lineHeight: 18,
+    marginBottom: 12,
   },
   scoreContainer: {
     alignItems: 'center',
@@ -526,14 +524,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.primary,
   },
-  outcomesContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-    paddingHorizontal: 16,
-  },
-  outcomeSection: {
-    flex: 1,
+  outcomeBadgeContainer: {
     alignItems: 'center',
   },
   outcomeBadge: {
@@ -548,6 +539,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     textTransform: 'uppercase',
+    textAlign: 'center',
   },
   periodScores: {
     padding: 16,

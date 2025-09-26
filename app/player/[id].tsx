@@ -90,7 +90,7 @@ const styles = StyleSheet.create({
   },
   captainBadgeText: {
     color: colors.background,
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
   },
   infoSection: {
@@ -135,40 +135,44 @@ export default function PlayerDetailsScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [player, setPlayer] = useState<Player | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadPlayerData = useCallback(async () => {
-    if (!id) {
-      setError('ID игрока не указан');
-      setLoading(false);
+    if (!id || isLoading) {
+      console.log('Skipping player load - no ID or already loading:', { id, isLoading });
       return;
     }
 
     try {
+      setIsLoading(true);
       setError(null);
       console.log('Loading player data for ID:', id);
+      
       const playerData = await getPlayerById(id);
       
       if (playerData) {
         setPlayer(playerData);
-        console.log('Player data loaded:', playerData);
+        console.log('Player data loaded successfully:', playerData.name);
       } else {
         setError('Игрок не найден');
+        console.log('Player not found for ID:', id);
       }
     } catch (err) {
-      console.log('Error loading player:', err);
+      console.error('Error loading player:', err);
       setError('Не удалось загрузить данные игрока. Попробуйте еще раз.');
     } finally {
-      setLoading(false);
+      setIsLoading(false);
       setRefreshing(false);
     }
-  }, [id]);
+  }, [id, isLoading]);
 
   useEffect(() => {
-    loadPlayerData();
-  }, [loadPlayerData]);
+    if (id) {
+      loadPlayerData();
+    }
+  }, [id]); // Only depend on id, not loadPlayerData to prevent double calls
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -185,7 +189,7 @@ export default function PlayerDetailsScreen() {
     return '—';
   };
 
-  if (loading) {
+  if (isLoading && !player) {
     return (
       <SafeAreaView style={styles.container}>
         <LoadingSpinner />
@@ -285,7 +289,7 @@ export default function PlayerDetailsScreen() {
           </View>
         </View>
 
-        {/* Game Information - Status field removed */}
+        {/* Game Information - Status field removed as requested */}
         <View style={styles.infoSection}>
           <Text style={styles.sectionTitle}>Игровая информация</Text>
           
