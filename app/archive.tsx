@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, RefreshControl, TouchableOpacity, Image, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, RefreshControl, TouchableOpacity, Image, StyleSheet, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { commonStyles, colors } from '../styles/commonStyles';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -8,6 +8,7 @@ import ErrorMessage from '../components/ErrorMessage';
 import { fetchPastGames, fetchPastGamesCount, getOutcomeText, getOutcomeColor } from '../data/pastGameData';
 import { Link, useRouter } from 'expo-router';
 import Icon from '../components/Icon';
+import { getCachedTeamLogo } from '../utils/teamLogos';
 
 interface EnrichedPastGame {
   id: string;
@@ -28,12 +29,15 @@ interface EnrichedPastGame {
   seasonName: string | null;
 }
 
+const ITEMS_PER_PAGE = 10;
+
 const styles = StyleSheet.create({
   gameCard: {
     backgroundColor: colors.card,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
+    marginHorizontal: 16,
     borderWidth: 1,
     borderColor: colors.border,
     boxShadow: `0px 2px 8px ${colors.shadow}`,
@@ -116,6 +120,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 24,
+    paddingHorizontal: 16,
   },
   backButton: {
     marginRight: 16,
@@ -142,46 +147,32 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
   },
+  loadingMore: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  loadingMoreText: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginTop: 8,
+  },
 });
 
 export default function GameArchiveScreen() {
-  const [games, setGames] = useState<EnrichedPastGame[]>([]);
+  const [allGames, setAllGames] = useState<EnrichedPastGame[]>([]);
+  const [displayedGames, setDisplayedGames] = useState<EnrichedPastGame[]>([]);
   const [gamesCount, setGamesCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [currentPage, setCurrentPage] = useState(0);
   const router = useRouter();
-
-  const testApiDirectly = async () => {
-    try {
-      console.log('=== Archive Screen: Testing API directly ===');
-      const response = await fetch('https://www.hc-forward.com/wp-json/app/v1/past-events');
-      console.log('Direct API response status:', response.status);
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Direct API response data keys:', Object.keys(data));
-        console.log('Direct API response count:', data.count);
-        console.log('Direct API response data length:', data.data?.length);
-        
-        if (data.data && data.data.length > 0) {
-          console.log('First event from direct API:', data.data[0]);
-        }
-      } else {
-        console.error('Direct API call failed with status:', response.status);
-      }
-    } catch (error) {
-      console.error('Direct API test error:', error);
-    }
-  };
 
   const loadData = async () => {
     try {
       setError(null);
       console.log('=== Archive Screen: Loading data ===');
-      
-      // Test API directly first
-      await testApiDirectly();
       
       // Load past games and count concurrently
       const [pastGames, count] = await Promise.all([
@@ -191,8 +182,13 @@ export default function GameArchiveScreen() {
       
       console.log(`Archive Screen: Received ${pastGames.length} games, count: ${count}`);
       
-      setGames(pastGames);
+      setAllGames(pastGames);
       setGamesCount(count);
+      
+      // Load first page
+      const firstPage = pastGames.slice(0, ITEMS_PER_PAGE);
+      setDisplayedGames(firstPage);
+      setCurrentPage(1);
       
       if (pastGames.length === 0 && count > 0) {
         console.warn('Archive Screen: Count is positive but games array is empty - this indicates a data processing issue');
@@ -207,12 +203,35 @@ export default function GameArchiveScreen() {
     }
   };
 
+  const loadMoreGames = useCallback(() => {
+    if (loadingMore || displayedGames.length >= allGames.length) {
+      return;
+    }
+
+    setLoadingMore(true);
+    
+    setTimeout(() => {
+      const nextPage = currentPage + 1;
+      const startIndex = currentPage * ITEMS_PER_PAGE;
+      const endIndex = startIndex + ITEMS_PER_PAGE;
+      const newGames = allGames.slice(startIndex, endIndex);
+      
+      setDisplayedGames(prev => [...prev, ...newGames]);
+      setCurrentPage(nextPage);
+      setLoadingMore(false);
+      
+      console.log(`Loaded page ${nextPage}, showing ${displayedGames.length + newGames.length} of ${allGames.length} games`);
+    }, 500); // Small delay to show loading indicator
+  }, [loadingMore, displayedGames.length, allGames.length, currentPage]);
+
   useEffect(() => {
     loadData();
   }, []);
 
   const onRefresh = () => {
     setRefreshing(true);
+    setCurrentPage(0);
+    setDisplayedGames([]);
     loadData();
   };
 
@@ -221,10 +240,47 @@ export default function GameArchiveScreen() {
     router.push(`/game/${gameId}`);
   };
 
-  const renderGameCard = (game: EnrichedPastGame) => {
+  const shortenLeagueName = (leagueName: string | null): string => {
+    if (!leagueName) return '';
+    
+    // Extract meaningful part from league name
+    // Example: "107: Первенство Санкт-Петербурга, группа А" → "Первенство"
+    const parts = leagueName.split(':');
+    if (parts.length > 1) {
+      const namePart = parts[1].trim();
+      const words = namePart.split(',')[0].trim(); // Take part before comma
+      const firstWord = words.split(' ')[0]; // Take first meaningful word
+      return firstWord;
+    }
+    
+    return leagueName.split(',')[0].trim(); // Fallback
+  };
+
+  const formatGameDate = (date: string, time: string): string => {
+    // Check if time is "00:00" to format date differently
+    if (time === '00:00') {
+      // Format as "28 сентября 2025 г" (without dot after year)
+      const dateObj = new Date(date);
+      return dateObj.toLocaleDateString('ru-RU', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      }) + ' г';
+    } else {
+      // Format as "28 сентября 2025 г. • 10:45"
+      const dateObj = new Date(date);
+      const formattedDate = dateObj.toLocaleDateString('ru-RU', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      }) + ' г.';
+      return `${formattedDate} • ${time}`;
+    }
+  };
+
+  const renderGameCard = ({ item: game }: { item: EnrichedPastGame }) => {
     return (
       <TouchableOpacity
-        key={game.id}
         style={styles.gameCard}
         onPress={() => handleGamePress(game.event_id)}
         activeOpacity={0.7}
@@ -232,7 +288,7 @@ export default function GameArchiveScreen() {
         {/* Date and Time */}
         <View style={styles.gameHeader}>
           <Text style={styles.dateTime}>
-            {game.date} {game.time && `• ${game.time}`}
+            {formatGameDate(game.date, game.time)}
           </Text>
         </View>
 
@@ -290,13 +346,13 @@ export default function GameArchiveScreen() {
           </View>
         )}
 
-        {/* Game Information */}
-        {(game.tournamentName || game.arenaName || game.seasonName) && (
+        {/* Game Information - Hide season, shorten league name */}
+        {(game.tournamentName || game.arenaName) && (
           <View style={styles.gameInfo}>
             {game.tournamentName && (
               <View style={styles.infoRow}>
                 <Icon name="trophy" size={16} color={colors.textSecondary} style={styles.infoIcon} />
-                <Text style={styles.infoText}>{game.tournamentName}</Text>
+                <Text style={styles.infoText}>{shortenLeagueName(game.tournamentName)}</Text>
               </View>
             )}
             
@@ -306,22 +362,50 @@ export default function GameArchiveScreen() {
                 <Text style={styles.infoText}>{game.arenaName}</Text>
               </View>
             )}
-            
-            {game.seasonName && (
-              <View style={styles.infoRow}>
-                <Icon name="calendar" size={16} color={colors.textSecondary} style={styles.infoIcon} />
-                <Text style={styles.infoText}>{game.seasonName}</Text>
-              </View>
-            )}
           </View>
         )}
       </TouchableOpacity>
     );
   };
 
+  const renderFooter = () => {
+    if (!loadingMore) return null;
+    
+    return (
+      <View style={styles.loadingMore}>
+        <LoadingSpinner />
+        <Text style={styles.loadingMoreText}>Загружаем еще игры...</Text>
+      </View>
+    );
+  };
+
+  const renderEmpty = () => (
+    <View style={styles.emptyContainer}>
+      <Icon name="archive" size={64} color={colors.textSecondary} />
+      <Text style={styles.emptyText}>Нет игр в архиве</Text>
+      <Text style={styles.emptySubtext}>
+        {gamesCount > 0 
+          ? `Найдено ${gamesCount} игр, но не удалось их обработать`
+          : 'Архивные игры появятся здесь после проведения матчей'
+        }
+      </Text>
+    </View>
+  );
+
   if (loading) {
     return (
       <SafeAreaView style={commonStyles.container}>
+        <View style={styles.headerContainer}>
+          <Link href="/" asChild>
+            <TouchableOpacity style={styles.backButton}>
+              <Icon name="chevron-back" size={24} color={colors.text} />
+            </TouchableOpacity>
+          </Link>
+          <View style={styles.headerInfo}>
+            <Text style={commonStyles.title}>Архив игр</Text>
+            <Text style={commonStyles.textSecondary}>Загружаем...</Text>
+          </View>
+        </View>
         <View style={commonStyles.loadingContainer}>
           <LoadingSpinner />
           <Text style={[commonStyles.textSecondary, { marginTop: 16 }]}>
@@ -335,21 +419,6 @@ export default function GameArchiveScreen() {
   if (error) {
     return (
       <SafeAreaView style={commonStyles.container}>
-        <ErrorMessage message={error} onRetry={loadData} />
-      </SafeAreaView>
-    );
-  }
-
-  return (
-    <SafeAreaView style={commonStyles.container}>
-      <ScrollView
-        style={commonStyles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
         <View style={styles.headerContainer}>
           <Link href="/" asChild>
             <TouchableOpacity style={styles.backButton}>
@@ -358,32 +427,46 @@ export default function GameArchiveScreen() {
           </Link>
           <View style={styles.headerInfo}>
             <Text style={commonStyles.title}>Архив игр</Text>
-            <Text style={commonStyles.textSecondary}>
-              {gamesCount > 0 ? `Всего игр: ${gamesCount}` : 'Нет сыгранных игр'}
-            </Text>
+            <Text style={commonStyles.textSecondary}>Ошибка загрузки</Text>
           </View>
         </View>
+        <ErrorMessage message={error} onRetry={loadData} />
+      </SafeAreaView>
+    );
+  }
 
-        {/* Games List */}
-        {games.length > 0 ? (
-          <>
-            {games.map(renderGameCard)}
-            {/* Bottom spacing */}
-            <View style={{ height: 32 }} />
-          </>
-        ) : (
-          <View style={styles.emptyContainer}>
-            <Icon name="archive" size={64} color={colors.textSecondary} />
-            <Text style={styles.emptyText}>Нет игр в архиве</Text>
-            <Text style={styles.emptySubtext}>
-              {gamesCount > 0 
-                ? `Найдено ${gamesCount} игр, но не удалось их обработать`
-                : 'Архивные игры появятся здесь после проведения матчей'
-              }
-            </Text>
-          </View>
-        )}
-      </ScrollView>
+  return (
+    <SafeAreaView style={commonStyles.container}>
+      {/* Header */}
+      <View style={styles.headerContainer}>
+        <Link href="/" asChild>
+          <TouchableOpacity style={styles.backButton}>
+            <Icon name="chevron-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+        </Link>
+        <View style={styles.headerInfo}>
+          <Text style={commonStyles.title}>Архив игр</Text>
+          <Text style={commonStyles.textSecondary}>
+            {gamesCount > 0 ? `Всего игр: ${gamesCount}` : 'Нет сыгранных игр'}
+          </Text>
+        </View>
+      </View>
+
+      {/* Games List with Infinite Scroll */}
+      <FlatList
+        data={displayedGames}
+        renderItem={renderGameCard}
+        keyExtractor={(item) => item.id}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        onEndReached={loadMoreGames}
+        onEndReachedThreshold={0.1}
+        ListFooterComponent={renderFooter}
+        ListEmptyComponent={renderEmpty}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={displayedGames.length === 0 ? { flex: 1 } : { paddingBottom: 32 }}
+      />
     </SafeAreaView>
   );
 }

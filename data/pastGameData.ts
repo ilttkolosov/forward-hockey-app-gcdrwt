@@ -3,6 +3,7 @@ import { apiService } from '../services/apiService';
 import { Game, ApiPastEvent, ApiTeam } from '../types';
 import { colors } from '../styles/commonStyles';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getCachedTeamLogo } from '../utils/teamLogos';
 
 interface CachedData<T> {
     data: T;
@@ -162,6 +163,10 @@ const convertApiPastEventToEnrichedGame = async (apiEvent: ApiPastEvent): Promis
             fetchTeamSafely(awayTeamId)
         ]);
 
+        // Cache team logos
+        const homeTeamLogo = await getCachedTeamLogo(homeTeamId, homeTeamData.logo_url || '');
+        const awayTeamLogo = await getCachedTeamLogo(awayTeamId, awayTeamData.logo_url || '');
+
         const homeGoals = parseGoals(apiEvent.results?.[homeTeamId]?.goals || 0);
         const awayGoals = parseGoals(apiEvent.results?.[awayTeamId]?.goals || 0);
 
@@ -179,8 +184,8 @@ const convertApiPastEventToEnrichedGame = async (apiEvent: ApiPastEvent): Promis
             event_id: String(apiEvent.event_id),
             homeTeam: homeTeamData.name,
             awayTeam: awayTeamData.name,
-            homeTeamLogo: homeTeamData.logo_url,
-            awayTeamLogo: awayTeamData.logo_url,
+            homeTeamLogo: homeTeamLogo,
+            awayTeamLogo: awayTeamLogo,
             homeGoals: homeGoals,
             awayGoals: awayGoals,
             homeOutcome: homeOutcome,

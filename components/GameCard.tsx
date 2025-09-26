@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { Game } from '../types';
 import { colors, commonStyles } from '../styles/commonStyles';
 import { useRouter } from 'expo-router';
+import { getCachedTeamLogo } from '../utils/teamLogos';
 
 interface GameCardProps {
   game: Game;
@@ -44,12 +45,27 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
     }
   };
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: string, timeString?: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('ru-RU', {
-      month: 'short',
-      day: 'numeric',
-    });
+    const time = timeString || game.time;
+    
+    // Check if time is "00:00" to format date differently
+    if (time === '00:00') {
+      // Format as "28 сентября 2025 г" (without dot after year)
+      return date.toLocaleDateString('ru-RU', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      }) + ' г';
+    } else {
+      // Format as "28 сентября 2025 г. • 10:45"
+      const formattedDate = date.toLocaleDateString('ru-RU', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      }) + ' г.';
+      return time ? `${formattedDate} • ${time}` : formattedDate;
+    }
   };
 
   const getOutcomeText = (outcome: string) => {
@@ -65,6 +81,22 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
     }
   };
 
+  const shortenLeagueName = (leagueName: string | null): string => {
+    if (!leagueName) return '';
+    
+    // Extract meaningful part from league name
+    // Example: "107: Первенство Санкт-Петербурга, группа А" → "Первенство"
+    const parts = leagueName.split(':');
+    if (parts.length > 1) {
+      const namePart = parts[1].trim();
+      const words = namePart.split(',')[0].trim(); // Take part before comma
+      const firstWord = words.split(' ')[0]; // Take first meaningful word
+      return firstWord;
+    }
+    
+    return leagueName.split(',')[0].trim(); // Fallback
+  };
+
   return (
     <TouchableOpacity onPress={handlePress} activeOpacity={0.7}>
       <View style={commonStyles.gameCard}>
@@ -73,7 +105,7 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
             <Text style={styles.statusText}>{getStatusText(game.status)}</Text>
           </View>
           <Text style={commonStyles.textSecondary}>
-            {formatDate(game.date)} • {game.time}
+            {formatDate(game.date, game.time)}
           </Text>
         </View>
 
@@ -156,14 +188,10 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
             )}
             {game.league_name && (
               <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
-                🏆 {game.league_name}
+                🏆 {shortenLeagueName(game.league_name)}
               </Text>
             )}
-            {game.season_name && (
-              <Text style={[commonStyles.textSecondary, styles.seasonText]} numberOfLines={1}>
-                📅 {game.season_name}
-              </Text>
-            )}
+            {/* Season field removed as requested */}
           </View>
         </View>
       </View>
@@ -255,10 +283,6 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   leagueText: {
-    fontSize: 12,
-    fontStyle: 'italic',
-  },
-  seasonText: {
     fontSize: 12,
     fontStyle: 'italic',
   },

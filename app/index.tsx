@@ -6,7 +6,6 @@ import { Link } from 'expo-router';
 import { commonStyles, colors } from '../styles/commonStyles';
 import { Game } from '../types';
 import { getCurrentGame, getFutureGames, getUpcomingGamesCount } from '../data/gameData';
-import { fetchPastGamesCount } from '../data/pastGameData';
 import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
@@ -50,7 +49,6 @@ export default function HomeScreen() {
   const [currentGame, setCurrentGame] = useState<Game | null>(null);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
   const [upcomingCount, setUpcomingCount] = useState<number>(0);
-  const [pastCount, setPastCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -60,24 +58,22 @@ export default function HomeScreen() {
       setError(null);
       console.log('Loading home screen data...');
       
-      // Load all data concurrently
-      const [current, upcoming, upcomingCountData, pastCountData] = await Promise.all([
+      // Load only current game, upcoming games, and upcoming count
+      // Archive count will be loaded in archive screen
+      const [current, upcoming, upcomingCountData] = await Promise.all([
         getCurrentGame(),
         getFutureGames(),
-        getUpcomingGamesCount(),
-        fetchPastGamesCount()
+        getUpcomingGamesCount()
       ]);
       
       setCurrentGame(current);
       setUpcomingGames(upcoming);
       setUpcomingCount(upcomingCountData);
-      setPastCount(pastCountData);
       
       console.log('Home screen data loaded:', {
         currentGame: current?.id,
         upcomingGames: upcoming.length,
-        upcomingCount: upcomingCountData,
-        pastCount: pastCountData
+        upcomingCount: upcomingCountData
       });
     } catch (err) {
       console.log('Error loading home screen data:', err);
@@ -166,9 +162,7 @@ export default function HomeScreen() {
                 style={quickNavStyles.icon} 
               />
               <Text style={quickNavStyles.title}>Архив игр</Text>
-              <Text style={quickNavStyles.subtitle}>
-                {pastCount > 0 ? `${pastCount} игр` : 'Нет игр'}
-              </Text>
+              <Text style={quickNavStyles.subtitle}>История матчей</Text>
             </TouchableOpacity>
           </Link>
 

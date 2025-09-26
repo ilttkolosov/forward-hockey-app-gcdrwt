@@ -19,6 +19,7 @@ import { colors, commonStyles } from '../../styles/commonStyles';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
 import Icon from '../../components/Icon';
+import { getCachedTeamLogo } from '../../utils/teamLogos';
 
 const { width } = Dimensions.get('window');
 
@@ -82,6 +83,10 @@ export default function GameDetailsScreen() {
         fetchTeamSafely(awayTeamId)
       ]);
 
+      // Cache team logos
+      const homeTeamLogo = await getCachedTeamLogo(homeTeamId, homeTeamData.logo_url || '');
+      const awayTeamLogo = await getCachedTeamLogo(awayTeamId, awayTeamData.logo_url || '');
+
       // Format date and time
       const { formattedDate, formattedTime } = formatDateTimeWithoutSeconds(apiData.date);
 
@@ -97,7 +102,7 @@ export default function GameDetailsScreen() {
         homeTeam: {
           id: homeTeamId,
           name: homeTeamData.name,
-          logo: homeTeamData.logo_url || '',
+          logo: homeTeamLogo,
           goals: parseInt(homeResults?.goals || '0') || 0,
           firstPeriod: homeResults?.first ? parseInt(homeResults.first) : undefined,
           secondPeriod: homeResults?.second ? parseInt(homeResults.second) : undefined,
@@ -107,7 +112,7 @@ export default function GameDetailsScreen() {
         awayTeam: {
           id: awayTeamId,
           name: awayTeamData.name,
-          logo: awayTeamData.logo_url || '',
+          logo: awayTeamLogo,
           goals: parseInt(awayResults?.goals || '0') || 0,
           firstPeriod: awayResults?.first ? parseInt(awayResults.first) : undefined,
           secondPeriod: awayResults?.second ? parseInt(awayResults.second) : undefined,
@@ -254,7 +259,7 @@ export default function GameDetailsScreen() {
         style={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* Video Player - Show at top if available */}
+        {/* Video Player - Adjusted for proper aspect ratio */}
         {gameDetails.videoUrl && (
           <View style={styles.videoContainer}>
             <Text style={styles.sectionTitle}>Видео матча</Text>
@@ -368,18 +373,12 @@ export default function GameDetailsScreen() {
           </View>
         )}
 
-        {/* Tournament, Season, Arena Info */}
+        {/* Tournament, Arena Info (Season removed as requested) */}
         <View style={styles.gameDetails}>
           {gameDetails.league && (
             <View style={styles.detailItem}>
               <Icon name="trophy" size={16} color={colors.textSecondary} />
               <Text style={styles.detailText}>Турнир: {gameDetails.league}</Text>
-            </View>
-          )}
-          {gameDetails.season && (
-            <View style={styles.detailItem}>
-              <Icon name="calendar" size={16} color={colors.textSecondary} />
-              <Text style={styles.detailText}>Сезон: {gameDetails.season}</Text>
             </View>
           )}
           {gameDetails.venue && (
@@ -436,7 +435,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   videoFrame: {
-    height: 220,
+    width: '100%',
+    aspectRatio: 16 / 9, // Fixed aspect ratio for video
     backgroundColor: colors.surface,
     borderRadius: 12,
     overflow: 'hidden',
