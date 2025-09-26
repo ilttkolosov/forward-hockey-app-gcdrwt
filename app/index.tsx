@@ -7,7 +7,7 @@ import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { Game, TeamStats } from '../types';
-import { mockCurrentGame, mockUpcomingGames, mockTeamStats } from '../data/mockData';
+import { getCurrentGame, getFutureGames, getPastGamesCount } from '../data/gameData';
 import { Link } from 'expo-router';
 import { TouchableOpacity } from 'react-native';
 import Icon from '../components/Icon';
@@ -15,7 +15,7 @@ import Icon from '../components/Icon';
 export default function HomeScreen() {
   const [currentGame, setCurrentGame] = useState<Game | null>(null);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
-  const [teamStats, setTeamStats] = useState<TeamStats | null>(null);
+  const [archiveCount, setArchiveCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -23,15 +23,26 @@ export default function HomeScreen() {
   const loadData = async () => {
     try {
       setError(null);
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log('Loading home screen data...');
       
-      setCurrentGame(mockCurrentGame);
-      setUpcomingGames(mockUpcomingGames.slice(0, 2)); // Show only next 2 games
-      setTeamStats(mockTeamStats);
+      // Load current game
+      const current = await getCurrentGame();
+      setCurrentGame(current);
+      console.log('Current game loaded:', current);
+      
+      // Load upcoming games
+      const upcoming = await getFutureGames();
+      setUpcomingGames(upcoming);
+      console.log('Upcoming games loaded:', upcoming.length);
+      
+      // Load archive count
+      const count = await getPastGamesCount();
+      setArchiveCount(count);
+      console.log('Archive count loaded:', count);
+      
     } catch (err) {
       console.log('Error loading home data:', err);
-      setError('Failed to load team data. Please try again.');
+      setError('Не удалось загрузить данные. Попробуйте еще раз.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -74,15 +85,15 @@ export default function HomeScreen() {
       >
         {/* Header */}
         <View style={{ marginBottom: 24 }}>
-          <Text style={commonStyles.title}>HC Forward</Text>
-          <Text style={commonStyles.textSecondary}>Official Mobile App</Text>
+          <Text style={commonStyles.title}>ХК Форвард</Text>
+          <Text style={commonStyles.textSecondary}>Официальное мобильное приложение</Text>
         </View>
 
         {/* Current Game */}
         {currentGame && (
           <View style={commonStyles.section}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-              <Text style={commonStyles.subtitle}>Current Game</Text>
+              <Text style={commonStyles.subtitle}>Текущая игра</Text>
               {currentGame.status === 'live' && (
                 <View style={{
                   width: 8,
@@ -97,50 +108,15 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Team Stats */}
-        {teamStats && (
-          <View style={commonStyles.section}>
-            <Text style={commonStyles.subtitle}>Season Stats</Text>
-            <View style={commonStyles.card}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 24, fontWeight: '700', color: colors.primary }}>
-                    {teamStats.position}
-                  </Text>
-                  <Text style={commonStyles.textSecondary}>Position</Text>
-                </View>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 24, fontWeight: '700', color: colors.success }}>
-                    {teamStats.wins}
-                  </Text>
-                  <Text style={commonStyles.textSecondary}>Wins</Text>
-                </View>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 24, fontWeight: '700', color: colors.primary }}>
-                    {teamStats.points}
-                  </Text>
-                  <Text style={commonStyles.textSecondary}>Points</Text>
-                </View>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 24, fontWeight: '700', color: colors.text }}>
-                    {teamStats.goalsFor}-{teamStats.goalsAgainst}
-                  </Text>
-                  <Text style={commonStyles.textSecondary}>Goals</Text>
-                </View>
-              </View>
-            </View>
-          </View>
-        )}
-
         {/* Upcoming Games */}
         {upcomingGames.length > 0 && (
           <View style={commonStyles.section}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <Text style={commonStyles.subtitle}>Next Games</Text>
+              <Text style={commonStyles.subtitle}>Ближайшие игры</Text>
               <Link href="/upcoming" asChild>
                 <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '500', marginRight: 4 }}>
-                    View All
+                    Все игры
                   </Text>
                   <Icon name="chevron-forward" size={16} color={colors.primary} />
                 </TouchableOpacity>
@@ -154,30 +130,38 @@ export default function HomeScreen() {
 
         {/* Quick Navigation */}
         <View style={commonStyles.section}>
-          <Text style={commonStyles.subtitle}>Quick Access</Text>
+          <Text style={commonStyles.subtitle}>Быстрый доступ</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
             <Link href="/archive" asChild>
               <TouchableOpacity style={quickNavStyles.button}>
                 <Icon name="archive" size={24} color={colors.primary} />
-                <Text style={quickNavStyles.buttonText}>Game Archive</Text>
+                <Text style={quickNavStyles.buttonText}>
+                  Архив игр {archiveCount > 0 && `(${archiveCount})`}
+                </Text>
+              </TouchableOpacity>
+            </Link>
+            <Link href="/upcoming" asChild>
+              <TouchableOpacity style={quickNavStyles.button}>
+                <Icon name="calendar" size={24} color={colors.primary} />
+                <Text style={quickNavStyles.buttonText}>Предстоящие игры</Text>
               </TouchableOpacity>
             </Link>
             <Link href="/players" asChild>
               <TouchableOpacity style={quickNavStyles.button}>
                 <Icon name="people" size={24} color={colors.primary} />
-                <Text style={quickNavStyles.buttonText}>Players</Text>
+                <Text style={quickNavStyles.buttonText}>Игроки</Text>
               </TouchableOpacity>
             </Link>
             <Link href="/tournaments" asChild>
               <TouchableOpacity style={quickNavStyles.button}>
                 <Icon name="trophy" size={24} color={colors.primary} />
-                <Text style={quickNavStyles.buttonText}>Tournaments</Text>
+                <Text style={quickNavStyles.buttonText}>Турниры</Text>
               </TouchableOpacity>
             </Link>
             <Link href="/coaches" asChild>
               <TouchableOpacity style={quickNavStyles.button}>
                 <Icon name="school" size={24} color={colors.primary} />
-                <Text style={quickNavStyles.buttonText}>Coaches</Text>
+                <Text style={quickNavStyles.buttonText}>Тренеры</Text>
               </TouchableOpacity>
             </Link>
           </View>

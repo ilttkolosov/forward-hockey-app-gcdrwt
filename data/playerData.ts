@@ -13,7 +13,7 @@ interface CachedImage {
   timestamp: number;
 }
 
-const CACHE_DURATION = 10 * 60 * 1000; // 10 минут
+const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
 const PLAYERS_CACHE_KEY = 'players_cache';
 const PLAYER_IMAGES_CACHE_KEY = 'player_images_cache';
 
@@ -23,8 +23,8 @@ function isCacheValid(timestamp: number): boolean {
 
 function removePatronymic(fullName: string): string {
   const parts = fullName.trim().split(' ');
-  if (parts.length >= 2) {
-    return `${parts[0]} ${parts[1]}`;
+  if (parts.length >= 3) {
+    return `${parts[0]} ${parts[2]}`;
   }
   return fullName;
 }
@@ -42,131 +42,149 @@ function calculateAge(birthDate: string): number | undefined {
       age--;
     }
     
-    return age > 0 ? age : undefined;
+    return age > 0 && age < 100 ? age : undefined;
   } catch (error) {
-    console.error('Ошибка вычисления возраста:', error);
+    console.error('Error calculating age:', error);
     return undefined;
   }
 }
 
 async function cachePlayerImage(imageUrl: string): Promise<void> {
   try {
-    const cachedImages = await AsyncStorage.getItem(PLAYER_IMAGES_CACHE_KEY);
-    const imageCache: { [key: string]: CachedImage } = cachedImages ? JSON.parse(cachedImages) : {};
-    
-    imageCache[imageUrl] = {
+    const cached: CachedImage = {
       url: imageUrl,
-      timestamp: Date.now(),
+      timestamp: Date.now()
     };
     
+    const existingCache = await AsyncStorage.getItem(PLAYER_IMAGES_CACHE_KEY);
+    const imageCache = existingCache ? JSON.parse(existingCache) : {};
+    
+    imageCache[imageUrl] = cached;
     await AsyncStorage.setItem(PLAYER_IMAGES_CACHE_KEY, JSON.stringify(imageCache));
   } catch (error) {
-    console.error('Ошибка кэширования изображения игрока:', error);
+    console.error('Error caching player image:', error);
   }
 }
 
 function convertApiPlayerToPlayer(apiPlayer: ApiPlayerResponse): Player {
-  console.log('Конвертация игрока из API:', apiPlayer);
+  const cleanName = removePatronymic(apiPlayer.post_title);
+  const age = calculateAge(apiPlayer.sp_birthdate || '');
   
-  const player: Player = {
+  // Cache image if available
+  if (apiPlayer.featured_image) {
+    cachePlayerImage(apiPlayer.featured_image);
+  }
+  
+  return {
     id: apiPlayer.id,
-    name: removePatronymic(apiPlayer.post_title || 'Неизвестный игрок'),
-    position: apiPlayer.position || 'Неизвестно',
-    number: typeof apiPlayer.sp_number === 'string' ? parseInt(apiPlayer.sp_number) || 0 : apiPlayer.sp_number || 0,
-    birthDate: apiPlayer.post_date,
-    age: calculateAge(apiPlayer.post_date),
-    height: apiPlayer.sp_metrics?.height ? parseInt(apiPlayer.sp_metrics.height) || undefined : undefined,
-    weight: apiPlayer.sp_metrics?.weight ? parseInt(apiPlayer.sp_metrics.weight) || undefined : undefined,
-    handedness: apiPlayer.sp_metrics?.onetwofive || undefined,
-    captainStatus: apiPlayer.sp_metrics?.ka || undefined,
-    nationality: apiPlayer.sp_nationality || undefined,
-    photo: apiPlayer.player_image || undefined,
+    name: cleanName,
+    position: apiPlayer.position || 'Unknown',
+    number: apiPlayer.sp_number || 0,
+    age,
+    height: apiPlayer.sp_height,
+    weight: apiPlayer.sp_weight,
+    nationality: apiPlayer.sp_nationality,
+    photo: apiPlayer.featured_image,
+    // New captain properties
+    isCaptain: apiPlayer.is_captain || false,
+    isAssistantCaptain: apiPlayer.is_assistant_captain || false,
   };
-  
-  console.log('Конвертированный игрок:', player);
-  return player;
 }
 
-export async function checkApiAvailability(): Promise<boolean> {
+async function checkApiAvailability(): Promise<boolean> {
   try {
-    console.log('Проверка доступности API игроков...');
-    const isAvailable = await apiService.checkPlayersApiAvailability();
-    console.log('API игроков доступен:', isAvailable);
-    return isAvailable;
+    return await apiService.checkPlayersApiAvailability();
   } catch (error) {
-    console.error('Ошибка проверки доступности API:', error);
+    console.error('Error checking API availability:', error);
     return false;
   }
 }
 
 async function preloadPlayerImages(players: Player[]): Promise<void> {
-  console.log('Предзагрузка изображений игроков...');
-  const imagePromises = players
-    .filter(player => player.photo)
-    .map(player => cachePlayerImage(player.photo!));
+  const imageUrls = players
+    .map(player => player.photo)
+    .filter((url): url is string => !!url);
   
-  await Promise.allSettled(imagePromises);
-  console.log('Предзагрузка изображений завершена');
+  console.log(`Preloading ${imageUrls.length} player images...`);
+  
+  const promises = imageUrls.map(url => cachePlayerImage(url));
+  await Promise.allSettled(promises);
+  
+  console.log('Player images preloading completed');
 }
 
 export async function getPlayers(): Promise<Player[]> {
   try {
-    // Проверяем кэш
+    // Check cache first
     const cachedData = await AsyncStorage.getItem(PLAYERS_CACHE_KEY);
     if (cachedData) {
       const parsed: CachedData<Player[]> = JSON.parse(cachedData);
       if (isCacheValid(parsed.timestamp)) {
-        console.log('Возврат игроков из кэша');
+        console.log('Returning players from cache');
         return parsed.data;
       }
     }
 
-    console.log('Загрузка игроков из API...');
-    const apiPlayers = await apiService.fetchPlayers();
+    console.log('Fetching players from API...');
     
-    if (!Array.isArray(apiPlayers) || apiPlayers.length === 0) {
-      console.log('Нет данных об игроках, используем fallback');
+    // Check if API is available
+    const isApiAvailable = await checkApiAvailability();
+    if (!isApiAvailable) {
+      console.log('API not available, using fallback players');
       return getFallbackPlayers();
     }
 
+    const apiPlayers = await apiService.fetchPlayers();
     const players = apiPlayers.map(convertApiPlayerToPlayer);
     
-    // Сортировка по номеру
+    // Sort players by number
     players.sort((a, b) => a.number - b.number);
-
-    // Кэшируем результат
+    
+    // Cache the result
     const cacheData: CachedData<Player[]> = {
       data: players,
-      timestamp: Date.now(),
+      timestamp: Date.now()
     };
     await AsyncStorage.setItem(PLAYERS_CACHE_KEY, JSON.stringify(cacheData));
-
-    // Предзагружаем изображения в фоне
+    
+    // Preload images in background
     preloadPlayerImages(players);
-
-    console.log(`Загружено ${players.length} игроков из API`);
+    
+    console.log(`Loaded ${players.length} players from API`);
     return players;
   } catch (error) {
-    console.error('Ошибка загрузки игроков:', error);
+    console.error('Error fetching players:', error);
     return getFallbackPlayers();
   }
 }
 
 export async function getPlayerById(playerId: string): Promise<Player | null> {
   try {
-    console.log('Поиск игрока по ID:', playerId);
+    console.log('Fetching player by ID:', playerId);
+    
+    // Try to get from API first
+    try {
+      const apiPlayer = await apiService.fetchPlayerById(playerId);
+      const player = convertApiPlayerToPlayer(apiPlayer);
+      console.log('Player fetched from API:', player);
+      return player;
+    } catch (apiError) {
+      console.log('API fetch failed, searching in cached players...');
+    }
+    
+    // Fallback to cached players
     const players = await getPlayers();
     const player = players.find(p => p.id === playerId);
     
     if (player) {
-      console.log('Игрок найден:', player);
+      console.log('Player found in cache:', player);
       return player;
     }
     
-    console.log('Игрок не найден');
+    console.log('Player not found');
     return null;
   } catch (error) {
-    console.error('Ошибка поиска игрока:', error);
+    console.error('Error fetching player by ID:', error);
     return null;
   }
 }
@@ -175,54 +193,54 @@ export function searchPlayers(players: Player[], searchQuery: string): Player[] 
   if (!searchQuery.trim()) {
     return players;
   }
-
+  
   const query = searchQuery.toLowerCase().trim();
-  console.log('Поиск игроков по запросу:', query);
-
-  const filtered = players.filter(player => {
-    const name = player.name.toLowerCase();
-    const position = player.position.toLowerCase();
-    const number = player.number.toString();
-    
-    return name.includes(query) || 
-           position.includes(query) || 
-           number.includes(query);
-  });
-
-  console.log(`Найдено ${filtered.length} игроков по запросу "${query}"`);
-  return filtered;
+  
+  return players.filter(player => 
+    player.name.toLowerCase().includes(query) ||
+    player.position.toLowerCase().includes(query) ||
+    player.number.toString().includes(query) ||
+    (player.nationality && player.nationality.toLowerCase().includes(query))
+  );
 }
 
 function getFallbackPlayers(): Player[] {
   return [
     {
       id: '1',
-      name: 'Иван Петров',
-      position: 'Вратарь',
-      number: 1,
+      name: 'Александр Петров',
+      position: 'Нападающий',
+      number: 10,
       age: 25,
-      height: 185,
-      weight: 80,
-      captainStatus: 'captain',
+      height: '180 см',
+      weight: '75 кг',
+      nationality: 'Россия',
+      isCaptain: true,
+      isAssistantCaptain: false,
     },
     {
       id: '2',
-      name: 'Алексей Сидоров',
+      name: 'Михаил Иванов',
       position: 'Защитник',
-      number: 2,
+      number: 5,
       age: 28,
-      height: 180,
-      weight: 85,
+      height: '185 см',
+      weight: '80 кг',
+      nationality: 'Россия',
+      isCaptain: false,
+      isAssistantCaptain: true,
     },
     {
       id: '3',
-      name: 'Михаил Козлов',
-      position: 'Нападающий',
-      number: 10,
-      age: 24,
-      height: 175,
-      weight: 75,
-      captainStatus: 'assistant',
+      name: 'Дмитрий Сидоров',
+      position: 'Вратарь',
+      number: 1,
+      age: 30,
+      height: '190 см',
+      weight: '85 кг',
+      nationality: 'Россия',
+      isCaptain: false,
+      isAssistantCaptain: false,
     },
   ];
 }

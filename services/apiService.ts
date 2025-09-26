@@ -1,9 +1,17 @@
 
-import { ApiPlayerResponse, ApiUpcomingEventsResponse, ApiPastEventsResponse, ApiTeam, ApiLeague, ApiSeason, ApiVenue } from '../types';
+import { 
+  ApiPlayerResponse, 
+  ApiUpcomingEventsResponse, 
+  ApiPastEventsResponse, 
+  ApiTeam, 
+  ApiLeague, 
+  ApiSeason, 
+  ApiVenue,
+  ApiGameDetailsResponse
+} from '../types';
 
 class ApiService {
   private baseUrl = 'https://www.hc-forward.com/wp-json/app/v1';
-  private playersUrl = 'https://www.hc-forward.com/wp-json/app/v1/players';
 
   // Cache for team data to avoid repeated requests
   private teamCache: { [key: string]: ApiTeam } = {};
@@ -31,10 +39,9 @@ class ApiService {
     }
   }
 
-  // NEW API endpoint for past events - completely updated
   async fetchPastEvents(): Promise<ApiPastEventsResponse> {
     try {
-      console.log('Fetching past events from NEW API endpoint...');
+      console.log('Fetching past events from API...');
       const response = await fetch(`${this.baseUrl}/past-events`);
       
       if (!response.ok) {
@@ -42,8 +49,8 @@ class ApiService {
       }
       
       const result: ApiPastEventsResponse = await response.json();
-      console.log('Past events response with NEW structure:', result);
-      console.log('Total past events count from NEW API:', result.count);
+      console.log('Past events response:', result);
+      console.log('Total past events count:', result.count);
       
       // Log the structure of the first event for debugging
       if (result.data && result.data.length > 0) {
@@ -53,12 +60,30 @@ class ApiService {
       
       return result;
     } catch (error) {
-      console.error('Error fetching past events from NEW API:', error);
+      console.error('Error fetching past events:', error);
       throw error;
     }
   }
 
-  // NEW method to fetch team details by ID
+  async fetchGameById(gameId: string): Promise<ApiGameDetailsResponse> {
+    try {
+      console.log('Fetching game details for ID:', gameId);
+      const response = await fetch(`${this.baseUrl}/events/${gameId}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const result: ApiGameDetailsResponse = await response.json();
+      console.log('Game details response:', result);
+      
+      return result;
+    } catch (error) {
+      console.error('Error fetching game details:', error);
+      throw error;
+    }
+  }
+
   async fetchTeam(teamId: string): Promise<ApiTeam> {
     // Check cache first
     if (this.teamCache[teamId]) {
@@ -188,11 +213,30 @@ class ApiService {
     }
   }
 
+  async fetchPlayerById(playerId: string): Promise<ApiPlayerResponse> {
+    try {
+      console.log('Fetching player details for ID:', playerId);
+      const response = await fetch(`${this.baseUrl}/players/${playerId}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const player: ApiPlayerResponse = await response.json();
+      console.log('Player details fetched:', player);
+      
+      return player;
+    } catch (error) {
+      console.error('Error fetching player details:', error);
+      throw error;
+    }
+  }
+
   async fetchPlayers(): Promise<ApiPlayerResponse[]> {
     try {
-      console.log('Fetching all players from API endpoint:', this.playersUrl);
+      console.log('Fetching all players from API...');
       
-      const response = await fetch(this.playersUrl);
+      const response = await fetch(`${this.baseUrl}/players`);
       
       if (!response.ok) {
         const errorMessage = `Error accessing players API! Status: ${response.status}`;
@@ -214,7 +258,9 @@ class ApiService {
           id: player.id,
           name: player.post_title,
           position: player.position,
-          number: player.sp_number
+          number: player.sp_number,
+          isCaptain: player.is_captain,
+          isAssistantCaptain: player.is_assistant_captain
         });
       });
       
@@ -228,7 +274,7 @@ class ApiService {
   async checkPlayersApiAvailability(): Promise<boolean> {
     try {
       console.log('Checking players API endpoint availability...');
-      const response = await fetch(this.playersUrl, { method: 'HEAD' });
+      const response = await fetch(`${this.baseUrl}/players`, { method: 'HEAD' });
       const isAvailable = response.ok;
       console.log('Players API endpoint available:', isAvailable);
       return isAvailable;
