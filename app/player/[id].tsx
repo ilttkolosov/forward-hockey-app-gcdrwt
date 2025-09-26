@@ -49,7 +49,7 @@ const styles = StyleSheet.create({
   playerHeader: {
     alignItems: 'center',
     paddingVertical: 32,
-    backgroundColor: colors.cardBackground,
+    backgroundColor: colors.card,
     marginBottom: 16,
   },
   playerAvatar: {
@@ -90,11 +90,11 @@ const styles = StyleSheet.create({
   },
   captainBadgeText: {
     color: colors.background,
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: 'bold',
   },
   infoSection: {
-    backgroundColor: colors.cardBackground,
+    backgroundColor: colors.card,
     marginHorizontal: 16,
     marginBottom: 16,
     borderRadius: 12,
@@ -209,7 +209,6 @@ export default function PlayerDetailsScreen() {
     );
   }
 
-  const captainBadgeText = getCaptainBadgeText(player.captainStatus || '');
   const fullCaptainText = getCaptainStatusText();
 
   return (
@@ -286,7 +285,7 @@ export default function PlayerDetailsScreen() {
           </View>
         </View>
 
-        {/* Game Information */}
+        {/* Game Information - Status field removed */}
         <View style={styles.infoSection}>
           <Text style={styles.sectionTitle}>Игровая информация</Text>
           
@@ -302,14 +301,9 @@ export default function PlayerDetailsScreen() {
             <Text style={styles.infoValue}>#{player.number}</Text>
           </View>
           
-          <View style={styles.infoRow}>
+          <View style={[styles.infoRow, styles.infoRowLast]}>
             <Text style={styles.infoLabel}>Позиция</Text>
             <Text style={styles.infoValue}>{player.position}</Text>
-          </View>
-          
-          <View style={[styles.infoRow, styles.infoRowLast]}>
-            <Text style={styles.infoLabel}>Статус</Text>
-            <Text style={styles.infoValue}>{fullCaptainText}</Text>
           </View>
         </View>
 

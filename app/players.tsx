@@ -1,8 +1,9 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl, TextInput, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { TabView, SceneMap, TabBar } from 'react-native-tab-view';
+import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { commonStyles, colors } from '../styles/commonStyles';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
@@ -51,15 +52,27 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  searchInput: {
-    backgroundColor: colors.cardBackground,
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    fontSize: 16,
-    color: colors.text,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  searchIcon: {
+    marginRight: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: colors.text,
+  },
+  clearButton: {
+    marginLeft: 12,
+    padding: 4,
   },
   tabBar: {
     backgroundColor: colors.background,
@@ -78,7 +91,7 @@ const styles = StyleSheet.create({
     textTransform: 'none',
   },
   playerCard: {
-    backgroundColor: colors.cardBackground,
+    backgroundColor: colors.card,
     marginHorizontal: 16,
     marginVertical: 6,
     borderRadius: 12,
@@ -114,25 +127,26 @@ const styles = StyleSheet.create({
   },
   numberContainer: {
     alignItems: 'center',
-  },
-  playerNumber: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.primary,
+    flexDirection: 'row',
   },
   captainBadge: {
     backgroundColor: colors.error,
     borderRadius: 10,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    marginBottom: 6,
+    marginRight: 8,
     minWidth: 28,
     alignItems: 'center',
   },
   captainBadgeText: {
     color: colors.background,
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: 'bold',
+  },
+  playerNumber: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.primary,
   },
   emptyContainer: {
     flex: 1,
@@ -186,23 +200,36 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onPress }) => {
 interface PlayerListProps {
   players: Player[];
   searchQuery: string;
-  refreshing: boolean;
-  onRefresh: () => void;
   onPlayerPress: (player: Player) => void;
+  onPullDown: () => void;
 }
 
 const PlayerList: React.FC<PlayerListProps> = ({ 
   players, 
   searchQuery, 
-  refreshing, 
-  onRefresh, 
-  onPlayerPress 
+  onPlayerPress,
+  onPullDown
 }) => {
   const filteredPlayers = searchPlayers(players, searchQuery);
 
   const renderPlayer = ({ item }: { item: Player }) => (
     <PlayerCard player={item} onPress={onPlayerPress} />
   );
+
+  const onGestureEvent = (event: any) => {
+    // Handle pull down gesture
+    if (event.nativeEvent.translationY > 100 && event.nativeEvent.velocityY > 0) {
+      onPullDown();
+    }
+  };
+
+  const onHandlerStateChange = (event: any) => {
+    if (event.nativeEvent.state === State.END) {
+      if (event.nativeEvent.translationY > 100 && event.nativeEvent.velocityY > 0) {
+        onPullDown();
+      }
+    }
+  };
 
   if (filteredPlayers.length === 0) {
     return (
@@ -215,16 +242,19 @@ const PlayerList: React.FC<PlayerListProps> = ({
   }
 
   return (
-    <FlatList
-      data={filteredPlayers}
-      renderItem={renderPlayer}
-      keyExtractor={(item) => item.id}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-      }
-      contentContainerStyle={{ paddingVertical: 8 }}
-      showsVerticalScrollIndicator={false}
-    />
+    <PanGestureHandler
+      onGestureEvent={onGestureEvent}
+      onHandlerStateChange={onHandlerStateChange}
+    >
+      <FlatList
+        data={filteredPlayers}
+        renderItem={renderPlayer}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={{ paddingVertical: 8 }}
+        showsVerticalScrollIndicator={false}
+        scrollEnabled={true}
+      />
+    </PanGestureHandler>
   );
 };
 
@@ -233,7 +263,6 @@ export default function PlayersScreen() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [index, setIndex] = useState(0);
@@ -258,17 +287,10 @@ export default function PlayersScreen() {
       setError('Не удалось загрузить список игроков. Попробуйте еще раз.');
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    setShowSearch(true);
     loadData();
   }, []);
 
@@ -280,6 +302,15 @@ export default function PlayersScreen() {
     router.back();
   };
 
+  const handlePullDown = () => {
+    console.log('Pull down detected - opening search');
+    setShowSearch(true);
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
+  };
+
   const groupedPlayers = groupPlayersByPosition(players);
 
   const renderScene = SceneMap(
@@ -288,9 +319,8 @@ export default function PlayersScreen() {
         <PlayerList
           players={groupedPlayers[position] || []}
           searchQuery={searchQuery}
-          refreshing={refreshing}
-          onRefresh={onRefresh}
           onPlayerPress={handlePlayerPress}
+          onPullDown={handlePullDown}
         />
       );
       return acc;
@@ -340,15 +370,24 @@ export default function PlayersScreen() {
       {/* Search Bar */}
       {showSearch && (
         <View style={styles.searchContainer}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Поиск игроков..."
-            placeholderTextColor={colors.textSecondary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
+          <View style={styles.searchInputContainer}>
+            <Icon name="search" size={20} color={colors.textSecondary} style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Поиск игроков..."
+              placeholderTextColor={colors.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoFocus
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity style={styles.clearButton} onPress={handleClearSearch}>
+                <Icon name="close" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       )}
 

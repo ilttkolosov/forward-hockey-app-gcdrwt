@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, RefreshControl, TouchableOpacity, Image, StyleSheet, FlatList, TextInput } from 'react-native';
+import { View, Text, TouchableOpacity, Image, StyleSheet, FlatList, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { commonStyles, colors } from '../../styles/commonStyles';
@@ -15,32 +15,64 @@ import { formatGameDate } from '../../utils/dateUtils';
 const ITEMS_PER_PAGE = 10;
 
 const styles = StyleSheet.create({
-  headerContainer: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
     paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
   backButton: {
     marginRight: 16,
-    padding: 4,
+    padding: 8,
   },
   headerInfo: {
     flex: 1,
   },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: colors.text,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  searchButton: {
+    marginLeft: 16,
+    padding: 8,
+  },
   searchContainer: {
     paddingHorizontal: 16,
-    paddingBottom: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  searchInput: {
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.surface,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    fontSize: 16,
-    color: colors.text,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  searchIcon: {
+    marginRight: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: colors.text,
+  },
+  clearButton: {
+    marginLeft: 12,
+    padding: 4,
   },
   gameCard: {
     backgroundColor: colors.card,
@@ -172,7 +204,6 @@ export default function SeasonGamesScreen() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
@@ -206,7 +237,6 @@ export default function SeasonGamesScreen() {
       setError('Не удалось загрузить игры сезона. Попробуйте еще раз.');
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   }, [seasonId]);
 
@@ -260,18 +290,17 @@ export default function SeasonGamesScreen() {
     setDisplayedGames(filteredGames.slice(0, ITEMS_PER_PAGE));
   }, [searchQuery, allGames, seasonId]);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    setCurrentPage(0);
-    setDisplayedGames([]);
-    setSearchQuery('');
-    setShowSearch(false);
-    loadData();
-  };
-
   const handleGamePress = (gameId: string) => {
     console.log('Season Games: Navigating to game:', gameId);
     router.push(`/game/${gameId}`);
+  };
+
+  const handleBackPress = () => {
+    router.back();
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
   };
 
   const shortenLeagueName = (leagueName: string | null): string => {
@@ -412,18 +441,15 @@ export default function SeasonGamesScreen() {
   if (loading) {
     return (
       <SafeAreaView style={commonStyles.container}>
-        <View style={styles.headerContainer}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
             <Icon name="chevron-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <View style={styles.headerInfo}>
-            <Text style={commonStyles.title}>
+            <Text style={styles.title}>
               {season ? season.name : 'Загрузка...'}
             </Text>
-            <Text style={commonStyles.textSecondary}>Загружаем игры...</Text>
+            <Text style={styles.subtitle}>Загружаем игры...</Text>
           </View>
         </View>
         <View style={commonStyles.loadingContainer}>
@@ -439,18 +465,15 @@ export default function SeasonGamesScreen() {
   if (error) {
     return (
       <SafeAreaView style={commonStyles.container}>
-        <View style={styles.headerContainer}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
             <Icon name="chevron-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <View style={styles.headerInfo}>
-            <Text style={commonStyles.title}>
+            <Text style={styles.title}>
               {season ? season.name : 'Ошибка'}
             </Text>
-            <Text style={commonStyles.textSecondary}>Ошибка загрузки</Text>
+            <Text style={styles.subtitle}>Ошибка загрузки</Text>
           </View>
         </View>
         <ErrorMessage message={error} onRetry={loadData} />
@@ -461,16 +484,13 @@ export default function SeasonGamesScreen() {
   return (
     <SafeAreaView style={commonStyles.container}>
       {/* Header */}
-      <View style={styles.headerContainer}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
           <Icon name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerInfo}>
-          <Text style={commonStyles.title}>{season.name}</Text>
-          <Text style={commonStyles.textSecondary}>
+          <Text style={styles.title}>{season.name}</Text>
+          <Text style={styles.subtitle}>
             {filteredGames.length > 0 
               ? `${filteredGames.length} ${filteredGames.length === 1 ? 'игра' : filteredGames.length < 5 ? 'игры' : 'игр'}`
               : 'Нет игр'
@@ -478,8 +498,8 @@ export default function SeasonGamesScreen() {
           </Text>
         </View>
         <TouchableOpacity
+          style={styles.searchButton}
           onPress={() => setShowSearch(!showSearch)}
-          style={styles.backButton}
         >
           <Icon name="search" size={24} color={colors.text} />
         </TouchableOpacity>
@@ -488,14 +508,22 @@ export default function SeasonGamesScreen() {
       {/* Search Input */}
       {showSearch && (
         <View style={styles.searchContainer}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Поиск по командам, турниру, арене..."
-            placeholderTextColor={colors.textSecondary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            autoFocus
-          />
+          <View style={styles.searchInputContainer}>
+            <Icon name="search" size={20} color={colors.textSecondary} style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Поиск по командам, турниру, арене..."
+              placeholderTextColor={colors.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoFocus
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity style={styles.clearButton} onPress={handleClearSearch}>
+                <Icon name="close" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       )}
 
@@ -504,9 +532,6 @@ export default function SeasonGamesScreen() {
         data={displayedGames}
         renderItem={renderGameCard}
         keyExtractor={(item) => item.id}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
         onEndReached={loadMoreGames}
         onEndReachedThreshold={0.1}
         ListFooterComponent={renderFooter}

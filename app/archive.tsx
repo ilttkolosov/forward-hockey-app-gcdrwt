@@ -8,13 +8,35 @@ import { commonStyles, colors } from '../styles/commonStyles';
 import Icon from '../components/Icon';
 
 const styles = StyleSheet.create({
-  headerContainer: {
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
-    paddingBottom: 24,
+    paddingVertical: 12,
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  backButton: {
+    marginRight: 16,
+    padding: 8,
+  },
+  headerTitle: {
+    flex: 1,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: colors.text,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
   seasonsContainer: {
     paddingHorizontal: 16,
-    paddingBottom: 32,
+    paddingVertical: 16,
   },
   seasonTile: {
     backgroundColor: colors.card,
@@ -68,7 +90,11 @@ const SeasonSelectorScreen = () => {
 
   const handlePress = (id: number) => {
     console.log('SeasonSelector: Navigating to season:', id);
-    router.push(`/archive/season/${id}`);
+    router.push(`/season/${id}`);
+  };
+
+  const handleBackPress = () => {
+    router.back();
   };
 
   const formatSeasonPeriod = (season: typeof seasons[0]): string => {
@@ -79,12 +105,15 @@ const SeasonSelectorScreen = () => {
 
   return (
     <SafeAreaView style={commonStyles.container}>
-      {/* Header */}
-      <View style={styles.headerContainer}>
-        <Text style={commonStyles.title}>Архив матчей</Text>
-        <Text style={commonStyles.textSecondary}>
-          Выберите сезон для просмотра игр
-        </Text>
+      {/* Header with Back Button */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
+          <Icon name="chevron-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <View style={styles.headerTitle}>
+          <Text style={styles.title}>Архив матчей</Text>
+          <Text style={styles.subtitle}>Выберите сезон для просмотра игр</Text>
+        </View>
       </View>
 
       {/* Seasons List */}
