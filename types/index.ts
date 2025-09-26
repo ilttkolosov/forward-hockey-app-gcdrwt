@@ -18,7 +18,7 @@ export interface Game {
   awayTeamId?: string;
   homeTeamLogo?: string;
   awayTeamLogo?: string;
-  sp_results?: string;
+  results?: { [teamId: string]: { goals: number; outcome: string } };
 }
 
 export interface Player {
@@ -106,23 +106,45 @@ export interface ApiPlayerResponse {
 
 // API interfaces for events
 export interface ApiUpcomingEventsResponse {
-  data: ApiEvent[];
+  data: ApiUpcomingEvent[];
   count: number;
 }
 
 export interface ApiPastEventsResponse {
-  data: ApiEvent[];
+  data: ApiPastEvent[];
   count: number;
 }
 
-export interface ApiEvent {
+export interface ApiUpcomingEvent {
   event_id: string;
   event_date: string;
   sp_teams: string; // comma-separated team IDs
   Leagues: string; // "id:name" format
   seasons: string; // "id:name" format
   venues: string; // "id:name" format
-  sp_results?: string; // PHP serialized array for past events
+}
+
+export interface ApiPastEvent {
+  event_id: string;
+  event_date: string;
+  teams: string; // comma-separated team IDs (updated field name)
+  Leagues: string; // "id:name" format
+  seasons: string; // "id:name" format
+  venues: string; // "id:name" format
+  results: { [teamId: string]: { goals: number; outcome: string } }; // new results structure
+}
+
+// Legacy interface for backward compatibility
+export interface ApiEvent {
+  event_id: string;
+  event_date: string;
+  sp_teams?: string; // comma-separated team IDs (legacy)
+  teams?: string; // comma-separated team IDs (new)
+  Leagues: string; // "id:name" format
+  seasons: string; // "id:name" format
+  venues: string; // "id:name" format
+  sp_results?: string; // PHP serialized array for past events (legacy)
+  results?: { [teamId: string]: { goals: number; outcome: string } }; // new results structure
 }
 
 export interface ApiTeam {

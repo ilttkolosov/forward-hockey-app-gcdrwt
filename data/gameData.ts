@@ -1,5 +1,5 @@
 
-import { Game, GameStats, ApiEvent } from '../types';
+import { Game, GameStats, ApiUpcomingEvent, ApiPastEvent } from '../types';
 import { apiService } from '../services/apiService';
 
 // Cache for API data
@@ -16,11 +16,11 @@ const isCacheValid = () => {
   return Date.now() - cacheTimestamp < CACHE_DURATION;
 };
 
-// Convert API event to Game object with simplified logic
-const convertApiEventToGame = async (apiEvent: ApiEvent, isPastEvent: boolean = false): Promise<Game> => {
-  console.log('Converting API event to game (simplified):', apiEvent);
+// Convert API upcoming event to Game object
+const convertApiUpcomingEventToGame = async (apiEvent: ApiUpcomingEvent): Promise<Game> => {
+  console.log('Converting API upcoming event to game:', apiEvent);
   
-  // Parse team IDs
+  // Parse team IDs from sp_teams field
   const teamIds = apiEvent.sp_teams.split(',').map(id => id.trim());
   const homeTeamId = teamIds[0] || '';
   const awayTeamId = teamIds[1] || '';
@@ -50,21 +50,85 @@ const convertApiEventToGame = async (apiEvent: ApiEvent, isPastEvent: boolean = 
     console.error('Error fetching team details:', error);
   }
   
-  // Parse results for past events
-  let homeScore: number | undefined;
-  let awayScore: number | undefined;
-  
-  if (isPastEvent && apiEvent.sp_results) {
-    const scores = apiService.parsePhpSerializedResults(apiEvent.sp_results);
-    homeScore = scores.homeScore;
-    awayScore = scores.awayScore;
-  }
-  
   // Format date and time
   const { date, time } = apiService.formatDateTime(apiEvent.event_date);
   
   // Determine status
-  const status = apiService.determineGameStatus(apiEvent.event_date, isPastEvent || (homeScore !== undefined && awayScore !== undefined));
+  const status = apiService.determineGameStatus(apiEvent.event_date, false);
+  
+  // Simple venue parsing
+  const venue = apiService.parseIdNameString(apiEvent.venues || '');
+  
+  const game: Game = {
+    id: apiEvent.event_id,
+    event_id: apiEvent.event_id,
+    event_date: apiEvent.event_date,
+    homeTeam,
+    awayTeam,
+    homeTeamId,
+    awayTeamId,
+    homeTeamLogo,
+    awayTeamLogo,
+    date,
+    time,
+    venue: venue.name || 'Арена',
+    status,
+    tournament: 'Чемпионат' // Default tournament name
+  };
+  
+  console.log('Converted upcoming game:', game);
+  return game;
+};
+
+// Convert API past event to Game object with new results structure
+const convertApiPastEventToGame = async (apiEvent: ApiPastEvent): Promise<Game> => {
+  console.log('Converting API past event to game with new results structure:', apiEvent);
+  
+  // Parse team IDs from teams field (updated field name)
+  const teamIds = apiEvent.teams.split(',').map(id => id.trim());
+  const homeTeamId = teamIds[0] || '';
+  const awayTeamId = teamIds[1] || '';
+  
+  // Fetch team details
+  let homeTeam = 'Home Team';
+  let awayTeam = 'Away Team';
+  let homeTeamLogo = '';
+  let awayTeamLogo = '';
+  
+  try {
+    const [homeTeamData, awayTeamData] = await Promise.all([
+      homeTeamId ? apiService.fetchTeam(homeTeamId) : null,
+      awayTeamId ? apiService.fetchTeam(awayTeamId) : null
+    ]);
+    
+    if (homeTeamData) {
+      homeTeam = homeTeamData.name;
+      homeTeamLogo = homeTeamData.logo_url;
+    }
+    
+    if (awayTeamData) {
+      awayTeam = awayTeamData.name;
+      awayTeamLogo = awayTeamData.logo_url;
+    }
+  } catch (error) {
+    console.error('Error fetching team details:', error);
+  }
+  
+  // Parse results using new structure
+  const { homeScore, awayScore, homeOutcome, awayOutcome } = apiService.parseNewResults(apiEvent.results, teamIds);
+  
+  console.log('Parsed match results:', {
+    homeScore,
+    awayScore,
+    homeOutcome,
+    awayOutcome
+  });
+  
+  // Format date and time
+  const { date, time } = apiService.formatDateTime(apiEvent.event_date);
+  
+  // Determine status (should be finished for past events)
+  const status = 'finished';
   
   // Simple venue parsing
   const venue = apiService.parseIdNameString(apiEvent.venues || '');
@@ -86,10 +150,10 @@ const convertApiEventToGame = async (apiEvent: ApiEvent, isPastEvent: boolean = 
     venue: venue.name || 'Арена',
     status,
     tournament: 'Чемпионат', // Default tournament name
-    sp_results: apiEvent.sp_results
+    results: apiEvent.results // Store the full results object for detailed display
   };
   
-  console.log('Converted game (simplified):', game);
+  console.log('Converted past game with results:', game);
   return game;
 };
 
@@ -106,7 +170,7 @@ export const getFutureGames = async (): Promise<Game[]> => {
     
     // Convert API events to Game objects
     const games = await Promise.all(
-      response.data.map(event => convertApiEventToGame(event, false))
+      response.data.map(event => convertApiUpcomingEventToGame(event))
     );
     
     upcomingGamesCache = games;
@@ -129,18 +193,18 @@ export const getPastGames = async (): Promise<Game[]> => {
       return pastGamesCache;
     }
 
-    console.log('Fetching past games from API...');
+    console.log('Fetching past games from updated API...');
     const response = await apiService.fetchPastEvents();
     
-    // Convert API events to Game objects
+    // Convert API events to Game objects using new structure
     const games = await Promise.all(
-      response.data.map(event => convertApiEventToGame(event, true))
+      response.data.map(event => convertApiPastEventToGame(event))
     );
     
     pastGamesCache = games;
     pastCountCache = response.count;
     cacheTimestamp = Date.now();
-    console.log('Past games cached successfully. Count:', response.count);
+    console.log('Past games cached successfully with new results structure. Count:', response.count);
 
     return games;
   } catch (error) {
@@ -272,6 +336,10 @@ const getFallbackCurrentGame = (): Game => ({
   status: 'live',
   tournament: 'Чемпионат',
   videoUrl: 'https://www.hc-forward.com/broadcast/live-stream',
+  results: {
+    '1': { goals: 2, outcome: 'win' },
+    '2': { goals: 1, outcome: 'loss' }
+  }
 });
 
 const getFallbackUpcomingGames = (): Game[] => [
@@ -316,6 +384,10 @@ const getFallbackPastGames = (): Game[] => [
     status: 'finished',
     tournament: 'Чемпионат',
     videoUrl: 'https://www.hc-forward.com/broadcast/replay-1',
+    results: {
+      '1': { goals: 3, outcome: 'win' },
+      '2': { goals: 2, outcome: 'loss' }
+    }
   },
   {
     id: '6',
@@ -331,6 +403,10 @@ const getFallbackPastGames = (): Game[] => [
     status: 'finished',
     tournament: 'Чемпионат',
     videoUrl: 'https://www.hc-forward.com/broadcast/replay-2',
+    results: {
+      '3': { goals: 1, outcome: 'loss' },
+      '1': { goals: 4, outcome: 'win' }
+    }
   },
 ];
 

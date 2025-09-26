@@ -4,6 +4,7 @@ import { Game } from '../types';
 import { useRouter } from 'expo-router';
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { colors, commonStyles } from '../styles/commonStyles';
+import { apiService } from '../services/apiService';
 
 interface GameCardProps {
   game: Game;
@@ -97,6 +98,56 @@ const styles = StyleSheet.create({
   venue: {
     fontSize: 12,
     color: colors.textSecondary,
+  },
+  resultsContainer: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  resultRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginVertical: 2,
+  },
+  teamResult: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  teamResultName: {
+    fontSize: 14,
+    color: colors.text,
+    fontWeight: '500',
+    flex: 1,
+  },
+  teamGoals: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: colors.primary,
+    marginHorizontal: 8,
+  },
+  outcomeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    minWidth: 60,
+    textAlign: 'center',
+  },
+  outcomeWin: {
+    backgroundColor: colors.success,
+    color: colors.surface,
+  },
+  outcomeLoss: {
+    backgroundColor: colors.error,
+    color: colors.surface,
+  },
+  outcomeDraw: {
+    backgroundColor: colors.warning,
+    color: colors.surface,
   },
 });
 
@@ -192,6 +243,67 @@ const GameCard: React.FC<GameCardProps> = ({ game, showScore = true, hideSeasonI
     );
   };
 
+  const getOutcomeStyle = (outcome: string) => {
+    switch (outcome) {
+      case 'win':
+        return [styles.outcomeText, styles.outcomeWin];
+      case 'loss':
+        return [styles.outcomeText, styles.outcomeLoss];
+      case 'nich':
+        return [styles.outcomeText, styles.outcomeDraw];
+      default:
+        return [styles.outcomeText, styles.outcomeDraw];
+    }
+  };
+
+  const renderDetailedResults = () => {
+    if (!game.results || !game.homeTeamId || !game.awayTeamId) {
+      return null;
+    }
+
+    const homeResult = game.results[game.homeTeamId];
+    const awayResult = game.results[game.awayTeamId];
+
+    if (!homeResult || !awayResult) {
+      return null;
+    }
+
+    console.log('Rendering detailed results:', {
+      homeTeam: game.homeTeam,
+      homeResult,
+      awayTeam: game.awayTeam,
+      awayResult
+    });
+
+    return (
+      <View style={styles.resultsContainer}>
+        <View style={styles.resultRow}>
+          <View style={styles.teamResult}>
+            <Text style={styles.teamResultName} numberOfLines={1}>
+              {game.homeTeam}
+            </Text>
+          </View>
+          <Text style={styles.teamGoals}>{homeResult.goals}</Text>
+          <Text style={getOutcomeStyle(homeResult.outcome)}>
+            {apiService.getOutcomeText(homeResult.outcome)}
+          </Text>
+        </View>
+        
+        <View style={styles.resultRow}>
+          <View style={styles.teamResult}>
+            <Text style={styles.teamResultName} numberOfLines={1}>
+              {game.awayTeam}
+            </Text>
+          </View>
+          <Text style={styles.teamGoals}>{awayResult.goals}</Text>
+          <Text style={getOutcomeStyle(awayResult.outcome)}>
+            {apiService.getOutcomeText(awayResult.outcome)}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
   return (
     <TouchableOpacity style={styles.card} onPress={handlePress}>
       <View style={styles.header}>
@@ -220,6 +332,9 @@ const GameCard: React.FC<GameCardProps> = ({ game, showScore = true, hideSeasonI
           {renderTeamWithLogo(game.awayTeam, game.awayTeamLogo)}
         </View>
       </View>
+
+      {/* Show detailed results for finished games with new results structure */}
+      {game.status === 'finished' && game.results && renderDetailedResults()}
 
       <View style={styles.details}>
         <Text style={styles.dateTime}>

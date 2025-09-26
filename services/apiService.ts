@@ -33,7 +33,7 @@ class ApiService {
 
   async fetchPastEvents(): Promise<ApiPastEventsResponse> {
     try {
-      console.log('Fetching past events from new API...');
+      console.log('Fetching past events from updated API...');
       const response = await fetch(`${this.baseUrl}/past-events`);
       
       if (!response.ok) {
@@ -41,7 +41,7 @@ class ApiService {
       }
       
       const result: ApiPastEventsResponse = await response.json();
-      console.log('Past events response:', result);
+      console.log('Past events response with new structure:', result);
       console.log('Total past events count:', result.count);
       
       return result;
@@ -245,7 +245,7 @@ class ApiService {
     };
   }
 
-  // Helper function to parse PHP serialized results
+  // Helper function to parse PHP serialized results (legacy support)
   parsePhpSerializedResults(serializedString: string): { homeScore?: number; awayScore?: number } {
     try {
       // This is a simplified parser for PHP serialized arrays
@@ -266,6 +266,29 @@ class ApiService {
       return {};
     } catch (error) {
       console.error('Error parsing PHP serialized results:', error);
+      return {};
+    }
+  }
+
+  // Helper function to parse new results structure
+  parseNewResults(results: { [teamId: string]: { goals: number; outcome: string } }, teamIds: string[]): { homeScore?: number; awayScore?: number; homeOutcome?: string; awayOutcome?: string } {
+    try {
+      console.log('Parsing new results structure:', results, 'for teams:', teamIds);
+      
+      const homeTeamId = teamIds[0];
+      const awayTeamId = teamIds[1];
+      
+      const homeResult = results[homeTeamId];
+      const awayResult = results[awayTeamId];
+      
+      return {
+        homeScore: homeResult?.goals,
+        awayScore: awayResult?.goals,
+        homeOutcome: homeResult?.outcome,
+        awayOutcome: awayResult?.outcome
+      };
+    } catch (error) {
+      console.error('Error parsing new results structure:', error);
       return {};
     }
   }
@@ -315,6 +338,20 @@ class ApiService {
         date: eventDate,
         time: '19:00'
       };
+    }
+  }
+
+  // Helper function to get outcome text in Russian
+  getOutcomeText(outcome: string): string {
+    switch (outcome) {
+      case 'win':
+        return 'Победа';
+      case 'loss':
+        return 'Поражение';
+      case 'nich':
+        return 'Ничья';
+      default:
+        return outcome;
     }
   }
 }
