@@ -66,8 +66,14 @@ const parseGoals = (goalsString: string | number): number => {
     return isNaN(goals) ? 0 : goals;
 };
 
-const parseTeamIds = (teamsString: string): string[] => {
-    return teamsString.split(',').map(id => id.trim());
+// Universal function to handle both string and string[] for teams
+const parseTeamIds = (teams: string | string[]): string[] => {
+    if (Array.isArray(teams)) {
+        // If it's already an array, filter out null/undefined values and convert to strings
+        return teams.filter(teamId => teamId !== null && teamId !== undefined).map(String);
+    }
+    // If it's a string, split by comma and trim
+    return (teams || '').split(',').map(s => s.trim()).filter(s => s !== '');
 };
 
 const parseIdNameString = (idNameString: string | null): { id: string; name: string } | null => {
@@ -100,11 +106,20 @@ const fetchTeamSafely = async (teamId: string): Promise<ApiTeam> => {
     }
 };
 
+// Helper function to extract outcome from array or string
+const extractOutcome = (outcome: string | string[]): string => {
+    if (Array.isArray(outcome)) {
+        return outcome.length > 0 ? outcome[0] : '';
+    }
+    return outcome || '';
+};
+
 const convertApiPastEventToEnrichedGame = async (apiEvent: ApiPastEvent): Promise<any> => {
     const teamIds = parseTeamIds(apiEvent.teams);
 
-    if (teamIds.length !== 2) {
-        console.warn(`Skipping game ${apiEvent.id}: Invalid team IDs`);
+    // Check if we have at least 2 teams (changed from exactly 2)
+    if (teamIds.length < 2) {
+        console.warn(`Skipping game ${apiEvent.id}: Invalid team IDs - need at least 2 teams, got ${teamIds.length}`);
         return null;
     }
 
@@ -112,14 +127,20 @@ const convertApiPastEventToEnrichedGame = async (apiEvent: ApiPastEvent): Promis
 
     try {
         const [homeTeamData, awayTeamData] = await Promise.all([
-            apiService.fetchTeam(homeTeamId),
-            apiService.fetchTeam(awayTeamId)
+            fetchTeamSafely(homeTeamId),
+            fetchTeamSafely(awayTeamId)
         ]);
 
         const homeGoals = parseGoals(apiEvent.results?.[homeTeamId]?.goals || 0);
         const awayGoals = parseGoals(apiEvent.results?.[awayTeamId]?.goals || 0);
 
+        // Extract outcomes, handling both array and string formats
+        const homeOutcome = extractOutcome(apiEvent.results?.[homeTeamId]?.outcome);
+        const awayOutcome = extractOutcome(apiEvent.results?.[awayTeamId]?.outcome);
+
         const { date, time } = formatDateTimeWithoutSeconds(apiEvent.date);
+
+        console.log(`Processing game ${apiEvent.id}: ${homeTeamData.name} vs ${awayTeamData.name} (${homeGoals}:${awayGoals})`);
 
         return {
             id: String(apiEvent.id),
@@ -130,10 +151,11 @@ const convertApiPastEventToEnrichedGame = async (apiEvent: ApiPastEvent): Promis
             awayTeamLogo: awayTeamData.logo_url,
             homeGoals: homeGoals,
             awayGoals: awayGoals,
-            homeOutcome: apiEvent.results?.[homeTeamId]?.outcome || '',
-            awayOutcome: apiEvent.results?.[awayTeamId]?.outcome || '',
+            homeOutcome: homeOutcome,
+            awayOutcome: awayOutcome,
             date: date,
             time: time,
+            event_date: apiEvent.date,
             tournamentName: parseIdNameString(apiEvent.leagues)?.name || null,
             arenaName: parseIdNameString(apiEvent.venues)?.name || null,
             seasonName: parseIdNameString(apiEvent.seasons)?.name || null
@@ -146,7 +168,12 @@ const convertApiPastEventToEnrichedGame = async (apiEvent: ApiPastEvent): Promis
 
 const fetchPastGames = async (): Promise<any[]> => {
     try {
-        const apiEvents = await apiService.fetchPastEvents();
+        console.log('Fetching past events from API...');
+        const apiResponse = await apiService.fetchPastEvents();
+        const apiEvents = apiResponse.data || apiResponse; // Handle both response formats
+        
+        console.log(`API returned ${apiEvents.length} past events`);
+        
         const enrichedGames = [];
 
         for (const apiEvent of apiEvents) {
@@ -157,7 +184,7 @@ const fetchPastGames = async (): Promise<any[]> => {
         }
 
         await setCachedData(PAST_GAMES_CACHE_KEY, enrichedGames);
-        console.log(`Fetched ${enrichedGames.length} past games from API`);
+        console.log(`Successfully processed ${enrichedGames.length} past games from API`);
         return enrichedGames;
     } catch (error) {
         console.error("Error fetching past games:", error);
@@ -172,9 +199,10 @@ const fetchPastGames = async (): Promise<any[]> => {
 
 const fetchPastGamesCount = async (): Promise<number> => {
     try {
-        const apiEvents = await apiService.fetchPastEvents();
-        const count = apiEvents.count;
+        const apiResponse = await apiService.fetchPastEvents();
+        const count = apiResponse.count || (apiResponse.data ? apiResponse.data.length : 0);
         await setCachedData(PAST_GAMES_COUNT_CACHE_KEY, count);
+        console.log(`Fetched past games count: ${count}`);
         return count;
     } catch (error) {
         console.error("Error fetching past games count:", error);
