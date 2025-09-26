@@ -76,15 +76,43 @@ const parseTeamIds = (teams: string | string[]): string[] => {
     return (teams || '').split(',').map(s => s.trim()).filter(s => s !== '');
 };
 
-const parseIdNameString = (idNameString: string | null): { id: string; name: string } | null => {
+// Updated parseIdNameString to handle multiple formats
+const parseIdNameString = (idNameString: any): { id: string; name: string } | null => {
     if (!idNameString) {
         return null;
     }
-    const [id, ...nameParts] = idNameString.split(':');
-    const name = nameParts.join(':').trim();
-    return { id: id.trim(), name };
+
+    // Handle array of objects - take the first element
+    if (Array.isArray(idNameString)) {
+        if (idNameString.length === 0) {
+            return null;
+        }
+        idNameString = idNameString[0]; // Take the first element
+    }
+
+    // Handle object with id and name properties
+    if (typeof idNameString === 'object' && idNameString !== null && 'id' in idNameString && 'name' in idNameString) {
+        return {
+            id: String(idNameString.id).trim(),
+            name: String(idNameString.name).trim()
+        };
+    }
+
+    // Handle string format "ID: Название"
+    if (typeof idNameString === 'string') {
+        const [id, ...nameParts] = idNameString.split(':');
+        const name = nameParts.join(':').trim();
+        return {
+            id: id.trim(),
+            name: name
+        };
+    }
+
+    console.warn("Unexpected format for idNameString:", idNameString);
+    return null;
 };
 
+// Updated to use event_date instead of date
 const formatDateTimeWithoutSeconds = (eventDate: string): { date: string; time: string } => {
     const date = new Date(eventDate);
     const dateString = date.toLocaleDateString('ru-RU');
@@ -115,11 +143,14 @@ const extractOutcome = (outcome: string | string[]): string => {
 };
 
 const convertApiPastEventToEnrichedGame = async (apiEvent: ApiPastEvent): Promise<any> => {
+    console.log('Processing API event:', apiEvent);
+    
     const teamIds = parseTeamIds(apiEvent.teams);
+    console.log('Parsed team IDs:', teamIds);
 
-    // Check if we have at least 2 teams (changed from exactly 2)
+    // Check if we have at least 2 teams
     if (teamIds.length < 2) {
-        console.warn(`Skipping game ${apiEvent.id}: Invalid team IDs - need at least 2 teams, got ${teamIds.length}`);
+        console.warn(`Skipping game ${apiEvent.event_id}: Invalid team IDs - need at least 2 teams, got ${teamIds.length}`);
         return null;
     }
 
@@ -138,13 +169,14 @@ const convertApiPastEventToEnrichedGame = async (apiEvent: ApiPastEvent): Promis
         const homeOutcome = extractOutcome(apiEvent.results?.[homeTeamId]?.outcome);
         const awayOutcome = extractOutcome(apiEvent.results?.[awayTeamId]?.outcome);
 
-        const { date, time } = formatDateTimeWithoutSeconds(apiEvent.date);
+        // Use event_date instead of date
+        const { date, time } = formatDateTimeWithoutSeconds(apiEvent.event_date);
 
-        console.log(`Processing game ${apiEvent.id}: ${homeTeamData.name} vs ${awayTeamData.name} (${homeGoals}:${awayGoals})`);
+        console.log(`Processing game ${apiEvent.event_id}: ${homeTeamData.name} vs ${awayTeamData.name} (${homeGoals}:${awayGoals})`);
 
         return {
-            id: String(apiEvent.id),
-            event_id: String(apiEvent.id),
+            id: String(apiEvent.event_id),
+            event_id: String(apiEvent.event_id),
             homeTeam: homeTeamData.name,
             awayTeam: awayTeamData.name,
             homeTeamLogo: homeTeamData.logo_url,
@@ -155,13 +187,13 @@ const convertApiPastEventToEnrichedGame = async (apiEvent: ApiPastEvent): Promis
             awayOutcome: awayOutcome,
             date: date,
             time: time,
-            event_date: apiEvent.date,
+            event_date: apiEvent.event_date,
             tournamentName: parseIdNameString(apiEvent.leagues)?.name || null,
             arenaName: parseIdNameString(apiEvent.venues)?.name || null,
             seasonName: parseIdNameString(apiEvent.seasons)?.name || null
         };
     } catch (error) {
-        console.error(`Error fetching team data for game ${apiEvent.id}:`, error);
+        console.error(`Error fetching team data for game ${apiEvent.event_id}:`, error);
         return null;
     }
 };
