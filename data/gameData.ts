@@ -29,17 +29,17 @@ async function convertApiUpcomingEventToGame(apiEvent: ApiUpcomingEvent): Promis
   const teamIds = apiEvent.sp_teams.split(',').map(id => id.trim());
   console.log('Team IDs from sp_teams:', teamIds);
   
-  // Fetch team data
+  // Fetch team data concurrently
   const teamPromises = teamIds.map(id => apiService.fetchTeam(id));
   const teams = await Promise.all(teamPromises);
   
-  // Parse league
-  const leagueInfo = apiService.parseIdNameString(apiEvent.Leagues);
+  // Parse league information
+  const leagueInfo = apiService.parseIdNameString(apiEvent.leagues);
   
-  // Parse season
+  // Parse season information
   const seasonInfo = apiService.parseIdNameString(apiEvent.seasons);
   
-  // Parse venue
+  // Parse venue information
   const venueInfo = apiService.parseIdNameString(apiEvent.venues);
   
   const game: Game = {
@@ -54,7 +54,7 @@ async function convertApiUpcomingEventToGame(apiEvent: ApiUpcomingEvent): Promis
     date,
     time,
     event_date: apiEvent.event_date,
-    venue: venueInfo.name,
+    venue: venueInfo.name || '',
     venue_id: venueInfo.id,
     venue_name: venueInfo.name,
     status: 'upcoming',
@@ -78,17 +78,17 @@ async function convertApiPastEventToGame(apiEvent: ApiPastEvent): Promise<Game> 
   const teamIds = apiEvent.teams.split(',').map(id => id.trim());
   console.log('Team IDs from teams field:', teamIds);
   
-  // Fetch team data
+  // Fetch team data concurrently
   const teamPromises = teamIds.map(id => apiService.fetchTeam(id));
   const teams = await Promise.all(teamPromises);
   
-  // Parse league
-  const leagueInfo = apiService.parseIdNameString(apiEvent.Leagues);
+  // Parse league information
+  const leagueInfo = apiService.parseIdNameString(apiEvent.leagues);
   
-  // Parse season
+  // Parse season information
   const seasonInfo = apiService.parseIdNameString(apiEvent.seasons);
   
-  // Parse venue
+  // Parse venue information
   const venueInfo = apiService.parseIdNameString(apiEvent.venues);
   
   // Process Results structure with period scores
@@ -109,7 +109,7 @@ async function convertApiPastEventToGame(apiEvent: ApiPastEvent): Promise<Game> 
     date,
     time,
     event_date: apiEvent.event_date,
-    venue: venueInfo.name,
+    venue: venueInfo.name || '',
     venue_id: venueInfo.id,
     venue_name: venueInfo.name,
     status: 'finished',
@@ -258,9 +258,19 @@ export async function getUpcomingGames(): Promise<Game[]> {
       return getFallbackUpcomingGames();
     }
 
-    const games = await Promise.all(
-      response.data.map(event => convertApiUpcomingEventToGame(event))
-    );
+    console.log(`Processing ${response.data.length} upcoming events...`);
+    
+    // Process events concurrently but with some delay to avoid overwhelming the API
+    const games: Game[] = [];
+    for (const event of response.data) {
+      try {
+        const game = await convertApiUpcomingEventToGame(event);
+        games.push(game);
+      } catch (error) {
+        console.error('Error converting event:', event.event_id, error);
+        // Continue with other events
+      }
+    }
 
     // Sort by date
     games.sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
@@ -270,7 +280,7 @@ export async function getUpcomingGames(): Promise<Game[]> {
       timestamp: Date.now(),
     };
 
-    console.log(`Loaded ${games.length} upcoming games`);
+    console.log(`Successfully loaded ${games.length} upcoming games`);
     return games;
   } catch (error) {
     console.error('Error loading upcoming games:', error);
@@ -293,9 +303,19 @@ export async function getPastGames(): Promise<Game[]> {
       return getFallbackPastGames();
     }
 
-    const games = await Promise.all(
-      response.data.map(event => convertApiPastEventToGame(event))
-    );
+    console.log(`Processing ${response.data.length} past events...`);
+    
+    // Process events concurrently but with some delay to avoid overwhelming the API
+    const games: Game[] = [];
+    for (const event of response.data) {
+      try {
+        const game = await convertApiPastEventToGame(event);
+        games.push(game);
+      } catch (error) {
+        console.error('Error converting event:', event.event_id, error);
+        // Continue with other events
+      }
+    }
 
     // Sort by date (newest first)
     games.sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
@@ -305,7 +325,7 @@ export async function getPastGames(): Promise<Game[]> {
       timestamp: Date.now(),
     };
 
-    console.log(`Loaded ${games.length} past games with period scores`);
+    console.log(`Successfully loaded ${games.length} past games with period scores`);
     return games;
   } catch (error) {
     console.error('Error loading past games:', error);
@@ -402,7 +422,7 @@ export async function getGameById(gameId: string): Promise<Game | null> {
         date,
         time,
         event_date: apiGame.date,
-        venue: venueInfo.name,
+        venue: venueInfo.name || '',
         venue_id: venueInfo.id,
         venue_name: venueInfo.name,
         status: apiGame.Results ? 'finished' : apiService.determineGameStatus(apiGame.date, !!apiGame.Results),

@@ -41,26 +41,47 @@ class ApiService {
 
   async fetchPastEvents(): Promise<ApiPastEventsResponse> {
     try {
-      console.log('Fetching past events from API...');
+      console.log('=== API Service: Fetching past events ===');
+      console.log('URL:', `${this.baseUrl}/past-events`);
+      
       const response = await fetch(`${this.baseUrl}/past-events`);
       
       if (!response.ok) {
+        console.error(`API Service: HTTP error! status: ${response.status}`);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       
       const result: ApiPastEventsResponse = await response.json();
-      console.log('Past events response:', result);
-      console.log('Total past events count:', result.count);
+      console.log('API Service: Past events response status:', result.status);
+      console.log('API Service: Total past events count:', result.count);
+      console.log('API Service: Data array length:', result.data?.length || 0);
       
-      // Log the structure of the first event for debugging
+      // Log the structure of the first few events for debugging
       if (result.data && result.data.length > 0) {
-        console.log('First past event structure:', result.data[0]);
-        console.log('Results structure:', result.data[0].Results);
+        console.log('=== API Service: First event structure ===');
+        const firstEvent = result.data[0];
+        console.log('Event ID:', firstEvent.event_id);
+        console.log('Event Date:', firstEvent.event_date);
+        console.log('Teams string:', firstEvent.teams);
+        console.log('Results object:', firstEvent.results);
+        console.log('Leagues:', firstEvent.leagues);
+        console.log('Venues:', firstEvent.venues);
+        console.log('Seasons:', firstEvent.seasons);
+        
+        if (result.data.length > 1) {
+          console.log('=== API Service: Second event structure ===');
+          const secondEvent = result.data[1];
+          console.log('Event ID:', secondEvent.event_id);
+          console.log('Teams string:', secondEvent.teams);
+          console.log('Results object:', secondEvent.results);
+        }
+      } else {
+        console.warn('API Service: No events in data array');
       }
       
       return result;
     } catch (error) {
-      console.error('Error fetching past events:', error);
+      console.error('API Service: Error fetching past events:', error);
       throw error;
     }
   }
@@ -87,33 +108,36 @@ class ApiService {
   async fetchTeam(teamId: string): Promise<ApiTeam> {
     // Check cache first
     if (this.teamCache[teamId]) {
-      console.log('Returning cached team data for ID:', teamId);
+      console.log(`API Service: Returning cached team data for ID: ${teamId} (${this.teamCache[teamId].name})`);
       return this.teamCache[teamId];
     }
 
     try {
-      console.log('Fetching team details for ID:', teamId);
+      console.log(`API Service: Fetching team details for ID: ${teamId}`);
       const response = await fetch(`${this.baseUrl}/teams/${teamId}`);
       
       if (!response.ok) {
+        console.error(`API Service: Team fetch failed for ID ${teamId}, status: ${response.status}`);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       
       const team: ApiTeam = await response.json();
-      console.log('Team details fetched:', team);
+      console.log(`API Service: Team fetched successfully - ID: ${teamId}, Name: ${team.name}`);
       
       // Cache the result
       this.teamCache[teamId] = team;
       
       return team;
     } catch (error) {
-      console.error('Error fetching team details for ID:', teamId, error);
+      console.error(`API Service: Error fetching team details for ID ${teamId}:`, error);
       // Return fallback data
-      return {
+      const fallbackTeam = {
         id: teamId,
         name: `Team ${teamId}`,
         logo_url: ''
       };
+      console.log(`API Service: Using fallback team data for ID ${teamId}:`, fallbackTeam);
+      return fallbackTeam;
     }
   }
 
@@ -284,18 +308,27 @@ class ApiService {
     }
   }
 
-  // Helper function to parse "id:name" format
-  parseIdNameString(idNameString: string): { id: string; name: string } {
-    const parts = idNameString.split(':');
-    if (parts.length >= 2) {
+  // Helper function to parse "id:name" format strings
+  parseIdNameString(idNameString: string | null): { id: string | null; name: string | null } {
+    if (!idNameString || idNameString.trim() === '' || idNameString === 'null') {
+      return { id: null, name: null };
+    }
+
+    const colonIndex = idNameString.indexOf(':');
+    if (colonIndex === -1) {
+      // No colon found, treat entire string as name
       return {
-        id: parts[0].trim(),
-        name: parts.slice(1).join(':').trim()
+        id: null,
+        name: idNameString.trim()
       };
     }
+
+    const id = idNameString.substring(0, colonIndex).trim();
+    const name = idNameString.substring(colonIndex + 1).trim();
+
     return {
-      id: idNameString.trim(),
-      name: idNameString.trim()
+      id: id || null,
+      name: name || null
     };
   }
 

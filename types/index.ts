@@ -109,42 +109,29 @@ export interface ApiUpcomingEvent {
   event_id: string;
   event_date: string;
   sp_teams: string; // Comma-separated team IDs for upcoming events
-  Leagues: string; // League ID:League Name
-  seasons: string; // Season ID:Season Name
-  venues: string; // Venue ID:Venue Name
+  leagues: string | null; // League ID:League Name or null
+  seasons: string | null; // Season ID:Season Name or null
+  venues: string | null; // Venue ID:Venue Name or null
 }
 
 export interface ApiPastEvent {
   event_id: string;
   event_date: string;
   teams: string; // Comma-separated team IDs for past events (different field name)
-  Leagues: string; // League ID:League Name
-  seasons: string; // Season ID:Season Name
-  venues: string; // Venue ID:Venue Name
-  Results: {
-    homeTeam: {
-      goals: number;
-      first: number;
-      second: number;
-      third: number;
-      outcome: 'nich' | 'win' | 'loss';
-    };
-    awayTeam: {
-      goals: number;
-      first: number;
-      second: number;
-      third: number;
-      outcome: 'nich' | 'win' | 'loss';
-    };
-  };
+  leagues: string | null; // League ID:League Name or null
+  seasons: string | null; // Season ID:Season Name or null
+  venues: string | null; // Venue ID:Venue Name or null
+  results: { [teamId: string]: { goals: string; outcome: 'nich' | 'win' | 'loss' } }; // Updated structure
 }
 
 export interface ApiUpcomingEventsResponse {
+  status: string;
   data: ApiUpcomingEvent[];
   count: number;
 }
 
 export interface ApiPastEventsResponse {
+  status: string;
   data: ApiPastEvent[];
   count: number;
 }
@@ -190,9 +177,9 @@ export interface ApiGameDetailsResponse {
   id: string; // Game ID
   date: string; // Date and time
   teams: string; // Comma-separated team IDs
-  leagues: string; // League ID:League Name
-  seasons: string; // Season ID:Season Name
-  venues: string; // Venue ID:Venue Name
+  leagues: string | null; // League ID:League Name or null
+  seasons: string | null; // Season ID:Season Name or null
+  venues: string | null; // Venue ID:Venue Name or null
   sp_video?: string; // VK video URL
   Results?: {
     homeTeam: {

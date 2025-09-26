@@ -22,9 +22,9 @@ export default function UpcomingGamesScreen() {
   const loadData = async () => {
     try {
       setError(null);
-      console.log('Loading upcoming games...');
+      console.log('Loading upcoming games screen data...');
       
-      // Load upcoming games and count
+      // Load upcoming games and count concurrently
       const [upcomingGames, count] = await Promise.all([
         getUpcomingGames(),
         getUpcomingGamesCount()
@@ -84,7 +84,7 @@ export default function UpcomingGamesScreen() {
             </TouchableOpacity>
           </Link>
           <View>
-            <Text style={commonStyles.title}>Предстоящие игры</Text>
+            <Text style={commonStyles.title}>Предстоящие игры ({gamesCount})</Text>
             <Text style={commonStyles.textSecondary}>
               {gamesCount > 0 ? `${gamesCount} игр запланировано` : 'Нет запланированных игр'}
             </Text>
@@ -93,12 +93,17 @@ export default function UpcomingGamesScreen() {
 
         {/* Games List */}
         {games.length > 0 ? (
-          games.map((game) => (
-            <GameCard key={game.id} game={game} showScore={false} />
-          ))
+          <View style={{ gap: 16 }}>
+            {games.map((game) => (
+              <GameCard key={game.id} game={game} showScore={false} />
+            ))}
+          </View>
         ) : (
           <View style={commonStyles.errorContainer}>
             <Text style={commonStyles.text}>Нет предстоящих игр.</Text>
+            <Text style={commonStyles.textSecondary}>
+              Проверьте позже или обновите страницу.
+            </Text>
           </View>
         )}
 

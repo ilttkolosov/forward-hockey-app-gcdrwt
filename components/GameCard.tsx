@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { Game } from '../types';
 import { colors, commonStyles } from '../styles/commonStyles';
 import { useRouter } from 'expo-router';
@@ -72,12 +72,29 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
           <View style={[styles.statusBadge, { backgroundColor: getStatusColor(game.status) }]}>
             <Text style={styles.statusText}>{getStatusText(game.status)}</Text>
           </View>
-          <Text style={commonStyles.textSecondary}>{formatDate(game.date)} • {game.time}</Text>
+          <Text style={commonStyles.textSecondary}>
+            {formatDate(game.date)} • {game.time}
+          </Text>
         </View>
 
         <View style={styles.teamsContainer}>
           <View style={styles.teamSection}>
-            <Text style={styles.teamName}>{game.homeTeam}</Text>
+            {game.homeTeamLogo ? (
+              <Image 
+                source={{ uri: game.homeTeamLogo }} 
+                style={styles.teamLogo}
+                resizeMode="contain"
+              />
+            ) : (
+              <View style={styles.placeholderLogo}>
+                <Text style={styles.placeholderText}>
+                  {game.homeTeam.charAt(0)}
+                </Text>
+              </View>
+            )}
+            <Text style={styles.teamName} numberOfLines={2}>
+              {game.homeTeam}
+            </Text>
             {showScore && game.homeScore !== undefined && (
               <View style={styles.scoreContainer}>
                 <Text style={styles.score}>{game.homeScore}</Text>
@@ -98,7 +115,22 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
           </View>
 
           <View style={styles.teamSection}>
-            <Text style={styles.teamName}>{game.awayTeam}</Text>
+            {game.awayTeamLogo ? (
+              <Image 
+                source={{ uri: game.awayTeamLogo }} 
+                style={styles.teamLogo}
+                resizeMode="contain"
+              />
+            ) : (
+              <View style={styles.placeholderLogo}>
+                <Text style={styles.placeholderText}>
+                  {game.awayTeam.charAt(0)}
+                </Text>
+              </View>
+            )}
+            <Text style={styles.teamName} numberOfLines={2}>
+              {game.awayTeam}
+            </Text>
             {showScore && game.awayScore !== undefined && (
               <View style={styles.scoreContainer}>
                 <Text style={styles.score}>{game.awayScore}</Text>
@@ -116,25 +148,24 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
         </View>
 
         <View style={styles.footer}>
-          <Text style={commonStyles.textSecondary}>{game.venue}</Text>
-          {game.tournament && (
-            <Text style={[commonStyles.textSecondary, styles.tournament]}>
-              {game.tournament}
-            </Text>
-          )}
-        </View>
-
-        {/* Additional info for finished games */}
-        {game.status === 'finished' && (game.league_name || game.season_name) && (
-          <View style={styles.additionalInfo}>
+          <View style={styles.gameInfo}>
+            {game.venue && (
+              <Text style={commonStyles.textSecondary} numberOfLines={1}>
+                📍 {game.venue}
+              </Text>
+            )}
             {game.league_name && (
-              <Text style={styles.infoText}>Лига: {game.league_name}</Text>
+              <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
+                🏆 {game.league_name}
+              </Text>
             )}
             {game.season_name && (
-              <Text style={styles.infoText}>Сезон: {game.season_name}</Text>
+              <Text style={[commonStyles.textSecondary, styles.seasonText]} numberOfLines={1}>
+                📅 {game.season_name}
+              </Text>
             )}
           </View>
-        )}
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -166,13 +197,35 @@ const styles = StyleSheet.create({
   teamSection: {
     flex: 1,
     alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  teamLogo: {
+    width: 48,
+    height: 48,
+    marginBottom: 8,
+    borderRadius: 24,
+  },
+  placeholderLogo: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  placeholderText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.textSecondary,
   },
   teamName: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: colors.text,
     textAlign: 'center',
     marginBottom: 8,
+    minHeight: 36,
   },
   scoreContainer: {
     alignItems: 'center',
@@ -196,22 +249,17 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   footer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    marginTop: 8,
   },
-  tournament: {
+  gameInfo: {
+    gap: 4,
+  },
+  leagueText: {
+    fontSize: 12,
     fontStyle: 'italic',
   },
-  additionalInfo: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  infoText: {
+  seasonText: {
     fontSize: 12,
-    color: colors.textSecondary,
-    marginBottom: 2,
+    fontStyle: 'italic',
   },
 });
