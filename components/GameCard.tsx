@@ -12,6 +12,18 @@ interface GameCardProps {
   showScore?: boolean;
 }
 
+// Helper function to determine game status
+const getGameStatus = (game: Game) => {
+  const now = new Date();
+  const gameDate = new Date(game.event_date);
+  const isToday = gameDate.toDateString() === now.toDateString();
+  const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000);   // –5 мин
+  const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000);   // +90 мин
+  const isLive = now >= liveStart && now <= liveEnd;
+  
+  return { isToday, isLive };
+};
+
 export default function GameCard({ game, showScore = true }: GameCardProps) {
   const router = useRouter();
 
@@ -20,10 +32,12 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
     router.push(`/game/${game.id}`);
   };
 
-  const getStatusColor = (status: Game['status']) => {
+  const getStatusColor = (status: Game['status'], isLive?: boolean) => {
+    if (isLive) return colors.success; // Green for LIVE
+    
     switch (status) {
       case 'live':
-        return colors.error;
+        return colors.success;
       case 'upcoming':
         return colors.warning;
       case 'finished':
@@ -33,10 +47,13 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
     }
   };
 
-  const getStatusText = (status: Game['status']) => {
+  const getStatusText = (status: Game['status'], isToday?: boolean, isLive?: boolean) => {
+    if (isLive) return 'LIVE';
+    if (isToday && status === 'upcoming') return 'СЕГОДНЯ';
+    
     switch (status) {
       case 'live':
-        return 'В ЭФИРЕ';
+        return 'LIVE';
       case 'upcoming':
         return 'ПРЕДСТОЯЩАЯ';
       case 'finished':
@@ -84,12 +101,15 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
     return leagueName.split(',')[0].trim(); // Fallback
   };
 
+  // Get game status for upcoming games
+  const { isToday, isLive } = game.status === 'upcoming' ? getGameStatus(game) : { isToday: false, isLive: false };
+
   return (
     <TouchableOpacity onPress={handlePress} activeOpacity={0.7}>
       <View style={commonStyles.gameCard}>
         <View style={styles.header}>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(game.status) }]}>
-            <Text style={styles.statusText}>{getStatusText(game.status)}</Text>
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(game.status, isLive) }]}>
+            <Text style={styles.statusText}>{getStatusText(game.status, isToday, isLive)}</Text>
           </View>
           <Text style={commonStyles.textSecondary}>
             {formatDate(game.date, game.time)}

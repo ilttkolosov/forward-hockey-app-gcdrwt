@@ -84,13 +84,13 @@ const styles = StyleSheet.create({
   captainBadge: {
     backgroundColor: colors.error,
     borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     marginBottom: 8,
   },
   captainBadgeText: {
     color: colors.background,
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: 'bold',
   },
   infoSection: {
@@ -210,6 +210,7 @@ export default function PlayerDetailsScreen() {
   }
 
   const captainBadgeText = getCaptainBadgeText(player.captainStatus || '');
+  const fullCaptainText = getCaptainStatusText();
 
   return (
     <SafeAreaView style={styles.container}>
@@ -243,9 +244,9 @@ export default function PlayerDetailsScreen() {
           
           {/* Captain Badge positioned above player number */}
           <View style={styles.numberContainer}>
-            {captainBadgeText && (
+            {fullCaptainText !== '—' && (
               <View style={styles.captainBadge}>
-                <Text style={styles.captainBadgeText}>{captainBadgeText}</Text>
+                <Text style={styles.captainBadgeText}>{fullCaptainText}</Text>
               </View>
             )}
             <Text style={styles.playerNumber}>#{player.number}</Text>
@@ -308,7 +309,7 @@ export default function PlayerDetailsScreen() {
           
           <View style={[styles.infoRow, styles.infoRowLast]}>
             <Text style={styles.infoLabel}>Статус</Text>
-            <Text style={styles.infoValue}>{getCaptainStatusText()}</Text>
+            <Text style={styles.infoValue}>{fullCaptainText}</Text>
           </View>
         </View>
 

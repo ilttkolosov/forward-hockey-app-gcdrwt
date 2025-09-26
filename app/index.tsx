@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, RefreshControl, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
 import { commonStyles, colors } from '../styles/commonStyles';
@@ -45,6 +45,62 @@ const quickNavStyles = {
   },
 };
 
+const headerStyles = StyleSheet.create({
+  headerContainer: {
+    marginBottom: 24,
+    alignItems: 'center',
+  },
+  teamName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+    textAlign: 'center',
+  },
+  cityName: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+  },
+});
+
+// Helper function to determine game status
+const getGameStatus = (game: Game) => {
+  const now = new Date();
+  const gameDate = new Date(game.event_date);
+  const isToday = gameDate.toDateString() === now.toDateString();
+  const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000);   // –5 мин
+  const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000);   // +90 мин
+  const isLive = now >= liveStart && now <= liveEnd;
+  
+  return { isToday, isLive };
+};
+
+// Helper function to sort upcoming games
+const sortUpcomingGames = (games: Game[]): Game[] => {
+  return [...games].sort((a, b) => {
+    const statusA = getGameStatus(a);
+    const statusB = getGameStatus(b);
+    
+    // LIVE games first
+    if (statusA.isLive && !statusB.isLive) return -1;
+    if (!statusA.isLive && statusB.isLive) return 1;
+    
+    // Today games second (but not LIVE)
+    if (statusA.isToday && !statusA.isLive && !statusB.isToday) return -1;
+    if (!statusA.isToday && statusB.isToday && !statusB.isLive) return 1;
+    
+    // Rest by date
+    return new Date(a.event_date).getTime() - new Date(b.event_date).getTime();
+  });
+};
+
 export default function HomeScreen() {
   const [currentGame, setCurrentGame] = useState<Game | null>(null);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
@@ -67,12 +123,15 @@ export default function HomeScreen() {
       ]);
       
       setCurrentGame(current);
-      setUpcomingGames(upcoming);
+      
+      // Sort upcoming games with new logic
+      const sortedUpcoming = sortUpcomingGames(upcoming);
+      setUpcomingGames(sortedUpcoming);
       setUpcomingCount(upcomingCountData);
       
       console.log('Home screen data loaded:', {
         currentGame: current?.id,
-        upcomingGames: upcoming.length,
+        upcomingGames: sortedUpcoming.length,
         upcomingCount: upcomingCountData
       });
     } catch (err) {
@@ -119,8 +178,11 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={{ marginBottom: 24 }}>
-          <Text style={commonStyles.title}>ХК Динамо Форвард 2014 • Санкт-Петербург</Text>
+        <View style={headerStyles.headerContainer}>
+          <View style={headerStyles.headerRow}>
+            <Text style={headerStyles.teamName}>ХК Динамо Форвард 2014</Text>
+            <Text style={headerStyles.cityName}> • Санкт-Петербург</Text>
+          </View>
         </View>
 
         {/* Current Game */}

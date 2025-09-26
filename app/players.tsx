@@ -122,14 +122,16 @@ const styles = StyleSheet.create({
   },
   captainBadge: {
     backgroundColor: colors.error,
-    borderRadius: 8,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    marginBottom: 4,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginBottom: 6,
+    minWidth: 28,
+    alignItems: 'center',
   },
   captainBadgeText: {
     color: colors.background,
-    fontSize: 10,
+    fontSize: 14,
     fontWeight: 'bold',
   },
   emptyContainer: {
