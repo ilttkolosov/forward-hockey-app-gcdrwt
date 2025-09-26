@@ -172,29 +172,53 @@ export interface ApiPlayerResponse {
   is_assistant_captain?: boolean;
 }
 
-// Updated API Game Details Response
+// Updated API Game Details Response based on new requirements
 export interface ApiGameDetailsResponse {
   id: string; // Game ID
-  date: string; // Date and time
-  teams: string; // Comma-separated team IDs
-  leagues: string | null; // League ID:League Name or null
-  seasons: string | null; // Season ID:Season Name or null
-  venues: string | null; // Venue ID:Venue Name or null
-  sp_video?: string; // VK video URL
-  Results?: {
-    homeTeam: {
-      goals: number;
-      first: number;
-      second: number;
-      third: number;
-      outcome: 'nich' | 'win' | 'loss';
-    };
-    awayTeam: {
-      goals: number;
-      first: number;
-      second: number;
-      third: number;
-      outcome: 'nich' | 'win' | 'loss';
+  date: string; // Date and time in format "YYYY-MM-DD HH:mm:ss"
+  teams: string[]; // Array of team IDs (always 2 elements)
+  leagues: Array<{ id: string; name: string }> | []; // Array of league objects (sometimes empty)
+  seasons: Array<{ id: string; name: string }> | []; // Array of season objects (sometimes empty)
+  venues: Array<{ id: string; name: string }> | []; // Array of venue objects (sometimes empty)
+  results: {
+    [teamId: string]: {
+      goals: string; // Total goals as string
+      first?: string; // First period goals (can be empty)
+      second?: string; // Second period goals (can be empty)
+      third?: string; // Third period goals (can be empty)
+      outcome: string[]; // Array of strings like ["win"], take first element
     };
   };
+  sp_video?: string; // VK video URL
+}
+
+// Enhanced Game interface for match details
+export interface EnrichedGameDetails {
+  id: string;
+  date: string; // Formatted date without seconds
+  time: string; // Formatted time without seconds
+  homeTeam: {
+    id: string;
+    name: string;
+    logo: string;
+    goals: number;
+    firstPeriod?: number;
+    secondPeriod?: number;
+    thirdPeriod?: number;
+    outcome: string;
+  };
+  awayTeam: {
+    id: string;
+    name: string;
+    logo: string;
+    goals: number;
+    firstPeriod?: number;
+    secondPeriod?: number;
+    thirdPeriod?: number;
+    outcome: string;
+  };
+  league?: string;
+  season?: string;
+  venue?: string;
+  videoUrl?: string;
 }
