@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -139,7 +139,7 @@ export default function PlayerDetailsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const loadPlayerData = async () => {
+  const loadPlayerData = useCallback(async () => {
     if (!id) {
       setError('ID игрока не указан');
       setLoading(false);
@@ -164,11 +164,11 @@ export default function PlayerDetailsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [id]);
 
   useEffect(() => {
     loadPlayerData();
-  }, [id]);
+  }, [loadPlayerData]);
 
   const onRefresh = () => {
     setRefreshing(true);

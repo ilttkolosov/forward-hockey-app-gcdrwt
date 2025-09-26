@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -33,13 +33,7 @@ export default function GameDetailsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [teamsLoading, setTeamsLoading] = useState(false);
 
-  useEffect(() => {
-    if (id) {
-      loadGameData();
-    }
-  }, [id]);
-
-  const loadGameData = async () => {
+  const loadGameData = useCallback(async () => {
     try {
       console.log('Loading game data for ID:', id);
       setLoading(true);
@@ -64,7 +58,13 @@ export default function GameDetailsScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    if (id) {
+      loadGameData();
+    }
+  }, [id, loadGameData]);
 
   const enrichGameData = async (apiData: ApiGameDetailsResponse): Promise<EnrichedGameDetails | null> => {
     try {
@@ -156,14 +156,12 @@ export default function GameDetailsScreen() {
     return outcome || '';
   };
 
-  const extractNameFromArray = (array: Array<{ id: string; name: string }> | []): string | undefined => {
+  const extractNameFromArray = (array: { id: string; name: string }[] | []): string | undefined => {
     if (Array.isArray(array) && array.length > 0) {
       return array[0].name;
     }
     return undefined;
   };
-
-
 
   const onRefresh = async () => {
     setRefreshing(true);

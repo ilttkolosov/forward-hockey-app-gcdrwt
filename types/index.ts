@@ -183,9 +183,9 @@ export interface ApiGameDetailsResponse {
   id: string; // Game ID
   date: string; // Date and time in format "YYYY-MM-DD HH:mm:ss"
   teams: string[]; // Array of team IDs (always 2 elements)
-  leagues: Array<{ id: string; name: string }> | []; // Array of league objects (sometimes empty)
-  seasons: Array<{ id: string; name: string }> | []; // Array of season objects (sometimes empty)
-  venues: Array<{ id: string; name: string }> | []; // Array of venue objects (sometimes empty)
+  leagues: { id: string; name: string }[] | []; // Array of league objects (sometimes empty)
+  seasons: { id: string; name: string }[] | []; // Array of season objects (sometimes empty)
+  venues: { id: string; name: string }[] | []; // Array of venue objects (sometimes empty)
   results: {
     [teamId: string]: {
       goals: string; // Total goals as string

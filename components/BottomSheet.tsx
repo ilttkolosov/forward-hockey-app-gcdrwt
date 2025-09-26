@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -21,11 +22,11 @@ interface SimpleBottomSheetProps {
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // Snap positions for the bottom sheet
-const SNAP_POINTS = {
-  HALF: SCREEN_HEIGHT * 0.5,
-  FULL: SCREEN_HEIGHT * 0.8,
-  CLOSED: SCREEN_HEIGHT,
-};
+const SNAP_POINTS = [
+  SCREEN_HEIGHT * 0.5,  // HALF
+  SCREEN_HEIGHT * 0.8,  // FULL
+  SCREEN_HEIGHT,        // CLOSED
+];
 
 const SimpleBottomSheet: React.FC<SimpleBottomSheetProps> = ({
   children,
@@ -35,17 +36,17 @@ const SimpleBottomSheet: React.FC<SimpleBottomSheetProps> = ({
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const gestureTranslateY = useRef(new Animated.Value(0)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
-  const [currentSnapPoint, setCurrentSnapPoint] = useState(SNAP_POINTS.HALF);
+  const [currentSnapPoint, setCurrentSnapPoint] = useState(SNAP_POINTS[0]);
   const lastGestureY = useRef(0);
   const startPositionY = useRef(0);
 
   useEffect(() => {
     if (isVisible) {
-      setCurrentSnapPoint(SNAP_POINTS.HALF);
+      setCurrentSnapPoint(SNAP_POINTS[0]);
       gestureTranslateY.setValue(0);
       Animated.parallel([
         Animated.timing(translateY, {
-          toValue: SCREEN_HEIGHT - SNAP_POINTS.HALF,
+          toValue: SCREEN_HEIGHT - SNAP_POINTS[0],
           duration: 300,
           useNativeDriver: true,
         }),
@@ -56,7 +57,7 @@ const SimpleBottomSheet: React.FC<SimpleBottomSheetProps> = ({
         }),
       ]).start();
     } else {
-      setCurrentSnapPoint(SNAP_POINTS.CLOSED);
+      setCurrentSnapPoint(SNAP_POINTS[2]);
       gestureTranslateY.setValue(0);
       Animated.parallel([
         Animated.timing(translateY, {
@@ -71,7 +72,7 @@ const SimpleBottomSheet: React.FC<SimpleBottomSheetProps> = ({
         }),
       ]).start();
     }
-  }, [isVisible, translateY, backdropOpacity]);
+  }, [isVisible, translateY, backdropOpacity, gestureTranslateY]);
 
   const handleBackdropPress = () => {
     onClose?.();
@@ -91,16 +92,16 @@ const SimpleBottomSheet: React.FC<SimpleBottomSheetProps> = ({
   const getClosestSnapPoint = (currentY: number, velocityY: number) => {
     const currentPosition = SCREEN_HEIGHT - currentY;
 
-    if (velocityY > 1000) return SNAP_POINTS.CLOSED;
-    if (velocityY < -1000) return SNAP_POINTS.FULL;
+    if (velocityY > 1000) return SNAP_POINTS[2];
+    if (velocityY < -1000) return SNAP_POINTS[1];
 
     const distances = [
-      { point: SNAP_POINTS.HALF, distance: Math.abs(currentPosition - SNAP_POINTS.HALF) },
-      { point: SNAP_POINTS.FULL, distance: Math.abs(currentPosition - SNAP_POINTS.FULL) },
+      { point: SNAP_POINTS[0], distance: Math.abs(currentPosition - SNAP_POINTS[0]) },
+      { point: SNAP_POINTS[1], distance: Math.abs(currentPosition - SNAP_POINTS[1]) },
     ];
 
-    if (currentPosition < SNAP_POINTS.HALF * 0.5) {
-      return SNAP_POINTS.CLOSED;
+    if (currentPosition < SNAP_POINTS[0] * 0.5) {
+      return SNAP_POINTS[2];
     }
 
     distances.sort((a, b) => a.distance - b.distance);
@@ -115,7 +116,7 @@ const SimpleBottomSheet: React.FC<SimpleBottomSheetProps> = ({
     const currentBasePosition = SCREEN_HEIGHT - currentSnapPoint;
     const intendedPosition = currentBasePosition + translationY;
 
-    const minPosition = SCREEN_HEIGHT - SNAP_POINTS.FULL;
+    const minPosition = SCREEN_HEIGHT - SNAP_POINTS[1];
     const maxPosition = SCREEN_HEIGHT;
 
     const clampedPosition = Math.max(minPosition, Math.min(maxPosition, intendedPosition));
@@ -134,7 +135,7 @@ const SimpleBottomSheet: React.FC<SimpleBottomSheetProps> = ({
       const currentBasePosition = SCREEN_HEIGHT - currentSnapPoint;
       const intendedPosition = currentBasePosition + translationY;
 
-      const minPosition = SCREEN_HEIGHT - SNAP_POINTS.FULL;
+      const minPosition = SCREEN_HEIGHT - SNAP_POINTS[1];
       const maxPosition = SCREEN_HEIGHT;
 
       const finalY = Math.max(minPosition, Math.min(maxPosition, intendedPosition));
@@ -142,7 +143,7 @@ const SimpleBottomSheet: React.FC<SimpleBottomSheetProps> = ({
 
       gestureTranslateY.setValue(0);
 
-      if (targetSnapPoint === SNAP_POINTS.CLOSED) {
+      if (targetSnapPoint === SNAP_POINTS[2]) {
         onClose?.();
       } else {
         snapToPoint(targetSnapPoint);
@@ -217,7 +218,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'black',
   },
   bottomSheet: {
-    height: SNAP_POINTS.FULL,
+    height: SNAP_POINTS[1],
     backgroundColor: colors.background || '#ffffff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,

@@ -188,7 +188,7 @@ export default function GameArchiveScreen() {
   const [selectedSeason, setSelectedSeason] = useState<string | null>(null);
   const router = useRouter();
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setError(null);
       console.log('=== Archive Screen: Loading data ===');
@@ -231,7 +231,7 @@ export default function GameArchiveScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
 
   const loadMoreGames = useCallback(() => {
     if (loadingMore || displayedGames.length >= filteredGames.length) {
@@ -252,11 +252,11 @@ export default function GameArchiveScreen() {
       
       console.log(`Loaded page ${nextPage}, showing ${displayedGames.length + newGames.length} of ${filteredGames.length} games`);
     }, 500); // Small delay to show loading indicator
-  }, [loadingMore, displayedGames.length, filteredGames.length, currentPage]);
+  }, [loadingMore, displayedGames.length, filteredGames, currentPage]);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -335,7 +335,7 @@ export default function GameArchiveScreen() {
     });
   };
 
-  const handleSeasonFilter = (season: string) => {
+  const handleSeasonFilter = useCallback((season: string) => {
     console.log('Filtering by season:', season);
     setSelectedSeason(season);
     
@@ -346,7 +346,7 @@ export default function GameArchiveScreen() {
     setCurrentPage(1);
     const firstPage = filtered.slice(0, ITEMS_PER_PAGE);
     setDisplayedGames(firstPage);
-  };
+  }, [allGames]);
 
   const renderGameCard = ({ item: game }: { item: EnrichedPastGame }) => {
     return (
