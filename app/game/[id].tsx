@@ -202,7 +202,11 @@ export default function GameDetailsScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Icon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Страница матча</Text>
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerTitle}>ХК Динамо Форвард 2014</Text>
+            <Text style={styles.headerSubtitle}> • </Text>
+            <Text style={styles.headerLocation}>Санкт-Петербург</Text>
+          </View>
         </View>
         <LoadingSpinner />
       </SafeAreaView>
@@ -216,7 +220,11 @@ export default function GameDetailsScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Icon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Страница матча</Text>
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerTitle}>ХК Динамо Форвард 2014</Text>
+            <Text style={styles.headerSubtitle}> • </Text>
+            <Text style={styles.headerLocation}>Санкт-Петербург</Text>
+          </View>
         </View>
         <ErrorMessage message={error || 'Матч не найден'} onRetry={loadGameData} />
       </SafeAreaView>
@@ -229,7 +237,11 @@ export default function GameDetailsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Страница матча</Text>
+        <View style={styles.headerTitleContainer}>
+          <Text style={styles.headerTitle}>ХК Динамо Форвард 2014</Text>
+          <Text style={styles.headerSubtitle}> • </Text>
+          <Text style={styles.headerLocation}>Санкт-Петербург</Text>
+        </View>
       </View>
 
       <ScrollView
@@ -270,51 +282,53 @@ export default function GameDetailsScreen() {
             <Text style={styles.gameDate}>{gameDetails.date} • {gameDetails.time}</Text>
           </View>
 
-          {/* Teams and Score in One Line */}
-          <View style={styles.scoreLineContainer}>
-            {/* Home Team Logo */}
-            {gameDetails.homeTeam.logo ? (
-              <Image 
-                source={{ uri: gameDetails.homeTeam.logo }} 
-                style={styles.scoreLineLogo}
-                onError={() => console.log('Failed to load home team logo')}
-              />
-            ) : (
-              <View style={styles.scoreLineLogoPlaceholder}>
-                <Icon name="shield" size={24} color={colors.textSecondary} />
-              </View>
-            )}
-            
-            {/* Home Team Name */}
-            <Text style={styles.scoreLineTeamName} numberOfLines={1}>
-              {gameDetails.homeTeam.name}
-            </Text>
-            
+          {/* Teams with Logos Above Names */}
+          <View style={styles.teamsContainer}>
+            {/* Home Team */}
+            <View style={styles.teamSection}>
+              {gameDetails.homeTeam.logo ? (
+                <Image 
+                  source={{ uri: gameDetails.homeTeam.logo }} 
+                  style={styles.teamLogo}
+                  onError={() => console.log('Failed to load home team logo')}
+                />
+              ) : (
+                <View style={styles.teamLogoPlaceholder}>
+                  <Icon name="shield" size={32} color={colors.textSecondary} />
+                </View>
+              )}
+              <Text style={styles.teamName} numberOfLines={2}>
+                {gameDetails.homeTeam.name}
+              </Text>
+            </View>
+
             {/* Score */}
-            <Text style={styles.scoreLineScore}>
-              {gameDetails.homeTeam.goals} : {gameDetails.awayTeam.goals}
-            </Text>
-            
-            {/* Away Team Name */}
-            <Text style={styles.scoreLineTeamName} numberOfLines={1}>
-              {gameDetails.awayTeam.name}
-            </Text>
-            
-            {/* Away Team Logo */}
-            {gameDetails.awayTeam.logo ? (
-              <Image 
-                source={{ uri: gameDetails.awayTeam.logo }} 
-                style={styles.scoreLineLogo}
-                onError={() => console.log('Failed to load away team logo')}
-              />
-            ) : (
-              <View style={styles.scoreLineLogoPlaceholder}>
-                <Icon name="shield" size={24} color={colors.textSecondary} />
-              </View>
-            )}
+            <View style={styles.scoreContainer}>
+              <Text style={styles.score}>
+                {gameDetails.homeTeam.goals} : {gameDetails.awayTeam.goals}
+              </Text>
+            </View>
+
+            {/* Away Team */}
+            <View style={styles.teamSection}>
+              {gameDetails.awayTeam.logo ? (
+                <Image 
+                  source={{ uri: gameDetails.awayTeam.logo }} 
+                  style={styles.teamLogo}
+                  onError={() => console.log('Failed to load away team logo')}
+                />
+              ) : (
+                <View style={styles.teamLogoPlaceholder}>
+                  <Icon name="shield" size={32} color={colors.textSecondary} />
+                </View>
+              )}
+              <Text style={styles.teamName} numberOfLines={2}>
+                {gameDetails.awayTeam.name}
+              </Text>
+            </View>
           </View>
 
-          {/* Outcome Badges in One Line */}
+          {/* Outcome Badges */}
           <View style={styles.outcomesContainer}>
             <View style={styles.outcomeSection}>
               {gameDetails.homeTeam.outcome && (
@@ -405,10 +419,25 @@ const styles = StyleSheet.create({
     marginRight: 16,
     padding: 4,
   },
+  headerTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: colors.text,
+  },
+  headerSubtitle: {
+    fontSize: 16,
+    fontWeight: '400',
+    color: colors.textSecondary,
+  },
+  headerLocation: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: colors.textSecondary,
   },
   content: {
     flex: 1,
@@ -452,40 +481,50 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: '500',
   },
-  scoreLineContainer: {
+  teamsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-    paddingHorizontal: 16,
+    justifyContent: 'space-between',
+    marginBottom: 24,
+    paddingHorizontal: 8,
   },
-  scoreLineLogo: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  teamSection: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  teamLogo: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: colors.surface,
+    marginBottom: 12,
   },
-  scoreLineLogoPlaceholder: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  teamLogoPlaceholder: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: 12,
   },
-  scoreLineTeamName: {
-    fontSize: 16,
+  teamName: {
+    fontSize: 14,
     fontWeight: '600',
     color: colors.text,
-    marginHorizontal: 12,
-    flex: 1,
     textAlign: 'center',
+    lineHeight: 18,
   },
-  scoreLineScore: {
-    fontSize: 28,
+  scoreContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  score: {
+    fontSize: 32,
     fontWeight: '800',
     color: colors.primary,
-    marginHorizontal: 16,
   },
   outcomesContainer: {
     flexDirection: 'row',
