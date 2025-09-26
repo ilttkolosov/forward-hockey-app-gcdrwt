@@ -58,6 +58,7 @@ export default function RootLayout() {
             <Stack.Screen name="index" />
             <Stack.Screen name="upcoming" />
             <Stack.Screen name="archive" />
+            <Stack.Screen name="season/[id]" />
             <Stack.Screen name="players" />
             <Stack.Screen name="coaches" />
             <Stack.Screen name="tournaments" />
