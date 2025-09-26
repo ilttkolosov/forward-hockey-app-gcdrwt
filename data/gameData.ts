@@ -25,9 +25,9 @@ async function convertApiUpcomingEventToGame(apiEvent: ApiUpcomingEvent): Promis
   
   const { date, time } = apiService.formatDateTime(apiEvent.event_date);
   
-  // Parse teams
+  // Parse teams using sp_teams field for upcoming events
   const teamIds = apiEvent.sp_teams.split(',').map(id => id.trim());
-  console.log('Team IDs:', teamIds);
+  console.log('Team IDs from sp_teams:', teamIds);
   
   // Fetch team data
   const teamPromises = teamIds.map(id => apiService.fetchTeam(id));
@@ -65,24 +65,24 @@ async function convertApiUpcomingEventToGame(apiEvent: ApiUpcomingEvent): Promis
     season_name: seasonInfo.name,
   };
   
-  console.log('Converted game:', game);
+  console.log('Converted upcoming game:', game);
   return game;
 }
 
 async function convertApiPastEventToGame(apiEvent: ApiPastEvent): Promise<Game> {
-  console.log('Converting past event with new structure:', apiEvent);
+  console.log('Converting past event with Results structure:', apiEvent);
   
   const { date, time } = apiService.formatDateTime(apiEvent.event_date);
   
-  // Parse teams (new field 'teams' instead of 'sp_teams')
+  // Parse teams using 'teams' field for past events
   const teamIds = apiEvent.teams.split(',').map(id => id.trim());
-  console.log('Team IDs from new teams field:', teamIds);
+  console.log('Team IDs from teams field:', teamIds);
   
   // Fetch team data
   const teamPromises = teamIds.map(id => apiService.fetchTeam(id));
   const teams = await Promise.all(teamPromises);
   
-  // Parse league (matches with tournament in app logic)
+  // Parse league
   const leagueInfo = apiService.parseIdNameString(apiEvent.Leagues);
   
   // Parse season
@@ -91,9 +91,9 @@ async function convertApiPastEventToGame(apiEvent: ApiPastEvent): Promise<Game> 
   // Parse venue
   const venueInfo = apiService.parseIdNameString(apiEvent.venues);
   
-  // Process new Results structure
+  // Process Results structure with period scores
   const results = apiEvent.Results;
-  console.log('New Results structure:', results);
+  console.log('Results structure with periods:', results);
   
   const game: Game = {
     id: apiEvent.event_id,
@@ -123,9 +123,16 @@ async function convertApiPastEventToGame(apiEvent: ApiPastEvent): Promise<Game> 
     team2_goals: results?.awayTeam?.goals || 0,
     team1_outcome: results?.homeTeam?.outcome || '',
     team2_outcome: results?.awayTeam?.outcome || '',
+    // Add period scores
+    team1_first: results?.homeTeam?.first || 0,
+    team1_second: results?.homeTeam?.second || 0,
+    team1_third: results?.homeTeam?.third || 0,
+    team2_first: results?.awayTeam?.first || 0,
+    team2_second: results?.awayTeam?.second || 0,
+    team2_third: results?.awayTeam?.third || 0,
   };
   
-  console.log('Converted past game with new fields:', game);
+  console.log('Converted past game with period scores:', game);
   return game;
 }
 
@@ -278,7 +285,7 @@ export async function getPastGames(): Promise<Game[]> {
       return pastGamesCache!.data;
     }
 
-    console.log('Loading past games from new API...');
+    console.log('Loading past games from API...');
     const response = await apiService.fetchPastEvents();
     
     if (!response.data || !Array.isArray(response.data)) {
@@ -298,10 +305,10 @@ export async function getPastGames(): Promise<Game[]> {
       timestamp: Date.now(),
     };
 
-    console.log(`Loaded ${games.length} past games with new structure`);
+    console.log(`Loaded ${games.length} past games with period scores`);
     return games;
   } catch (error) {
-    console.error('Error loading past games from new API:', error);
+    console.error('Error loading past games:', error);
     return getFallbackPastGames();
   }
 }
@@ -342,7 +349,7 @@ export async function getPastGamesCount(): Promise<number> {
       return pastCountCache!.data;
     }
 
-    console.log('Getting past games count from new API...');
+    console.log('Getting past games count...');
     const response = await apiService.fetchPastEvents();
     const count = response.count || 0;
 
@@ -351,7 +358,7 @@ export async function getPastGamesCount(): Promise<number> {
       timestamp: Date.now(),
     };
 
-    console.log('Past games count from new API:', count);
+    console.log('Past games count:', count);
     return count;
   } catch (error) {
     console.error('Error getting past games count:', error);
@@ -369,7 +376,7 @@ export async function getGameById(gameId: string): Promise<Game | null> {
       console.log('Game fetched from API:', apiGame);
       
       // Convert API response to Game object
-      const { date, time } = apiService.formatDateTime(apiGame.event_date);
+      const { date, time } = apiService.formatDateTime(apiGame.date);
       
       // Parse teams
       const teamIds = apiGame.teams.split(',').map(id => id.trim());
@@ -377,13 +384,13 @@ export async function getGameById(gameId: string): Promise<Game | null> {
       const teams = await Promise.all(teamPromises);
       
       // Parse other fields
-      const leagueInfo = apiService.parseIdNameString(apiGame.Leagues);
+      const leagueInfo = apiService.parseIdNameString(apiGame.leagues);
       const seasonInfo = apiService.parseIdNameString(apiGame.seasons);
       const venueInfo = apiService.parseIdNameString(apiGame.venues);
       
       const game: Game = {
-        id: apiGame.event_id,
-        event_id: apiGame.event_id,
+        id: apiGame.id,
+        event_id: apiGame.id,
         homeTeam: teams[0]?.name || `Team ${teamIds[0]}`,
         awayTeam: teams[1]?.name || `Team ${teamIds[1]}`,
         homeTeamId: teamIds[0],
@@ -394,21 +401,28 @@ export async function getGameById(gameId: string): Promise<Game | null> {
         awayScore: apiGame.Results?.awayTeam?.goals,
         date,
         time,
-        event_date: apiGame.event_date,
+        event_date: apiGame.date,
         venue: venueInfo.name,
         venue_id: venueInfo.id,
         venue_name: venueInfo.name,
-        status: apiGame.Results ? 'finished' : apiService.determineGameStatus(apiGame.event_date, !!apiGame.Results),
+        status: apiGame.Results ? 'finished' : apiService.determineGameStatus(apiGame.date, !!apiGame.Results),
         tournament: leagueInfo.name || 'Товарищеский матч',
         league_id: leagueInfo.id,
         league_name: leagueInfo.name,
         season_id: seasonInfo.id,
         season_name: seasonInfo.name,
-        videoUrl: apiGame.video_url,
+        sp_video: apiGame.sp_video, // VK video URL
         team1_goals: apiGame.Results?.homeTeam?.goals,
         team2_goals: apiGame.Results?.awayTeam?.goals,
         team1_outcome: apiGame.Results?.homeTeam?.outcome,
         team2_outcome: apiGame.Results?.awayTeam?.outcome,
+        // Add period scores
+        team1_first: apiGame.Results?.homeTeam?.first,
+        team1_second: apiGame.Results?.homeTeam?.second,
+        team1_third: apiGame.Results?.homeTeam?.third,
+        team2_first: apiGame.Results?.awayTeam?.first,
+        team2_second: apiGame.Results?.awayTeam?.second,
+        team2_third: apiGame.Results?.awayTeam?.third,
       };
       
       return game;

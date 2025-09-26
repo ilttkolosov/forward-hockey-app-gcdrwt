@@ -7,13 +7,14 @@ import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { Game } from '../types';
-import { mockGameArchive } from '../data/mockData';
+import { getPastGames, getPastGamesCount } from '../data/gameData';
 import { Link } from 'expo-router';
 import { TouchableOpacity } from 'react-native';
 import Icon from '../components/Icon';
 
 export default function GameArchiveScreen() {
   const [games, setGames] = useState<Game[]>([]);
+  const [gamesCount, setGamesCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -21,13 +22,20 @@ export default function GameArchiveScreen() {
   const loadData = async () => {
     try {
       setError(null);
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 800));
+      console.log('Loading past games...');
       
-      setGames(mockGameArchive);
+      // Load past games and count
+      const [pastGames, count] = await Promise.all([
+        getPastGames(),
+        getPastGamesCount()
+      ]);
+      
+      setGames(pastGames);
+      setGamesCount(count);
+      console.log(`Loaded ${pastGames.length} past games, total count: ${count}`);
     } catch (err) {
       console.log('Error loading game archive:', err);
-      setError('Failed to load game archive. Please try again.');
+      setError('Не удалось загрузить архив игр. Попробуйте еще раз.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -76,8 +84,10 @@ export default function GameArchiveScreen() {
             </TouchableOpacity>
           </Link>
           <View>
-            <Text style={commonStyles.title}>Game Archive</Text>
-            <Text style={commonStyles.textSecondary}>{games.length} games played</Text>
+            <Text style={commonStyles.title}>Архив игр</Text>
+            <Text style={commonStyles.textSecondary}>
+              {gamesCount > 0 ? `${gamesCount} игр сыграно` : 'Нет сыгранных игр'}
+            </Text>
           </View>
         </View>
 
@@ -88,7 +98,7 @@ export default function GameArchiveScreen() {
           ))
         ) : (
           <View style={commonStyles.errorContainer}>
-            <Text style={commonStyles.text}>No games in archive.</Text>
+            <Text style={commonStyles.text}>Нет игр в архиве.</Text>
           </View>
         )}
 

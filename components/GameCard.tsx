@@ -34,11 +34,11 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
   const getStatusText = (status: Game['status']) => {
     switch (status) {
       case 'live':
-        return 'LIVE';
+        return 'В ЭФИРЕ';
       case 'upcoming':
-        return 'UPCOMING';
+        return 'ПРЕДСТОЯЩАЯ';
       case 'finished':
-        return 'FINISHED';
+        return 'ЗАВЕРШЕНА';
       default:
         return '';
     }
@@ -46,10 +46,23 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
+    return date.toLocaleDateString('ru-RU', {
       month: 'short',
       day: 'numeric',
     });
+  };
+
+  const getOutcomeText = (outcome: string) => {
+    switch (outcome) {
+      case 'win':
+        return 'П';
+      case 'loss':
+        return 'Пор';
+      case 'nich':
+        return 'Н';
+      default:
+        return '';
+    }
   };
 
   return (
@@ -66,7 +79,17 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
           <View style={styles.teamSection}>
             <Text style={styles.teamName}>{game.homeTeam}</Text>
             {showScore && game.homeScore !== undefined && (
-              <Text style={styles.score}>{game.homeScore}</Text>
+              <View style={styles.scoreContainer}>
+                <Text style={styles.score}>{game.homeScore}</Text>
+                {game.team1_outcome && (
+                  <Text style={[styles.outcome, { 
+                    color: game.team1_outcome === 'win' ? colors.success : 
+                           game.team1_outcome === 'loss' ? colors.error : colors.warning 
+                  }]}>
+                    {getOutcomeText(game.team1_outcome)}
+                  </Text>
+                )}
+              </View>
             )}
           </View>
 
@@ -77,7 +100,17 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
           <View style={styles.teamSection}>
             <Text style={styles.teamName}>{game.awayTeam}</Text>
             {showScore && game.awayScore !== undefined && (
-              <Text style={styles.score}>{game.awayScore}</Text>
+              <View style={styles.scoreContainer}>
+                <Text style={styles.score}>{game.awayScore}</Text>
+                {game.team2_outcome && (
+                  <Text style={[styles.outcome, { 
+                    color: game.team2_outcome === 'win' ? colors.success : 
+                           game.team2_outcome === 'loss' ? colors.error : colors.warning 
+                  }]}>
+                    {getOutcomeText(game.team2_outcome)}
+                  </Text>
+                )}
+              </View>
             )}
           </View>
         </View>
@@ -90,6 +123,18 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
             </Text>
           )}
         </View>
+
+        {/* Additional info for finished games */}
+        {game.status === 'finished' && (game.league_name || game.season_name) && (
+          <View style={styles.additionalInfo}>
+            {game.league_name && (
+              <Text style={styles.infoText}>Лига: {game.league_name}</Text>
+            )}
+            {game.season_name && (
+              <Text style={styles.infoText}>Сезон: {game.season_name}</Text>
+            )}
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -129,10 +174,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 8,
   },
+  scoreContainer: {
+    alignItems: 'center',
+  },
   score: {
     fontSize: 24,
     fontWeight: '800',
     color: colors.primary,
+  },
+  outcome: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 4,
   },
   vsSection: {
     paddingHorizontal: 16,
@@ -149,5 +202,16 @@ const styles = StyleSheet.create({
   },
   tournament: {
     fontStyle: 'italic',
+  },
+  additionalInfo: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  infoText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: 2,
   },
 });

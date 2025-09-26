@@ -23,11 +23,19 @@ export interface Game {
   season_id?: string;
   season_name?: string;
   videoUrl?: string;
-  // New fields for results
+  sp_video?: string; // New field for VK video URL
+  // New fields for detailed results
   team1_goals?: number;
   team2_goals?: number;
   team1_outcome?: string;
   team2_outcome?: string;
+  // New fields for period scores
+  team1_first?: number;
+  team1_second?: number;
+  team1_third?: number;
+  team2_first?: number;
+  team2_second?: number;
+  team2_third?: number;
 }
 
 export interface Player {
@@ -96,31 +104,37 @@ export interface TeamStats {
   position: number;
 }
 
-// API Response Types
+// API Response Types - Updated for new specifications
 export interface ApiUpcomingEvent {
   event_id: string;
   event_date: string;
-  sp_teams: string;
-  Leagues: string;
-  seasons: string;
-  venues: string;
+  sp_teams: string; // Comma-separated team IDs for upcoming events
+  Leagues: string; // League ID:League Name
+  seasons: string; // Season ID:Season Name
+  venues: string; // Venue ID:Venue Name
 }
 
 export interface ApiPastEvent {
   event_id: string;
   event_date: string;
-  teams: string; // Changed from sp_teams to teams
-  Leagues: string;
-  seasons: string;
-  venues: string;
+  teams: string; // Comma-separated team IDs for past events (different field name)
+  Leagues: string; // League ID:League Name
+  seasons: string; // Season ID:Season Name
+  venues: string; // Venue ID:Venue Name
   Results: {
     homeTeam: {
       goals: number;
-      outcome: string;
+      first: number;
+      second: number;
+      third: number;
+      outcome: 'nich' | 'win' | 'loss';
     };
     awayTeam: {
       goals: number;
-      outcome: string;
+      first: number;
+      second: number;
+      third: number;
+      outcome: 'nich' | 'win' | 'loss';
     };
   };
 }
@@ -171,22 +185,29 @@ export interface ApiPlayerResponse {
   is_assistant_captain?: boolean;
 }
 
+// Updated API Game Details Response
 export interface ApiGameDetailsResponse {
-  event_id: string;
-  event_date: string;
-  teams: string;
-  Leagues: string;
-  seasons: string;
-  venues: string;
-  video_url?: string;
+  id: string; // Game ID
+  date: string; // Date and time
+  teams: string; // Comma-separated team IDs
+  leagues: string; // League ID:League Name
+  seasons: string; // Season ID:Season Name
+  venues: string; // Venue ID:Venue Name
+  sp_video?: string; // VK video URL
   Results?: {
     homeTeam: {
       goals: number;
-      outcome: string;
+      first: number;
+      second: number;
+      third: number;
+      outcome: 'nich' | 'win' | 'loss';
     };
     awayTeam: {
       goals: number;
-      outcome: string;
+      first: number;
+      second: number;
+      third: number;
+      outcome: 'nich' | 'win' | 'loss';
     };
   };
 }

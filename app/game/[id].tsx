@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import { Game, GameStats, GamePlayerStats } from '../../types';
-import { getGameById, getGameStatsById } from '../../data/mockData';
+import { getGameById, getGameStatsById } from '../../data/gameData';
 import { colors, commonStyles } from '../../styles/commonStyles';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
@@ -41,14 +41,11 @@ export default function GameDetailsScreen() {
       setLoading(true);
       setError(null);
 
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      const gameData = getGameById(id);
-      const statsData = getGameStatsById(id);
+      const gameData = await getGameById(id);
+      const statsData = await getGameStatsById(id);
 
       if (!gameData) {
-        setError('Game not found');
+        setError('Игра не найдена');
         return;
       }
 
@@ -56,7 +53,7 @@ export default function GameDetailsScreen() {
       setGameStats(statsData || null);
     } catch (err) {
       console.error('Error loading game data:', err);
-      setError('Failed to load game data');
+      setError('Не удалось загрузить данные игры');
     } finally {
       setLoading(false);
     }
@@ -84,19 +81,32 @@ export default function GameDetailsScreen() {
   const getStatusText = (status: Game['status']) => {
     switch (status) {
       case 'live':
-        return 'LIVE';
+        return 'В ЭФИРЕ';
       case 'upcoming':
-        return 'UPCOMING';
+        return 'ПРЕДСТОЯЩАЯ';
       case 'finished':
-        return 'FINISHED';
+        return 'ЗАВЕРШЕНА';
       default:
         return '';
     }
   };
 
+  const getOutcomeText = (outcome: string) => {
+    switch (outcome) {
+      case 'win':
+        return 'Победа';
+      case 'loss':
+        return 'Поражение';
+      case 'nich':
+        return 'Ничья';
+      default:
+        return outcome;
+    }
+  };
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
+    return date.toLocaleDateString('ru-RU', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
@@ -117,23 +127,23 @@ export default function GameDetailsScreen() {
         <View style={styles.playerStats}>
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{player.goals}</Text>
-            <Text style={styles.statLabel}>G</Text>
+            <Text style={styles.statLabel}>Г</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{player.assists}</Text>
-            <Text style={styles.statLabel}>A</Text>
+            <Text style={styles.statLabel}>П</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{player.points}</Text>
-            <Text style={styles.statLabel}>P</Text>
+            <Text style={styles.statLabel}>О</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{player.shots}</Text>
-            <Text style={styles.statLabel}>SOG</Text>
+            <Text style={styles.statLabel}>Б</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{player.timeOnIce}</Text>
-            <Text style={styles.statLabel}>TOI</Text>
+            <Text style={styles.statLabel}>ВИ</Text>
           </View>
         </View>
       </View>
@@ -153,11 +163,11 @@ export default function GameDetailsScreen() {
       <SafeAreaView style={commonStyles.container}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Icon name="arrow-left" size={24} color={colors.text} />
+            <Icon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Game Details</Text>
+          <Text style={styles.headerTitle}>Детали игры</Text>
         </View>
-        <ErrorMessage message={error || 'Game not found'} />
+        <ErrorMessage message={error || 'Игра не найдена'} onRetry={loadGameData} />
       </SafeAreaView>
     );
   }
@@ -166,9 +176,9 @@ export default function GameDetailsScreen() {
     <SafeAreaView style={commonStyles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Icon name="arrow-left" size={24} color={colors.text} />
+          <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Game Details</Text>
+        <Text style={styles.headerTitle}>Детали игры</Text>
       </View>
 
       <ScrollView
@@ -209,16 +219,69 @@ export default function GameDetailsScreen() {
             {game.tournament && (
               <Text style={styles.tournament}>{game.tournament}</Text>
             )}
+            {game.league_name && (
+              <Text style={styles.league}>Лига: {game.league_name}</Text>
+            )}
+            {game.season_name && (
+              <Text style={styles.season}>Сезон: {game.season_name}</Text>
+            )}
           </View>
         </View>
 
+        {/* Period Scores */}
+        {game.status === 'finished' && (game.team1_first !== undefined || game.team2_first !== undefined) && (
+          <View style={styles.periodScores}>
+            <Text style={styles.sectionTitle}>Счет по периодам</Text>
+            <View style={styles.periodTable}>
+              <View style={styles.periodHeader}>
+                <Text style={styles.periodHeaderText}>Команда</Text>
+                <Text style={styles.periodHeaderText}>1</Text>
+                <Text style={styles.periodHeaderText}>2</Text>
+                <Text style={styles.periodHeaderText}>3</Text>
+                <Text style={styles.periodHeaderText}>Итого</Text>
+              </View>
+              <View style={styles.periodRow}>
+                <Text style={styles.periodTeam}>{game.homeTeam}</Text>
+                <Text style={styles.periodScore}>{game.team1_first || 0}</Text>
+                <Text style={styles.periodScore}>{game.team1_second || 0}</Text>
+                <Text style={styles.periodScore}>{game.team1_third || 0}</Text>
+                <Text style={styles.periodTotal}>{game.team1_goals || 0}</Text>
+              </View>
+              <View style={styles.periodRow}>
+                <Text style={styles.periodTeam}>{game.awayTeam}</Text>
+                <Text style={styles.periodScore}>{game.team2_first || 0}</Text>
+                <Text style={styles.periodScore}>{game.team2_second || 0}</Text>
+                <Text style={styles.periodScore}>{game.team2_third || 0}</Text>
+                <Text style={styles.periodTotal}>{game.team2_goals || 0}</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Game Results */}
+        {game.status === 'finished' && (game.team1_outcome || game.team2_outcome) && (
+          <View style={styles.gameResults}>
+            <Text style={styles.sectionTitle}>Результат</Text>
+            <View style={styles.resultsContainer}>
+              <View style={styles.resultItem}>
+                <Text style={styles.resultTeam}>{game.homeTeam}</Text>
+                <Text style={styles.resultOutcome}>{getOutcomeText(game.team1_outcome || '')}</Text>
+              </View>
+              <View style={styles.resultItem}>
+                <Text style={styles.resultTeam}>{game.awayTeam}</Text>
+                <Text style={styles.resultOutcome}>{getOutcomeText(game.team2_outcome || '')}</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Video Frame */}
-        {game.videoUrl && (
+        {game.sp_video && (
           <View style={styles.videoContainer}>
-            <Text style={styles.sectionTitle}>Live Broadcast</Text>
+            <Text style={styles.sectionTitle}>Трансляция матча</Text>
             <View style={styles.videoFrame}>
               <WebView
-                source={{ uri: game.videoUrl }}
+                source={{ uri: game.sp_video }}
                 style={styles.webview}
                 javaScriptEnabled={true}
                 domStorageEnabled={true}
@@ -226,6 +289,14 @@ export default function GameDetailsScreen() {
                 scalesPageToFit={true}
                 allowsInlineMediaPlayback={true}
                 mediaPlaybackRequiresUserAction={false}
+                onError={(syntheticEvent) => {
+                  const { nativeEvent } = syntheticEvent;
+                  console.error('WebView error: ', nativeEvent);
+                }}
+                onHttpError={(syntheticEvent) => {
+                  const { nativeEvent } = syntheticEvent;
+                  console.error('WebView HTTP error: ', nativeEvent);
+                }}
               />
             </View>
           </View>
@@ -234,7 +305,7 @@ export default function GameDetailsScreen() {
         {/* Player Statistics */}
         {gameStats && (
           <View style={styles.statsContainer}>
-            <Text style={styles.sectionTitle}>Player Statistics</Text>
+            <Text style={styles.sectionTitle}>Статистика игроков</Text>
             
             {/* Team Tabs */}
             <View style={styles.tabContainer}>
@@ -258,13 +329,13 @@ export default function GameDetailsScreen() {
 
             {/* Stats Header */}
             <View style={styles.statsHeader}>
-              <Text style={styles.statsHeaderText}>Player</Text>
+              <Text style={styles.statsHeaderText}>Игрок</Text>
               <View style={styles.statsHeaderRight}>
-                <Text style={styles.statsHeaderLabel}>G</Text>
-                <Text style={styles.statsHeaderLabel}>A</Text>
-                <Text style={styles.statsHeaderLabel}>P</Text>
-                <Text style={styles.statsHeaderLabel}>SOG</Text>
-                <Text style={styles.statsHeaderLabel}>TOI</Text>
+                <Text style={styles.statsHeaderLabel}>Г</Text>
+                <Text style={styles.statsHeaderLabel}>П</Text>
+                <Text style={styles.statsHeaderLabel}>О</Text>
+                <Text style={styles.statsHeaderLabel}>Б</Text>
+                <Text style={styles.statsHeaderLabel}>ВИ</Text>
               </View>
             </View>
 
@@ -279,7 +350,7 @@ export default function GameDetailsScreen() {
             {/* Game Highlights */}
             {gameStats.gameHighlights && gameStats.gameHighlights.length > 0 && (
               <View style={styles.highlightsContainer}>
-                <Text style={styles.sectionTitle}>Game Highlights</Text>
+                <Text style={styles.sectionTitle}>Основные моменты</Text>
                 {gameStats.gameHighlights.map((highlight, index) => (
                   <View key={index} style={styles.highlightItem}>
                     <Text style={styles.highlightText}>• {highlight}</Text>
@@ -383,6 +454,93 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textSecondary,
     fontStyle: 'italic',
+    marginBottom: 2,
+  },
+  league: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: 2,
+  },
+  season: {
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  periodScores: {
+    padding: 16,
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  periodTable: {
+    backgroundColor: colors.surface,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  periodHeader: {
+    flexDirection: 'row',
+    backgroundColor: colors.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  periodHeaderText: {
+    flex: 1,
+    color: colors.background,
+    fontWeight: '600',
+    textAlign: 'center',
+    fontSize: 14,
+  },
+  periodRow: {
+    flexDirection: 'row',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  periodTeam: {
+    flex: 1,
+    color: colors.text,
+    fontWeight: '500',
+    fontSize: 14,
+  },
+  periodScore: {
+    flex: 1,
+    color: colors.text,
+    textAlign: 'center',
+    fontSize: 14,
+  },
+  periodTotal: {
+    flex: 1,
+    color: colors.primary,
+    textAlign: 'center',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  gameResults: {
+    padding: 16,
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  resultsContainer: {
+    backgroundColor: colors.surface,
+    borderRadius: 8,
+    padding: 16,
+  },
+  resultItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  resultTeam: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: colors.text,
+  },
+  resultOutcome: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
   },
   videoContainer: {
     padding: 16,

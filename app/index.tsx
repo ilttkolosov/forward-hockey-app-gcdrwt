@@ -7,7 +7,7 @@ import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { Game, TeamStats } from '../types';
-import { getCurrentGame, getFutureGames, getPastGamesCount } from '../data/gameData';
+import { getCurrentGame, getFutureGames, getPastGamesCount, getUpcomingGamesCount } from '../data/gameData';
 import { Link } from 'expo-router';
 import { TouchableOpacity } from 'react-native';
 import Icon from '../components/Icon';
@@ -16,6 +16,7 @@ export default function HomeScreen() {
   const [currentGame, setCurrentGame] = useState<Game | null>(null);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
   const [archiveCount, setArchiveCount] = useState<number>(0);
+  const [upcomingCount, setUpcomingCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -36,9 +37,14 @@ export default function HomeScreen() {
       console.log('Upcoming games loaded:', upcoming.length);
       
       // Load archive count
-      const count = await getPastGamesCount();
-      setArchiveCount(count);
-      console.log('Archive count loaded:', count);
+      const archCount = await getPastGamesCount();
+      setArchiveCount(archCount);
+      console.log('Archive count loaded:', archCount);
+      
+      // Load upcoming count
+      const upCount = await getUpcomingGamesCount();
+      setUpcomingCount(upCount);
+      console.log('Upcoming count loaded:', upCount);
       
     } catch (err) {
       console.log('Error loading home data:', err);
@@ -143,7 +149,9 @@ export default function HomeScreen() {
             <Link href="/upcoming" asChild>
               <TouchableOpacity style={quickNavStyles.button}>
                 <Icon name="calendar" size={24} color={colors.primary} />
-                <Text style={quickNavStyles.buttonText}>Предстоящие игры</Text>
+                <Text style={quickNavStyles.buttonText}>
+                  Предстоящие игры {upcomingCount > 0 && `(${upcomingCount})`}
+                </Text>
               </TouchableOpacity>
             </Link>
             <Link href="/players" asChild>
