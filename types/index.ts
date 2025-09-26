@@ -51,6 +51,11 @@ export interface Player {
   // New properties as requested
   isCaptain?: boolean;
   isAssistantCaptain?: boolean;
+  // Additional fields from API
+  fullName?: string;
+  birthDate?: string;
+  handedness?: string;
+  captainStatus?: 'К' | 'А' | '';
 }
 
 export interface GamePlayerStats {
@@ -157,19 +162,20 @@ export interface ApiVenue {
   name: string;
 }
 
+// Updated API Player Response based on new requirements
 export interface ApiPlayerResponse {
-  id: string;
-  post_title: string;
-  position: string;
-  sp_number: number;
-  sp_nationality?: string;
-  sp_birthdate?: string;
-  sp_height?: string;
-  sp_weight?: string;
-  featured_image?: string;
-  // New fields for captain status
-  is_captain?: boolean;
-  is_assistant_captain?: boolean;
+  id: number;
+  post_title: string; // Full name with patronymic
+  post_date: string; // Birth date in format "2014-06-14 12:44:40"
+  sp_number: number; // Jersey number
+  position: "Вратарь" | "Защитник" | "Нападающий"; // Position
+  sp_metrics: {
+    ka: "К" | "А" | ""; // Captain status
+    onetwofive: "Левый" | "Правый"; // Handedness
+    height: string; // Height (can be empty)
+    weight: string; // Weight (can be empty)
+  };
+  player_image: string; // Avatar URL (can be empty)
 }
 
 // Updated API Game Details Response based on new requirements

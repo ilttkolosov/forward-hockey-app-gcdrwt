@@ -1,6 +1,7 @@
 
-import { Player } from '../types';
-import { apiService, ApiPlayerResponse } from '../services/apiService';
+import { Player, ApiPlayerResponse } from '../types';
+import { apiService } from '../services/apiService';
+import { getShortName, calculateAge } from '../utils/playerUtils';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface CachedData<T> {
@@ -21,34 +22,6 @@ function isCacheValid(timestamp: number): boolean {
   return Date.now() - timestamp < CACHE_DURATION;
 }
 
-function removePatronymic(fullName: string): string {
-  const parts = fullName.trim().split(' ');
-  if (parts.length >= 3) {
-    return `${parts[0]} ${parts[2]}`;
-  }
-  return fullName;
-}
-
-function calculateAge(birthDate: string): number | undefined {
-  if (!birthDate) return undefined;
-  
-  try {
-    const birth = new Date(birthDate);
-    const today = new Date();
-    let age = today.getFullYear() - birth.getFullYear();
-    const monthDiff = today.getMonth() - birth.getMonth();
-    
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
-      age--;
-    }
-    
-    return age > 0 && age < 100 ? age : undefined;
-  } catch (error) {
-    console.error('Error calculating age:', error);
-    return undefined;
-  }
-}
-
 async function cachePlayerImage(imageUrl: string): Promise<void> {
   try {
     const cached: CachedImage = {
@@ -67,27 +40,29 @@ async function cachePlayerImage(imageUrl: string): Promise<void> {
 }
 
 function convertApiPlayerToPlayer(apiPlayer: ApiPlayerResponse): Player {
-  const cleanName = removePatronymic(apiPlayer.post_title);
-  const age = calculateAge(apiPlayer.sp_birthdate || '');
+  const shortName = getShortName(apiPlayer.post_title);
+  const age = calculateAge(apiPlayer.post_date);
   
   // Cache image if available
-  if (apiPlayer.featured_image) {
-    cachePlayerImage(apiPlayer.featured_image);
+  if (apiPlayer.player_image) {
+    cachePlayerImage(apiPlayer.player_image);
   }
   
   return {
-    id: apiPlayer.id,
-    name: cleanName,
-    position: apiPlayer.position || 'Unknown',
-    number: apiPlayer.sp_number || 0,
+    id: apiPlayer.id.toString(),
+    name: shortName,
+    fullName: apiPlayer.post_title,
+    position: apiPlayer.position,
+    number: apiPlayer.sp_number,
     age,
-    height: apiPlayer.sp_height,
-    weight: apiPlayer.sp_weight,
-    nationality: apiPlayer.sp_nationality,
-    photo: apiPlayer.featured_image,
-    // New captain properties
-    isCaptain: apiPlayer.is_captain || false,
-    isAssistantCaptain: apiPlayer.is_assistant_captain || false,
+    height: apiPlayer.sp_metrics?.height || '',
+    weight: apiPlayer.sp_metrics?.weight || '',
+    photo: apiPlayer.player_image || '',
+    birthDate: apiPlayer.post_date,
+    handedness: apiPlayer.sp_metrics?.onetwofive || '',
+    captainStatus: apiPlayer.sp_metrics?.ka || '',
+    isCaptain: apiPlayer.sp_metrics?.ka === 'К',
+    isAssistantCaptain: apiPlayer.sp_metrics?.ka === 'А',
   };
 }
 
@@ -199,9 +174,18 @@ export function searchPlayers(players: Player[], searchQuery: string): Player[] 
   return players.filter(player => 
     player.name.toLowerCase().includes(query) ||
     player.position.toLowerCase().includes(query) ||
-    player.number.toString().includes(query) ||
-    (player.nationality && player.nationality.toLowerCase().includes(query))
+    player.number.toString().includes(query)
   );
+}
+
+export function groupPlayersByPosition(players: Player[]): { [position: string]: Player[] } {
+  return players.reduce((acc, player) => {
+    if (!acc[player.position]) {
+      acc[player.position] = [];
+    }
+    acc[player.position].push(player);
+    return acc;
+  }, {} as { [position: string]: Player[] });
 }
 
 function getFallbackPlayers(): Player[] {
@@ -209,38 +193,47 @@ function getFallbackPlayers(): Player[] {
     {
       id: '1',
       name: 'Александр Петров',
+      fullName: 'Петров Александр Иванович',
       position: 'Нападающий',
       number: 10,
       age: 25,
-      height: '180 см',
-      weight: '75 кг',
-      nationality: 'Россия',
+      height: '180',
+      weight: '75',
+      handedness: 'Левый',
+      captainStatus: 'К',
       isCaptain: true,
       isAssistantCaptain: false,
+      photo: '',
     },
     {
       id: '2',
       name: 'Михаил Иванов',
+      fullName: 'Иванов Михаил Петрович',
       position: 'Защитник',
       number: 5,
       age: 28,
-      height: '185 см',
-      weight: '80 кг',
-      nationality: 'Россия',
+      height: '185',
+      weight: '80',
+      handedness: 'Правый',
+      captainStatus: 'А',
       isCaptain: false,
       isAssistantCaptain: true,
+      photo: '',
     },
     {
       id: '3',
       name: 'Дмитрий Сидоров',
+      fullName: 'Сидоров Дмитрий Александрович',
       position: 'Вратарь',
       number: 1,
       age: 30,
-      height: '190 см',
-      weight: '85 кг',
-      nationality: 'Россия',
+      height: '190',
+      weight: '85',
+      handedness: 'Левый',
+      captainStatus: '',
       isCaptain: false,
       isAssistantCaptain: false,
+      photo: '',
     },
   ];
 }

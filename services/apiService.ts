@@ -237,30 +237,11 @@ class ApiService {
     }
   }
 
-  async fetchPlayerById(playerId: string): Promise<ApiPlayerResponse> {
-    try {
-      console.log('Fetching player details for ID:', playerId);
-      const response = await fetch(`${this.baseUrl}/players/${playerId}`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const player: ApiPlayerResponse = await response.json();
-      console.log('Player details fetched:', player);
-      
-      return player;
-    } catch (error) {
-      console.error('Error fetching player details:', error);
-      throw error;
-    }
-  }
-
   async fetchPlayers(): Promise<ApiPlayerResponse[]> {
     try {
       console.log('Fetching all players from API...');
       
-      const response = await fetch(`${this.baseUrl}/players`);
+      const response = await fetch(`${this.baseUrl}/players/`);
       
       if (!response.ok) {
         const errorMessage = `Error accessing players API! Status: ${response.status}`;
@@ -283,8 +264,7 @@ class ApiService {
           name: player.post_title,
           position: player.position,
           number: player.sp_number,
-          isCaptain: player.is_captain,
-          isAssistantCaptain: player.is_assistant_captain
+          sp_metrics: player.sp_metrics
         });
       });
       
@@ -295,10 +275,29 @@ class ApiService {
     }
   }
 
+  async fetchPlayerById(playerId: string): Promise<ApiPlayerResponse> {
+    try {
+      console.log('Fetching player details for ID:', playerId);
+      const response = await fetch(`${this.baseUrl}/players/${playerId}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const player: ApiPlayerResponse = await response.json();
+      console.log('Player details fetched:', player);
+      
+      return player;
+    } catch (error) {
+      console.error('Error fetching player details:', error);
+      throw error;
+    }
+  }
+
   async checkPlayersApiAvailability(): Promise<boolean> {
     try {
       console.log('Checking players API endpoint availability...');
-      const response = await fetch(`${this.baseUrl}/players`, { method: 'HEAD' });
+      const response = await fetch(`${this.baseUrl}/players/`, { method: 'HEAD' });
       const isAvailable = response.ok;
       console.log('Players API endpoint available:', isAvailable);
       return isAvailable;

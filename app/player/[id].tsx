@@ -1,100 +1,111 @@
 
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { colors, commonStyles } from '../../styles/commonStyles';
+import { getPlayerById } from '../../data/playerData';
+import { Player } from '../../types';
+import Icon from '../../components/Icon';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
-import Icon from '../../components/Icon';
-import { Player } from '../../types';
-import { getPlayerById } from '../../data/playerData';
-import { colors, commonStyles } from '../../styles/commonStyles';
+import { formatPlayerBirthDate, getHandednessText, getCaptainBadgeText } from '../../utils/playerUtils';
+import { Image } from 'expo-image';
 
 const styles = StyleSheet.create({
-  content: {
-    paddingHorizontal: 16,
-    paddingBottom: 20,
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
   },
   header: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 24,
-    backgroundColor: colors.surface,
-    marginBottom: 16,
-    borderRadius: 12,
-  },
-  photoContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-    overflow: 'hidden',
-    borderWidth: 3,
-    borderColor: colors.primary,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  photo: {
+  backButton: {
+    marginRight: 16,
+    padding: 8,
+  },
+  headerTitle: {
+    flex: 1,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: colors.text,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  content: {
+    flex: 1,
+  },
+  playerHeader: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    backgroundColor: colors.cardBackground,
+    marginBottom: 16,
+  },
+  playerAvatar: {
     width: 120,
     height: 120,
     borderRadius: 60,
+    backgroundColor: colors.border,
+    marginBottom: 16,
   },
-  name: {
+  playerName: {
     fontSize: 24,
     fontWeight: 'bold',
     color: colors.text,
     textAlign: 'center',
     marginBottom: 8,
   },
-  number: {
+  playerPosition: {
+    fontSize: 16,
+    color: colors.textSecondary,
+    marginBottom: 8,
+  },
+  playerNumber: {
     fontSize: 32,
     fontWeight: 'bold',
     color: colors.primary,
-    marginBottom: 8,
-  },
-  badges: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
   },
   captainBadge: {
+    backgroundColor: colors.error,
+    borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 8,
-    marginRight: 8,
+    marginTop: 8,
   },
-  captainText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.surface,
-  },
-  positionBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  positionText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.surface,
+  captainBadgeText: {
+    color: colors.background,
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   infoSection: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.cardBackground,
+    marginHorizontal: 16,
+    marginBottom: 16,
     borderRadius: 12,
     padding: 16,
-    marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: colors.text,
-    marginBottom: 12,
+    marginBottom: 16,
   },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -102,237 +113,198 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   infoLabel: {
-    fontSize: 14,
+    fontSize: 16,
     color: colors.textSecondary,
-    flex: 1,
   },
   infoValue: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '500',
     color: colors.text,
     textAlign: 'right',
-  },
-  nationalityContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  nationalityText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: colors.text,
-    marginLeft: 8,
+    flex: 1,
+    marginLeft: 16,
   },
 });
 
 export default function PlayerDetailsScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { id } = useLocalSearchParams<{ id: string }>();
   const [player, setPlayer] = useState<Player | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (id) {
-      loadPlayerData();
-    }
-  }, [id]);
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadPlayerData = async () => {
+    if (!id) {
+      setError('ID игрока не указан');
+      setLoading(false);
+      return;
+    }
+
     try {
       setError(null);
-      console.log('Загрузка данных игрока с ID:', id);
+      console.log('Loading player data for ID:', id);
+      const playerData = await getPlayerById(id);
       
-      const playerData = await getPlayerById(id!);
       if (playerData) {
         setPlayer(playerData);
-        console.log('Данные игрока загружены:', playerData);
+        console.log('Player data loaded:', playerData);
       } else {
         setError('Игрок не найден');
       }
-    } catch (error) {
-      console.error('Ошибка загрузки данных игрока:', error);
-      setError('Не удалось загрузить данные игрока');
+    } catch (err) {
+      console.log('Error loading player:', err);
+      setError('Не удалось загрузить данные игрока. Попробуйте еще раз.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
+  useEffect(() => {
+    loadPlayerData();
+  }, [id]);
+
   const onRefresh = () => {
     setRefreshing(true);
     loadPlayerData();
   };
 
-  const getPositionColor = (position: string) => {
-    switch (position.toLowerCase()) {
-      case 'вратарь':
-      case 'goalkeeper':
-      case 'g':
-        return colors.error;
-      case 'защитник':
-      case 'defenseman':
-      case 'd':
-        return colors.primary;
-      case 'нападающий':
-      case 'forward':
-      case 'f':
-        return colors.success;
-      default:
-        return colors.textSecondary;
-    }
+  const handleBackPress = () => {
+    router.back();
   };
 
-  const getCaptainBadgeInfo = () => {
-    if (!player?.captainStatus) return null;
-    
-    switch (player.captainStatus.toLowerCase()) {
-      case 'captain':
-      case 'капитан':
-        return { text: 'Капитан', color: colors.warning };
-      case 'assistant':
-      case 'ассистент':
-        return { text: 'Ассистент', color: colors.secondary };
-      default:
-        return null;
-    }
-  };
-
-  const getNationalityInfo = () => {
-    if (!player?.nationality) return null;
-    
-    // Здесь можно добавить логику для отображения флагов
-    return {
-      flag: '🇷🇺', // По умолчанию российский флаг
-      name: player.nationality,
-    };
-  };
-
-  const formatBirthDate = () => {
-    if (!player?.birthDate) return null;
-    
-    try {
-      const date = new Date(player.birthDate);
-      return date.toLocaleDateString('ru-RU', {
-        day: '2-digit',
-        month: 'long',
-        year: 'numeric',
-      });
-    } catch (error) {
-      return player.birthDate;
-    }
+  const getCaptainStatusText = (): string => {
+    if (player?.captainStatus === 'К') return 'Капитан';
+    if (player?.captainStatus === 'А') return 'Ассистент капитана';
+    return '—';
   };
 
   if (loading) {
     return (
-      <SafeAreaView style={commonStyles.container}>
-        <LoadingSpinner text="Загрузка данных игрока..." />
+      <SafeAreaView style={styles.container}>
+        <LoadingSpinner />
       </SafeAreaView>
     );
   }
 
-  if (error || !player) {
+  if (error) {
     return (
-      <SafeAreaView style={commonStyles.container}>
-        <ErrorMessage message={error || 'Игрок не найден'} />
-        <TouchableOpacity 
-          style={[commonStyles.button, { margin: 16 }]} 
-          onPress={() => router.back()}
-        >
-          <Text style={commonStyles.buttonText}>Назад</Text>
-        </TouchableOpacity>
+      <SafeAreaView style={styles.container}>
+        <ErrorMessage message={error} onRetry={loadPlayerData} />
       </SafeAreaView>
     );
   }
 
-  const captainInfo = getCaptainBadgeInfo();
-  const nationalityInfo = getNationalityInfo();
+  if (!player) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <ErrorMessage message="Игрок не найден" onRetry={loadPlayerData} />
+      </SafeAreaView>
+    );
+  }
+
+  const captainBadgeText = getCaptainBadgeText(player.captainStatus || '');
 
   return (
-    <SafeAreaView style={commonStyles.container}>
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
+          <Icon name="chevron-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <View style={styles.headerTitle}>
+          <Text style={styles.title}>{player.name}</Text>
+          <Text style={styles.subtitle}>#{player.number} • {player.position}</Text>
+        </View>
+      </View>
+
       <ScrollView
-        style={commonStyles.flex1}
-        contentContainerStyle={styles.content}
+        style={styles.content}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.header}>
-          <View style={styles.photoContainer}>
-            {player.photo ? (
-              <Image 
-                source={{ uri: player.photo }} 
-                style={styles.photo}
-                defaultSource={require('../../assets/images/natively-dark.png')}
-              />
-            ) : (
-              <Icon name="person" size={60} color={colors.textSecondary} />
-            )}
+        {/* Player Header */}
+        <View style={styles.playerHeader}>
+          <Image
+            source={player.photo ? { uri: player.photo } : require('../../assets/images/natively-dark.png')}
+            style={styles.playerAvatar}
+            cachePolicy="memory-disk"
+          />
+          <Text style={styles.playerName}>{player.fullName || player.name}</Text>
+          <Text style={styles.playerPosition}>{player.position}</Text>
+          <Text style={styles.playerNumber}>#{player.number}</Text>
+          {captainBadgeText && (
+            <View style={styles.captainBadge}>
+              <Text style={styles.captainBadgeText}>{getCaptainStatusText()}</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Personal Information */}
+        <View style={styles.infoSection}>
+          <Text style={styles.sectionTitle}>Личная информация</Text>
+          
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Дата рождения</Text>
+            <Text style={styles.infoValue}>
+              {player.birthDate ? formatPlayerBirthDate(player.birthDate) : '—'}
+            </Text>
           </View>
           
-          <Text style={styles.name}>{player.name}</Text>
-          <Text style={styles.number}>#{player.number}</Text>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Возраст</Text>
+            <Text style={styles.infoValue}>
+              {player.age ? `${player.age} лет` : '—'}
+            </Text>
+          </View>
           
-          <View style={styles.badges}>
-            {captainInfo && (
-              <View style={[styles.captainBadge, { backgroundColor: captainInfo.color }]}>
-                <Text style={styles.captainText}>{captainInfo.text}</Text>
-              </View>
-            )}
-            <View style={[styles.positionBadge, { backgroundColor: getPositionColor(player.position) }]}>
-              <Text style={styles.positionText}>{player.position}</Text>
-            </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Рост</Text>
+            <Text style={styles.infoValue}>
+              {player.height ? `${player.height} см` : '—'}
+            </Text>
+          </View>
+          
+          <View style={[styles.infoRow, styles.infoRowLast]}>
+            <Text style={styles.infoLabel}>Вес</Text>
+            <Text style={styles.infoValue}>
+              {player.weight ? `${player.weight} кг` : '—'}
+            </Text>
           </View>
         </View>
 
+        {/* Game Information */}
         <View style={styles.infoSection}>
-          <Text style={styles.sectionTitle}>Основная информация</Text>
+          <Text style={styles.sectionTitle}>Игровая информация</Text>
           
-          {player.age && (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Возраст</Text>
-              <Text style={styles.infoValue}>{player.age} лет</Text>
-            </View>
-          )}
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Хват</Text>
+            <Text style={styles.infoValue}>
+              {getHandednessText(player.handedness || '')}
+            </Text>
+          </View>
           
-          {formatBirthDate() && (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Дата рождения</Text>
-              <Text style={styles.infoValue}>{formatBirthDate()}</Text>
-            </View>
-          )}
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Номер</Text>
+            <Text style={styles.infoValue}>#{player.number}</Text>
+          </View>
           
-          {nationalityInfo && (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Гражданство</Text>
-              <View style={styles.nationalityContainer}>
-                <Text style={styles.infoValue}>{nationalityInfo.flag}</Text>
-                <Text style={styles.nationalityText}>{nationalityInfo.name}</Text>
-              </View>
-            </View>
-          )}
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Позиция</Text>
+            <Text style={styles.infoValue}>{player.position}</Text>
+          </View>
           
-          {player.height && (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Рост</Text>
-              <Text style={styles.infoValue}>{player.height} см</Text>
-            </View>
-          )}
-          
-          {player.weight && (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Вес</Text>
-              <Text style={styles.infoValue}>{player.weight} кг</Text>
-            </View>
-          )}
-          
-          {player.handedness && (
-            <View style={[styles.infoRow, styles.infoRowLast]}>
-              <Text style={styles.infoLabel}>Хват</Text>
-              <Text style={styles.infoValue}>{player.handedness}</Text>
-            </View>
-          )}
+          <View style={[styles.infoRow, styles.infoRowLast]}>
+            <Text style={styles.infoLabel}>Статус</Text>
+            <Text style={styles.infoValue}>{getCaptainStatusText()}</Text>
+          </View>
         </View>
+
+        {/* Bottom spacing */}
+        <View style={{ height: 32 }} />
       </ScrollView>
     </SafeAreaView>
   );
