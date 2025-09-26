@@ -1,67 +1,12 @@
 
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { colors, commonStyles } from '../styles/commonStyles';
 import { Tournament } from '../types';
+import { colors, commonStyles } from '../styles/commonStyles';
 
 interface TournamentCardProps {
   tournament: Tournament;
 }
-
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    padding: 16,
-    marginVertical: 8,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  name: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-    flex: 1,
-  },
-  status: {
-    fontSize: 12,
-    fontWeight: '500',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  season: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: 8,
-  },
-  stats: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  stat: {
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-});
 
 export default function TournamentCard({ tournament }: TournamentCardProps) {
   const getStatusColor = (status: Tournament['status']) => {
@@ -80,43 +25,95 @@ export default function TournamentCard({ tournament }: TournamentCardProps) {
   const getStatusText = (status: Tournament['status']) => {
     switch (status) {
       case 'active':
-        return 'Активный';
+        return 'ACTIVE';
       case 'finished':
-        return 'Завершен';
+        return 'FINISHED';
       case 'upcoming':
-        return 'Предстоящий';
+        return 'UPCOMING';
       default:
-        return status;
+        return '';
     }
   };
 
   return (
-    <View style={styles.card}>
+    <View style={commonStyles.card}>
       <View style={styles.header}>
-        <Text style={styles.name} numberOfLines={2}>
-          {tournament.name}
-        </Text>
-        <Text style={[styles.status, { color: getStatusColor(tournament.status) }]}>
-          {getStatusText(tournament.status)}
-        </Text>
+        <View style={styles.tournamentInfo}>
+          <Text style={styles.name}>{tournament.name}</Text>
+          <Text style={styles.season}>{tournament.season}</Text>
+        </View>
+        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(tournament.status) }]}>
+          <Text style={styles.statusText}>{getStatusText(tournament.status)}</Text>
+        </View>
       </View>
-      
-      <Text style={styles.season}>{tournament.season}</Text>
-      
-      <View style={styles.stats}>
-        {tournament.teams && (
-          <View style={styles.stat}>
-            <Text style={styles.statValue}>{tournament.teams}</Text>
-            <Text style={styles.statLabel}>Команд</Text>
-          </View>
-        )}
-        {tournament.games && (
-          <View style={styles.stat}>
-            <Text style={styles.statValue}>{tournament.games}</Text>
-            <Text style={styles.statLabel}>Игр</Text>
-          </View>
-        )}
-      </View>
+
+      {(tournament.teams || tournament.games) && (
+        <View style={styles.stats}>
+          {tournament.teams && (
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{tournament.teams}</Text>
+              <Text style={styles.statLabel}>Teams</Text>
+            </View>
+          )}
+          {tournament.games && (
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{tournament.games}</Text>
+              <Text style={styles.statLabel}>Games</Text>
+            </View>
+          )}
+        </View>
+      )}
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  tournamentInfo: {
+    flex: 1,
+    marginRight: 16,
+  },
+  name: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  season: {
+    fontSize: 14,
+    color: colors.textSecondary,
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusText: {
+    color: colors.background,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  stats: {
+    flexDirection: 'row',
+    gap: 24,
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.primary,
+    marginBottom: 2,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+  },
+});

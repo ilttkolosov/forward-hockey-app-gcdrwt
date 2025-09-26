@@ -1,221 +1,119 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, ScrollView, RefreshControl, TouchableOpacity, StyleSheet, Animated } from 'react-native';
-import { Link } from 'expo-router';
+import React, { useState, useEffect } from 'react';
+import { View, Text, ScrollView, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Icon from '../components/Icon';
-import { Player } from '../types';
-import LoadingSpinner from '../components/LoadingSpinner';
-import PlayerSearchBar from '../components/PlayerSearchBar';
-import { getPlayers, checkApiAvailability, searchPlayers } from '../data/playerData';
 import { commonStyles, colors } from '../styles/commonStyles';
 import PlayerCard from '../components/PlayerCard';
+import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
-
-const styles = StyleSheet.create({
-  searchContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  playersContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: 20,
-  },
-  headerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  playerCount: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  scrollToTopButton: {
-    position: 'absolute',
-    right: 16,
-    bottom: 80,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-});
+import { Player } from '../types';
+import { mockPlayers } from '../data/mockData';
+import { Link } from 'expo-router';
+import { TouchableOpacity } from 'react-native';
+import Icon from '../components/Icon';
 
 export default function PlayersScreen() {
-  const [allPlayers, setAllPlayers] = useState<Player[]>([]);
-  const [filteredPlayers, setFilteredPlayers] = useState<Player[]>([]);
+  const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showScrollToTop, setShowScrollToTop] = useState(false);
-  const scrollViewRef = useRef<ScrollView>(null);
-  const scrollToTopOpacity = useRef(new Animated.Value(0)).current;
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    initializeScreen();
-  }, []);
-
-  useEffect(() => {
-    if (searchQuery.trim() === '') {
-      setFilteredPlayers(allPlayers);
-    } else {
-      const filtered = searchPlayers(allPlayers, searchQuery);
-      setFilteredPlayers(filtered);
-    }
-  }, [searchQuery, allPlayers]);
-
-  const initializeScreen = async () => {
-    console.log('Инициализация экрана игроков...');
-    await loadPlayers();
-  };
-
-  const loadPlayers = async () => {
+  const loadData = async () => {
     try {
       setError(null);
-      console.log('Загрузка игроков...');
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 800));
       
-      const apiAvailable = await checkApiAvailability();
-      console.log('API доступен:', apiAvailable);
+      // Sort players by position and number
+      const sortedPlayers = [...mockPlayers].sort((a, b) => {
+        const positionOrder = { 'Goaltender': 0, 'Defenseman': 1, 'Forward': 2 };
+        const aOrder = positionOrder[a.position as keyof typeof positionOrder] ?? 3;
+        const bOrder = positionOrder[b.position as keyof typeof positionOrder] ?? 3;
+        
+        if (aOrder !== bOrder) {
+          return aOrder - bOrder;
+        }
+        return a.number - b.number;
+      });
       
-      const players = await getPlayers();
-      console.log('Загружено игроков:', players.length);
-      
-      setAllPlayers(players);
-      setFilteredPlayers(players);
-    } catch (error) {
-      console.error('Ошибка загрузки игроков:', error);
-      setError('Не удалось загрузить список игроков. Проверьте подключение к интернету.');
+      setPlayers(sortedPlayers);
+    } catch (err) {
+      console.log('Error loading players:', err);
+      setError('Failed to load players. Please try again.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
+  useEffect(() => {
+    loadData();
+  }, []);
+
   const onRefresh = () => {
     setRefreshing(true);
-    loadPlayers();
-  };
-
-  const handleScroll = (event: any) => {
-    const offsetY = event.nativeEvent.contentOffset.y;
-    const shouldShow = offsetY > 300;
-    
-    if (shouldShow !== showScrollToTop) {
-      setShowScrollToTop(shouldShow);
-      Animated.timing(scrollToTopOpacity, {
-        toValue: shouldShow ? 1 : 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
-    }
-  };
-
-  const handleSearchChange = (query: string) => {
-    setSearchQuery(query);
-  };
-
-  const handleClearSearch = () => {
-    setSearchQuery('');
-  };
-
-  const scrollToTop = () => {
-    scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    loadData();
   };
 
   if (loading) {
     return (
       <SafeAreaView style={commonStyles.container}>
-        <LoadingSpinner text="Загрузка игроков..." />
+        <LoadingSpinner />
       </SafeAreaView>
     );
   }
 
+  if (error) {
+    return (
+      <SafeAreaView style={commonStyles.container}>
+        <ErrorMessage message={error} onRetry={loadData} />
+      </SafeAreaView>
+    );
+  }
+
+  const groupedPlayers = players.reduce((acc, player) => {
+    if (!acc[player.position]) {
+      acc[player.position] = [];
+    }
+    acc[player.position].push(player);
+    return acc;
+  }, {} as Record<string, Player[]>);
+
   return (
     <SafeAreaView style={commonStyles.container}>
-      <View style={styles.headerContainer}>
-        <View>
-          <Text style={styles.headerTitle}>Игроки</Text>
-          <Text style={styles.playerCount}>
-            {filteredPlayers.length} {filteredPlayers.length === 1 ? 'игрок' : 
-             filteredPlayers.length < 5 ? 'игрока' : 'игроков'}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.searchContainer}>
-        <PlayerSearchBar
-          value={searchQuery}
-          onChangeText={handleSearchChange}
-          onClear={handleClearSearch}
-          placeholder="Поиск игроков..."
-        />
-      </View>
-
-      {error && <ErrorMessage message={error} />}
-
       <ScrollView
-        ref={scrollViewRef}
-        style={commonStyles.flex1}
-        contentContainerStyle={styles.playersContainer}
+        style={commonStyles.content}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
+        showsVerticalScrollIndicator={false}
       >
-        {filteredPlayers.length === 0 ? (
-          <View style={commonStyles.emptyState}>
-            <Icon name="person-off" size={48} color={colors.textSecondary} />
-            <Text style={commonStyles.emptyStateTitle}>
-              {searchQuery ? 'Игроки не найдены' : 'Нет игроков'}
-            </Text>
-            <Text style={commonStyles.emptyStateText}>
-              {searchQuery 
-                ? 'Попробуйте изменить поисковый запрос'
-                : 'Список игроков пуст'
-              }
-            </Text>
+        {/* Header */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24 }}>
+          <Link href="/" asChild>
+            <TouchableOpacity style={{ marginRight: 16 }}>
+              <Icon name="chevron-back" size={24} color={colors.text} />
+            </TouchableOpacity>
+          </Link>
+          <View>
+            <Text style={commonStyles.title}>Team Roster</Text>
+            <Text style={commonStyles.textSecondary}>{players.length} players</Text>
           </View>
-        ) : (
-          filteredPlayers.map((player) => (
-            <PlayerCard key={player.id} player={player} />
-          ))
-        )}
-      </ScrollView>
+        </View>
 
-      <Animated.View 
-        style={[
-          styles.scrollToTopButton,
-          { opacity: scrollToTopOpacity }
-        ]}
-        pointerEvents={showScrollToTop ? 'auto' : 'none'}
-      >
-        <TouchableOpacity onPress={scrollToTop} style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="keyboard-arrow-up" size={24} color={colors.surface} />
-        </TouchableOpacity>
-      </Animated.View>
+        {/* Players by Position */}
+        {Object.entries(groupedPlayers).map(([position, positionPlayers]) => (
+          <View key={position} style={commonStyles.section}>
+            <Text style={commonStyles.subtitle}>{position}s</Text>
+            {positionPlayers.map((player) => (
+              <PlayerCard key={player.id} player={player} />
+            ))}
+          </View>
+        ))}
+
+        {/* Bottom spacing */}
+        <View style={{ height: 32 }} />
+      </ScrollView>
     </SafeAreaView>
   );
 }

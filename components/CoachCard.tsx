@@ -1,90 +1,68 @@
 
 import React from 'react';
-import { View, Text, StyleSheet, Image } from 'react-native';
-import { colors, commonStyles } from '../styles/commonStyles';
+import { View, Text, StyleSheet } from 'react-native';
 import { Coach } from '../types';
-import Icon from './Icon';
+import { colors, commonStyles } from '../styles/commonStyles';
 
 interface CoachCardProps {
   coach: Coach;
 }
 
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    padding: 16,
-    marginVertical: 8,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  content: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  photoContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-    overflow: 'hidden',
-  },
-  photo: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-  },
-  info: {
-    flex: 1,
-  },
-  name: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  role: {
-    fontSize: 14,
-    color: colors.primary,
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  experience: {
-    fontSize: 12,
-    color: colors.textSecondary,
-  },
-});
-
 export default function CoachCard({ coach }: CoachCardProps) {
+  const getRoleColor = (role: string) => {
+    if (role.toLowerCase().includes('head')) {
+      return colors.primary;
+    } else if (role.toLowerCase().includes('assistant')) {
+      return colors.secondary;
+    } else {
+      return colors.accent;
+    }
+  };
+
   return (
-    <View style={styles.card}>
-      <View style={styles.content}>
-        <View style={styles.photoContainer}>
-          {coach.photo ? (
-            <Image 
-              source={{ uri: coach.photo }} 
-              style={styles.photo}
-              defaultSource={require('../assets/images/natively-dark.png')}
-            />
-          ) : (
-            <Icon name="person" size={30} color={colors.textSecondary} />
-          )}
-        </View>
-        
-        <View style={styles.info}>
+    <View style={commonStyles.card}>
+      <View style={styles.header}>
+        <View style={[styles.roleIndicator, { backgroundColor: getRoleColor(coach.role) }]} />
+        <View style={styles.coachInfo}>
           <Text style={styles.name}>{coach.name}</Text>
           <Text style={styles.role}>{coach.role}</Text>
           {coach.experience && (
-            <Text style={styles.experience}>Опыт: {coach.experience}</Text>
+            <Text style={styles.experience}>{coach.experience} experience</Text>
           )}
         </View>
       </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  roleIndicator: {
+    width: 4,
+    height: 60,
+    borderRadius: 2,
+    marginRight: 16,
+  },
+  coachInfo: {
+    flex: 1,
+  },
+  name: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  role: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: colors.primary,
+    marginBottom: 2,
+  },
+  experience: {
+    fontSize: 14,
+    color: colors.textSecondary,
+  },
+});
