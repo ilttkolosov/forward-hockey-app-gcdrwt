@@ -14,12 +14,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginVertical: 8,
-    marginHorizontal: 8,
     shadowColor: colors.shadow,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
@@ -28,26 +24,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   name: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: colors.text,
     flex: 1,
   },
   status: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '500',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
-    overflow: 'hidden',
   },
   season: {
     fontSize: 14,
     color: colors.textSecondary,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   stats: {
     flexDirection: 'row',
@@ -57,55 +52,57 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '600',
     color: colors.primary,
   },
   statLabel: {
     fontSize: 12,
     color: colors.textSecondary,
-    marginTop: 4,
+    marginTop: 2,
   },
 });
 
-const TournamentCard: React.FC<TournamentCardProps> = ({ tournament }) => {
+export default function TournamentCard({ tournament }: TournamentCardProps) {
   const getStatusColor = (status: Tournament['status']) => {
     switch (status) {
       case 'active':
-        return { backgroundColor: colors.success, color: colors.surface };
-      case 'upcoming':
-        return { backgroundColor: colors.warning, color: colors.surface };
+        return colors.success;
       case 'finished':
-        return { backgroundColor: colors.textSecondary, color: colors.surface };
+        return colors.textSecondary;
+      case 'upcoming':
+        return colors.warning;
       default:
-        return { backgroundColor: colors.textSecondary, color: colors.surface };
+        return colors.textSecondary;
     }
   };
 
   const getStatusText = (status: Tournament['status']) => {
     switch (status) {
       case 'active':
-        return 'АКТИВНЫЙ';
-      case 'upcoming':
-        return 'ПРЕДСТОЯЩИЙ';
+        return 'Активный';
       case 'finished':
-        return 'ЗАВЕРШЕН';
+        return 'Завершен';
+      case 'upcoming':
+        return 'Предстоящий';
       default:
-        return 'НЕИЗВЕСТНО';
+        return status;
     }
   };
 
   return (
     <View style={styles.card}>
       <View style={styles.header}>
-        <Text style={styles.name}>{tournament.name}</Text>
-        <Text style={[styles.status, getStatusColor(tournament.status)]}>
+        <Text style={styles.name} numberOfLines={2}>
+          {tournament.name}
+        </Text>
+        <Text style={[styles.status, { color: getStatusColor(tournament.status) }]}>
           {getStatusText(tournament.status)}
         </Text>
       </View>
-
-      <Text style={styles.season}>Сезон {tournament.season}</Text>
-
+      
+      <Text style={styles.season}>{tournament.season}</Text>
+      
       <View style={styles.stats}>
         {tournament.teams && (
           <View style={styles.stat}>
@@ -113,7 +110,6 @@ const TournamentCard: React.FC<TournamentCardProps> = ({ tournament }) => {
             <Text style={styles.statLabel}>Команд</Text>
           </View>
         )}
-        
         {tournament.games && (
           <View style={styles.stat}>
             <Text style={styles.statValue}>{tournament.games}</Text>
@@ -123,6 +119,4 @@ const TournamentCard: React.FC<TournamentCardProps> = ({ tournament }) => {
       </View>
     </View>
   );
-};
-
-export default TournamentCard;
+}

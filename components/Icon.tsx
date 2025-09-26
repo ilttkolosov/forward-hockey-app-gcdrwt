@@ -1,25 +1,15 @@
-import { View, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../styles/commonStyles';
+
+import React from 'react';
+import { MaterialIcons } from '@expo/vector-icons';
+import { ViewStyle } from 'react-native';
 
 interface IconProps {
-  name: keyof typeof Ionicons.glyphMap;
+  name: keyof typeof MaterialIcons.glyphMap;
   size?: number;
-  style?: object;
   color?: string;
+  style?: ViewStyle;
 }
 
-export default function Icon({ name, size = 40, style, color = "black" }: IconProps) {
-  return (
-    <View style={[styles.iconContainer, style]}>
-      <Ionicons name={name} size={size} color={color} />
-    </View>
-  );
+export default function Icon({ name, size = 24, color = '#000', style }: IconProps) {
+  return <MaterialIcons name={name} size={size} color={color} style={style} />;
 }
-
-const styles = StyleSheet.create({
-  iconContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});

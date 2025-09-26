@@ -2,489 +2,398 @@
 import { Game, GameStats, ApiUpcomingEvent, ApiPastEvent } from '../types';
 import { apiService } from '../services/apiService';
 
-// Cache for API data
-let upcomingGamesCache: Game[] | null = null;
-let pastGamesCache: Game[] | null = null;
-let upcomingCountCache: number = 0;
-let pastCountCache: number = 0;
-let gameDetailsCache: { [key: string]: Game } = {};
-let cacheTimestamp = 0;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const CACHE_DURATION = 5 * 60 * 1000; // 5 минут
 
-// Check if cache is valid
-const isCacheValid = () => {
-  return Date.now() - cacheTimestamp < CACHE_DURATION;
-};
+interface CachedData<T> {
+  data: T;
+  timestamp: number;
+}
 
-// Convert API upcoming event to Game object
-const convertApiUpcomingEventToGame = async (apiEvent: ApiUpcomingEvent): Promise<Game> => {
-  console.log('Converting API upcoming event to game:', apiEvent);
+let upcomingGamesCache: CachedData<Game[]> | null = null;
+let pastGamesCache: CachedData<Game[]> | null = null;
+let upcomingCountCache: CachedData<number> | null = null;
+let pastCountCache: CachedData<number> | null = null;
+
+function isCacheValid<T>(cache: CachedData<T> | null): boolean {
+  if (!cache) return false;
+  return Date.now() - cache.timestamp < CACHE_DURATION;
+}
+
+async function convertApiUpcomingEventToGame(apiEvent: ApiUpcomingEvent): Promise<Game> {
+  console.log('Конвертация предстоящего события:', apiEvent);
   
-  // Parse team IDs from sp_teams field
+  const { date, time } = apiService.formatDateTime(apiEvent.event_date);
+  
+  // Парсинг команд
   const teamIds = apiEvent.sp_teams.split(',').map(id => id.trim());
-  const homeTeamId = teamIds[0] || '';
-  const awayTeamId = teamIds[1] || '';
+  console.log('ID команд:', teamIds);
   
-  // Fetch team details
-  let homeTeam = 'Home Team';
-  let awayTeam = 'Away Team';
-  let homeTeamLogo = '';
-  let awayTeamLogo = '';
+  // Получение данных команд
+  const teamPromises = teamIds.map(id => apiService.fetchTeam(id));
+  const teams = await Promise.all(teamPromises);
   
-  try {
-    const [homeTeamData, awayTeamData] = await Promise.all([
-      homeTeamId ? apiService.fetchTeam(homeTeamId) : null,
-      awayTeamId ? apiService.fetchTeam(awayTeamId) : null
-    ]);
-    
-    if (homeTeamData) {
-      homeTeam = homeTeamData.name;
-      homeTeamLogo = homeTeamData.logo_url;
-    }
-    
-    if (awayTeamData) {
-      awayTeam = awayTeamData.name;
-      awayTeamLogo = awayTeamData.logo_url;
-    }
-  } catch (error) {
-    console.error('Error fetching team details:', error);
-  }
+  // Парсинг лиги
+  const leagueInfo = apiService.parseIdNameString(apiEvent.Leagues);
   
-  // Format date and time
-  const { date, time } = apiService.formatDateTime(apiEvent.event_date);
+  // Парсинг сезона
+  const seasonInfo = apiService.parseIdNameString(apiEvent.seasons);
   
-  // Determine status
-  const status = apiService.determineGameStatus(apiEvent.event_date, false);
-  
-  // Simple venue parsing
-  const venue = apiService.parseIdNameString(apiEvent.venues || '');
+  // Парсинг арены
+  const venueInfo = apiService.parseIdNameString(apiEvent.venues);
   
   const game: Game = {
     id: apiEvent.event_id,
     event_id: apiEvent.event_id,
-    event_date: apiEvent.event_date,
-    homeTeam,
-    awayTeam,
-    homeTeamId,
-    awayTeamId,
-    homeTeamLogo,
-    awayTeamLogo,
+    homeTeam: teams[0]?.name || `Команда ${teamIds[0]}`,
+    awayTeam: teams[1]?.name || `Команда ${teamIds[1]}`,
+    homeTeamId: teamIds[0],
+    awayTeamId: teamIds[1],
+    homeTeamLogo: teams[0]?.logo_url || '',
+    awayTeamLogo: teams[1]?.logo_url || '',
     date,
     time,
-    venue: venue.name || 'Арена',
-    status,
-    tournament: 'Чемпионат' // Default tournament name
+    event_date: apiEvent.event_date,
+    venue: venueInfo.name,
+    venue_id: venueInfo.id,
+    venue_name: venueInfo.name,
+    status: 'upcoming',
+    tournament: leagueInfo.name || 'Товарищеский матч',
+    league_id: leagueInfo.id,
+    league_name: leagueInfo.name,
+    season_id: seasonInfo.id,
+    season_name: seasonInfo.name,
   };
   
-  console.log('Converted upcoming game:', game);
+  console.log('Конвертированная игра:', game);
   return game;
-};
+}
 
-// Convert API past event to Game object with new results structure
-const convertApiPastEventToGame = async (apiEvent: ApiPastEvent): Promise<Game> => {
-  console.log('Converting API past event to game with new results structure:', apiEvent);
+async function convertApiPastEventToGame(apiEvent: ApiPastEvent): Promise<Game> {
+  console.log('Конвертация архивного события с НОВОЙ структурой:', apiEvent);
   
-  // Parse team IDs from teams field (updated field name)
+  const { date, time } = apiService.formatDateTime(apiEvent.event_date);
+  
+  // Парсинг команд (НОВОЕ поле teams вместо sp_teams)
   const teamIds = apiEvent.teams.split(',').map(id => id.trim());
-  const homeTeamId = teamIds[0] || '';
-  const awayTeamId = teamIds[1] || '';
+  console.log('ID команд из НОВОГО поля teams:', teamIds);
   
-  // Fetch team details
-  let homeTeam = 'Home Team';
-  let awayTeam = 'Away Team';
-  let homeTeamLogo = '';
-  let awayTeamLogo = '';
+  // Получение данных команд
+  const teamPromises = teamIds.map(id => apiService.fetchTeam(id));
+  const teams = await Promise.all(teamPromises);
   
-  try {
-    const [homeTeamData, awayTeamData] = await Promise.all([
-      homeTeamId ? apiService.fetchTeam(homeTeamId) : null,
-      awayTeamId ? apiService.fetchTeam(awayTeamId) : null
-    ]);
-    
-    if (homeTeamData) {
-      homeTeam = homeTeamData.name;
-      homeTeamLogo = homeTeamData.logo_url;
-    }
-    
-    if (awayTeamData) {
-      awayTeam = awayTeamData.name;
-      awayTeamLogo = awayTeamData.logo_url;
-    }
-  } catch (error) {
-    console.error('Error fetching team details:', error);
-  }
+  // Парсинг лиги (сопоставляется с tournament в логике приложения)
+  const leagueInfo = apiService.parseIdNameString(apiEvent.Leagues);
   
-  // Parse results using new structure
-  const { homeScore, awayScore, homeOutcome, awayOutcome } = apiService.parseNewResults(apiEvent.results, teamIds);
+  // Парсинг сезона
+  const seasonInfo = apiService.parseIdNameString(apiEvent.seasons);
   
-  console.log('Parsed match results:', {
-    homeScore,
-    awayScore,
-    homeOutcome,
-    awayOutcome
-  });
+  // Парсинг арены
+  const venueInfo = apiService.parseIdNameString(apiEvent.venues);
   
-  // Format date and time
-  const { date, time } = apiService.formatDateTime(apiEvent.event_date);
-  
-  // Determine status (should be finished for past events)
-  const status = 'finished';
-  
-  // Simple venue parsing
-  const venue = apiService.parseIdNameString(apiEvent.venues || '');
+  // Обработка НОВОЙ структуры Results
+  const results = apiEvent.Results;
+  console.log('НОВАЯ структура Results:', results);
   
   const game: Game = {
     id: apiEvent.event_id,
     event_id: apiEvent.event_id,
-    event_date: apiEvent.event_date,
-    homeTeam,
-    awayTeam,
-    homeTeamId,
-    awayTeamId,
-    homeTeamLogo,
-    awayTeamLogo,
-    homeScore,
-    awayScore,
+    homeTeam: teams[0]?.name || `Команда ${teamIds[0]}`,
+    awayTeam: teams[1]?.name || `Команда ${teamIds[1]}`,
+    homeTeamId: teamIds[0],
+    awayTeamId: teamIds[1],
+    homeTeamLogo: teams[0]?.logo_url || '',
+    awayTeamLogo: teams[1]?.logo_url || '',
+    homeScore: results?.homeTeam?.goals || 0,
+    awayScore: results?.awayTeam?.goals || 0,
     date,
     time,
-    venue: venue.name || 'Арена',
-    status,
-    tournament: 'Чемпионат', // Default tournament name
-    results: apiEvent.results // Store the full results object for detailed display
+    event_date: apiEvent.event_date,
+    venue: venueInfo.name,
+    venue_id: venueInfo.id,
+    venue_name: venueInfo.name,
+    status: 'finished',
+    tournament: leagueInfo.name || 'Товарищеский матч',
+    league_id: leagueInfo.id,
+    league_name: leagueInfo.name,
+    season_id: seasonInfo.id,
+    season_name: seasonInfo.name,
+    // Добавляем результаты для каждой команды
+    team1_goals: results?.homeTeam?.goals || 0,
+    team2_goals: results?.awayTeam?.goals || 0,
+    team1_outcome: results?.homeTeam?.outcome || '',
+    team2_outcome: results?.awayTeam?.outcome || '',
   };
   
-  console.log('Converted past game with results:', game);
+  console.log('Конвертированная архивная игра с НОВЫМИ полями:', game);
   return game;
-};
+}
 
-// Get upcoming games
-export const getFutureGames = async (): Promise<Game[]> => {
+function getFallbackCurrentGame(): Game {
+  return {
+    id: 'current-1',
+    event_id: 'current-1',
+    homeTeam: 'ХК Форвард',
+    awayTeam: 'Соперник',
+    date: new Date().toISOString().split('T')[0],
+    time: '19:00',
+    event_date: new Date().toISOString(),
+    venue: 'Домашняя арена',
+    status: 'live',
+    tournament: 'Чемпионат',
+    homeScore: 2,
+    awayScore: 1,
+  };
+}
+
+function getFallbackUpcomingGames(): Game[] {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  
+  return [
+    {
+      id: 'upcoming-1',
+      event_id: 'upcoming-1',
+      homeTeam: 'ХК Форвард',
+      awayTeam: 'Команда А',
+      date: tomorrow.toISOString().split('T')[0],
+      time: '19:00',
+      event_date: tomorrow.toISOString(),
+      venue: 'Домашняя арена',
+      status: 'upcoming',
+      tournament: 'Чемпионат',
+    },
+  ];
+}
+
+function getFallbackPastGames(): Game[] {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  
+  return [
+    {
+      id: 'past-1',
+      event_id: 'past-1',
+      homeTeam: 'ХК Форвард',
+      awayTeam: 'Команда Б',
+      homeScore: 3,
+      awayScore: 2,
+      date: yesterday.toISOString().split('T')[0],
+      time: '19:00',
+      event_date: yesterday.toISOString(),
+      venue: 'Домашняя арена',
+      status: 'finished',
+      tournament: 'Чемпионат',
+    },
+  ];
+}
+
+function getFallbackGames(): Game[] {
+  return [...getFallbackUpcomingGames(), ...getFallbackPastGames()];
+}
+
+function getFallbackGameById(gameId: string): Game | null {
+  const games = getFallbackGames();
+  return games.find(game => game.id === gameId) || null;
+}
+
+function getFallbackGameStats(gameId: string): GameStats | null {
+  return {
+    gameId,
+    homeTeamStats: [],
+    awayTeamStats: [],
+    gameHighlights: ['Игра завершена'],
+  };
+}
+
+export async function getCurrentGame(): Promise<Game | null> {
   try {
-    if (isCacheValid() && upcomingGamesCache) {
-      console.log('Returning cached upcoming games');
-      return upcomingGamesCache;
+    console.log('Получение текущей игры...');
+    
+    // Сначала пробуем получить предстоящие игры
+    const upcomingGames = await getUpcomingGames();
+    if (upcomingGames && upcomingGames.length > 0) {
+      // Ищем игру, которая идет сейчас или скоро начнется
+      const now = new Date();
+      const currentGame = upcomingGames.find(game => {
+        const gameDate = new Date(game.event_date);
+        const diffInHours = Math.abs(now.getTime() - gameDate.getTime()) / (1000 * 60 * 60);
+        return diffInHours <= 3; // Игра в течение 3 часов
+      });
+      
+      if (currentGame) {
+        console.log('Найдена текущая игра:', currentGame);
+        return currentGame;
+      }
+    }
+    
+    // Если нет текущей игры, возвращаем null
+    console.log('Текущая игра не найдена');
+    return null;
+  } catch (error) {
+    console.error('Ошибка получения текущей игры:', error);
+    return null;
+  }
+}
+
+export async function getUpcomingGames(): Promise<Game[]> {
+  try {
+    if (isCacheValid(upcomingGamesCache)) {
+      console.log('Возврат предстоящих игр из кэша');
+      return upcomingGamesCache!.data;
     }
 
-    console.log('Fetching upcoming games from API...');
+    console.log('Загрузка предстоящих игр из API...');
     const response = await apiService.fetchUpcomingEvents();
     
-    // Convert API events to Game objects
+    if (!response.data || !Array.isArray(response.data)) {
+      console.log('Нет данных о предстоящих играх, используем fallback');
+      return getFallbackUpcomingGames();
+    }
+
     const games = await Promise.all(
       response.data.map(event => convertApiUpcomingEventToGame(event))
     );
-    
-    upcomingGamesCache = games;
-    upcomingCountCache = response.count;
-    cacheTimestamp = Date.now();
-    console.log('Upcoming games cached successfully. Count:', response.count);
 
+    // Сортировка по дате
+    games.sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
+
+    upcomingGamesCache = {
+      data: games,
+      timestamp: Date.now(),
+    };
+
+    console.log(`Загружено ${games.length} предстоящих игр`);
     return games;
   } catch (error) {
-    console.error('Error fetching upcoming games:', error);
+    console.error('Ошибка загрузки предстоящих игр:', error);
     return getFallbackUpcomingGames();
   }
-};
+}
 
-// Get past games
-export const getPastGames = async (): Promise<Game[]> => {
+export async function getPastGames(): Promise<Game[]> {
   try {
-    if (isCacheValid() && pastGamesCache) {
-      console.log('Returning cached past games');
-      return pastGamesCache;
+    if (isCacheValid(pastGamesCache)) {
+      console.log('Возврат архивных игр из кэша');
+      return pastGamesCache!.data;
     }
 
-    console.log('Fetching past games from updated API...');
+    console.log('Загрузка архивных игр из НОВОГО API...');
     const response = await apiService.fetchPastEvents();
     
-    // Convert API events to Game objects using new structure
+    if (!response.data || !Array.isArray(response.data)) {
+      console.log('Нет данных об архивных играх, используем fallback');
+      return getFallbackPastGames();
+    }
+
     const games = await Promise.all(
       response.data.map(event => convertApiPastEventToGame(event))
     );
-    
-    pastGamesCache = games;
-    pastCountCache = response.count;
-    cacheTimestamp = Date.now();
-    console.log('Past games cached successfully with new results structure. Count:', response.count);
 
+    // Сортировка по дате (новые сначала)
+    games.sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
+
+    pastGamesCache = {
+      data: games,
+      timestamp: Date.now(),
+    };
+
+    console.log(`Загружено ${games.length} архивных игр с НОВОЙ структурой`);
     return games;
   } catch (error) {
-    console.error('Error fetching past games:', error);
+    console.error('Ошибка загрузки архивных игр из НОВОГО API:', error);
     return getFallbackPastGames();
   }
-};
+}
 
-// Get all games (future + past)
-export const getAllGames = async (): Promise<Game[]> => {
+export async function getFutureGames(): Promise<Game[]> {
+  const upcomingGames = await getUpcomingGames();
+  return upcomingGames.slice(0, 5); // Возвращаем только первые 5 игр для главного экрана
+}
+
+export async function getUpcomingGamesCount(): Promise<number> {
   try {
-    console.log('Fetching all games...');
-    const [upcomingGames, pastGames] = await Promise.all([
-      getFutureGames(),
-      getPastGames()
-    ]);
-
-    return [...upcomingGames, ...pastGames];
-  } catch (error) {
-    console.error('Error fetching all games:', error);
-    return getFallbackGames();
-  }
-};
-
-// Get current game (most recent live or upcoming game)
-export const getCurrentGame = async (): Promise<Game | null> => {
-  try {
-    const allGames = await getAllGames();
-    
-    // First, look for live games
-    const liveGame = allGames.find(game => game.status === 'live');
-    if (liveGame) {
-      console.log('Found live game:', liveGame);
-      return liveGame;
+    if (isCacheValid(upcomingCountCache)) {
+      console.log('Возврат количества предстоящих игр из кэша');
+      return upcomingCountCache!.data;
     }
 
-    // Then, look for the next upcoming game
-    const upcomingGames = allGames
-      .filter(game => game.status === 'upcoming')
-      .sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
-    
-    if (upcomingGames.length > 0) {
-      console.log('Found upcoming game:', upcomingGames[0]);
-      return upcomingGames[0];
-    }
+    console.log('Получение количества предстоящих игр...');
+    const response = await apiService.fetchUpcomingEvents();
+    const count = response.count || 0;
 
-    // Finally, return the most recent finished game
-    const finishedGames = allGames
-      .filter(game => game.status === 'finished')
-      .sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
-    
-    const currentGame = finishedGames.length > 0 ? finishedGames[0] : null;
-    console.log('Found current game:', currentGame);
-    return currentGame;
-  } catch (error) {
-    console.error('Error fetching current game:', error);
-    return getFallbackCurrentGame();
-  }
-};
-
-// Get game by ID with detailed information
-export const getGameById = async (gameId: string): Promise<Game | null> => {
-  try {
-    // Check cache first
-    if (gameDetailsCache[gameId]) {
-      console.log('Returning cached game details for ID:', gameId);
-      return gameDetailsCache[gameId];
-    }
-
-    console.log('Searching for game with ID:', gameId);
-    
-    // Try to find the game in cached data first
-    const allCachedGames = [...(upcomingGamesCache || []), ...(pastGamesCache || [])];
-    const cachedGame = allCachedGames.find(game => game.id === gameId || game.event_id === gameId);
-    
-    if (cachedGame) {
-      console.log('Found game in cache:', cachedGame);
-      gameDetailsCache[gameId] = cachedGame;
-      return cachedGame;
-    }
-    
-    // If not in cache, fetch all games and search
-    const allGames = await getAllGames();
-    const game = allGames.find(game => game.id === gameId || game.event_id === gameId);
-    
-    if (game) {
-      gameDetailsCache[gameId] = game;
-      console.log('Found game in all games:', game);
-      return game;
-    }
-    
-    console.log('Game not found, returning fallback');
-    return getFallbackGameById(gameId);
-  } catch (error) {
-    console.error('Error fetching game details:', error);
-    return getFallbackGameById(gameId);
-  }
-};
-
-// Get counts for display on main screen
-export const getUpcomingGamesCount = (): number => {
-  return upcomingCountCache;
-};
-
-export const getPastGamesCount = (): number => {
-  return pastCountCache;
-};
-
-// Mock game statistics (since the API structure for detailed stats is not fully defined)
-export const getGameStatsById = (gameId: string): GameStats | null => {
-  console.log('Getting game stats for ID:', gameId);
-  // This would need to be implemented based on the actual API structure
-  // For now, return mock data for demonstration
-  return getFallbackGameStats(gameId);
-};
-
-// Fallback data when API is unavailable
-const getFallbackCurrentGame = (): Game => ({
-  id: '1',
-  event_id: '1',
-  event_date: '2024-01-15 19:30:00',
-  homeTeam: 'Динамо-Форвард',
-  awayTeam: 'Варяги',
-  homeScore: 2,
-  awayScore: 1,
-  date: '2024-01-15',
-  time: '19:30',
-  venue: 'Арена Форвард',
-  status: 'live',
-  tournament: 'Чемпионат',
-  videoUrl: 'https://www.hc-forward.com/broadcast/live-stream',
-  results: {
-    '1': { goals: 2, outcome: 'win' },
-    '2': { goals: 1, outcome: 'loss' }
-  }
-});
-
-const getFallbackUpcomingGames = (): Game[] => [
-  {
-    id: '2',
-    event_id: '2',
-    event_date: '2024-01-18 20:00:00',
-    homeTeam: 'Спартак',
-    awayTeam: 'Форвард',
-    date: '2024-01-18',
-    time: '20:00',
-    venue: 'Ледовый дворец Спартак',
-    status: 'upcoming',
-    tournament: 'Чемпионат',
-  },
-  {
-    id: '3',
-    event_id: '3',
-    event_date: '2024-01-22 19:30:00',
-    homeTeam: 'Форвард',
-    awayTeam: 'ЦСКА',
-    date: '2024-01-22',
-    time: '19:30',
-    venue: 'Арена Форвард',
-    status: 'upcoming',
-    tournament: 'Чемпионат',
-  },
-];
-
-const getFallbackPastGames = (): Game[] => [
-  {
-    id: '5',
-    event_id: '5',
-    event_date: '2024-01-10 19:30:00',
-    homeTeam: 'Форвард',
-    awayTeam: 'Локомотив',
-    homeScore: 3,
-    awayScore: 2,
-    date: '2024-01-10',
-    time: '19:30',
-    venue: 'Арена Форвард',
-    status: 'finished',
-    tournament: 'Чемпионат',
-    videoUrl: 'https://www.hc-forward.com/broadcast/replay-1',
-    results: {
-      '1': { goals: 3, outcome: 'win' },
-      '2': { goals: 2, outcome: 'loss' }
-    }
-  },
-  {
-    id: '6',
-    event_id: '6',
-    event_date: '2024-01-05 20:00:00',
-    homeTeam: 'Металлург',
-    awayTeam: 'Форвард',
-    homeScore: 1,
-    awayScore: 4,
-    date: '2024-01-05',
-    time: '20:00',
-    venue: 'Арена Металлург',
-    status: 'finished',
-    tournament: 'Чемпионат',
-    videoUrl: 'https://www.hc-forward.com/broadcast/replay-2',
-    results: {
-      '3': { goals: 1, outcome: 'loss' },
-      '1': { goals: 4, outcome: 'win' }
-    }
-  },
-];
-
-const getFallbackGames = (): Game[] => [
-  getFallbackCurrentGame(),
-  ...getFallbackUpcomingGames(),
-  ...getFallbackPastGames(),
-];
-
-const getFallbackGameById = (gameId: string): Game | null => {
-  const allFallbackGames = getFallbackGames();
-  return allFallbackGames.find(game => game.id === gameId || game.event_id === gameId) || null;
-};
-
-const getFallbackGameStats = (gameId: string): GameStats | null => {
-  // Mock stats for demonstration
-  if (gameId === '1' || gameId === '5') {
-    return {
-      gameId,
-      homeTeamStats: [
-        {
-          playerId: '1',
-          playerName: 'Александр Петров',
-          position: 'Нападающий',
-          number: 10,
-          goals: 1,
-          assists: 1,
-          points: 2,
-          penaltyMinutes: 2,
-          shots: 4,
-          hits: 3,
-          blockedShots: 0,
-          faceoffWins: 8,
-          faceoffLosses: 5,
-          timeOnIce: '18:45',
-        },
-        {
-          playerId: '4',
-          playerName: 'Павел Козлов',
-          position: 'Нападающий',
-          number: 17,
-          goals: 1,
-          assists: 0,
-          points: 1,
-          penaltyMinutes: 0,
-          shots: 3,
-          hits: 2,
-          blockedShots: 1,
-          faceoffWins: 6,
-          faceoffLosses: 4,
-          timeOnIce: '16:22',
-        },
-      ],
-      awayTeamStats: [
-        {
-          playerId: 'away1',
-          playerName: 'Виктор Орлов',
-          position: 'Нападающий',
-          number: 9,
-          goals: 1,
-          assists: 0,
-          points: 1,
-          penaltyMinutes: 0,
-          shots: 5,
-          hits: 2,
-          blockedShots: 0,
-          faceoffWins: 7,
-          faceoffLosses: 8,
-          timeOnIce: '17:28',
-        },
-      ],
-      gameHighlights: [
-        'Захватывающий матч с отличными играми от обеих команд',
-        'Сильная защитная игра',
-        'Отличная игра вратарей на протяжении всего матча',
-      ],
+    upcomingCountCache = {
+      data: count,
+      timestamp: Date.now(),
     };
+
+    console.log('Количество предстоящих игр:', count);
+    return count;
+  } catch (error) {
+    console.error('Ошибка получения количества предстоящих игр:', error);
+    return 0;
   }
-  
-  return null;
-};
+}
+
+export async function getPastGamesCount(): Promise<number> {
+  try {
+    if (isCacheValid(pastCountCache)) {
+      console.log('Возврат количества архивных игр из кэша');
+      return pastCountCache!.data;
+    }
+
+    console.log('Получение количества архивных игр из НОВОГО API...');
+    const response = await apiService.fetchPastEvents();
+    const count = response.count || 0;
+
+    pastCountCache = {
+      data: count,
+      timestamp: Date.now(),
+    };
+
+    console.log('Количество архивных игр из НОВОГО API:', count);
+    return count;
+  } catch (error) {
+    console.error('Ошибка получения количества архивных игр:', error);
+    return 0;
+  }
+}
+
+export async function getGameById(gameId: string): Promise<Game | null> {
+  try {
+    console.log('Поиск игры по ID:', gameId);
+    
+    // Ищем в предстоящих играх
+    const upcomingGames = await getUpcomingGames();
+    const upcomingGame = upcomingGames.find(game => game.id === gameId || game.event_id === gameId);
+    if (upcomingGame) {
+      console.log('Игра найдена в предстоящих:', upcomingGame);
+      return upcomingGame;
+    }
+    
+    // Ищем в архивных играх
+    const pastGames = await getPastGames();
+    const pastGame = pastGames.find(game => game.id === gameId || game.event_id === gameId);
+    if (pastGame) {
+      console.log('Игра найдена в архиве:', pastGame);
+      return pastGame;
+    }
+    
+    console.log('Игра не найдена, используем fallback');
+    return getFallbackGameById(gameId);
+  } catch (error) {
+    console.error('Ошибка поиска игры по ID:', error);
+    return getFallbackGameById(gameId);
+  }
+}
+
+export async function getGameStatsById(gameId: string): Promise<GameStats | null> {
+  try {
+    console.log('Получение статистики игры для ID:', gameId);
+    // В текущей версии API нет детальной статистики игры
+    // Возвращаем fallback данные
+    return getFallbackGameStats(gameId);
+  } catch (error) {
+    console.error('Ошибка получения статистики игры:', error);
+    return getFallbackGameStats(gameId);
+  }
+}

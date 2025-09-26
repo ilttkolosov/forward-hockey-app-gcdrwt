@@ -1,133 +1,93 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, RefreshControl, TouchableOpacity, StyleSheet, Animated } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
-import PlayerCard from '../components/PlayerCard';
-import PlayerSearchBar from '../components/PlayerSearchBar';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from '../components/Icon';
 import { Player } from '../types';
+import LoadingSpinner from '../components/LoadingSpinner';
+import PlayerSearchBar from '../components/PlayerSearchBar';
 import { getPlayers, checkApiAvailability, searchPlayers } from '../data/playerData';
 import { commonStyles, colors } from '../styles/commonStyles';
-import LoadingSpinner from '../components/LoadingSpinner';
+import PlayerCard from '../components/PlayerCard';
 import ErrorMessage from '../components/ErrorMessage';
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  searchContainer: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: colors.background,
+    paddingVertical: 8,
+    backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: colors.text,
-    marginLeft: 16,
-  },
-  backButton: {
-    padding: 8,
-    borderRadius: 8,
-  },
-  content: {
-    flex: 1,
-  },
-  searchContainer: {
-    overflow: 'hidden',
-  },
   playersContainer: {
-    padding: 8,
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-    paddingVertical: 64,
-  },
-  emptyStateIcon: {
-    marginBottom: 16,
-  },
-  emptyStateTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.text,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  emptyStateText: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  searchResultsInfo: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingBottom: 20,
   },
-  searchResultsText: {
+  headerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: colors.text,
+  },
+  playerCount: {
     fontSize: 14,
     color: colors.textSecondary,
-    textAlign: 'center',
+    marginTop: 2,
+  },
+  scrollToTopButton: {
+    position: 'absolute',
+    right: 16,
+    bottom: 80,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
 });
 
-const PlayersScreen: React.FC = () => {
+export default function PlayersScreen() {
   const [allPlayers, setAllPlayers] = useState<Player[]>([]);
   const [filteredPlayers, setFilteredPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [apiAvailable, setApiAvailable] = useState<boolean | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showSearch, setShowSearch] = useState(false);
-  
-  const searchHeight = useRef(new Animated.Value(0)).current;
+  const [showScrollToTop, setShowScrollToTop] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  const scrollToTopOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     initializeScreen();
   }, []);
 
   useEffect(() => {
-    // Фильтруем игроков при изменении поискового запроса
-    let filtered = allPlayers;
-    
-    console.log('Фильтрация игроков. Всего игроков:', allPlayers.length);
-    console.log('Поисковый запрос:', searchQuery);
-    
-    // Фильтруем по поисковому запросу
-    if (searchQuery) {
-      filtered = searchPlayers(filtered, searchQuery);
-      console.log(`После поиска по запросу "${searchQuery}" осталось ${filtered.length} игроков`);
+    if (searchQuery.trim() === '') {
+      setFilteredPlayers(allPlayers);
+    } else {
+      const filtered = searchPlayers(allPlayers, searchQuery);
+      setFilteredPlayers(filtered);
     }
-    
-    // Сортируем по игровому номеру по возрастанию
-    filtered = filtered.sort((a, b) => a.number - b.number);
-    
-    setFilteredPlayers(filtered);
   }, [searchQuery, allPlayers]);
 
   const initializeScreen = async () => {
     console.log('Инициализация экрана игроков...');
-    
-    // Проверяем доступность API при запуске
-    const isApiAvailable = await checkApiAvailability();
-    setApiAvailable(isApiAvailable);
-    
-    if (!isApiAvailable) {
-      setError('Ошибка доступа к API игроков. Проверьте подключение к интернету.');
-      setLoading(false);
-      return;
-    }
-    
     await loadPlayers();
   };
 
@@ -136,156 +96,126 @@ const PlayersScreen: React.FC = () => {
       setError(null);
       console.log('Загрузка игроков...');
       
-      const playersData = await getPlayers();
-      setAllPlayers(playersData);
+      const apiAvailable = await checkApiAvailability();
+      console.log('API доступен:', apiAvailable);
       
-      console.log(`Успешно загружено ${playersData.length} игроков`);
+      const players = await getPlayers();
+      console.log('Загружено игроков:', players.length);
       
-      // Логируем распределение по позициям для отладки
-      const positionCounts = playersData.reduce((acc, player) => {
-        acc[player.position] = (acc[player.position] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>);
-      
-      console.log('Распределение игроков по позициям:', positionCounts);
-      
-    } catch (err) {
-      console.error('Ошибка загрузки игроков:', err);
-      setError('Ошибка загрузки списка игроков. Попробуйте обновить страницу.');
+      setAllPlayers(players);
+      setFilteredPlayers(players);
+    } catch (error) {
+      console.error('Ошибка загрузки игроков:', error);
+      setError('Не удалось загрузить список игроков. Проверьте подключение к интернету.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
-  const onRefresh = async () => {
+  const onRefresh = () => {
     setRefreshing(true);
-    await loadPlayers();
+    loadPlayers();
   };
 
   const handleScroll = (event: any) => {
-    const { contentOffset } = event.nativeEvent;
+    const offsetY = event.nativeEvent.contentOffset.y;
+    const shouldShow = offsetY > 300;
     
-    // Показываем поиск при прокрутке вниз
-    if (contentOffset.y < -50 && !showSearch) {
-      setShowSearch(true);
-      Animated.timing(searchHeight, {
-        toValue: 80,
-        duration: 300,
-        useNativeDriver: false,
+    if (shouldShow !== showScrollToTop) {
+      setShowScrollToTop(shouldShow);
+      Animated.timing(scrollToTopOpacity, {
+        toValue: shouldShow ? 1 : 0,
+        duration: 200,
+        useNativeDriver: true,
       }).start();
     }
   };
 
   const handleSearchChange = (query: string) => {
-    console.log('Поиск игроков:', query);
     setSearchQuery(query);
   };
 
   const handleClearSearch = () => {
     setSearchQuery('');
-    setShowSearch(false);
-    Animated.timing(searchHeight, {
-      toValue: 0,
-      duration: 300,
-      useNativeDriver: false,
-    }).start();
+  };
+
+  const scrollToTop = () => {
+    scrollViewRef.current?.scrollTo({ y: 0, animated: true });
   };
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <Link href="/" asChild>
-            <TouchableOpacity style={styles.backButton}>
-              <Icon name="arrow-back" size={24} color={colors.text} />
-            </TouchableOpacity>
-          </Link>
-          <Text style={styles.title}>Игроки</Text>
-        </View>
-        <View style={styles.content}>
-          <LoadingSpinner />
-        </View>
+      <SafeAreaView style={commonStyles.container}>
+        <LoadingSpinner text="Загрузка игроков..." />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Link href="/" asChild>
-          <TouchableOpacity style={styles.backButton}>
-            <Icon name="arrow-back" size={24} color={colors.text} />
-          </TouchableOpacity>
-        </Link>
-        <Text style={styles.title}>Игроки</Text>
+    <SafeAreaView style={commonStyles.container}>
+      <View style={styles.headerContainer}>
+        <View>
+          <Text style={styles.headerTitle}>Игроки</Text>
+          <Text style={styles.playerCount}>
+            {filteredPlayers.length} {filteredPlayers.length === 1 ? 'игрок' : 
+             filteredPlayers.length < 5 ? 'игрока' : 'игроков'}
+          </Text>
+        </View>
       </View>
 
-      <Animated.View style={[styles.searchContainer, { height: searchHeight }]}>
-        {showSearch && (
-          <PlayerSearchBar
-            searchQuery={searchQuery}
-            onSearchChange={handleSearchChange}
-            onClear={handleClearSearch}
-            placeholder="Поиск по имени, позиции или номеру..."
-          />
-        )}
-      </Animated.View>
+      <View style={styles.searchContainer}>
+        <PlayerSearchBar
+          value={searchQuery}
+          onChangeText={handleSearchChange}
+          onClear={handleClearSearch}
+          placeholder="Поиск игроков..."
+        />
+      </View>
+
+      {error && <ErrorMessage message={error} />}
 
       <ScrollView
         ref={scrollViewRef}
-        style={styles.content}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
+        style={commonStyles.flex1}
+        contentContainerStyle={styles.playersContainer}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
       >
-        {error && <ErrorMessage message={error} />}
-
-        {searchQuery.length > 0 && (
-          <View style={styles.searchResultsInfo}>
-            <Text style={styles.searchResultsText}>
-              Найдено игроков: {filteredPlayers.length}
-            </Text>
-          </View>
-        )}
-
         {filteredPlayers.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Icon 
-              name={searchQuery.length > 0 ? "search" : "people"} 
-              size={64} 
-              color={colors.textSecondary} 
-              style={styles.emptyStateIcon} 
-            />
-            <Text style={styles.emptyStateTitle}>
-              {searchQuery.length > 0 
-                ? 'Игроки не найдены' 
-                : apiAvailable === false 
-                  ? 'API недоступен' 
-                  : 'Нет игроков'
-              }
+          <View style={commonStyles.emptyState}>
+            <Icon name="person-off" size={48} color={colors.textSecondary} />
+            <Text style={commonStyles.emptyStateTitle}>
+              {searchQuery ? 'Игроки не найдены' : 'Нет игроков'}
             </Text>
-            <Text style={styles.emptyStateText}>
-              {searchQuery.length > 0 
-                ? `По запросу "${searchQuery}" игроки не найдены. Попробуйте изменить поисковый запрос.`
-                : apiAvailable === false 
-                  ? 'Не удается подключиться к серверу. Проверьте подключение к интернету и попробуйте снова.'
-                  : 'Информация об игроках будет добавлена в ближайшее время'
+            <Text style={commonStyles.emptyStateText}>
+              {searchQuery 
+                ? 'Попробуйте изменить поисковый запрос'
+                : 'Список игроков пуст'
               }
             </Text>
           </View>
         ) : (
-          <View style={styles.playersContainer}>
-            {filteredPlayers.map((player) => (
-              <PlayerCard key={player.id} player={player} />
-            ))}
-          </View>
+          filteredPlayers.map((player) => (
+            <PlayerCard key={player.id} player={player} />
+          ))
         )}
       </ScrollView>
+
+      <Animated.View 
+        style={[
+          styles.scrollToTopButton,
+          { opacity: scrollToTopOpacity }
+        ]}
+        pointerEvents={showScrollToTop ? 'auto' : 'none'}
+      >
+        <TouchableOpacity onPress={scrollToTop} style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="keyboard-arrow-up" size={24} color={colors.surface} />
+        </TouchableOpacity>
+      </Animated.View>
     </SafeAreaView>
   );
-};
-
-export default PlayersScreen;
+}

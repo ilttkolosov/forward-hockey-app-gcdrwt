@@ -1,11 +1,7 @@
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { apiService, ApiPlayerResponse } from '../services/apiService';
 import { Player } from '../types';
-
-const CACHE_DURATION = 5 * 60 * 1000; // 5 минут
-const PLAYERS_CACHE_KEY = 'new_players_cache';
-const PLAYER_IMAGES_CACHE_KEY = 'new_player_images_cache';
+import { apiService, ApiPlayerResponse } from '../services/apiService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface CachedData<T> {
   data: T;
@@ -17,19 +13,18 @@ interface CachedImage {
   timestamp: number;
 }
 
-let playersMemoryCache: Player[] = [];
-let playersCacheTimestamp = 0;
+const CACHE_DURATION = 10 * 60 * 1000; // 10 минут
+const PLAYERS_CACHE_KEY = 'players_cache';
+const PLAYER_IMAGES_CACHE_KEY = 'player_images_cache';
 
 function isCacheValid(timestamp: number): boolean {
   return Date.now() - timestamp < CACHE_DURATION;
 }
 
 function removePatronymic(fullName: string): string {
-  if (!fullName) return '';
-  
-  const nameParts = fullName.trim().split(/\s+/);
-  if (nameParts.length >= 3) {
-    return `${nameParts[0]} ${nameParts[1]}`;
+  const parts = fullName.trim().split(' ');
+  if (parts.length >= 2) {
+    return `${parts[0]} ${parts[1]}`;
   }
   return fullName;
 }
@@ -37,222 +32,154 @@ function removePatronymic(fullName: string): string {
 function calculateAge(birthDate: string): number | undefined {
   if (!birthDate) return undefined;
   
-  const birth = new Date(birthDate);
-  const today = new Date();
-  let age = today.getFullYear() - birth.getFullYear();
-  const monthDiff = today.getMonth() - birth.getMonth();
-  
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
-    age--;
-  }
-  
-  return age > 0 ? age : undefined;
-}
-
-async function cachePlayerImage(imageUrl: string): Promise<string> {
   try {
-    if (!imageUrl) return '';
+    const birth = new Date(birthDate);
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    const monthDiff = today.getMonth() - birth.getMonth();
     
-    const cachedImagesJson = await AsyncStorage.getItem(PLAYER_IMAGES_CACHE_KEY);
-    const cachedImages: Record<string, CachedImage> = cachedImagesJson ? JSON.parse(cachedImagesJson) : {};
-    
-    const cached = cachedImages[imageUrl];
-    if (cached && isCacheValid(cached.timestamp)) {
-      console.log('Используется кэшированное изображение для:', imageUrl);
-      return imageUrl;
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+      age--;
     }
     
-    cachedImages[imageUrl] = {
+    return age > 0 ? age : undefined;
+  } catch (error) {
+    console.error('Ошибка вычисления возраста:', error);
+    return undefined;
+  }
+}
+
+async function cachePlayerImage(imageUrl: string): Promise<void> {
+  try {
+    const cachedImages = await AsyncStorage.getItem(PLAYER_IMAGES_CACHE_KEY);
+    const imageCache: { [key: string]: CachedImage } = cachedImages ? JSON.parse(cachedImages) : {};
+    
+    imageCache[imageUrl] = {
       url: imageUrl,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
     
-    await AsyncStorage.setItem(PLAYER_IMAGES_CACHE_KEY, JSON.stringify(cachedImages));
-    console.log('Изображение кэшировано для:', imageUrl);
-    
-    return imageUrl;
+    await AsyncStorage.setItem(PLAYER_IMAGES_CACHE_KEY, JSON.stringify(imageCache));
   } catch (error) {
     console.error('Ошибка кэширования изображения игрока:', error);
-    return imageUrl;
   }
 }
 
 function convertApiPlayerToPlayer(apiPlayer: ApiPlayerResponse): Player {
-  const name = removePatronymic(apiPlayer.post_title);
-  // Используем поле position из API (не positions)
-  const position = apiPlayer.position || 'Игрок';
-  const birthDate = apiPlayer.post_date ? apiPlayer.post_date.split('T')[0] : undefined;
-  const age = calculateAge(apiPlayer.post_date);
+  console.log('Конвертация игрока из API:', apiPlayer);
   
-  const metrics = apiPlayer.sp_metrics || {};
-  const height = metrics.height ? parseInt(metrics.height) : undefined;
-  const weight = metrics.weight ? parseInt(metrics.weight) : undefined;
-  
-  // Преобразуем sp_number в число
-  const number = typeof apiPlayer.sp_number === 'string' 
-    ? parseInt(apiPlayer.sp_number) || 0 
-    : apiPlayer.sp_number || 0;
-  
-  console.log(`Конвертация игрока: ${name}, позиция API: "${apiPlayer.position}", отображаемая позиция: "${position}", номер: ${number}`);
-  
-  return {
+  const player: Player = {
     id: apiPlayer.id,
-    name,
-    position,
-    number,
-    birthDate,
-    age,
-    height,
-    weight,
-    handedness: metrics.onetwofive || undefined,
-    captainStatus: metrics.ka || undefined, // Используем поле ka из sp_metrics
+    name: removePatronymic(apiPlayer.post_title || 'Неизвестный игрок'),
+    position: apiPlayer.position || 'Неизвестно',
+    number: typeof apiPlayer.sp_number === 'string' ? parseInt(apiPlayer.sp_number) || 0 : apiPlayer.sp_number || 0,
+    birthDate: apiPlayer.post_date,
+    age: calculateAge(apiPlayer.post_date),
+    height: apiPlayer.sp_metrics?.height ? parseInt(apiPlayer.sp_metrics.height) || undefined : undefined,
+    weight: apiPlayer.sp_metrics?.weight ? parseInt(apiPlayer.sp_metrics.weight) || undefined : undefined,
+    handedness: apiPlayer.sp_metrics?.onetwofive || undefined,
+    captainStatus: apiPlayer.sp_metrics?.ka || undefined,
     nationality: apiPlayer.sp_nationality || undefined,
     photo: apiPlayer.player_image || undefined,
   };
+  
+  console.log('Конвертированный игрок:', player);
+  return player;
 }
 
 export async function checkApiAvailability(): Promise<boolean> {
   try {
-    return await apiService.checkPlayersApiAvailability();
+    console.log('Проверка доступности API игроков...');
+    const isAvailable = await apiService.checkPlayersApiAvailability();
+    console.log('API игроков доступен:', isAvailable);
+    return isAvailable;
   } catch (error) {
     console.error('Ошибка проверки доступности API:', error);
     return false;
   }
 }
 
-export async function preloadPlayerImages(players: Player[]): Promise<void> {
-  try {
-    console.log('Предзагрузка изображений игроков...');
-    
-    const imagePromises = players
-      .filter(player => player.photo)
-      .map(player => cachePlayerImage(player.photo!));
-    
-    await Promise.all(imagePromises);
-    console.log('Предзагрузка изображений завершена');
-  } catch (error) {
-    console.error('Ошибка предзагрузки изображений:', error);
-  }
+async function preloadPlayerImages(players: Player[]): Promise<void> {
+  console.log('Предзагрузка изображений игроков...');
+  const imagePromises = players
+    .filter(player => player.photo)
+    .map(player => cachePlayerImage(player.photo!));
+  
+  await Promise.allSettled(imagePromises);
+  console.log('Предзагрузка изображений завершена');
 }
 
 export async function getPlayers(): Promise<Player[]> {
   try {
-    console.log('Получение игроков...');
-    
-    // Проверяем кэш в памяти
-    if (playersMemoryCache.length > 0 && isCacheValid(playersCacheTimestamp)) {
-      console.log('Используется кэш в памяти');
-      return playersMemoryCache;
-    }
-    
-    // Проверяем кэш в AsyncStorage
-    try {
-      const cachedDataJson = await AsyncStorage.getItem(PLAYERS_CACHE_KEY);
-      if (cachedDataJson) {
-        const cachedData: CachedData<Player[]> = JSON.parse(cachedDataJson);
-        if (isCacheValid(cachedData.timestamp)) {
-          console.log('Используется кэш AsyncStorage');
-          playersMemoryCache = cachedData.data;
-          playersCacheTimestamp = cachedData.timestamp;
-          return cachedData.data;
-        }
+    // Проверяем кэш
+    const cachedData = await AsyncStorage.getItem(PLAYERS_CACHE_KEY);
+    if (cachedData) {
+      const parsed: CachedData<Player[]> = JSON.parse(cachedData);
+      if (isCacheValid(parsed.timestamp)) {
+        console.log('Возврат игроков из кэша');
+        return parsed.data;
       }
-    } catch (cacheError) {
-      console.error('Ошибка чтения кэша:', cacheError);
     }
-    
+
+    console.log('Загрузка игроков из API...');
     const apiPlayers = await apiService.fetchPlayers();
-    console.log(`Получено ${apiPlayers.length} игроков из API`);
     
-    // Логируем первые несколько игроков для отладки
-    apiPlayers.slice(0, 3).forEach((player, index) => {
-      console.log(`Игрок ${index + 1}:`, {
-        id: player.id,
-        name: player.post_title,
-        position: player.position,
-        number: player.sp_number
-      });
-    });
-    
+    if (!Array.isArray(apiPlayers) || apiPlayers.length === 0) {
+      console.log('Нет данных об игроках, используем fallback');
+      return getFallbackPlayers();
+    }
+
     const players = apiPlayers.map(convertApiPlayerToPlayer);
     
-    // Сортируем игроков по номеру
+    // Сортировка по номеру
     players.sort((a, b) => a.number - b.number);
-    
-    // Логируем распределение игроков по позициям
-    const positionCounts = players.reduce((acc, player) => {
-      acc[player.position] = (acc[player.position] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-    
-    console.log('Распределение игроков по позициям:', positionCounts);
-    
-    playersMemoryCache = players;
-    playersCacheTimestamp = Date.now();
-    
+
+    // Кэшируем результат
     const cacheData: CachedData<Player[]> = {
       data: players,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
     await AsyncStorage.setItem(PLAYERS_CACHE_KEY, JSON.stringify(cacheData));
-    
-    await preloadPlayerImages(players);
-    
-    console.log(`Успешно обработано ${players.length} игроков`);
+
+    // Предзагружаем изображения в фоне
+    preloadPlayerImages(players);
+
+    console.log(`Загружено ${players.length} игроков из API`);
     return players;
-    
   } catch (error) {
-    console.error('Ошибка получения игроков:', error);
-    
-    if (playersMemoryCache.length > 0) {
-      console.log('Используется устаревший кэш в памяти');
-      return playersMemoryCache;
-    }
-    
-    try {
-      const cachedDataJson = await AsyncStorage.getItem(PLAYERS_CACHE_KEY);
-      if (cachedDataJson) {
-        const cachedData: CachedData<Player[]> = JSON.parse(cachedDataJson);
-        console.log('Используется устаревший кэш AsyncStorage');
-        return cachedData.data;
-      }
-    } catch (cacheError) {
-      console.error('Ошибка чтения кэша:', cacheError);
-    }
-    
+    console.error('Ошибка загрузки игроков:', error);
     return getFallbackPlayers();
   }
 }
 
 export async function getPlayerById(playerId: string): Promise<Player | null> {
   try {
-    console.log('Получение игрока по ID:', playerId);
-    
-    const allPlayers = await getPlayers();
-    const player = allPlayers.find(p => p.id === playerId);
+    console.log('Поиск игрока по ID:', playerId);
+    const players = await getPlayers();
+    const player = players.find(p => p.id === playerId);
     
     if (player) {
       console.log('Игрок найден:', player);
       return player;
-    } else {
-      console.log('Игрок не найден для ID:', playerId);
-      return null;
     }
     
+    console.log('Игрок не найден');
+    return null;
   } catch (error) {
-    console.error('Ошибка получения игрока по ID:', error);
+    console.error('Ошибка поиска игрока:', error);
     return null;
   }
 }
 
 export function searchPlayers(players: Player[], searchQuery: string): Player[] {
-  if (!searchQuery || searchQuery.length < 1) {
+  if (!searchQuery.trim()) {
     return players;
   }
-  
+
   const query = searchQuery.toLowerCase().trim();
-  
-  return players.filter(player => {
+  console.log('Поиск игроков по запросу:', query);
+
+  const filtered = players.filter(player => {
     const name = player.name.toLowerCase();
     const position = player.position.toLowerCase();
     const number = player.number.toString();
@@ -261,39 +188,41 @@ export function searchPlayers(players: Player[], searchQuery: string): Player[] 
            position.includes(query) || 
            number.includes(query);
   });
+
+  console.log(`Найдено ${filtered.length} игроков по запросу "${query}"`);
+  return filtered;
 }
 
 function getFallbackPlayers(): Player[] {
   return [
     {
       id: '1',
-      name: 'Александр Петров',
-      position: 'Нападающий',
-      number: 10,
-      age: 28,
+      name: 'Иван Петров',
+      position: 'Вратарь',
+      number: 1,
+      age: 25,
       height: 185,
-      weight: 85,
-      photo: 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=400&h=400&fit=crop&crop=face',
+      weight: 80,
+      captainStatus: 'captain',
     },
     {
       id: '2',
-      name: 'Дмитрий Иванов',
+      name: 'Алексей Сидоров',
       position: 'Защитник',
-      number: 5,
-      age: 26,
-      height: 190,
-      weight: 90,
-      photo: 'https://images.unsplash.com/photo-1566492031773-4f4e44671d66?w=400&h=400&fit=crop&crop=face',
+      number: 2,
+      age: 28,
+      height: 180,
+      weight: 85,
     },
     {
       id: '3',
-      name: 'Сергей Козлов',
-      position: 'Вратарь',
-      number: 1,
-      age: 30,
-      height: 188,
-      weight: 82,
-      photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=400&fit=crop&crop=face',
+      name: 'Михаил Козлов',
+      position: 'Нападающий',
+      number: 10,
+      age: 24,
+      height: 175,
+      weight: 75,
+      captainStatus: 'assistant',
     },
   ];
 }

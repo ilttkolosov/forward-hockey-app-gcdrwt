@@ -1,68 +1,70 @@
 
-import { Stack, useGlobalSearchParams } from 'expo-router';
-import { SafeAreaProvider, useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
-import { Platform } from 'react-native';
-import { useEffect, useState } from 'react';
-import { setupErrorLogging } from '../utils/errorLogger';
+import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-
-const STORAGE_KEY = 'emulated_device';
+import { StatusBar } from 'expo-status-bar';
 
 export default function RootLayout() {
-  const actualInsets = useSafeAreaInsets();
-  const { emulate } = useGlobalSearchParams<{ emulate?: string }>();
-  const [storedEmulate, setStoredEmulate] = useState<string | null>(null);
-
-  useEffect(() => {
-    // Set up global error logging
-    setupErrorLogging();
-
-    if (Platform.OS === 'web') {
-      // If there's a new emulate parameter, store it
-      if (emulate) {
-        localStorage.setItem(STORAGE_KEY, emulate);
-        setStoredEmulate(emulate);
-      } else {
-        // If no emulate parameter, try to get from localStorage
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          setStoredEmulate(stored);
-        }
-      }
-    }
-  }, [emulate]);
-
-  let insetsToUse = actualInsets;
-
-  if (Platform.OS === 'web') {
-    const simulatedInsets = {
-      ios: { top: 47, bottom: 20, left: 0, right: 0 },
-      android: { top: 40, bottom: 0, left: 0, right: 0 },
-    };
-
-    // Use stored emulate value if available, otherwise use the current emulate parameter
-    const deviceToEmulate = storedEmulate || emulate;
-    insetsToUse = deviceToEmulate ? simulatedInsets[deviceToEmulate as keyof typeof simulatedInsets] || actualInsets : actualInsets;
-  }
-
   return (
-    <SafeAreaProvider>
-        <GestureHandlerRootView style={{ flex: 1 }}>
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              animation: 'slide_from_right',
-              animationDuration: 200,
-            }}
-          >
-            <Stack.Screen name="index" />
-            <Stack.Screen name="upcoming" />
-            <Stack.Screen name="archive" />
-            <Stack.Screen name="players" />
-            <Stack.Screen name="coaches" />
-            <Stack.Screen name="tournaments" />
-          </Stack>
-        </GestureHandlerRootView>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <StatusBar style="dark" />
+      <Stack>
+        <Stack.Screen 
+          name="index" 
+          options={{ 
+            title: 'ХК Форвард',
+            headerShown: false 
+          }} 
+        />
+        <Stack.Screen 
+          name="players" 
+          options={{ 
+            title: 'Игроки',
+            headerBackTitle: 'Назад'
+          }} 
+        />
+        <Stack.Screen 
+          name="coaches" 
+          options={{ 
+            title: 'Тренеры',
+            headerBackTitle: 'Назад'
+          }} 
+        />
+        <Stack.Screen 
+          name="tournaments" 
+          options={{ 
+            title: 'Турниры',
+            headerBackTitle: 'Назад'
+          }} 
+        />
+        <Stack.Screen 
+          name="upcoming" 
+          options={{ 
+            title: 'Предстоящие игры',
+            headerBackTitle: 'Назад'
+          }} 
+        />
+        <Stack.Screen 
+          name="archive" 
+          options={{ 
+            title: 'Архив игр',
+            headerBackTitle: 'Назад'
+          }} 
+        />
+        <Stack.Screen 
+          name="player/[id]" 
+          options={{ 
+            title: 'Игрок',
+            headerBackTitle: 'Назад'
+          }} 
+        />
+        <Stack.Screen 
+          name="game/[id]" 
+          options={{ 
+            title: 'Матч',
+            headerBackTitle: 'Назад'
+          }} 
+        />
+      </Stack>
+    </GestureHandlerRootView>
   );
 }

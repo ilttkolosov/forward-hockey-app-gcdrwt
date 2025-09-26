@@ -2,8 +2,8 @@
 import React from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Player } from '../types';
 import { colors, commonStyles } from '../styles/commonStyles';
+import { Player } from '../types';
 import Icon from './Icon';
 
 interface PlayerCardProps {
@@ -16,181 +16,179 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginVertical: 8,
-    marginHorizontal: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
     shadowColor: colors.shadow,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
+  content: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   photoContainer: {
-    position: 'relative',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: 16,
+    overflow: 'hidden',
   },
   photo: {
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: colors.background,
-  },
-  photoPlaceholder: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  captainBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    backgroundColor: colors.primary,
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    minWidth: 20,
-    alignItems: 'center',
-  },
-  assistantBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    backgroundColor: colors.warning,
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    minWidth: 20,
-    alignItems: 'center',
-  },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: colors.surface,
   },
   info: {
     flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
   },
   name: {
     fontSize: 16,
     fontWeight: '600',
     color: colors.text,
+    flex: 1,
+  },
+  number: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.primary,
+    marginLeft: 8,
+  },
+  badges: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 4,
   },
-  position: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginBottom: 8,
+  captainBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  captainText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.surface,
+  },
+  positionBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  positionText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.surface,
   },
   details: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
+    marginTop: 4,
   },
-  detail: {
+  detailText: {
     fontSize: 12,
     color: colors.textSecondary,
     marginRight: 12,
-    marginBottom: 2,
-  },
-  numberContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 16,
-  },
-  number: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.primary,
-    minWidth: 40,
-    textAlign: 'center',
   },
 });
 
-const PlayerCard: React.FC<PlayerCardProps> = ({ player }) => {
+export default function PlayerCard({ player }: PlayerCardProps) {
   const router = useRouter();
 
   const getPositionColor = (position: string) => {
-    const pos = position.toLowerCase();
-    
-    // Обрабатываем позиции из API
-    if (pos.includes('нападающ')) {
-      return colors.error;
+    switch (position.toLowerCase()) {
+      case 'вратарь':
+      case 'goalkeeper':
+      case 'g':
+        return colors.error;
+      case 'защитник':
+      case 'defenseman':
+      case 'd':
+        return colors.primary;
+      case 'нападающий':
+      case 'forward':
+      case 'f':
+        return colors.success;
+      default:
+        return colors.textSecondary;
     }
-    if (pos.includes('защитник')) {
-      return colors.primary;
-    }
-    if (pos.includes('вратар')) {
-      return colors.warning;
-    }
-    
-    return colors.textSecondary;
   };
 
   const getCaptainBadgeInfo = () => {
-    const ka = player.captainStatus;
-    if (!ka) return null;
+    if (!player.captainStatus) return null;
     
-    const status = ka.toLowerCase();
-    if (status === 'k') {
-      return { text: 'К', style: styles.captainBadge, title: 'Капитан' };
+    switch (player.captainStatus.toLowerCase()) {
+      case 'captain':
+      case 'капитан':
+        return { text: 'К', color: colors.warning };
+      case 'assistant':
+      case 'ассистент':
+        return { text: 'А', color: colors.secondary };
+      default:
+        return null;
     }
-    if (status === 'a') {
-      return { text: 'А', style: styles.assistantBadge, title: 'Ассистент' };
-    }
-    return null;
   };
 
   const handlePress = () => {
-    console.log('Переход к деталям игрока:', player.id);
     router.push(`/player/${player.id}`);
   };
 
-  const captainBadgeInfo = getCaptainBadgeInfo();
+  const captainInfo = getCaptainBadgeInfo();
 
   return (
     <TouchableOpacity style={styles.card} onPress={handlePress}>
-      <View style={styles.photoContainer}>
-        {player.photo ? (
-          <Image source={{ uri: player.photo }} style={styles.photo} />
-        ) : (
-          <View style={styles.photoPlaceholder}>
-            <Icon name="person" size={24} color={colors.textSecondary} />
-          </View>
-        )}
-        
-        {captainBadgeInfo && (
-          <View style={captainBadgeInfo.style}>
-            <Text style={styles.badgeText}>{captainBadgeInfo.text}</Text>
-          </View>
-        )}
-      </View>
-      
-      <View style={styles.info}>
-        <Text style={styles.name}>{player.name}</Text>
-        <Text style={[styles.position, { color: getPositionColor(player.position) }]}>
-          {player.position}
-        </Text>
-        
-        <View style={styles.details}>
-          {player.age && (
-            <Text style={styles.detail}>Возраст: {player.age}</Text>
-          )}
-          {player.handedness && (
-            <Text style={styles.detail}>Хват: {player.handedness}</Text>
+      <View style={styles.content}>
+        <View style={styles.photoContainer}>
+          {player.photo ? (
+            <Image 
+              source={{ uri: player.photo }} 
+              style={styles.photo}
+              defaultSource={require('../assets/images/natively-dark.png')}
+            />
+          ) : (
+            <Icon name="person" size={30} color={colors.textSecondary} />
           )}
         </View>
-      </View>
-
-      <View style={styles.numberContainer}>
-        <Text style={styles.number}>#{player.number}</Text>
+        
+        <View style={styles.info}>
+          <View style={styles.header}>
+            <Text style={styles.name} numberOfLines={1}>
+              {player.name}
+            </Text>
+            <Text style={styles.number}>#{player.number}</Text>
+          </View>
+          
+          <View style={styles.badges}>
+            {captainInfo && (
+              <View style={[styles.captainBadge, { backgroundColor: captainInfo.color }]}>
+                <Text style={styles.captainText}>{captainInfo.text}</Text>
+              </View>
+            )}
+            <View style={[styles.positionBadge, { backgroundColor: getPositionColor(player.position) }]}>
+              <Text style={styles.positionText}>{player.position}</Text>
+            </View>
+          </View>
+          
+          <View style={styles.details}>
+            {player.age && (
+              <Text style={styles.detailText}>{player.age} лет</Text>
+            )}
+            {player.height && (
+              <Text style={styles.detailText}>{player.height} см</Text>
+            )}
+            {player.weight && (
+              <Text style={styles.detailText}>{player.weight} кг</Text>
+            )}
+          </View>
+        </View>
       </View>
     </TouchableOpacity>
   );
-};
-
-export default PlayerCard;
+}
