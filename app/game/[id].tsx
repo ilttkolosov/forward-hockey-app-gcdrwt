@@ -24,6 +24,77 @@ import { formatDateTimeWithoutSeconds } from '../../utils/dateUtils';
 
 const { width } = Dimensions.get('window');
 
+// VK Video Utilities - Inline implementation to avoid import issues
+const parseVKVideoUrl = (url: string): { ownerId: string; videoId: string } | null => {
+  try {
+    console.log('Parsing VK video URL:', url);
+    
+    // Check if it's already an embed URL
+    if (url.includes('video_ext.php')) {
+      console.log('URL is already an embed URL');
+      return null; // Return null to use the URL as-is
+    }
+    
+    // Parse URLs like https://vkvideo.ru/video-211881014_456240669
+    const videoMatch = url.match(/video(-?\d+)_(\d+)/);
+    if (videoMatch) {
+      const ownerId = videoMatch[1]; // Already includes the minus sign if present
+      const videoId = videoMatch[2];
+      console.log('Extracted VK video IDs:', { ownerId, videoId });
+      return { ownerId, videoId };
+    }
+    
+    console.log('Could not parse VK video URL');
+    return null;
+  } catch (error) {
+    console.error('Error parsing VK video URL:', error);
+    return null;
+  }
+};
+
+const constructVKEmbedUrl = (ownerId: string, videoId: string): string => {
+  // Use the parameters specified in the requirements:
+  // - hd=4 for 1920×1080 resolution
+  // - autoplay=1 to enable autostart
+  // - js_api=1 to enable JavaScript API for player control
+  const embedUrl = `https://vk.com/video_ext.php?oid=${ownerId}&id=${videoId}&hd=4&autoplay=1&js_api=1`;
+  console.log('Constructed VK embed URL:', embedUrl);
+  return embedUrl;
+};
+
+const getVKEmbedUrl = (videoUrl: string): string => {
+  try {
+    // If it's already an embed URL, enhance it with our preferred parameters
+    if (videoUrl.includes('video_ext.php')) {
+      const url = new URL(videoUrl);
+      
+      // Add our preferred parameters if they're not already there
+      if (!url.searchParams.has('hd')) url.searchParams.set('hd', '4');
+      if (!url.searchParams.has('autoplay')) url.searchParams.set('autoplay', '1');
+      if (!url.searchParams.has('js_api')) url.searchParams.set('js_api', '1');
+      
+      const enhancedUrl = url.toString();
+      console.log('Enhanced existing embed URL:', enhancedUrl);
+      return enhancedUrl;
+    }
+    
+    // Parse the VK video URL and construct embed URL
+    const parsed = parseVKVideoUrl(videoUrl);
+    if (parsed) {
+      return constructVKEmbedUrl(parsed.ownerId, parsed.videoId);
+    }
+    
+    // If we can't parse it, return the original URL as fallback
+    console.log('Using original URL as fallback:', videoUrl);
+    return videoUrl;
+  } catch (error) {
+    console.error('Error processing VK video URL:', error);
+    return videoUrl; // Return original URL as fallback
+  }
+};
+
+
+
 export default function GameDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -33,138 +104,7 @@ export default function GameDetailsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [teamsLoading, setTeamsLoading] = useState(false);
 
-  // JavaScript code to inject into WebView to hide VK page elements and focus on video
-  const injectScript = `
-    (function() {
-      console.log('Injecting VK video masking script...');
-      
-      // Function to hide elements
-      function hideElement(selector) {
-        const elements = document.querySelectorAll(selector);
-        elements.forEach(el => {
-          if (el) {
-            el.style.display = 'none';
-            console.log('Hidden element:', selector);
-          }
-        });
-      }
-      
-      // Function to style video for fullscreen
-      function styleVideo() {
-        const video = document.querySelector('video');
-        if (video) {
-          console.log('Found video element, styling...');
-          video.style.width = '100%';
-          video.style.height = '100%';
-          video.style.position = 'absolute';
-          video.style.top = '0';
-          video.style.left = '0';
-          video.style.objectFit = 'contain';
-          video.style.zIndex = '1000';
-          
-          // Make video container fullscreen
-          const videoContainer = video.closest('.video_player, .videoplayer, .player_wrap, .mv_player');
-          if (videoContainer) {
-            videoContainer.style.position = 'absolute';
-            videoContainer.style.top = '0';
-            videoContainer.style.left = '0';
-            videoContainer.style.width = '100%';
-            videoContainer.style.height = '100%';
-            videoContainer.style.zIndex = '999';
-          }
-        }
-      }
-      
-      // Wait for page to load and then apply changes
-      function applyChanges() {
-        console.log('Applying VK page changes...');
-        
-        // Hide VK page elements
-        hideElement('header');
-        hideElement('.top_bar');
-        hideElement('.TopNavBtn');
-        hideElement('.left_menu');
-        hideElement('.side_bar');
-        hideElement('.sidebar');
-        hideElement('.comments');
-        hideElement('.footer');
-        hideElement('.mv_info');
-        hideElement('.mv_actions');
-        hideElement('.mv_description');
-        hideElement('.mv_author');
-        hideElement('.mv_title');
-        hideElement('.breadcrumbs');
-        hideElement('.page_header');
-        hideElement('.page_block');
-        hideElement('.mv_related');
-        hideElement('.mv_playlist');
-        hideElement('#page_header');
-        hideElement('#side_bar');
-        hideElement('.fixed_header');
-        hideElement('.page_wrap');
-        hideElement('.content');
-        
-        // Remove body margins and padding
-        document.body.style.margin = '0';
-        document.body.style.padding = '0';
-        document.body.style.overflow = 'hidden';
-        document.body.style.backgroundColor = '#000';
-        
-        // Remove html margins
-        document.documentElement.style.margin = '0';
-        document.documentElement.style.padding = '0';
-        document.documentElement.style.overflow = 'hidden';
-        
-        // Style video
-        styleVideo();
-        
-        // Try again after a short delay in case elements load later
-        setTimeout(() => {
-          styleVideo();
-          hideElement('.mv_info');
-          hideElement('.mv_actions');
-          hideElement('.mv_description');
-        }, 1000);
-        
-        // And once more after longer delay
-        setTimeout(() => {
-          styleVideo();
-          hideElement('.mv_info');
-          hideElement('.mv_actions');
-          hideElement('.mv_description');
-        }, 3000);
-      }
-      
-      // Apply changes immediately
-      applyChanges();
-      
-      // Apply changes when DOM is ready
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', applyChanges);
-      }
-      
-      // Apply changes when window loads
-      window.addEventListener('load', applyChanges);
-      
-      // Observer to watch for dynamically added elements
-      const observer = new MutationObserver(function(mutations) {
-        mutations.forEach(function(mutation) {
-          if (mutation.type === 'childList') {
-            // Re-apply video styling when new elements are added
-            setTimeout(styleVideo, 100);
-          }
-        });
-      });
-      
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true
-      });
-      
-      console.log('VK video masking script completed');
-    })();
-    true; // Return true to indicate script executed successfully
-  `;
+
 
   const loadGameData = useCallback(async () => {
     try {
@@ -381,38 +321,44 @@ export default function GameDetailsScreen() {
         style={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* Video Player - Enhanced with JavaScript injection to hide VK elements */}
+        {/* VK Video Player - Using official VK embed API */}
         {gameDetails.videoUrl && (
           <View style={styles.videoContainer}>
             <Text style={styles.sectionTitle}>Видео матча</Text>
             <View style={styles.videoFrame}>
               <WebView
-                source={{ uri: gameDetails.videoUrl }}
+                source={{ uri: getVKEmbedUrl(gameDetails.videoUrl) }}
                 style={styles.webview}
-                injectedJavaScript={injectScript}
                 javaScriptEnabled={true}
                 domStorageEnabled={true}
                 startInLoadingState={true}
-                scalesPageToFit={true}
+                scalesPageToFit={false}
                 allowsInlineMediaPlayback={true}
                 mediaPlaybackRequiresUserAction={false}
                 mixedContentMode="compatibility"
+                allowsFullscreenVideo={true}
+                bounces={false}
+                scrollEnabled={false}
+                showsHorizontalScrollIndicator={false}
+                showsVerticalScrollIndicator={false}
+                onLoadStart={() => {
+                  console.log('VK video embed started loading for URL:', getVKEmbedUrl(gameDetails.videoUrl));
+                }}
                 onLoadEnd={() => {
-                  console.log('WebView loaded, video should be masked');
+                  console.log('VK video embed loaded successfully');
                 }}
                 onError={(syntheticEvent) => {
                   const { nativeEvent } = syntheticEvent;
-                  console.error('WebView error: ', nativeEvent);
+                  console.error('VK video embed error:', nativeEvent);
                 }}
                 onHttpError={(syntheticEvent) => {
                   const { nativeEvent } = syntheticEvent;
-                  console.error('WebView HTTP error: ', nativeEvent);
+                  console.error('VK video embed HTTP error:', nativeEvent);
                 }}
-                onMessage={(event) => {
-                  console.log('WebView message:', event.nativeEvent.data);
-                }}
+                userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"
               />
             </View>
+
           </View>
         )}
 
@@ -598,10 +544,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+    elevation: 4, // Android shadow
   },
   webview: {
     flex: 1,
     backgroundColor: '#000', // Black background for video
+    borderRadius: 12,
   },
   gameInfo: {
     padding: 20,
@@ -761,4 +709,5 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 12,
   },
+
 });
