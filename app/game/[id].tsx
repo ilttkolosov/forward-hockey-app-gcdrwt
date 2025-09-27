@@ -33,135 +33,292 @@ export default function GameDetailsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [teamsLoading, setTeamsLoading] = useState(false);
 
-  // JavaScript code to inject into WebView to hide VK page elements and focus on video
+  // Enhanced JavaScript code to inject into WebView to completely hide VK page elements
   const injectScript = `
     (function() {
-      console.log('Injecting VK video masking script...');
+      console.log('=== VK Video Masking Script Started ===');
       
-      // Function to hide elements
-      function hideElement(selector) {
-        const elements = document.querySelectorAll(selector);
-        elements.forEach(el => {
-          if (el) {
-            el.style.display = 'none';
-            console.log('Hidden element:', selector);
+      // More aggressive element hiding function
+      function hideElements() {
+        console.log('Hiding VK page elements...');
+        
+        // List of selectors to hide - comprehensive list for VK
+        const selectorsToHide = [
+          // Headers and navigation
+          'header', '.header', '#header',
+          '.top_bar', '.TopNavBtn', '.top_nav',
+          '.left_menu', '.side_bar', '.sidebar', '#side_bar',
+          '.fixed_header', '.page_header', '#page_header',
+          '.breadcrumbs', '.nav', '.navigation',
+          
+          // VK specific elements
+          '.mv_info', '.mv_actions', '.mv_description', 
+          '.mv_author', '.mv_title', '.mv_related', '.mv_playlist',
+          '.video_info', '.video_actions', '.video_description',
+          '.video_author', '.video_title', '.video_related',
+          
+          // Comments and social elements
+          '.comments', '.comment', '.social', '.share',
+          '.likes', '.views', '.rating',
+          
+          // Footer and additional content
+          '.footer', '#footer', '.page_footer',
+          '.content', '.page_wrap', '.page_block',
+          
+          // VK mobile specific
+          '.mobile_header', '.mobile_nav', '.mobile_menu',
+          '.vk_header', '.vk_nav', '.vk_menu',
+          
+          // Generic hiding
+          '[class*="header"]', '[class*="nav"]', '[class*="menu"]',
+          '[class*="info"]', '[class*="description"]', '[class*="comment"]',
+          '[id*="header"]', '[id*="nav"]', '[id*="menu"]'
+        ];
+        
+        // Hide elements by selector
+        selectorsToHide.forEach(selector => {
+          try {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach(el => {
+              if (el && el.style) {
+                el.style.display = 'none !important';
+                el.style.visibility = 'hidden !important';
+                el.style.opacity = '0 !important';
+                el.style.height = '0 !important';
+                el.style.width = '0 !important';
+                el.style.margin = '0 !important';
+                el.style.padding = '0 !important';
+              }
+            });
+            if (elements.length > 0) {
+              console.log('Hidden elements for selector:', selector, elements.length);
+            }
+          } catch (e) {
+            console.log('Error hiding selector:', selector, e);
+          }
+        });
+        
+        // Hide elements by text content (VK specific)
+        const textSelectors = ['Показать ещё', 'Комментарии', 'Поделиться', 'Нравится'];
+        textSelectors.forEach(text => {
+          try {
+            const xpath = "//*[contains(text(), '" + text + "')]";
+            const result = document.evaluate(xpath, document, null, XPathResult.UNORDERED_NODE_SNAPSHOT_TYPE, null);
+            for (let i = 0; i < result.snapshotLength; i++) {
+              const element = result.snapshotItem(i);
+              if (element && element.style) {
+                element.style.display = 'none !important';
+              }
+            }
+          } catch (e) {
+            console.log('Error hiding by text:', text, e);
           }
         });
       }
       
       // Function to style video for fullscreen
       function styleVideo() {
+        console.log('Styling video for fullscreen...');
+        
+        // Find video element
         const video = document.querySelector('video');
         if (video) {
-          console.log('Found video element, styling...');
-          video.style.width = '100%';
-          video.style.height = '100%';
-          video.style.position = 'absolute';
-          video.style.top = '0';
-          video.style.left = '0';
-          video.style.objectFit = 'contain';
-          video.style.zIndex = '1000';
+          console.log('Found video element, applying fullscreen styles');
           
-          // Make video container fullscreen
-          const videoContainer = video.closest('.video_player, .videoplayer, .player_wrap, .mv_player');
-          if (videoContainer) {
-            videoContainer.style.position = 'absolute';
-            videoContainer.style.top = '0';
-            videoContainer.style.left = '0';
-            videoContainer.style.width = '100%';
-            videoContainer.style.height = '100%';
-            videoContainer.style.zIndex = '999';
-          }
+          // Video styles
+          video.style.cssText = \`
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            object-fit: contain !important;
+            z-index: 9999 !important;
+            background: #000 !important;
+          \`;
+          
+          // Find and style video container
+          const containers = [
+            video.closest('.video_player'),
+            video.closest('.videoplayer'), 
+            video.closest('.player_wrap'),
+            video.closest('.mv_player'),
+            video.closest('[class*="player"]'),
+            video.closest('[class*="video"]'),
+            video.parentElement
+          ];
+          
+          containers.forEach(container => {
+            if (container && container !== document.body) {
+              container.style.cssText = \`
+                position: fixed !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 100vw !important;
+                height: 100vh !important;
+                z-index: 9998 !important;
+                background: #000 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+              \`;
+              console.log('Styled video container');
+            }
+          });
+          
+          return true;
         }
+        
+        console.log('Video element not found');
+        return false;
       }
       
-      // Wait for page to load and then apply changes
-      function applyChanges() {
-        console.log('Applying VK page changes...');
+      // Function to clean up page structure
+      function cleanupPage() {
+        console.log('Cleaning up page structure...');
         
-        // Hide VK page elements
-        hideElement('header');
-        hideElement('.top_bar');
-        hideElement('.TopNavBtn');
-        hideElement('.left_menu');
-        hideElement('.side_bar');
-        hideElement('.sidebar');
-        hideElement('.comments');
-        hideElement('.footer');
-        hideElement('.mv_info');
-        hideElement('.mv_actions');
-        hideElement('.mv_description');
-        hideElement('.mv_author');
-        hideElement('.mv_title');
-        hideElement('.breadcrumbs');
-        hideElement('.page_header');
-        hideElement('.page_block');
-        hideElement('.mv_related');
-        hideElement('.mv_playlist');
-        hideElement('#page_header');
-        hideElement('#side_bar');
-        hideElement('.fixed_header');
-        hideElement('.page_wrap');
-        hideElement('.content');
-        
-        // Remove body margins and padding
-        document.body.style.margin = '0';
-        document.body.style.padding = '0';
-        document.body.style.overflow = 'hidden';
-        document.body.style.backgroundColor = '#000';
+        // Remove body margins and set black background
+        if (document.body) {
+          document.body.style.cssText = \`
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+            background: #000 !important;
+            height: 100vh !important;
+            width: 100vw !important;
+          \`;
+        }
         
         // Remove html margins
-        document.documentElement.style.margin = '0';
-        document.documentElement.style.padding = '0';
-        document.documentElement.style.overflow = 'hidden';
+        if (document.documentElement) {
+          document.documentElement.style.cssText = \`
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+            background: #000 !important;
+            height: 100vh !important;
+            width: 100vw !important;
+          \`;
+        }
         
-        // Style video
-        styleVideo();
+        // Add CSS to hide everything except video
+        const style = document.createElement('style');
+        style.textContent = \`
+          * {
+            box-sizing: border-box !important;
+          }
+          
+          body > *:not([class*="video"]):not([class*="player"]):not(video):not(style):not(script) {
+            display: none !important;
+          }
+          
+          [class*="header"], [class*="nav"], [class*="menu"], 
+          [class*="info"], [class*="description"], [class*="comment"],
+          [class*="footer"], [class*="sidebar"] {
+            display: none !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
+            height: 0 !important;
+            width: 0 !important;
+          }
+          
+          video {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            object-fit: contain !important;
+            z-index: 9999 !important;
+            background: #000 !important;
+          }
+        \`;
+        document.head.appendChild(style);
+        console.log('Added cleanup CSS');
+      }
+      
+      // Main function to apply all changes
+      function applyVideoMasking() {
+        console.log('Applying video masking...');
         
-        // Try again after a short delay in case elements load later
+        hideElements();
+        cleanupPage();
+        const videoFound = styleVideo();
+        
+        if (!videoFound) {
+          // Try again after a delay if video not found
+          setTimeout(() => {
+            console.log('Retrying video styling...');
+            styleVideo();
+          }, 1000);
+          
+          setTimeout(() => {
+            console.log('Final retry for video styling...');
+            styleVideo();
+          }, 3000);
+        }
+        
+        // Continue hiding elements that might load dynamically
         setTimeout(() => {
+          hideElements();
           styleVideo();
-          hideElement('.mv_info');
-          hideElement('.mv_actions');
-          hideElement('.mv_description');
-        }, 1000);
+        }, 2000);
         
-        // And once more after longer delay
         setTimeout(() => {
+          hideElements();
           styleVideo();
-          hideElement('.mv_info');
-          hideElement('.mv_actions');
-          hideElement('.mv_description');
-        }, 3000);
+        }, 5000);
       }
       
       // Apply changes immediately
-      applyChanges();
+      applyVideoMasking();
       
       // Apply changes when DOM is ready
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', applyChanges);
+        document.addEventListener('DOMContentLoaded', applyVideoMasking);
       }
       
       // Apply changes when window loads
-      window.addEventListener('load', applyChanges);
+      window.addEventListener('load', applyVideoMasking);
       
       // Observer to watch for dynamically added elements
       const observer = new MutationObserver(function(mutations) {
+        let shouldReapply = false;
+        
         mutations.forEach(function(mutation) {
-          if (mutation.type === 'childList') {
-            // Re-apply video styling when new elements are added
-            setTimeout(styleVideo, 100);
+          if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+            // Check if any added nodes are not video-related
+            mutation.addedNodes.forEach(node => {
+              if (node.nodeType === 1) { // Element node
+                const element = node;
+                const className = element.className || '';
+                const tagName = element.tagName || '';
+                
+                // If it's not a video-related element, hide it
+                if (!className.includes('video') && 
+                    !className.includes('player') && 
+                    tagName !== 'VIDEO') {
+                  shouldReapply = true;
+                }
+              }
+            });
           }
         });
+        
+        if (shouldReapply) {
+          setTimeout(() => {
+            hideElements();
+            styleVideo();
+          }, 100);
+        }
       });
       
+      // Start observing
       observer.observe(document.body, {
         childList: true,
         subtree: true
       });
       
-      console.log('VK video masking script completed');
+      console.log('=== VK Video Masking Script Completed ===');
     })();
     true; // Return true to indicate script executed successfully
   `;
@@ -328,6 +485,14 @@ export default function GameDetailsScreen() {
     }
   };
 
+  // Helper function to get tournament display name
+  const getTournamentDisplayName = (league?: string): { name: string; isFriendly: boolean } => {
+    if (!league || league.trim() === '') {
+      return { name: 'Товарищеский матч', isFriendly: true };
+    }
+    return { name: league, isFriendly: false };
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={commonStyles.container}>
@@ -364,6 +529,8 @@ export default function GameDetailsScreen() {
     );
   }
 
+  const tournamentInfo = getTournamentDisplayName(gameDetails.league);
+
   return (
     <SafeAreaView style={commonStyles.container}>
       <View style={styles.header}>
@@ -381,7 +548,7 @@ export default function GameDetailsScreen() {
         style={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* Video Player - Enhanced with JavaScript injection to hide VK elements */}
+        {/* Video Player - Enhanced with more aggressive JavaScript injection */}
         {gameDetails.videoUrl && (
           <View style={styles.videoContainer}>
             <Text style={styles.sectionTitle}>Видео матча</Text>
@@ -398,7 +565,7 @@ export default function GameDetailsScreen() {
                 mediaPlaybackRequiresUserAction={false}
                 mixedContentMode="compatibility"
                 onLoadEnd={() => {
-                  console.log('WebView loaded, video should be masked');
+                  console.log('WebView loaded, applying enhanced video masking');
                 }}
                 onError={(syntheticEvent) => {
                   const { nativeEvent } = syntheticEvent;
@@ -517,12 +684,14 @@ export default function GameDetailsScreen() {
 
         {/* Tournament, Arena Info (Season removed as requested) */}
         <View style={styles.gameDetails}>
-          {gameDetails.league && (
-            <View style={styles.detailItem}>
+          <View style={styles.detailItem}>
+            {tournamentInfo.isFriendly ? (
+              <Icon name="people" size={16} color={colors.textSecondary} />
+            ) : (
               <Icon name="trophy" size={16} color={colors.textSecondary} />
-              <Text style={styles.detailText}>Турнир: {gameDetails.league}</Text>
-            </View>
-          )}
+            )}
+            <Text style={styles.detailText}>Турнир: {tournamentInfo.name}</Text>
+          </View>
           {gameDetails.venue && (
             <View style={styles.detailItem}>
               <Icon name="location" size={16} color={colors.textSecondary} />
