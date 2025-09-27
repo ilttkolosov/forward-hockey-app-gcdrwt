@@ -33,6 +33,139 @@ export default function GameDetailsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [teamsLoading, setTeamsLoading] = useState(false);
 
+  // JavaScript code to inject into WebView to hide VK page elements and focus on video
+  const injectScript = `
+    (function() {
+      console.log('Injecting VK video masking script...');
+      
+      // Function to hide elements
+      function hideElement(selector) {
+        const elements = document.querySelectorAll(selector);
+        elements.forEach(el => {
+          if (el) {
+            el.style.display = 'none';
+            console.log('Hidden element:', selector);
+          }
+        });
+      }
+      
+      // Function to style video for fullscreen
+      function styleVideo() {
+        const video = document.querySelector('video');
+        if (video) {
+          console.log('Found video element, styling...');
+          video.style.width = '100%';
+          video.style.height = '100%';
+          video.style.position = 'absolute';
+          video.style.top = '0';
+          video.style.left = '0';
+          video.style.objectFit = 'contain';
+          video.style.zIndex = '1000';
+          
+          // Make video container fullscreen
+          const videoContainer = video.closest('.video_player, .videoplayer, .player_wrap, .mv_player');
+          if (videoContainer) {
+            videoContainer.style.position = 'absolute';
+            videoContainer.style.top = '0';
+            videoContainer.style.left = '0';
+            videoContainer.style.width = '100%';
+            videoContainer.style.height = '100%';
+            videoContainer.style.zIndex = '999';
+          }
+        }
+      }
+      
+      // Wait for page to load and then apply changes
+      function applyChanges() {
+        console.log('Applying VK page changes...');
+        
+        // Hide VK page elements
+        hideElement('header');
+        hideElement('.top_bar');
+        hideElement('.TopNavBtn');
+        hideElement('.left_menu');
+        hideElement('.side_bar');
+        hideElement('.sidebar');
+        hideElement('.comments');
+        hideElement('.footer');
+        hideElement('.mv_info');
+        hideElement('.mv_actions');
+        hideElement('.mv_description');
+        hideElement('.mv_author');
+        hideElement('.mv_title');
+        hideElement('.breadcrumbs');
+        hideElement('.page_header');
+        hideElement('.page_block');
+        hideElement('.mv_related');
+        hideElement('.mv_playlist');
+        hideElement('#page_header');
+        hideElement('#side_bar');
+        hideElement('.fixed_header');
+        hideElement('.page_wrap');
+        hideElement('.content');
+        
+        // Remove body margins and padding
+        document.body.style.margin = '0';
+        document.body.style.padding = '0';
+        document.body.style.overflow = 'hidden';
+        document.body.style.backgroundColor = '#000';
+        
+        // Remove html margins
+        document.documentElement.style.margin = '0';
+        document.documentElement.style.padding = '0';
+        document.documentElement.style.overflow = 'hidden';
+        
+        // Style video
+        styleVideo();
+        
+        // Try again after a short delay in case elements load later
+        setTimeout(() => {
+          styleVideo();
+          hideElement('.mv_info');
+          hideElement('.mv_actions');
+          hideElement('.mv_description');
+        }, 1000);
+        
+        // And once more after longer delay
+        setTimeout(() => {
+          styleVideo();
+          hideElement('.mv_info');
+          hideElement('.mv_actions');
+          hideElement('.mv_description');
+        }, 3000);
+      }
+      
+      // Apply changes immediately
+      applyChanges();
+      
+      // Apply changes when DOM is ready
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', applyChanges);
+      }
+      
+      // Apply changes when window loads
+      window.addEventListener('load', applyChanges);
+      
+      // Observer to watch for dynamically added elements
+      const observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+          if (mutation.type === 'childList') {
+            // Re-apply video styling when new elements are added
+            setTimeout(styleVideo, 100);
+          }
+        });
+      });
+      
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+      
+      console.log('VK video masking script completed');
+    })();
+    true; // Return true to indicate script executed successfully
+  `;
+
   const loadGameData = useCallback(async () => {
     try {
       console.log('Loading game data for ID:', id);
@@ -248,7 +381,7 @@ export default function GameDetailsScreen() {
         style={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* Video Player - Adjusted for proper aspect ratio */}
+        {/* Video Player - Enhanced with JavaScript injection to hide VK elements */}
         {gameDetails.videoUrl && (
           <View style={styles.videoContainer}>
             <Text style={styles.sectionTitle}>Видео матча</Text>
@@ -256,13 +389,17 @@ export default function GameDetailsScreen() {
               <WebView
                 source={{ uri: gameDetails.videoUrl }}
                 style={styles.webview}
+                injectedJavaScript={injectScript}
                 javaScriptEnabled={true}
                 domStorageEnabled={true}
                 startInLoadingState={true}
-                scalesPageToFit={false}
+                scalesPageToFit={true}
                 allowsInlineMediaPlayback={true}
                 mediaPlaybackRequiresUserAction={false}
                 mixedContentMode="compatibility"
+                onLoadEnd={() => {
+                  console.log('WebView loaded, video should be masked');
+                }}
                 onError={(syntheticEvent) => {
                   const { nativeEvent } = syntheticEvent;
                   console.error('WebView error: ', nativeEvent);
@@ -270,6 +407,9 @@ export default function GameDetailsScreen() {
                 onHttpError={(syntheticEvent) => {
                   const { nativeEvent } = syntheticEvent;
                   console.error('WebView HTTP error: ', nativeEvent);
+                }}
+                onMessage={(event) => {
+                  console.log('WebView message:', event.nativeEvent.data);
                 }}
               />
             </View>
@@ -454,14 +594,14 @@ const styles = StyleSheet.create({
   videoFrame: {
     width: '100%',
     aspectRatio: 16 / 9, // Fixed aspect ratio for video
-    backgroundColor: colors.surface,
+    backgroundColor: '#000', // Black background for video
     borderRadius: 12,
     overflow: 'hidden',
     boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
   },
   webview: {
     flex: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: '#000', // Black background for video
   },
   gameInfo: {
     padding: 20,
