@@ -1,202 +1,24 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, Image, StyleSheet, FlatList, TextInput } from 'react-native';
+import { View, Text, TouchableOpacity, Image, StyleSheet, FlatList, TextInput, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { commonStyles, colors } from '../../styles/commonStyles';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { SEASONS_MAP } from '../../utils/seasons';
+import { formatGameDate } from '../../utils/dateUtils';
+import { fetchPastGames, getOutcomeText, getOutcomeColor } from '../../data/pastGameData';
+import { enrichGamesWithSeasons, filterGamesBySeason, GameWithSeason } from '../../utils/gameUtils';
 import ErrorMessage from '../../components/ErrorMessage';
 import Icon from '../../components/Icon';
-import { fetchPastGames, getOutcomeText, getOutcomeColor } from '../../data/pastGameData';
-import { SEASONS_MAP } from '../../utils/seasons';
-import { enrichGamesWithSeasons, filterGamesBySeason, GameWithSeason } from '../../utils/gameUtils';
-import { formatGameDate } from '../../utils/dateUtils';
+import LoadingSpinner from '../../components/LoadingSpinner';
 
-const ITEMS_PER_PAGE = 10;
-
-const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  backButton: {
-    marginRight: 16,
-    padding: 8,
-  },
-  headerInfo: {
-    flex: 1,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  searchButton: {
-    marginLeft: 16,
-    padding: 8,
-  },
-  searchContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  searchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  searchIcon: {
-    marginRight: 12,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: colors.text,
-  },
-  clearButton: {
-    marginLeft: 12,
-    padding: 4,
-  },
-  gameCard: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    marginHorizontal: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    boxShadow: `0px 2px 8px ${colors.shadow}`,
-    elevation: 2,
-  },
-  gameHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  teamsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  teamInfo: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  teamLogo: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginBottom: 8,
-    backgroundColor: colors.backgroundAlt,
-  },
-  teamName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-    textAlign: 'center',
-  },
-  scoreContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-  },
-  score: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  outcomeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 8,
-  },
-  teamOutcome: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  outcomeText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  gameInfo: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  infoIcon: {
-    marginRight: 8,
-  },
-  infoText: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    flex: 1,
-  },
-  dateTime: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    fontWeight: '500',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-    paddingVertical: 64,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
-  loadingMore: {
-    paddingVertical: 20,
-    alignItems: 'center',
-  },
-  loadingMoreText: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginTop: 8,
-  },
-});
+const ITEMS_PER_PAGE = 20;
 
 export default function SeasonGamesScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const seasonId = Number(id);
-  const season = SEASONS_MAP[seasonId];
+  const { id } = useLocalSearchParams();
   const router = useRouter();
+  const seasonId = parseInt(id as string);
+  const season = SEASONS_MAP[seasonId];
 
   const [allGames, setAllGames] = useState<GameWithSeason[]>([]);
   const [filteredGames, setFilteredGames] = useState<GameWithSeason[]>([]);
@@ -204,99 +26,78 @@ export default function SeasonGamesScreen() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showSearch, setShowSearch] = useState(false);
+  const [showSearchModal, setShowSearchModal] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const loadData = useCallback(async () => {
     try {
       setError(null);
-      console.log(`=== Season Games: Loading games for season ${seasonId} ===`);
+      console.log('Loading games for season:', seasonId);
       
-      // Load all past games
       const pastGames = await fetchPastGames();
-      console.log(`Season Games: Received ${pastGames.length} games`);
-      
-      // Enrich games with season information
       const enrichedGames = enrichGamesWithSeasons(pastGames);
-      setAllGames(enrichedGames);
-      
-      // Filter games by selected season
       const seasonGames = filterGamesBySeason(enrichedGames, seasonId);
-      console.log(`Season Games: Found ${seasonGames.length} games for season ${seasonId}`);
       
+      setAllGames(seasonGames);
       setFilteredGames(seasonGames);
-      
-      // Load first page
-      const firstPage = seasonGames.slice(0, ITEMS_PER_PAGE);
-      setDisplayedGames(firstPage);
+      setDisplayedGames(seasonGames.slice(0, ITEMS_PER_PAGE));
       setCurrentPage(1);
       
+      console.log(`Loaded ${seasonGames.length} games for season ${seasonId}`);
     } catch (err) {
-      console.error('Season Games: Error loading data:', err);
+      console.error('Error loading season games:', err);
       setError('Не удалось загрузить игры сезона. Попробуйте еще раз.');
     } finally {
       setLoading(false);
     }
   }, [seasonId]);
 
-  const loadMoreGames = useCallback(() => {
-    if (loadingMore || displayedGames.length >= filteredGames.length) {
-      return;
-    }
-
-    setLoadingMore(true);
-    
-    setTimeout(() => {
-      const nextPage = currentPage + 1;
-      const startIndex = currentPage * ITEMS_PER_PAGE;
-      const endIndex = startIndex + ITEMS_PER_PAGE;
-      const newGames = filteredGames.slice(startIndex, endIndex);
-      
-      setDisplayedGames(prev => [...prev, ...newGames]);
-      setCurrentPage(nextPage);
-      setLoadingMore(false);
-      
-      console.log(`Loaded page ${nextPage}, showing ${displayedGames.length + newGames.length} of ${filteredGames.length} games`);
-    }, 500);
-  }, [loadingMore, displayedGames.length, filteredGames, currentPage]);
-
   useEffect(() => {
-    if (!season) {
-      setError('Сезон не найден');
-      setLoading(false);
-      return;
-    }
     loadData();
   }, [loadData, season]);
 
-  // Search functionality
+  // Filter games based on search query
   useEffect(() => {
     if (!searchQuery.trim()) {
-      setFilteredGames(filterGamesBySeason(allGames, seasonId));
+      setFilteredGames(allGames);
+      setDisplayedGames(allGames.slice(0, ITEMS_PER_PAGE));
+      setCurrentPage(1);
     } else {
-      const seasonGames = filterGamesBySeason(allGames, seasonId);
-      const searchResults = seasonGames.filter(game => 
+      const filtered = allGames.filter(game => 
         game.homeTeam.toLowerCase().includes(searchQuery.toLowerCase()) ||
         game.awayTeam.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (game.tournamentName && game.tournamentName.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (game.arenaName && game.arenaName.toLowerCase().includes(searchQuery.toLowerCase()))
       );
-      setFilteredGames(searchResults);
+      setFilteredGames(filtered);
+      setDisplayedGames(filtered.slice(0, ITEMS_PER_PAGE));
+      setCurrentPage(1);
     }
-    
-    // Reset pagination when search changes
-    setCurrentPage(1);
-    setDisplayedGames(filteredGames.slice(0, ITEMS_PER_PAGE));
   }, [searchQuery, allGames, seasonId]);
 
   const handleGamePress = (gameId: string) => {
-    console.log('Season Games: Navigating to game:', gameId);
+    console.log('Navigating to game:', gameId);
+    // Close search modal if open
+    if (showSearchModal) {
+      setShowSearchModal(false);
+      setSearchQuery('');
+    }
     router.push(`/game/${gameId}`);
   };
 
   const handleBackPress = () => {
     router.back();
+  };
+
+  const handleSearchPress = () => {
+    console.log('Search icon pressed - opening search modal');
+    setShowSearchModal(true);
+  };
+
+  const handleCloseSearch = () => {
+    setShowSearchModal(false);
+    setSearchQuery('');
   };
 
   const handleClearSearch = () => {
@@ -306,6 +107,7 @@ export default function SeasonGamesScreen() {
   const shortenLeagueName = (leagueName: string | null): string => {
     if (!leagueName) return '';
     
+    // Extract meaningful part from league name
     const parts = leagueName.split(':');
     if (parts.length > 1) {
       const namePart = parts[1].trim();
@@ -317,123 +119,115 @@ export default function SeasonGamesScreen() {
     return leagueName.split(',')[0].trim();
   };
 
-  const renderGameCard = ({ item: game }: { item: GameWithSeason }) => {
-    return (
-      <TouchableOpacity
-        style={styles.gameCard}
-        onPress={() => handleGamePress(game.event_id)}
-        activeOpacity={0.7}
-      >
-        {/* Date and Time */}
-        <View style={styles.gameHeader}>
-          <Text style={styles.dateTime}>
-            {formatGameDate(game.event_date)}
+  const getLeagueDisplayName = (leagueName: string | null): string => {
+    // If league is empty or null, return "Товарищеский матч" without truncation
+    if (!leagueName || leagueName.trim() === '') {
+      return 'Товарищеский матч';
+    }
+    
+    // For non-empty leagues, apply truncation as before
+    return shortenLeagueName(leagueName);
+  };
+
+  const renderGameCard = ({ item: game }: { item: GameWithSeason }) => (
+    <TouchableOpacity
+      style={commonStyles.gameCard}
+      onPress={() => handleGamePress(game.id)}
+      activeOpacity={0.7}
+    >
+      <View style={styles.header}>
+        <Text style={commonStyles.textSecondary}>
+          {formatGameDate(game.event_date)}
+        </Text>
+      </View>
+
+      <View style={styles.teamsContainer}>
+        <View style={styles.teamContainer}>
+          {game.homeTeamLogo ? (
+            <Image 
+              source={{ uri: game.homeTeamLogo }} 
+              style={styles.teamLogo}
+              resizeMode="contain"
+            />
+          ) : (
+            <View style={styles.placeholderLogo}>
+              <Text style={styles.placeholderText}>
+                {game.homeTeam.charAt(0)}
+              </Text>
+            </View>
+          )}
+          <Text style={styles.teamName} numberOfLines={2}>
+            {game.homeTeam}
+          </Text>
+          <Text style={styles.score}>{game.homeGoals}</Text>
+          <View style={styles.outcomeBadgeContainer}>
+            <Text style={[styles.outcomeText, { color: getOutcomeColor(game.homeOutcome) }]}>
+              {getOutcomeText(game.homeOutcome)}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.vsSection}>
+          <Text style={styles.vsText}>VS</Text>
+        </View>
+
+        <View style={styles.teamContainer}>
+          {game.awayTeamLogo ? (
+            <Image 
+              source={{ uri: game.awayTeamLogo }} 
+              style={styles.teamLogo}
+              resizeMode="contain"
+            />
+          ) : (
+            <View style={styles.placeholderLogo}>
+              <Text style={styles.placeholderText}>
+                {game.awayTeam.charAt(0)}
+              </Text>
+            </View>
+          )}
+          <Text style={styles.teamName} numberOfLines={2}>
+            {game.awayTeam}
+          </Text>
+          <Text style={styles.score}>{game.awayGoals}</Text>
+          <View style={styles.outcomeBadgeContainer}>
+            <Text style={[styles.outcomeText, { color: getOutcomeColor(game.awayOutcome) }]}>
+              {getOutcomeText(game.awayOutcome)}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.footer}>
+        <View style={styles.gameInfo}>
+          {game.arenaName && (
+            <Text style={commonStyles.textSecondary} numberOfLines={1}>
+              📍 {game.arenaName}
+            </Text>
+          )}
+          <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
+            {(!game.tournamentName || game.tournamentName.trim() === '') ? '🤝 ' : '🏆 '}{getLeagueDisplayName(game.tournamentName)}
           </Text>
         </View>
-
-        {/* Teams and Score */}
-        <View style={styles.teamsContainer}>
-          {/* Home Team */}
-          <View style={styles.teamInfo}>
-            {game.homeTeamLogo ? (
-              <Image
-                source={{ uri: game.homeTeamLogo }}
-                style={styles.teamLogo}
-                defaultSource={require('../../assets/images/natively-dark.png')}
-              />
-            ) : (
-              <View style={styles.teamLogo} />
-            )}
-            <Text style={styles.teamName} numberOfLines={2}>
-              {game.homeTeam}
-            </Text>
-          </View>
-
-          {/* Score */}
-          <View style={styles.scoreContainer}>
-            <Text style={styles.score}>
-              {game.homeGoals} : {game.awayGoals}
-            </Text>
-          </View>
-
-          {/* Away Team */}
-          <View style={styles.teamInfo}>
-            {game.awayTeamLogo ? (
-              <Image
-                source={{ uri: game.awayTeamLogo }}
-                style={styles.teamLogo}
-                defaultSource={require('../../assets/images/natively-dark.png')}
-              />
-            ) : (
-              <View style={styles.teamLogo} />
-            )}
-            <Text style={styles.teamName} numberOfLines={2}>
-              {game.awayTeam}
-            </Text>
-          </View>
-        </View>
-
-        {/* Outcomes */}
-        {(game.homeOutcome || game.awayOutcome) && (
-          <View style={styles.outcomeContainer}>
-            <View style={styles.teamOutcome}>
-              <Text style={[styles.outcomeText, { color: getOutcomeColor(game.homeOutcome) }]}>
-                {getOutcomeText(game.homeOutcome)}
-              </Text>
-            </View>
-            <View style={styles.scoreContainer} />
-            <View style={styles.teamOutcome}>
-              <Text style={[styles.outcomeText, { color: getOutcomeColor(game.awayOutcome) }]}>
-                {getOutcomeText(game.awayOutcome)}
-              </Text>
-            </View>
-          </View>
-        )}
-
-        {/* Game Information */}
-        {(game.tournamentName || game.arenaName) && (
-          <View style={styles.gameInfo}>
-            {game.tournamentName && (
-              <View style={styles.infoRow}>
-                <Icon name="trophy" size={16} color={colors.textSecondary} style={styles.infoIcon} />
-                <Text style={styles.infoText}>{shortenLeagueName(game.tournamentName)}</Text>
-              </View>
-            )}
-            
-            {game.arenaName && (
-              <View style={styles.infoRow}>
-                <Icon name="location" size={16} color={colors.textSecondary} style={styles.infoIcon} />
-                <Text style={styles.infoText}>{game.arenaName}</Text>
-              </View>
-            )}
-          </View>
-        )}
-      </TouchableOpacity>
-    );
-  };
+      </View>
+    </TouchableOpacity>
+  );
 
   const renderFooter = () => {
     if (!loadingMore) return null;
-    
     return (
-      <View style={styles.loadingMore}>
+      <View style={{ padding: 20 }}>
         <LoadingSpinner />
-        <Text style={styles.loadingMoreText}>Загружаем еще игры...</Text>
       </View>
     );
   };
 
   const renderEmpty = () => (
-    <View style={styles.emptyContainer}>
-      <Icon name="calendar" size={64} color={colors.textSecondary} />
-      <Text style={styles.emptyText}>
+    <View style={commonStyles.errorContainer}>
+      <Text style={commonStyles.text}>
         {searchQuery ? 'Игры не найдены' : 'Нет игр в этом сезоне'}
       </Text>
-      <Text style={styles.emptySubtext}>
-        {searchQuery 
-          ? 'Попробуйте изменить поисковый запрос'
-          : 'Игры этого сезона появятся здесь после их проведения'
-        }
+      <Text style={commonStyles.textSecondary}>
+        {searchQuery ? 'Попробуйте изменить поисковый запрос' : 'Проверьте позже'}
       </Text>
     </View>
   );
@@ -441,23 +235,7 @@ export default function SeasonGamesScreen() {
   if (loading) {
     return (
       <SafeAreaView style={commonStyles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
-            <Icon name="chevron-back" size={24} color={colors.text} />
-          </TouchableOpacity>
-          <View style={styles.headerInfo}>
-            <Text style={styles.title}>
-              {season ? season.name : 'Загрузка...'}
-            </Text>
-            <Text style={styles.subtitle}>Загружаем игры...</Text>
-          </View>
-        </View>
-        <View style={commonStyles.loadingContainer}>
-          <LoadingSpinner />
-          <Text style={[commonStyles.textSecondary, { marginTop: 16 }]}>
-            Загружаем игры сезона...
-          </Text>
-        </View>
+        <LoadingSpinner />
       </SafeAreaView>
     );
   }
@@ -465,80 +243,263 @@ export default function SeasonGamesScreen() {
   if (error) {
     return (
       <SafeAreaView style={commonStyles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
-            <Icon name="chevron-back" size={24} color={colors.text} />
-          </TouchableOpacity>
-          <View style={styles.headerInfo}>
-            <Text style={styles.title}>
-              {season ? season.name : 'Ошибка'}
-            </Text>
-            <Text style={styles.subtitle}>Ошибка загрузки</Text>
-          </View>
-        </View>
         <ErrorMessage message={error} onRetry={loadData} />
+      </SafeAreaView>
+    );
+  }
+
+  if (!season) {
+    return (
+      <SafeAreaView style={commonStyles.container}>
+        <ErrorMessage message="Сезон не найден" onRetry={() => router.back()} />
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={commonStyles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
-          <Icon name="chevron-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <View style={styles.headerInfo}>
-          <Text style={styles.title}>{season.name}</Text>
-          <Text style={styles.subtitle}>
-            {filteredGames.length > 0 
-              ? `${filteredGames.length} ${filteredGames.length === 1 ? 'игра' : filteredGames.length < 5 ? 'игры' : 'игр'}`
-              : 'Нет игр'
-            }
-          </Text>
+      <View style={commonStyles.content}>
+        {/* Header */}
+        <View style={styles.headerContainer}>
+          <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
+            <Icon name="chevron-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+          <View style={styles.headerTextContainer}>
+            <Text style={commonStyles.title}>{season.name}</Text>
+            <Text style={commonStyles.textSecondary}>
+              {filteredGames.length} {filteredGames.length === 1 ? 'игра' : 'игр'}
+            </Text>
+          </View>
+          <TouchableOpacity onPress={handleSearchPress} style={styles.searchButton}>
+            <Icon name="search" size={24} color={colors.text} />
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity
-          style={styles.searchButton}
-          onPress={() => setShowSearch(!showSearch)}
-        >
-          <Icon name="search" size={24} color={colors.text} />
-        </TouchableOpacity>
+
+        {/* Games List */}
+        <FlatList
+          data={displayedGames}
+          renderItem={renderGameCard}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContainer}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={renderEmpty}
+          ListFooterComponent={renderFooter}
+        />
       </View>
 
-      {/* Search Input */}
-      {showSearch && (
-        <View style={styles.searchContainer}>
-          <View style={styles.searchInputContainer}>
-            <Icon name="search" size={20} color={colors.textSecondary} style={styles.searchIcon} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Поиск по командам, турниру, арене..."
-              placeholderTextColor={colors.textSecondary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              autoFocus
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity style={styles.clearButton} onPress={handleClearSearch}>
-                <Icon name="close" size={20} color={colors.textSecondary} />
+      {/* Search Modal */}
+      <Modal
+        visible={showSearchModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={handleCloseSearch}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.searchHeader}>
+              <Text style={styles.searchTitle}>Поиск игр</Text>
+              <TouchableOpacity style={styles.closeButton} onPress={handleCloseSearch}>
+                <Icon name="close" size={24} color={colors.text} />
               </TouchableOpacity>
-            )}
+            </View>
+
+            <View style={styles.searchInputContainer}>
+              <Icon name="search" size={20} color={colors.textSecondary} style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Поиск по командам, турнирам..."
+                placeholderTextColor={colors.textSecondary}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoFocus
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={handleClearSearch} style={styles.clearButton}>
+                  <Icon name="close" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Search Results */}
+            <FlatList
+              data={searchQuery ? filteredGames : []}
+              renderItem={renderGameCard}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.searchResults}
+              showsVerticalScrollIndicator={false}
+              ListEmptyComponent={searchQuery ? renderEmpty : null}
+            />
           </View>
         </View>
-      )}
-
-      {/* Games List */}
-      <FlatList
-        data={displayedGames}
-        renderItem={renderGameCard}
-        keyExtractor={(item) => item.id}
-        onEndReached={loadMoreGames}
-        onEndReachedThreshold={0.1}
-        ListFooterComponent={renderFooter}
-        ListEmptyComponent={renderEmpty}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={displayedGames.length === 0 ? { flex: 1 } : { paddingBottom: 32 }}
-      />
+      </Modal>
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  headerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 16,
+  },
+  backButton: {
+    marginRight: 16,
+    padding: 4,
+  },
+  headerTextContainer: {
+    flex: 1,
+  },
+  searchButton: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  // Search Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-start',
+  },
+  modalContent: {
+    backgroundColor: colors.background,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+    paddingTop: 50, // Account for status bar
+    paddingBottom: 20,
+    paddingHorizontal: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+    maxHeight: '80%',
+  },
+  searchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  searchTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+    flex: 1,
+  },
+  closeButton: {
+    padding: 8,
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    height: 48,
+    marginBottom: 16,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: colors.text,
+    paddingVertical: 0,
+  },
+  clearButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  searchResults: {
+    paddingBottom: 20,
+  },
+  listContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 32,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  teamsContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  teamContainer: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  teamLogo: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.surface,
+    marginBottom: 8,
+  },
+  placeholderLogo: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  placeholderText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  teamName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: 8,
+    minHeight: 36,
+  },
+  score: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: colors.primary,
+    marginBottom: 4,
+  },
+  outcomeBadgeContainer: {
+    alignItems: 'center',
+  },
+  outcomeText: {
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  // VS Section - Aligned with bottom of team names
+  vsSection: {
+    paddingHorizontal: 16,
+    justifyContent: 'flex-start',
+    paddingTop: 56, // Logo (48px) + margin (8px) = 56px to align with team names
+  },
+  vsText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  footer: {
+    marginTop: 8,
+  },
+  gameInfo: {
+    gap: 4,
+  },
+  leagueText: {
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+});

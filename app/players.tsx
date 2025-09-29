@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Dimensions, Animated } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Dimensions, Animated, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { TabView, SceneMap, TabBar } from 'react-native-tab-view';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
@@ -45,12 +45,42 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
   },
-  searchContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  searchButton: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  // Search Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-start',
+  },
+  modalContent: {
     backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+    paddingTop: 50, // Account for status bar
+    paddingBottom: 20,
+    paddingHorizontal: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  searchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  searchTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+    flex: 1,
+  },
+  closeButton: {
+    padding: 8,
   },
   searchInputContainer: {
     flexDirection: 'row',
@@ -61,6 +91,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderWidth: 1,
     borderColor: colors.border,
+    marginBottom: 16,
   },
   searchIcon: {
     marginRight: 12,
@@ -73,6 +104,9 @@ const styles = StyleSheet.create({
   clearButton: {
     marginLeft: 12,
     padding: 4,
+  },
+  searchResults: {
+    maxHeight: 400,
   },
   tabBar: {
     backgroundColor: colors.background,
@@ -283,7 +317,7 @@ export default function PlayersScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showSearch, setShowSearch] = useState(false);
+  const [showSearchModal, setShowSearchModal] = useState(false);
   const [index, setIndex] = useState(0);
 
   // Animation values for smooth transitions
@@ -333,6 +367,11 @@ export default function PlayersScreen() {
   }, [index, animatedValues]);
 
   const handlePlayerPress = (player: Player) => {
+    // Close search modal if open
+    if (showSearchModal) {
+      setShowSearchModal(false);
+      setSearchQuery('');
+    }
     router.push(`/player/${player.id}`);
   };
 
@@ -340,9 +379,14 @@ export default function PlayersScreen() {
     router.back();
   };
 
-  const handlePullDown = () => {
-    console.log('Pull down detected - opening search');
-    setShowSearch(true);
+  const handleSearchPress = () => {
+    console.log('Search icon pressed - opening search modal');
+    setShowSearchModal(true);
+  };
+
+  const handleCloseSearch = () => {
+    setShowSearchModal(false);
+    setSearchQuery('');
   };
 
   const handleClearSearch = () => {
@@ -351,14 +395,17 @@ export default function PlayersScreen() {
 
   const groupedPlayers = groupPlayersByPosition(players);
 
+  // Get all players for search (across all positions)
+  const allPlayersForSearch = Object.values(groupedPlayers).flat();
+
   const renderScene = ({ route }: { route: { key: string } }) => {
     const positionIndex = positions.indexOf(route.key);
     return (
       <PlayerList
         players={groupedPlayers[route.key] || []}
-        searchQuery={searchQuery}
+        searchQuery=""
         onPlayerPress={handlePlayerPress}
-        onPullDown={handlePullDown}
+        onPullDown={handleSearchPress}
         animatedValue={animatedValues[positionIndex]}
         isActive={positionIndex === index}
       />
@@ -403,31 +450,10 @@ export default function PlayersScreen() {
           <Text style={styles.title}>Игроки</Text>
           <Text style={styles.subtitle}>{players.length} игроков</Text>
         </View>
+        <TouchableOpacity style={styles.searchButton} onPress={handleSearchPress}>
+          <Icon name="search" size={24} color={colors.text} />
+        </TouchableOpacity>
       </View>
-
-      {/* Search Bar */}
-      {showSearch && (
-        <View style={styles.searchContainer}>
-          <View style={styles.searchInputContainer}>
-            <Icon name="search" size={20} color={colors.textSecondary} style={styles.searchIcon} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Поиск игроков..."
-              placeholderTextColor={colors.textSecondary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoFocus
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity style={styles.clearButton} onPress={handleClearSearch}>
-                <Icon name="close" size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      )}
 
       {/* Tab View with Smooth Animations */}
       <TabView
@@ -439,6 +465,60 @@ export default function PlayersScreen() {
         animationEnabled={true}
         swipeEnabled={true}
       />
+
+      {/* Search Modal */}
+      <Modal
+        visible={showSearchModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={handleCloseSearch}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.searchHeader}>
+              <Text style={styles.searchTitle}>Поиск игроков</Text>
+              <TouchableOpacity style={styles.closeButton} onPress={handleCloseSearch}>
+                <Icon name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.searchInputContainer}>
+              <Icon name="search" size={20} color={colors.textSecondary} style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Поиск по всем игрокам..."
+                placeholderTextColor={colors.textSecondary}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoFocus
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity style={styles.clearButton} onPress={handleClearSearch}>
+                  <Icon name="close" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Search Results */}
+            <Animated.ScrollView
+              style={styles.searchResults}
+              contentContainerStyle={{ paddingVertical: 8 }}
+              showsVerticalScrollIndicator={false}
+            >
+              {searchPlayers(allPlayersForSearch, searchQuery).map((player, index) => (
+                <PlayerCard key={player.id} player={player} onPress={handlePlayerPress} />
+              ))}
+              {searchQuery && searchPlayers(allPlayersForSearch, searchQuery).length === 0 && (
+                <View style={styles.emptyContainer}>
+                  <Text style={styles.emptyText}>Игроки не найдены</Text>
+                </View>
+              )}
+            </Animated.ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

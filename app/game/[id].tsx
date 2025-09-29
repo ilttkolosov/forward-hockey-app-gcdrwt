@@ -396,7 +396,7 @@ export default function GameDetailsScreen() {
               )}
             </View>
 
-            {/* Score */}
+            {/* Score - Aligned with bottom of team names */}
             <View style={styles.scoreContainer}>
               <Text style={styles.score}>
                 {gameDetails.homeTeam.goals} : {gameDetails.awayTeam.goals}
@@ -602,10 +602,12 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginBottom: 12,
   },
+  // Score Container - Positioned to align with bottom of team names
   scoreContainer: {
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     paddingHorizontal: 16,
+    paddingTop: 76, // Logo (64px) + margin (12px) = 76px to align with team names
   },
   score: {
     fontSize: 32,

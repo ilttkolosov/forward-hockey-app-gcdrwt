@@ -6,6 +6,7 @@ import { Link } from 'expo-router';
 import { commonStyles, colors } from '../styles/commonStyles';
 import { Game } from '../types';
 import { getCurrentGame, getFutureGames, getUpcomingGamesCount } from '../data/gameData';
+import { getPlayers } from '../data/playerData';
 import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
@@ -70,19 +71,27 @@ const headerStyles = StyleSheet.create({
   },
 });
 
-// Helper function to determine game status
+// Helper function to determine game status with new badge logic
 const getGameStatus = (game: Game) => {
   const now = new Date();
   const gameDate = new Date(game.event_date);
+  
+  // Check if game is today
   const isToday = gameDate.toDateString() === now.toDateString();
+  
+  // Check if game is within next 3 days
+  const daysDiff = Math.ceil((gameDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  const isWithin3Days = daysDiff >= 0 && daysDiff <= 3;
+  
+  // Check if game is live (5 minutes before to 90 minutes after)
   const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000);   // –5 мин
   const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000);   // +90 мин
   const isLive = now >= liveStart && now <= liveEnd;
   
-  return { isToday, isLive };
+  return { isToday, isWithin3Days, isLive };
 };
 
-// Helper function to sort upcoming games
+// Helper function to sort upcoming games with new priority logic
 const sortUpcomingGames = (games: Game[]): Game[] => {
   return [...games].sort((a, b) => {
     const statusA = getGameStatus(a);
@@ -96,6 +105,10 @@ const sortUpcomingGames = (games: Game[]): Game[] => {
     if (statusA.isToday && !statusA.isLive && !statusB.isToday) return -1;
     if (!statusA.isToday && statusB.isToday && !statusB.isLive) return 1;
     
+    // Within 3 days games third
+    if (statusA.isWithin3Days && !statusB.isWithin3Days) return -1;
+    if (!statusA.isWithin3Days && statusB.isWithin3Days) return 1;
+    
     // Rest by date
     return new Date(a.event_date).getTime() - new Date(b.event_date).getTime();
   });
@@ -105,6 +118,7 @@ export default function HomeScreen() {
   const [currentGame, setCurrentGame] = useState<Game | null>(null);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
   const [upcomingCount, setUpcomingCount] = useState<number>(0);
+  const [playersCount, setPlayersCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -114,12 +128,12 @@ export default function HomeScreen() {
       setError(null);
       console.log('Loading home screen data...');
       
-      // Load only current game, upcoming games, and upcoming count
-      // Archive count will be loaded in archive screen
-      const [current, upcoming, upcomingCountData] = await Promise.all([
+      // Load game data and player count
+      const [current, upcoming, upcomingCountData, players] = await Promise.all([
         getCurrentGame(),
         getFutureGames(),
-        getUpcomingGamesCount()
+        getUpcomingGamesCount(),
+        getPlayers() // This will initialize player data if needed
       ]);
       
       setCurrentGame(current);
@@ -128,11 +142,13 @@ export default function HomeScreen() {
       const sortedUpcoming = sortUpcomingGames(upcoming);
       setUpcomingGames(sortedUpcoming);
       setUpcomingCount(upcomingCountData);
+      setPlayersCount(players.length);
       
       console.log('Home screen data loaded:', {
         currentGame: current?.id,
         upcomingGames: sortedUpcoming.length,
-        upcomingCount: upcomingCountData
+        upcomingCount: upcomingCountData,
+        playersCount: players.length
       });
     } catch (err) {
       console.log('Error loading home screen data:', err);
@@ -247,7 +263,9 @@ export default function HomeScreen() {
                 style={quickNavStyles.icon} 
               />
               <Text style={quickNavStyles.title}>Игроки</Text>
-              <Text style={quickNavStyles.subtitle}>Состав команды</Text>
+              <Text style={quickNavStyles.subtitle}>
+                {playersCount > 0 ? `${playersCount} игроков` : 'Состав команды'}
+              </Text>
             </TouchableOpacity>
           </Link>
         </View>

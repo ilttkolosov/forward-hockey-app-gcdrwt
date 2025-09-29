@@ -1,161 +1,247 @@
-
-import { Player, ApiPlayerResponse } from '../types';
+import { Player } from '../types';
 import { apiService } from '../services/apiService';
 import { getShortName, calculateAge } from '../utils/playerUtils';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
+const { documentDirectory } = FileSystem;
 
-interface CachedData<T> {
-  data: T;
-  timestamp: number;
-}
+// Storage keys
+const PLAYERS_DIRECTORY = `${documentDirectory || ''}players/`;
+const PLAYERS_DATA_LOADED_KEY = 'playersDataLoaded';
+const PLAYERS_STORAGE_KEY = 'localPlayersData';
 
-interface CachedImage {
-  url: string;
-  timestamp: number;
-}
-
-const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
-const PLAYERS_CACHE_KEY = 'players_cache';
-const PLAYER_IMAGES_CACHE_KEY = 'player_images_cache';
-
-function isCacheValid(timestamp: number): boolean {
-  return Date.now() - timestamp < CACHE_DURATION;
-}
-
-async function cachePlayerImage(imageUrl: string): Promise<void> {
+/**
+ * Check if data has been loaded and cached locally
+ */
+async function isDataLoaded(): Promise<boolean> {
   try {
-    const cached: CachedImage = {
-      url: imageUrl,
-      timestamp: Date.now()
-    };
-    
-    const existingCache = await AsyncStorage.getItem(PLAYER_IMAGES_CACHE_KEY);
-    const imageCache = existingCache ? JSON.parse(existingCache) : {};
-    
-    imageCache[imageUrl] = cached;
-    await AsyncStorage.setItem(PLAYER_IMAGES_CACHE_KEY, JSON.stringify(imageCache));
+    const loaded = await AsyncStorage.getItem(PLAYERS_DATA_LOADED_KEY);
+    return loaded === 'true';
   } catch (error) {
-    console.error('Error caching player image:', error);
-  }
-}
-
-function convertApiPlayerToPlayer(apiPlayer: ApiPlayerResponse): Player {
-  const shortName = getShortName(apiPlayer.post_title);
-  const age = calculateAge(apiPlayer.post_date);
-  
-  // Cache image if available
-  if (apiPlayer.player_image) {
-    cachePlayerImage(apiPlayer.player_image);
-  }
-  
-  return {
-    id: apiPlayer.id.toString(),
-    name: shortName,
-    fullName: apiPlayer.post_title,
-    position: apiPlayer.position,
-    number: apiPlayer.sp_number,
-    age,
-    height: apiPlayer.sp_metrics?.height || '',
-    weight: apiPlayer.sp_metrics?.weight || '',
-    photo: apiPlayer.player_image || '',
-    birthDate: apiPlayer.post_date,
-    handedness: apiPlayer.sp_metrics?.onetwofive || '',
-    captainStatus: apiPlayer.sp_metrics?.ka || '',
-    isCaptain: apiPlayer.sp_metrics?.ka === 'К',
-    isAssistantCaptain: apiPlayer.sp_metrics?.ka === 'А',
-  };
-}
-
-async function checkApiAvailability(): Promise<boolean> {
-  try {
-    return await apiService.checkPlayersApiAvailability();
-  } catch (error) {
-    console.error('Error checking API availability:', error);
+    console.error('Error checking if data is loaded:', error);
     return false;
   }
 }
 
-async function preloadPlayerImages(players: Player[]): Promise<void> {
-  const imageUrls = players
-    .map(player => player.photo)
-    .filter((url): url is string => !!url);
-  
-  console.log(`Preloading ${imageUrls.length} player images...`);
-  
-  const promises = imageUrls.map(url => cachePlayerImage(url));
-  await Promise.allSettled(promises);
-  
-  console.log('Player images preloading completed');
+/**
+ * Set the data loaded flag
+ */
+async function setDataLoaded(loaded: boolean): Promise<void> {
+  try {
+    await AsyncStorage.setItem(PLAYERS_DATA_LOADED_KEY, loaded.toString());
+  } catch (error) {
+    console.error('Error setting data loaded flag:', error);
+  }
 }
 
-export async function getPlayers(): Promise<Player[]> {
+/**
+ * Ensure the players directory exists for photo storage
+ */
+async function ensurePlayersDirectoryExists(): Promise<void> {
   try {
-    // Check cache first
-    const cachedData = await AsyncStorage.getItem(PLAYERS_CACHE_KEY);
-    if (cachedData) {
-      const parsed: CachedData<Player[]> = JSON.parse(cachedData);
-      if (isCacheValid(parsed.timestamp)) {
-        console.log('Returning players from cache');
-        return parsed.data;
+    const dirInfo = await FileSystem.getInfoAsync(PLAYERS_DIRECTORY);
+    if (!dirInfo.exists) {
+      await FileSystem.makeDirectoryAsync(PLAYERS_DIRECTORY, { intermediates: true });
+      console.log('Created players directory:', PLAYERS_DIRECTORY);
+    }
+  } catch (error) {
+    console.error('Error creating players directory:', error);
+  }
+}
+
+/**
+ * Download and cache a player photo locally
+ */
+async function downloadAndCachePhoto(photoUrl: string, playerId: string): Promise<string | null> {
+  try {
+    if (!photoUrl?.trim()) return null;
+    await ensurePlayersDirectoryExists();
+    const filename = `player_${playerId}.jpg`;
+    const fileUri = PLAYERS_DIRECTORY + filename;
+    console.log(`Downloading photo for player ${playerId} from ${photoUrl}`);
+    const downloadResult = await FileSystem.downloadAsync(photoUrl.trim(), fileUri);
+    if (downloadResult.status === 200) {
+      console.log(`Successfully downloaded photo for player ${playerId} to ${downloadResult.uri}`);
+      return downloadResult.uri;
+    } else {
+      console.error(`Failed to download photo for player ${playerId}, status: ${downloadResult.status}`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`Error downloading photo for player ${playerId}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Convert API player data to internal Player format
+ */
+function convertApiPlayerToPlayer(
+  basicData: { id: string; name: string; number: number; position: string; birth_date: string },
+  detailedData: any,
+  photoPath: string | null
+): Player {
+  const age = calculateAge(basicData.birth_date);
+  const shortName = getShortName(basicData.name);
+  return {
+    id: basicData.id,
+    name: shortName,
+    fullName: basicData.name,
+    position: basicData.position,
+    number: basicData.number,
+    age,
+    height: String(detailedData.metrics?.height || ''),
+    weight: String(detailedData.metrics?.weight || ''),
+    photo: photoPath || '',
+    birthDate: basicData.birth_date,
+    handedness: detailedData.metrics?.onetwofive || '',
+    captainStatus: detailedData.metrics?.ka || '',
+    isCaptain: detailedData.metrics?.ka === 'К',
+    isAssistantCaptain: detailedData.metrics?.ka === 'А',
+    nationality: detailedData.nationality || '',
+  };
+}
+
+/**
+ * Save players data to local storage
+ */
+async function savePlayersToStorage(players: Player[]): Promise<void> {
+  try {
+    const playersData = JSON.stringify(players);
+    await AsyncStorage.setItem(PLAYERS_STORAGE_KEY, playersData);
+    console.log(`Saved ${players.length} players to local storage`);
+  } catch (error) {
+    console.error('Error saving players to storage:', error);
+    throw error;
+  }
+}
+
+/**
+ * Load players data from local storage
+ */
+async function getPlayersFromStorage(): Promise<Player[]> {
+  try {
+    const playersData = await AsyncStorage.getItem(PLAYERS_STORAGE_KEY);
+    if (playersData) {
+      const players = JSON.parse(playersData);
+      console.log(`Loaded ${players.length} players from local storage`);
+      return players;
+    }
+    return [];
+  } catch (error) {
+    console.error('Error loading players from storage:', error);
+    return [];
+  }
+}
+
+/**
+ * Load all players data from API and cache locally
+ */
+async function loadAllPlayersFromApi(): Promise<Player[]> {
+  try {
+    console.log('Starting complete player data loading process from API...');
+    const playersList = await apiService.fetchPlayersList();
+    console.log(`Loaded ${playersList.length} players from list endpoint`);
+
+    const allPlayers: Player[] = [];
+    for (let i = 0; i < playersList.length; i++) {
+      const basicPlayer = playersList[i];
+      console.log(`Processing player ${i + 1}/${playersList.length}: ${basicPlayer.name} (ID: ${basicPlayer.id})`);
+      try {
+        const detailedData = await apiService.fetchPlayerDetails(basicPlayer.id);
+        let photoPath: string | null = null;
+        try {
+          const photoData = await apiService.fetchPlayerPhoto(basicPlayer.id);
+          if (photoData?.photo_url) {
+            photoPath = await downloadAndCachePhoto(photoData.photo_url, basicPlayer.id);
+          }
+        } catch (photoError) {
+          console.warn(`Failed to load photo for player ${basicPlayer.id}:`, photoError);
+        }
+        const player = convertApiPlayerToPlayer(basicPlayer, detailedData, photoPath);
+        allPlayers.push(player);
+        console.log(`Successfully processed player: ${player.name} (#${player.number})`);
+      } catch (error) {
+        console.error(`Failed to load detailed data for player ${basicPlayer.id}:`, error);
+        const fallbackPlayer: Player = {
+          id: basicPlayer.id,
+          name: getShortName(basicPlayer.name),
+          fullName: basicPlayer.name,
+          position: basicPlayer.position,
+          number: basicPlayer.number,
+          age: calculateAge(basicPlayer.birth_date),
+          height: '',
+          weight: '',
+          photo: '',
+          birthDate: basicPlayer.birth_date,
+          handedness: '',
+          captainStatus: '',
+          isCaptain: false,
+          isAssistantCaptain: false,
+          nationality: '',
+        };
+        allPlayers.push(fallbackPlayer);
       }
     }
 
-    console.log('Fetching players from API...');
-    
-    // Check if API is available
-    const isApiAvailable = await checkApiAvailability();
-    if (!isApiAvailable) {
-      console.log('API not available, using fallback players');
-      return getFallbackPlayers();
+    allPlayers.sort((a, b) => a.number - b.number);
+    await savePlayersToStorage(allPlayers);
+    await setDataLoaded(true);
+    console.log(`Successfully loaded and cached ${allPlayers.length} players`);
+    return allPlayers;
+  } catch (error) {
+    console.error('Error loading all players data from API:', error);
+    throw error;
+  }
+}
+
+/**
+ * Main function to get players data
+ * - On first launch: loads from API and caches.
+ * - On subsequent launches: returns cached data without validation.
+ */
+export async function getPlayers(): Promise<Player[]> {
+  try {
+    const dataLoaded = await isDataLoaded();
+    if (dataLoaded) {
+      console.log('Data already loaded, using local storage...');
+      const players = await getPlayersFromStorage();
+      if (players.length > 0) {
+        console.log(`Returning ${players.length} players from local storage`);
+        return players;
+      }
     }
 
-    const apiPlayers = await apiService.fetchPlayers();
-    const players = apiPlayers.map(convertApiPlayerToPlayer);
-    
-    // Sort players by number
-    players.sort((a, b) => a.number - b.number);
-    
-    // Cache the result
-    const cacheData: CachedData<Player[]> = {
-      data: players,
-      timestamp: Date.now()
-    };
-    await AsyncStorage.setItem(PLAYERS_CACHE_KEY, JSON.stringify(cacheData));
-    
-    // Preload images in background
-    preloadPlayerImages(players);
-    
-    console.log(`Loaded ${players.length} players from API`);
-    return players;
+    console.log('First launch or no cached data — loading from API...');
+    return await loadAllPlayersFromApi();
   } catch (error) {
-    console.error('Error fetching players:', error);
+    console.error('Error in getPlayers:', error);
+    try {
+      const cachedPlayers = await getPlayersFromStorage();
+      if (cachedPlayers.length > 0) {
+        console.log('Returning cached players as fallback');
+        return cachedPlayers;
+      }
+    } catch (cacheError) {
+      console.error('Error loading cached players:', cacheError);
+    }
+    console.log('Using fallback players data');
     return getFallbackPlayers();
   }
 }
 
+/**
+ * Get a specific player by ID
+ */
 export async function getPlayerById(playerId: string): Promise<Player | null> {
   try {
     console.log('Fetching player by ID:', playerId);
-    
-    // Try to get from API first
-    try {
-      const apiPlayer = await apiService.fetchPlayerById(playerId);
-      const player = convertApiPlayerToPlayer(apiPlayer);
-      console.log('Player fetched from API:', player);
-      return player;
-    } catch (apiError) {
-      console.log('API fetch failed, searching in cached players...');
-    }
-    
-    // Fallback to cached players
     const players = await getPlayers();
     const player = players.find(p => p.id === playerId);
-    
     if (player) {
-      console.log('Player found in cache:', player);
+      console.log('Player found:', player.name);
       return player;
     }
-    
     console.log('Player not found');
     return null;
   } catch (error) {
@@ -164,20 +250,25 @@ export async function getPlayerById(playerId: string): Promise<Player | null> {
   }
 }
 
+/**
+ * Search players by query
+ */
 export function searchPlayers(players: Player[], searchQuery: string): Player[] {
   if (!searchQuery.trim()) {
     return players;
   }
-  
   const query = searchQuery.toLowerCase().trim();
-  
   return players.filter(player => 
     player.name.toLowerCase().includes(query) ||
+    player.fullName?.toLowerCase().includes(query) ||
     player.position.toLowerCase().includes(query) ||
     player.number.toString().includes(query)
   );
 }
 
+/**
+ * Group players by position
+ */
 export function groupPlayersByPosition(players: Player[]): { [position: string]: Player[] } {
   return players.reduce((acc, player) => {
     if (!acc[player.position]) {
@@ -188,6 +279,47 @@ export function groupPlayersByPosition(players: Player[]): { [position: string]:
   }, {} as { [position: string]: Player[] });
 }
 
+/**
+ * Refresh players data (force reload from API)
+ */
+export async function refreshPlayersData(): Promise<Player[]> {
+  try {
+    console.log('Refreshing players data...');
+    await setDataLoaded(false);
+    return await getPlayers();
+  } catch (error) {
+    console.error('Error refreshing players data:', error);
+    throw error;
+  }
+}
+
+/**
+ * Clear all cached player data
+ */
+export async function clearPlayersData(): Promise<void> {
+  try {
+    console.log('Clearing all player data...');
+    await AsyncStorage.removeItem(PLAYERS_DATA_LOADED_KEY);
+    await AsyncStorage.removeItem(PLAYERS_STORAGE_KEY);
+    try {
+      const dirInfo = await FileSystem.getInfoAsync(PLAYERS_DIRECTORY);
+      if (dirInfo.exists) {
+        await FileSystem.deleteAsync(PLAYERS_DIRECTORY, { idempotent: true });
+        console.log('Cleared players directory');
+      }
+    } catch (error) {
+      console.warn('Error clearing players directory:', error);
+    }
+    console.log('All player data cleared');
+  } catch (error) {
+    console.error('Error clearing player data:', error);
+    throw error;
+  }
+}
+
+/**
+ * Fallback players data for when API is unavailable
+ */
 function getFallbackPlayers(): Player[] {
   return [
     {
@@ -204,6 +336,8 @@ function getFallbackPlayers(): Player[] {
       isCaptain: true,
       isAssistantCaptain: false,
       photo: '',
+      birthDate: '1999-01-15 00:00:00',
+      nationality: 'Россия',
     },
     {
       id: '2',
@@ -219,6 +353,8 @@ function getFallbackPlayers(): Player[] {
       isCaptain: false,
       isAssistantCaptain: true,
       photo: '',
+      birthDate: '1996-03-22 00:00:00',
+      nationality: 'Россия',
     },
     {
       id: '3',
@@ -234,6 +370,8 @@ function getFallbackPlayers(): Player[] {
       isCaptain: false,
       isAssistantCaptain: false,
       photo: '',
+      birthDate: '1994-07-10 00:00:00',
+      nationality: 'Россия',
     },
   ];
 }

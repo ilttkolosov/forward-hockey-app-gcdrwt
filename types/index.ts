@@ -178,6 +178,44 @@ export interface ApiPlayerResponse {
   player_image: string; // Avatar URL (can be empty)
 }
 
+// NEW API INTERFACES FOR UPDATED PLAYER ENDPOINTS
+
+/**
+ * Response from GET /get-player/ (basic player list)
+ */
+export interface ApiPlayerListItem {
+  id: string;
+  name: string;
+  number: number;
+  position: string;
+  birth_date: string;
+}
+
+/**
+ * Response from GET /get-player/{id} (detailed player data)
+ */
+export interface ApiPlayerDetailsResponse {
+  id: string;
+  name: string;
+  number: number;
+  position: string;
+  birth_date: string;
+  nationality?: string;
+  metrics: {
+    ka: string; // captain status
+    onetwofive: string; // handedness
+    height: string;
+    weight: string;
+  };
+}
+
+/**
+ * Response from GET /get-photo-players/{id} (player photo)
+ */
+export interface ApiPlayerPhotoResponse {
+  photo_url: string;
+}
+
 // Updated API Game Details Response based on new requirements
 export interface ApiGameDetailsResponse {
   id: string; // Game ID

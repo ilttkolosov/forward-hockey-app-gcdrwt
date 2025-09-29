@@ -10,6 +10,34 @@ import {
   ApiGameDetailsResponse
 } from '../types';
 
+// New interfaces for the updated player API endpoints
+interface ApiPlayerListItem {
+  id: string;
+  name: string;
+  number: number;
+  position: string;
+  birth_date: string;
+}
+
+interface ApiPlayerDetailsResponse {
+  id: string;
+  name: string;
+  number: number;
+  position: string;
+  birth_date: string;
+  nationality?: string;
+  metrics: {
+    ka: string; // captain status
+    onetwofive: string; // handedness
+    height: string;
+    weight: string;
+  };
+}
+
+interface ApiPlayerPhotoResponse {
+  photo_url: string;
+}
+
 class ApiService {
   private baseUrl = 'https://www.hc-forward.com/wp-json/app/v1';
 
@@ -236,6 +264,142 @@ class ApiService {
       };
     }
   }
+
+  // NEW PLAYER API METHODS
+
+  /**
+   * Fetch basic player list from new endpoint
+   * GET https://www.hc-forward.com/wp-json/app/v1/get-player/
+   */
+  async fetchPlayersList(): Promise<ApiPlayerListItem[]> {
+  try {
+      console.log('Fetching players list from new API endpoint...');
+      const response = await fetch(`${this.baseUrl}/get-player/`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const result = await response.json();
+
+      // 🔥 ИСПРАВЛЕНИЕ: API возвращает { data: [...] }, а не массив напрямую
+      const playersData = Array.isArray(result) 
+        ? result 
+        : (Array.isArray(result.data) ? result.data : []);
+
+      console.log(`Fetched ${playersData.length} players from list endpoint`);
+
+      // Ensure all IDs are strings
+      const players = playersData.map((player: any) => ({
+        ...player,
+        id: String(player.id)
+      }));
+      return players;
+    } catch (error) {
+      console.error('Error fetching players list:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch detailed player data from new endpoint
+   * GET https://www.hc-forward.com/wp-json/app/v1/get-player/{id}
+   */
+/**
+ * Fetch detailed player data from new endpoint
+ * GET https://www.hc-forward.com/wp-json/app/v1/get-player/{id}
+ */
+  /**
+ * Fetch detailed player data from new endpoint
+ * GET https://www.hc-forward.com/wp-json/app/v1/get-player/{id}
+ */
+    async fetchPlayerDetails(id: string): Promise<ApiPlayerDetailsResponse> {
+      try {
+        console.log(`Fetching player details for ID: ${id}`);
+        const response = await fetch(`${this.baseUrl}/get-player/${id}`);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const result = await response.json();
+        console.log(`Fetched details for player ${id}`);
+
+        // 🔥 ИСПРАВЛЕНИЕ: API возвращает { status, data: { ... } }
+        if (!result || typeof result !== 'object' || !result.data) {
+          console.warn(`Invalid player data format for ID ${id}:`, result);
+          throw new Error('Invalid player data format');
+        }
+
+        const playerData = result.data;
+
+        // 🔒 Проверка обязательных полей внутри data
+        if (
+          typeof playerData.id === 'undefined' ||
+          typeof playerData.name === 'undefined' ||
+          typeof playerData.number === 'undefined' ||
+          typeof playerData.position === 'undefined'
+        ) {
+          console.warn(`Missing required fields in player data for ID ${id}:`, playerData);
+          throw new Error('Missing required player fields');
+        }
+
+        // 🔒 Безопасное приведение ID к строке
+        const safeId = String(playerData.id);
+
+        // 🔒 Обеспечиваем наличие metrics
+        const metrics = playerData.metrics || {
+          ka: '',
+          onetwofive: '',
+          height: '',
+          weight: ''
+        };
+
+        return {
+          id: safeId,
+          name: playerData.name,
+          number: playerData.number ?? 0,
+          position: playerData.position ?? '',
+          birth_date: playerData.birth_date ?? '',
+          nationality: playerData.nationality ?? '',
+          metrics: {
+            ka: metrics.ka ?? '',
+            onetwofive: metrics.onetwofive ?? '',
+            height: String(metrics.height ?? ''),
+            weight: String(metrics.weight ?? '')
+          }
+        };
+      } catch (error) {
+        console.error(`Error fetching player details for ID ${id}:`, error);
+        throw error;
+      }
+    }
+  /**
+   * Fetch player photo from new endpoint
+   * GET https://www.hc-forward.com/wp-json/app/v1/get-photo-players/{id}
+   */
+  async fetchPlayerPhoto(id: string): Promise<{ photo_url: string } | null> {
+    try {
+      console.log(`Fetching player photo for ID: ${id}`);
+      const response = await fetch(`${this.baseUrl}/get-photo-players/${id}`);
+      if (!response.ok) {
+        console.log(`No photo available for player ${id}`);
+        return null;
+      }
+      const result: ApiPlayerPhotoResponse = await response.json();
+      console.log(`Fetched photo for player ${id}:`, result.photo_url);
+
+      // 🔥 ИСПРАВЛЕНИЕ: удаляем пробелы в начале и конце URL
+      const cleanPhotoUrl = result.photo_url?.trim();
+      if (!cleanPhotoUrl) {
+        console.log(`Photo URL is empty for player ${id}`);
+        return null;
+      }
+
+      return { photo_url: cleanPhotoUrl };
+    } catch (error) {
+      console.error(`Error fetching photo for player ${id}:`, error);
+      return null;
+    }
+  }
+
+  // LEGACY PLAYER API METHODS (kept for backward compatibility)
 
   async fetchPlayers(): Promise<ApiPlayerResponse[]> {
     try {

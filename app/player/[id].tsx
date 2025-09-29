@@ -140,39 +140,26 @@ export default function PlayerDetailsScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const loadPlayerData = useCallback(async () => {
-    if (!id || isLoading) {
-      console.log('Skipping player load - no ID or already loading:', { id, isLoading });
-      return;
-    }
-
-    try {
-      setIsLoading(true);
-      setError(null);
-      console.log('Loading player data for ID:', id);
-      
-      const playerData = await getPlayerById(id);
-      
-      if (playerData) {
+      if (!id) return;
+      // Уберите проверку isLoading — она не нужна, если вызов идёт только из useEffect
+      try {
+        setIsLoading(true);
+        setError(null);
+        const playerData = await getPlayerById(id);
         setPlayer(playerData);
-        console.log('Player data loaded successfully:', playerData.name);
-      } else {
-        setError('Игрок не найден');
-        console.log('Player not found for ID:', id);
+      } catch (err) {
+        setError('Не удалось загрузить данные игрока');
+      } finally {
+        setIsLoading(false);
+        setRefreshing(false);
       }
-    } catch (err) {
-      console.error('Error loading player:', err);
-      setError('Не удалось загрузить данные игрока. Попробуйте еще раз.');
-    } finally {
-      setIsLoading(false);
-      setRefreshing(false);
-    }
-  }, [id, isLoading]);
+    }, [id]); // ← только id
 
   useEffect(() => {
     if (id) {
       loadPlayerData();
     }
-  }, [id]); // Only depend on id, not loadPlayerData to prevent double calls
+  }, [id, loadPlayerData]);
 
   const onRefresh = () => {
     setRefreshing(true);

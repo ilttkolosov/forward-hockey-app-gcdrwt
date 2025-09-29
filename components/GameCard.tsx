@@ -12,16 +12,24 @@ interface GameCardProps {
   showScore?: boolean;
 }
 
-// Helper function to determine game status
+// Helper function to determine game status with new badge logic
 const getGameStatus = (game: Game) => {
   const now = new Date();
   const gameDate = new Date(game.event_date);
+  
+  // Check if game is today
   const isToday = gameDate.toDateString() === now.toDateString();
+  
+  // Check if game is within next 3 days
+  const daysDiff = Math.ceil((gameDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  const isWithin3Days = daysDiff >= 0 && daysDiff <= 3;
+  
+  // Check if game is live (5 minutes before to 90 minutes after)
   const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000);   // –5 мин
   const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000);   // +90 мин
   const isLive = now >= liveStart && now <= liveEnd;
   
-  return { isToday, isLive };
+  return { isToday, isWithin3Days, isLive };
 };
 
 export default function GameCard({ game, showScore = true }: GameCardProps) {
@@ -47,17 +55,21 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
     }
   };
 
-  const getStatusText = (status: Game['status'], isToday?: boolean, isLive?: boolean) => {
+  const getStatusText = (status: Game['status'], isToday?: boolean, isWithin3Days?: boolean, isLive?: boolean) => {
     if (isLive) return 'LIVE';
-    if (isToday && status === 'upcoming') return 'СЕГОДНЯ';
+    
+    // New badge logic for upcoming games
+    if (status === 'upcoming') {
+      if (isToday) return 'СЕГОДНЯ';
+      if (isWithin3Days) return 'СКОРО';
+      return 'ПРЕДСТОЯЩАЯ';
+    }
     
     switch (status) {
       case 'live':
         return 'LIVE';
-      case 'upcoming':
-        return 'ПРЕДСТОЯЩАЯ';
       case 'finished':
-        return 'ЗАВЕРШЕНА';
+        return ''; // Remove "ЗАВЕРШЕНА" badge for finished games
       default:
         return '';
     }
@@ -101,16 +113,29 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
     return leagueName.split(',')[0].trim(); // Fallback
   };
 
+  const getLeagueDisplayName = (leagueName: string | null): string => {
+    // If league is empty or null, return "Товарищеский матч" without truncation
+    if (!leagueName || leagueName.trim() === '') {
+      return 'Товарищеский матч';
+    }
+    
+    // For non-empty leagues, apply truncation as before
+    return shortenLeagueName(leagueName);
+  };
+
   // Get game status for upcoming games
-  const { isToday, isLive } = game.status === 'upcoming' ? getGameStatus(game) : { isToday: false, isLive: false };
+  const { isToday, isWithin3Days, isLive } = game.status === 'upcoming' ? getGameStatus(game) : { isToday: false, isWithin3Days: false, isLive: false };
+  const statusText = getStatusText(game.status, isToday, isWithin3Days, isLive);
 
   return (
     <TouchableOpacity onPress={handlePress} activeOpacity={0.7}>
       <View style={commonStyles.gameCard}>
         <View style={styles.header}>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(game.status, isLive) }]}>
-            <Text style={styles.statusText}>{getStatusText(game.status, isToday, isLive)}</Text>
-          </View>
+          {statusText && (
+            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(game.status, isLive) }]}>
+              <Text style={styles.statusText}>{statusText}</Text>
+            </View>
+          )}
           <Text style={commonStyles.textSecondary}>
             {formatDate(game.date, game.time)}
           </Text>
@@ -151,6 +176,7 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
             )}
           </View>
 
+          {/* VS Section - Aligned with bottom of team names */}
           <View style={styles.vsSection}>
             <Text style={styles.vsText}>VS</Text>
           </View>
@@ -197,11 +223,9 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
                 📍 {game.venue}
               </Text>
             )}
-            {game.league_name && (
-              <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
-                🏆 {shortenLeagueName(game.league_name)}
-              </Text>
-            )}
+            <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
+              {(!game.league_name || game.league_name.trim() === '') ? '🤝 ' : '🏆 '}{getLeagueDisplayName(game.league_name)}
+            </Text>
             {/* Season field removed as requested */}
           </View>
         </View>
@@ -280,9 +304,11 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
   },
+  // VS Section - Positioned to align with bottom of team names
   vsSection: {
     paddingHorizontal: 16,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 56, // Logo (48px) + margin (8px) = 56px to align with team names
   },
   vsText: {
     fontSize: 14,
