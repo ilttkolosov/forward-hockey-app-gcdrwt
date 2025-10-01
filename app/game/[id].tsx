@@ -1,3 +1,4 @@
+// app/game/[id].tsx
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -13,14 +14,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
-import { ApiGameDetailsResponse, EnrichedGameDetails, ApiTeam } from '../../types';
-import { apiService } from '../../services/apiService';
+import { Game } from '../../types'; // Используем обновлённый тип Game
+import { getGameById } from '../../data/gameData'; // Импортируем новую функцию
 import { colors, commonStyles } from '../../styles/commonStyles';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
 import Icon from '../../components/Icon';
-import { getCachedTeamLogo } from '../../utils/teamLogos';
-import { formatDateTimeWithoutSeconds } from '../../utils/dateUtils';
+import { getCachedTeamLogo } from '../../utils/teamLogos'; // Возможно, не понадобится, так как logo_uri уже в Game
+import { formatDateTimeWithoutSeconds } from '../../utils/dateUtils'; // Возможно, не понадобится, так как date/time уже в Game
 
 const { width } = Dimensions.get('window');
 
@@ -35,7 +36,7 @@ const parseVKVideoUrl = (url: string): { ownerId: string; videoId: string } | nu
       return null; // Return null to use the URL as-is
     }
     
-    // Parse URLs like https://vkvideo.ru/video-211881014_456240669
+    // Parse URLs like https://vkvideo.ru/video-211881014_456240669  
     const videoMatch = url.match(/video(-?\d+)_(\d+)/);
     if (videoMatch) {
       const ownerId = videoMatch[1]; // Already includes the minus sign if present
@@ -93,18 +94,46 @@ const getVKEmbedUrl = (videoUrl: string): string => {
   }
 };
 
+// --- Вспомогательные функции для работы с новым типом Game ---
+// Эти функции адаптируют данные из нового Game к структуре EnrichedGameDetails
 
+// Извлечение результата (outcome) из массива
+const extractOutcome = (outcomeArray: any): string => {
+  if (Array.isArray(outcomeArray) && outcomeArray.length > 0) {
+    const outcome = outcomeArray[0].toLowerCase();
+    if (outcome === 'w' || outcome === 'win') return 'win';
+    if (outcome === 'l' || outcome === 'loss') return 'loss';
+    if (outcome === 't' || outcome === 'tie' || outcome === 'draw' || outcome === 'nich') return 'nich';
+  }
+  return '';
+};
+
+// Извлечение имени из объекта сущности (лиги, сезона, места проведения)
+const extractNameFromEntity = (entity: any): string | undefined => {
+  if (entity && typeof entity === 'object' && 'name' in entity) {
+    return entity.name;
+  }
+  return undefined;
+};
+
+// Форматирование даты и времени (если нужно, но в Game уже отформатировано)
+// const formatDateTimeWithoutSeconds = (dateString: string): { formattedDate: string; formattedTime: string } => {
+//   // Реализация может быть в utils/dateUtils, но если Game.date и Game.time уже отформатированы, это не нужно.
+//   // const date = new Date(dateString);
+//   // const formattedDate = date.toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' });
+//   // const formattedTime = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+//   // return { formattedDate, formattedTime };
+//   // return { formattedDate: '', formattedTime: '' };
+// };
 
 export default function GameDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const [gameDetails, setGameDetails] = useState<EnrichedGameDetails | null>(null);
+  const [gameDetails, setGameDetails] = useState<Game | null>(null); // Используем Game, а не EnrichedGameDetails
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [teamsLoading, setTeamsLoading] = useState(false);
-
-
+  // const [teamsLoading, setTeamsLoading] = useState(false); // Больше не нужно, так как данные уже обогащены в gameData.ts
 
   const loadGameData = useCallback(async () => {
     try {
@@ -112,19 +141,15 @@ export default function GameDetailsScreen() {
       setLoading(true);
       setError(null);
 
-      // First, fetch the game data
-      const apiGameData = await apiService.fetchGameById(id as string);
-      console.log('API Game Data:', apiGameData);
+      // Используем новую функцию getGameById
+      const gameData = await getGameById(id);
 
-      // Then, enrich it with team data
-      const enrichedGame = await enrichGameData(apiGameData);
-      
-      if (!enrichedGame) {
-        setError('Не удалось обработать данные игры');
+      if (!gameData) {
+        setError('Игра не найдена');
         return;
       }
 
-      setGameDetails(enrichedGame);
+      setGameDetails(gameData);
     } catch (err) {
       console.error('Error loading game data:', err);
       setError('Не удалось загрузить данные игры');
@@ -139,109 +164,13 @@ export default function GameDetailsScreen() {
     }
   }, [id, loadGameData]);
 
-  const enrichGameData = async (apiData: ApiGameDetailsResponse): Promise<EnrichedGameDetails | null> => {
-    try {
-      setTeamsLoading(true);
-      
-      // Validate teams array
-      if (!apiData.teams || !Array.isArray(apiData.teams) || apiData.teams.length < 2) {
-        console.error('Invalid teams data:', apiData.teams);
-        return null;
-      }
-
-      const [homeTeamId, awayTeamId] = apiData.teams;
-
-      // Fetch team data in parallel
-      const [homeTeamData, awayTeamData] = await Promise.all([
-        fetchTeamSafely(homeTeamId),
-        fetchTeamSafely(awayTeamId)
-      ]);
-
-      // Cache team logos
-      const homeTeamLogo = await getCachedTeamLogo(homeTeamId, homeTeamData.logo_url || '');
-      const awayTeamLogo = await getCachedTeamLogo(awayTeamId, awayTeamData.logo_url || '');
-
-      // Format date and time
-      const { formattedDate, formattedTime } = formatDateTimeWithoutSeconds(apiData.date);
-
-      // Extract results
-      const homeResults = apiData.results?.[homeTeamId];
-      const awayResults = apiData.results?.[awayTeamId];
-
-      // Build enriched game object
-      const enrichedGame: EnrichedGameDetails = {
-        id: apiData.id,
-        date: formattedDate,
-        time: formattedTime,
-        homeTeam: {
-          id: homeTeamId,
-          name: homeTeamData.name,
-          logo: homeTeamLogo,
-          goals: parseInt(homeResults?.goals || '0') || 0,
-          firstPeriod: homeResults?.first ? parseInt(homeResults.first) : undefined,
-          secondPeriod: homeResults?.second ? parseInt(homeResults.second) : undefined,
-          thirdPeriod: homeResults?.third ? parseInt(homeResults.third) : undefined,
-          outcome: extractOutcome(homeResults?.outcome || [])
-        },
-        awayTeam: {
-          id: awayTeamId,
-          name: awayTeamData.name,
-          logo: awayTeamLogo,
-          goals: parseInt(awayResults?.goals || '0') || 0,
-          firstPeriod: awayResults?.first ? parseInt(awayResults.first) : undefined,
-          secondPeriod: awayResults?.second ? parseInt(awayResults.second) : undefined,
-          thirdPeriod: awayResults?.third ? parseInt(awayResults.third) : undefined,
-          outcome: extractOutcome(awayResults?.outcome || [])
-        },
-        league: extractNameFromArray(apiData.leagues),
-        season: extractNameFromArray(apiData.seasons),
-        venue: extractNameFromArray(apiData.venues),
-        videoUrl: apiData.sp_video
-      };
-
-      console.log('Enriched game data:', enrichedGame);
-      return enrichedGame;
-    } catch (error) {
-      console.error('Error enriching game data:', error);
-      return null;
-    } finally {
-      setTeamsLoading(false);
-    }
-  };
-
-  const fetchTeamSafely = async (teamId: string): Promise<ApiTeam> => {
-    try {
-      return await apiService.fetchTeam(teamId);
-    } catch (error) {
-      console.error(`Error fetching team ${teamId}:`, error);
-      return {
-        id: teamId,
-        name: 'Команда не найдена',
-        logo_url: ''
-      };
-    }
-  };
-
-  const extractOutcome = (outcome: string | string[]): string => {
-    if (Array.isArray(outcome)) {
-      return outcome.length > 0 ? outcome[0] : '';
-    }
-    return outcome || '';
-  };
-
-  const extractNameFromArray = (array: { id: string; name: string }[] | []): string | undefined => {
-    if (Array.isArray(array) && array.length > 0) {
-      return array[0].name;
-    }
-    return undefined;
-  };
-
   const onRefresh = async () => {
     setRefreshing(true);
     await loadGameData();
     setRefreshing(false);
   };
 
+  // --- Адаптация функций для нового типа Game ---
   const getOutcomeText = (outcome: string): string => {
     switch (outcome) {
       case 'win':
@@ -268,6 +197,7 @@ export default function GameDetailsScreen() {
     }
   };
 
+  // --- Рендеринг компонента ---
   if (loading) {
     return (
       <SafeAreaView style={commonStyles.container}>
@@ -304,6 +234,58 @@ export default function GameDetailsScreen() {
     );
   }
 
+  // --- Используем данные из gameDetails (нового типа Game) ---
+  // Извлекаем нужные поля
+  const {
+    id: gameId, // Не используется в отображении
+    date: formattedDate, // Уже отформатированная дата из gameData.ts
+    time: formattedTime, // Уже отформатированное время из gameData.ts
+    homeTeam,
+    awayTeam,
+    homeTeamLogo, // URI из локального хранилища
+    awayTeamLogo, // URI из локального хранилища
+    homeScore,
+    awayScore,
+    homeOutcome,
+    awayOutcome,
+    team1_first, // Результаты по периодам
+    team1_second,
+    team1_third,
+    team2_first,
+    team2_second,
+    team2_third,
+    league, // Объект лиги
+    season, // Объект сезона
+    venue, // Объект места проведения
+    sp_video, // URL видео
+    event_date, // Не используется напрямую
+    status, // Не используется напрямую
+    // ... другие поля, если нужны
+  } = gameDetails;
+
+  // Извлекаем имена команд из объектов
+  const homeTeamName = homeTeam?.name || 'Команда 1';
+  const awayTeamName = awayTeam?.name || 'Команда 2';
+
+  // Извлекаем имена лиги, сезона, места проведения
+  const leagueName = extractNameFromEntity(league);
+  const seasonName = extractNameFromEntity(season);
+  const venueName = extractNameFromEntity(venue);
+
+  // Извлекаем результаты по периодам
+  const homeFirstPeriod = team1_first;
+  const homeSecondPeriod = team1_second;
+  const homeThirdPeriod = team1_third;
+  const awayFirstPeriod = team2_first;
+  const awaySecondPeriod = team2_second;
+  const awayThirdPeriod = team2_third;
+
+  // Извлекаем итоговые результаты
+  const homeGoals = homeScore;
+  const awayGoals = awayScore;
+  const homeOutcomeText = extractOutcome(homeOutcome);
+  const awayOutcomeText = extractOutcome(awayOutcome);
+
   return (
     <SafeAreaView style={commonStyles.container}>
       <View style={styles.header}>
@@ -322,12 +304,12 @@ export default function GameDetailsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {/* VK Video Player - Using official VK embed API */}
-        {gameDetails.videoUrl && (
+        {sp_video && (
           <View style={styles.videoContainer}>
             <Text style={styles.sectionTitle}>Видео матча</Text>
             <View style={styles.videoFrame}>
               <WebView
-                source={{ uri: getVKEmbedUrl(gameDetails.videoUrl) }}
+                source={{ uri: getVKEmbedUrl(sp_video) }}
                 style={styles.webview}
                 javaScriptEnabled={true}
                 domStorageEnabled={true}
@@ -342,7 +324,7 @@ export default function GameDetailsScreen() {
                 showsHorizontalScrollIndicator={false}
                 showsVerticalScrollIndicator={false}
                 onLoadStart={() => {
-                  console.log('VK video embed started loading for URL:', getVKEmbedUrl(gameDetails.videoUrl));
+                  console.log('VK video embed started loading for URL:', getVKEmbedUrl(sp_video));
                 }}
                 onLoadEnd={() => {
                   console.log('VK video embed loaded successfully');
@@ -358,23 +340,22 @@ export default function GameDetailsScreen() {
                 userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"
               />
             </View>
-
           </View>
         )}
 
         {/* Main Game Info */}
         <View style={styles.gameInfo}>
           <View style={styles.gameHeader}>
-            <Text style={styles.gameDate}>{gameDetails.date} • {gameDetails.time}</Text>
+            <Text style={styles.gameDate}>{formattedDate} • {formattedTime}</Text>
           </View>
 
           {/* Teams with Logos Above Names */}
           <View style={styles.teamsContainer}>
             {/* Home Team Column */}
             <View style={styles.teamColumn}>
-              {gameDetails.homeTeam.logo ? (
+              {homeTeamLogo ? (
                 <Image 
-                  source={{ uri: gameDetails.homeTeam.logo }} 
+                  source={{ uri: homeTeamLogo }} 
                   style={styles.teamLogo}
                   onError={() => console.log('Failed to load home team logo')}
                 />
@@ -384,13 +365,13 @@ export default function GameDetailsScreen() {
                 </View>
               )}
               <Text style={styles.teamName} numberOfLines={2}>
-                {gameDetails.homeTeam.name}
+                {homeTeamName}
               </Text>
               {/* Outcome Badge centered under team name */}
-              {gameDetails.homeTeam.outcome && (
+              {homeOutcomeText && (
                 <View style={styles.outcomeBadgeContainer}>
-                  <View style={[styles.outcomeBadge, { backgroundColor: getOutcomeColor(gameDetails.homeTeam.outcome) }]}>
-                    <Text style={styles.outcomeText}>{getOutcomeText(gameDetails.homeTeam.outcome)}</Text>
+                  <View style={[styles.outcomeBadge, { backgroundColor: getOutcomeColor(homeOutcomeText) }]}>
+                    <Text style={styles.outcomeText}>{getOutcomeText(homeOutcomeText)}</Text>
                   </View>
                 </View>
               )}
@@ -399,15 +380,15 @@ export default function GameDetailsScreen() {
             {/* Score - Aligned with bottom of team names */}
             <View style={styles.scoreContainer}>
               <Text style={styles.score}>
-                {gameDetails.homeTeam.goals} : {gameDetails.awayTeam.goals}
+                {homeGoals} : {awayGoals}
               </Text>
             </View>
 
             {/* Away Team Column */}
             <View style={styles.teamColumn}>
-              {gameDetails.awayTeam.logo ? (
+              {awayTeamLogo ? (
                 <Image 
-                  source={{ uri: gameDetails.awayTeam.logo }} 
+                  source={{ uri: awayTeamLogo }} 
                   style={styles.teamLogo}
                   onError={() => console.log('Failed to load away team logo')}
                 />
@@ -417,13 +398,13 @@ export default function GameDetailsScreen() {
                 </View>
               )}
               <Text style={styles.teamName} numberOfLines={2}>
-                {gameDetails.awayTeam.name}
+                {awayTeamName}
               </Text>
               {/* Outcome Badge centered under team name */}
-              {gameDetails.awayTeam.outcome && (
+              {awayOutcomeText && (
                 <View style={styles.outcomeBadgeContainer}>
-                  <View style={[styles.outcomeBadge, { backgroundColor: getOutcomeColor(gameDetails.awayTeam.outcome) }]}>
-                    <Text style={styles.outcomeText}>{getOutcomeText(gameDetails.awayTeam.outcome)}</Text>
+                  <View style={[styles.outcomeBadge, { backgroundColor: getOutcomeColor(awayOutcomeText) }]}>
+                    <Text style={styles.outcomeText}>{getOutcomeText(awayOutcomeText)}</Text>
                   </View>
                 </View>
               )}
@@ -432,7 +413,7 @@ export default function GameDetailsScreen() {
         </View>
 
         {/* Period Scores */}
-        {(gameDetails.homeTeam.firstPeriod !== undefined || gameDetails.awayTeam.firstPeriod !== undefined) && (
+        {(homeFirstPeriod !== undefined || awayFirstPeriod !== undefined) && (
           <View style={styles.periodScores}>
             <Text style={styles.sectionTitle}>Счет по периодам</Text>
             <View style={styles.periodTable}>
@@ -444,18 +425,18 @@ export default function GameDetailsScreen() {
                 <Text style={styles.periodHeaderText}>Итого</Text>
               </View>
               <View style={styles.periodRow}>
-                <Text style={styles.periodTeam}>{gameDetails.homeTeam.name}</Text>
-                <Text style={styles.periodScore}>{gameDetails.homeTeam.firstPeriod || 0}</Text>
-                <Text style={styles.periodScore}>{gameDetails.homeTeam.secondPeriod || 0}</Text>
-                <Text style={styles.periodScore}>{gameDetails.homeTeam.thirdPeriod || 0}</Text>
-                <Text style={styles.periodTotal}>{gameDetails.homeTeam.goals}</Text>
+                <Text style={styles.periodTeam}>{homeTeamName}</Text>
+                <Text style={styles.periodScore}>{homeFirstPeriod || 0}</Text>
+                <Text style={styles.periodScore}>{homeSecondPeriod || 0}</Text>
+                <Text style={styles.periodScore}>{homeThirdPeriod || 0}</Text>
+                <Text style={styles.periodTotal}>{homeGoals}</Text>
               </View>
               <View style={styles.periodRow}>
-                <Text style={styles.periodTeam}>{gameDetails.awayTeam.name}</Text>
-                <Text style={styles.periodScore}>{gameDetails.awayTeam.firstPeriod || 0}</Text>
-                <Text style={styles.periodScore}>{gameDetails.awayTeam.secondPeriod || 0}</Text>
-                <Text style={styles.periodScore}>{gameDetails.awayTeam.thirdPeriod || 0}</Text>
-                <Text style={styles.periodTotal}>{gameDetails.awayTeam.goals}</Text>
+                <Text style={styles.periodTeam}>{awayTeamName}</Text>
+                <Text style={styles.periodScore}>{awayFirstPeriod || 0}</Text>
+                <Text style={styles.periodScore}>{awaySecondPeriod || 0}</Text>
+                <Text style={styles.periodScore}>{awayThirdPeriod || 0}</Text>
+                <Text style={styles.periodTotal}>{awayGoals}</Text>
               </View>
             </View>
           </View>
@@ -463,26 +444,27 @@ export default function GameDetailsScreen() {
 
         {/* Tournament, Arena Info (Season removed as requested) */}
         <View style={styles.gameDetails}>
-          {gameDetails.league && (
+          {leagueName && (
             <View style={styles.detailItem}>
               <Icon name="trophy" size={16} color={colors.textSecondary} />
-              <Text style={styles.detailText}>Турнир: {gameDetails.league}</Text>
+              <Text style={styles.detailText}>Турнир: {leagueName}</Text>
             </View>
           )}
-          {gameDetails.venue && (
+          {venueName && (
             <View style={styles.detailItem}>
               <Icon name="location" size={16} color={colors.textSecondary} />
-              <Text style={styles.detailText}>Арена: {gameDetails.venue}</Text>
+              <Text style={styles.detailText}>Арена: {venueName}</Text>
             </View>
           )}
         </View>
 
-        {teamsLoading && (
+        {/* teamsLoading больше не используется, так как данные уже загружены в gameData.ts */}
+        {/* {teamsLoading && (
           <View style={styles.loadingContainer}>
             <LoadingSpinner />
             <Text style={styles.loadingText}>Загрузка данных команд...</Text>
           </View>
-        )}
+        )} */}
       </ScrollView>
     </SafeAreaView>
   );
@@ -711,5 +693,4 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 12,
   },
-
 });

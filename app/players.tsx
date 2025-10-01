@@ -204,16 +204,20 @@ interface PlayerCardProps {
 }
 
 
-const formatName = (fullName: string): string => {
-  const parts = fullName.trim().split(/\s+/); // разбиваем по пробелам, убираем лишние
+const formatName = (fullName: string | null | undefined): string => {
+  if (!fullName) {
+    return 'Игрок'; // или '', но лучше что-то понятное
+  }
+
+  const parts = fullName.trim().split(/\s+/);
 
   if (parts.length === 1) {
-    return parts[0]; // только фамилия или только имя
+    return parts[0];
   }
 
   if (parts.length >= 2) {
-    const [lastName, firstName, ...rest] = parts;
-    return `${firstName} ${lastName}`; // "Имя Фамилия"
+    const [lastName, firstName] = parts;
+    return `${firstName} ${lastName}`;
   }
 
   return fullName;
@@ -234,7 +238,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onPress }) => {
       <View style={styles.playerInfo}>
         <Text style={styles.playerName}>{formatName(player.name)}</Text>
         <Text style={styles.playerDetails}>
-         {player.position} • Хват - {getHandednessText(player.handedness || '')}  
+         {player.position} • Хват: {getHandednessText(player.handedness || '')}  
         </Text>
         <Text style={styles.playerDetails}>
           {player.age ? `${player.age} лет` : 'Возраст не указан'}
@@ -246,7 +250,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onPress }) => {
             <Text style={styles.captainBadgeText}>{captainBadgeText}</Text>
           </View>
         )}
-        <Text style={[styles.playerNumber, { fontSize: 30 }]}>#{player.number}</Text> **/* делаем отображение номера крупнее, но только здесь/** */
+        <Text style={[styles.playerNumber, { fontSize: 30 }]}>#{player.number}</Text>
       </View>
     </TouchableOpacity>
   );

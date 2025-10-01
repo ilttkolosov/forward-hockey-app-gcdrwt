@@ -1,50 +1,149 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet, FlatList, TextInput, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { commonStyles, colors } from '../../styles/commonStyles';
-import { SEASONS_MAP } from '../../utils/seasons';
+// import { SEASONS_MAP } from '../../utils/seasons'; // Больше не нужно для получения дат
 import { formatGameDate } from '../../utils/dateUtils';
-import { fetchPastGames, getOutcomeText, getOutcomeColor } from '../../data/pastGameData';
-import { enrichGamesWithSeasons, filterGamesBySeason, GameWithSeason } from '../../utils/gameUtils';
+import { getGames } from '../../data/gameData'; // Импортируем новую функцию
+import { Game } from '../../types'; // Импортируем тип Game
 import ErrorMessage from '../../components/ErrorMessage';
 import Icon from '../../components/Icon';
 import LoadingSpinner from '../../components/LoadingSpinner';
 
 const ITEMS_PER_PAGE = 20;
 
+// --- Вспомогательная функция для определения дат начала и конца сезона по ID ---
+// Предположим, ID сезона соответствует году начала сезона (например, ID 99 -> 2025-2026)
+// Это нужно адаптировать под вашу логику определения ID сезона
+const getSeasonDates = (seasonId: string): { startDate: string; endDate: string } | null => {
+  // Парсим ID как число, предполагая, что оно связано с годом
+  const seasonNumber = parseInt(seasonId);
+  if (isNaN(seasonNumber)) {
+    console.error(`Invalid season ID: ${seasonId}`);
+    return null;
+  }
+
+  // Попробуем вычислить год начала сезона из ID
+  // Пример: ID 99 -> 2025 год начала сезона (2025-2026)
+  // Это гипотетическая логика. Нужно адаптировать под реальные ID и годы.
+  // Допустим, ID 99 соответствует 2025 году начала.
+  // const startYear = 2025; // Жёстко для примера
+  const startYear = seasonNumber + 2026 - 99; // Пример вычисления года из ID, если ID 99 -> 2025
+
+  // const startYear = seasonNumber; // Если ID уже является годом начала (менее вероятно)
+
+  // Формируем даты: 01 июля startYear года по 31 мая (startYear + 1) года
+  const startDate = `${startYear}-07-01`;
+  const endDate = `${startYear + 1}-05-31`;
+
+  console.log(`Season ID ${seasonId} corresponds to date range: ${startDate} to ${endDate}`);
+
+  return { startDate, endDate };
+};
+
+// --- Функции для работы с исходом игры (outcome) ---
+const getOutcomeText = (outcome: string | undefined): string => {
+  switch (outcome) {
+    case 'win':
+      return 'Победа';
+    case 'loss':
+      return 'Поражение';
+    case 'draw':
+      return 'Ничья';
+    default:
+      return outcome || '';
+  }
+};
+
+const getOutcomeColor = (outcome: string | undefined): string => {
+  switch (outcome) {
+    case 'win':
+      return colors.success;
+    case 'loss':
+      return colors.error;
+    case 'draw':
+      return colors.warning; // или другой цвет для ничьей
+    default:
+      return colors.textSecondary;
+  }
+};
+
+// --- Функции для работы с названием лиги (tournament) ---
+const shortenLeagueName = (leagueName: string | undefined): string => {
+  if (!leagueName) return '';
+
+  // Extract meaningful part from league name
+  const parts = leagueName.split(':');
+  if (parts.length > 1) {
+    const namePart = parts[1].trim();
+    const words = namePart.split(',')[0].trim();
+    const firstWord = words.split(' ')[0];
+    return firstWord;
+  }
+
+  return leagueName.split(',')[0].trim();
+};
+
+const getLeagueDisplayName = (leagueName: string | undefined): string => {
+  // If league is empty or null, return "Товарищеский матч" without truncation
+  if (!leagueName || leagueName.trim() === '') {
+    return 'Товарищеский матч';
+  }
+
+  // For non-empty leagues, apply truncation as before
+  return shortenLeagueName(leagueName);
+};
+
 export default function SeasonGamesScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
-  const seasonId = parseInt(id as string);
-  const season = SEASONS_MAP[seasonId];
+  const seasonId = id as string; // ID сезона строка
 
-  const [allGames, setAllGames] = useState<GameWithSeason[]>([]);
-  const [filteredGames, setFilteredGames] = useState<GameWithSeason[]>([]);
-  const [displayedGames, setDisplayedGames] = useState<GameWithSeason[]>([]);
+  // Получаем информацию о сезоне (например, название) из SEASONS_MAP или другим способом
+  // const seasonInfo = SEASONS_MAP[parseInt(seasonId)]; // Пока оставим как есть, но нужно убедиться, что SEASONS_MAP адаптирован
+  // const seasonName = seasonInfo?.name || `Сезон ${seasonId}`; // Фолбэк на ID, если не найден
+  // Пока используем ID как имя, если SEASONS_MAP не обновлён
+  const seasonName = `Сезон ${seasonId}`; // Или получите из другого источника, если SEASONS_MAP обновлён
+
+  const [allGames, setAllGames] = useState<Game[]>([]);
+  const [filteredGames, setFilteredGames] = useState<Game[]>([]); // <-- ИСПРАВЛЕНО: добавлена недостающая ]
+  const [displayedGames, setDisplayedGames] = useState<Game[]>([]); // Используем для отображения с пагинацией
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false); // Не используется в этом варианте, так как загружаем всё сразу
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchModal, setShowSearchModal] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1); // Не используется в этом варианте
 
   const loadData = useCallback(async () => {
     try {
       setError(null);
-      console.log('Loading games for season:', seasonId);
-      
-      const pastGames = await fetchPastGames();
-      const enrichedGames = enrichGamesWithSeasons(pastGames);
-      const seasonGames = filterGamesBySeason(enrichedGames, seasonId);
-      
+      console.log('Loading games for season ID:', seasonId);
+
+      // Получаем диапазон дат для сезона
+      const seasonDates = getSeasonDates(seasonId);
+      if (!seasonDates) {
+        setError('Не удалось определить даты сезона');
+        setLoading(false);
+        return;
+      }
+
+      const { startDate, endDate } = seasonDates;
+
+      // Используем getGames с фильтром по дате и команде 74
+      const seasonGames = await getGames({
+        date_from: startDate,
+        date_to: endDate,
+        teams: '74', // Фильтр по команде с ID 74
+      });
+
       setAllGames(seasonGames);
       setFilteredGames(seasonGames);
-      setDisplayedGames(seasonGames.slice(0, ITEMS_PER_PAGE));
-      setCurrentPage(1);
-      
-      console.log(`Loaded ${seasonGames.length} games for season ${seasonId}`);
+      setDisplayedGames(seasonGames); // Показываем все загруженные игры, пагинация не используется
+      // setCurrentPage(1); // Не нужно
+
+      console.log(`Loaded ${seasonGames.length} games for season ${seasonId} (${startDate} to ${endDate})`);
     } catch (err) {
       console.error('Error loading season games:', err);
       setError('Не удалось загрузить игры сезона. Попробуйте еще раз.');
@@ -55,26 +154,27 @@ export default function SeasonGamesScreen() {
 
   useEffect(() => {
     loadData();
-  }, [loadData, season]);
+  }, [loadData, seasonId]);
 
-  // Filter games based on search query
+  // Filter games based on search query - АДАПТИРУЕМ ПОД НОВЫЙ ТИП Game
   useEffect(() => {
     if (!searchQuery.trim()) {
       setFilteredGames(allGames);
-      setDisplayedGames(allGames.slice(0, ITEMS_PER_PAGE));
-      setCurrentPage(1);
+      setDisplayedGames(allGames); // Показываем все отфильтрованные игры
+      // setCurrentPage(1); // Не нужно
     } else {
-      const filtered = allGames.filter(game => 
-        game.homeTeam.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        game.awayTeam.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (game.tournamentName && game.tournamentName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (game.arenaName && game.arenaName.toLowerCase().includes(searchQuery.toLowerCase()))
+      const filtered = allGames.filter(game =>
+        // game.homeTeam.name, game.awayTeam.name, game.tournament (если это строка), game.venue_name
+        (game.homeTeam?.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (game.awayTeam?.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (game.tournament && game.tournament.toLowerCase().includes(searchQuery.toLowerCase())) || // tournament - строка
+        (game.venue_name && game.venue_name.toLowerCase().includes(searchQuery.toLowerCase())) // venue_name - строка
       );
       setFilteredGames(filtered);
-      setDisplayedGames(filtered.slice(0, ITEMS_PER_PAGE));
-      setCurrentPage(1);
+      setDisplayedGames(filtered); // Показываем отфильтрованные игры
+      // setCurrentPage(1); // Не нужно
     }
-  }, [searchQuery, allGames, seasonId]);
+  }, [searchQuery, allGames]);
 
   const handleGamePress = (gameId: string) => {
     console.log('Navigating to game:', gameId);
@@ -104,32 +204,7 @@ export default function SeasonGamesScreen() {
     setSearchQuery('');
   };
 
-  const shortenLeagueName = (leagueName: string | null): string => {
-    if (!leagueName) return '';
-    
-    // Extract meaningful part from league name
-    const parts = leagueName.split(':');
-    if (parts.length > 1) {
-      const namePart = parts[1].trim();
-      const words = namePart.split(',')[0].trim();
-      const firstWord = words.split(' ')[0];
-      return firstWord;
-    }
-    
-    return leagueName.split(',')[0].trim();
-  };
-
-  const getLeagueDisplayName = (leagueName: string | null): string => {
-    // If league is empty or null, return "Товарищеский матч" without truncation
-    if (!leagueName || leagueName.trim() === '') {
-      return 'Товарищеский матч';
-    }
-    
-    // For non-empty leagues, apply truncation as before
-    return shortenLeagueName(leagueName);
-  };
-
-  const renderGameCard = ({ item: game }: { item: GameWithSeason }) => (
+  const renderGameCard = ({ item: game }: { item: Game }) => ( // Меняем тип item на Game
     <TouchableOpacity
       style={commonStyles.gameCard}
       onPress={() => handleGamePress(game.id)}
@@ -137,29 +212,29 @@ export default function SeasonGamesScreen() {
     >
       <View style={styles.header}>
         <Text style={commonStyles.textSecondary}>
-          {formatGameDate(game.event_date)}
+          {formatGameDate(game.event_date)} 
         </Text>
       </View>
 
       <View style={styles.teamsContainer}>
         <View style={styles.teamContainer}>
-          {game.homeTeamLogo ? (
-            <Image 
-              source={{ uri: game.homeTeamLogo }} 
+          {game.homeTeamLogo ? ( // Используем homeTeamLogo из Game
+            <Image
+              source={{ uri: game.homeTeamLogo }} // URI уже из локального хранилища
               style={styles.teamLogo}
               resizeMode="contain"
             />
           ) : (
             <View style={styles.placeholderLogo}>
               <Text style={styles.placeholderText}>
-                {game.homeTeam.charAt(0)}
+                {game.homeTeam?.name?.charAt(0) || '?'} 
               </Text>
             </View>
           )}
           <Text style={styles.teamName} numberOfLines={2}>
-            {game.homeTeam}
+            {game.homeTeam?.name || '—'} 
           </Text>
-          <Text style={styles.score}>{game.homeGoals}</Text>
+          <Text style={styles.score}>{game.homeScore}</Text> {/* Используем homeScore */}
           <View style={styles.outcomeBadgeContainer}>
             <Text style={[styles.outcomeText, { color: getOutcomeColor(game.homeOutcome) }]}>
               {getOutcomeText(game.homeOutcome)}
@@ -172,26 +247,26 @@ export default function SeasonGamesScreen() {
         </View>
 
         <View style={styles.teamContainer}>
-          {game.awayTeamLogo ? (
-            <Image 
-              source={{ uri: game.awayTeamLogo }} 
+          {game.awayTeamLogo ? ( // Используем awayTeamLogo из Game
+            <Image
+              source={{ uri: game.awayTeamLogo }} // URI уже из локального хранилища
               style={styles.teamLogo}
               resizeMode="contain"
             />
           ) : (
             <View style={styles.placeholderLogo}>
               <Text style={styles.placeholderText}>
-                {game.awayTeam.charAt(0)}
+                {game.awayTeam?.name?.charAt(0) || '?'} 
               </Text>
             </View>
           )}
           <Text style={styles.teamName} numberOfLines={2}>
-            {game.awayTeam}
+            {game.awayTeam?.name || '—'} 
           </Text>
-          <Text style={styles.score}>{game.awayGoals}</Text>
+          <Text style={styles.score}>{game.awayScore}</Text> {/* Используем awayScore */}
           <View style={styles.outcomeBadgeContainer}>
             <Text style={[styles.outcomeText, { color: getOutcomeColor(game.awayOutcome) }]}>
-              {getOutcomeText(game.awayOutcome)}
+              {getOutcomeText(game.awayOutcome)} 
             </Text>
           </View>
         </View>
@@ -199,27 +274,28 @@ export default function SeasonGamesScreen() {
 
       <View style={styles.footer}>
         <View style={styles.gameInfo}>
-          {game.arenaName && (
+          {game.venue_name && ( // Используем venue_name из Game
             <Text style={commonStyles.textSecondary} numberOfLines={1}>
-              📍 {game.arenaName}
+              📍 {game.venue_name}
             </Text>
           )}
           <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
-            {(!game.tournamentName || game.tournamentName.trim() === '') ? '🤝 ' : '🏆 '}{getLeagueDisplayName(game.tournamentName)}
+            {(!game.tournament || game.tournament.trim() === '') ? '🤝 ' : '🏆 '}{getLeagueDisplayName(game.tournament)} 
           </Text>
         </View>
       </View>
     </TouchableOpacity>
   );
 
-  const renderFooter = () => {
-    if (!loadingMore) return null;
-    return (
-      <View style={{ padding: 20 }}>
-        <LoadingSpinner />
-      </View>
-    );
-  };
+  // renderFooter больше не используется, так как пагинация отключена
+  // const renderFooter = () => {
+  //   if (!loadingMore) return null;
+  //   return (
+  //     <View style={{ padding: 20 }}>
+  //       <LoadingSpinner />
+  //     </View>
+  //   );
+  // };
 
   const renderEmpty = () => (
     <View style={commonStyles.errorContainer}>
@@ -248,13 +324,14 @@ export default function SeasonGamesScreen() {
     );
   }
 
-  if (!season) {
-    return (
-      <SafeAreaView style={commonStyles.container}>
-        <ErrorMessage message="Сезон не найден" onRetry={() => router.back()} />
-      </SafeAreaView>
-    );
-  }
+  // Проверка сезона может быть адаптирована, если SEASONS_MAP использует строковые ключи
+  // if (!season) {
+  //   return (
+  //     <SafeAreaView style={commonStyles.container}>
+  //       <ErrorMessage message="Сезон не найден" onRetry={() => router.back()} />
+  //     </SafeAreaView>
+  //   );
+  // }
 
   return (
     <SafeAreaView style={commonStyles.container}>
@@ -265,9 +342,9 @@ export default function SeasonGamesScreen() {
             <Icon name="chevron-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <View style={styles.headerTextContainer}>
-            <Text style={commonStyles.title}>{season.name}</Text>
+            <Text style={commonStyles.title}>{seasonName}</Text> {/* Используем seasonName */}
             <Text style={commonStyles.textSecondary}>
-              {filteredGames.length} {filteredGames.length === 1 ? 'игра' : 'игр'}
+              {filteredGames.length} {filteredGames.length === 1 ? 'игра' : filteredGames.length < 5 ? 'игры' : 'игр'}
             </Text>
           </View>
           <TouchableOpacity onPress={handleSearchPress} style={styles.searchButton}>
@@ -277,13 +354,13 @@ export default function SeasonGamesScreen() {
 
         {/* Games List */}
         <FlatList
-          data={displayedGames}
+          data={displayedGames} // Используем displayedGames
           renderItem={renderGameCard}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => item.id} // ID игры из нового объекта Game
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={renderEmpty}
-          ListFooterComponent={renderFooter}
+          // ListFooterComponent={renderFooter} // Убрано
         />
       </View>
 
@@ -324,9 +401,9 @@ export default function SeasonGamesScreen() {
 
             {/* Search Results */}
             <FlatList
-              data={searchQuery ? filteredGames : []}
+              data={searchQuery ? filteredGames : []} // Используем filteredGames для результатов поиска
               renderItem={renderGameCard}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item) => item.id} // ID игры из нового объекта Game
               contentContainerStyle={styles.searchResults}
               showsVerticalScrollIndicator={false}
               ListEmptyComponent={searchQuery ? renderEmpty : null}

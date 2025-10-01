@@ -1,22 +1,39 @@
+// services/apiService.ts
 
+// Импорты из старого файла типов (для совместимости со старыми методами и компонентами)
 import { 
   ApiPlayerResponse, 
   ApiUpcomingEventsResponse, 
   ApiPastEventsResponse, 
-  ApiTeam, 
   ApiLeague, 
-  ApiSeason, 
-  ApiVenue,
-  ApiGameDetailsResponse
+  ApiGameDetailsResponse as LegacyApiGameDetailsResponse // Переименовываем, чтобы избежать конфликта
 } from '../types';
 
-// New interfaces for the updated player API endpoints
+// Импорты из нового файла типов (для новых методов)
+import { 
+  ApiEventsResponse, 
+  ApiEvent, 
+  ApiSeason, 
+  ApiVenue, 
+  ApiGameDetailsResponse, // Новый тип для /event-by-id/{id}
+  ApiLeaguesResponse, 
+  ApiSeasonsResponse, 
+  ApiVenuesResponse 
+} from '../types/apiTypes';
+
+// --- Старые интерфейсы для игроков (оставлены для совместимости) ---
 interface ApiPlayerListItem {
   id: string;
   name: string;
   number: number;
   position: string;
   birth_date: string;
+}
+
+export interface ApiTeam {
+  id: string;
+  name: string;
+  logo_url: string; // может быть пустой строкой
 }
 
 interface ApiPlayerDetailsResponse {
@@ -39,96 +56,310 @@ interface ApiPlayerPhotoResponse {
 }
 
 class ApiService {
-  private baseUrl = 'https://www.hc-forward.com/wp-json/app/v1';
+  private baseUrl = "https://www.hc-forward.com/wp-json/app/v1";
 
-  // Cache for team data to avoid repeated requests
+  // Кэши для данных, чтобы избежать повторных запросов
   private teamCache: { [key: string]: ApiTeam } = {};
   private leagueCache: { [key: string]: ApiLeague } = {};
   private seasonCache: { [key: string]: ApiSeason } = {};
   private venueCache: { [key: string]: ApiVenue } = {};
+  private teamListCache: ApiTeam[] | null = null;
 
-  async fetchUpcomingEvents(): Promise<ApiUpcomingEventsResponse> {
-    try {
-      console.log('Fetching upcoming events from API...');
-      const response = await fetch(`${this.baseUrl}/upcoming-events`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const result: ApiUpcomingEventsResponse = await response.json();
-      console.log('Upcoming events response:', result);
-      console.log('Total upcoming events count:', result.count);
-      
-      return result;
-    } catch (error) {
-      console.error('Error fetching upcoming events:', error);
-      throw error;
+  // --- НОВЫЕ МЕТОДЫ для новых эндпоинтов ---
+
+  /**
+ * Получает список игр с фильтрацией
+ */
+async fetchEvents(params: {
+  date_from?: string;
+  date_to?: string;
+  league?: string;
+  season?: string;
+  teams?: string;
+}): Promise<ApiEventsResponse> {
+  const url = new URL(`${this.baseUrl}/get-events`);
+
+  // Явно указываем тип ключей
+  const keys = Object.keys(params) as (keyof typeof params)[];
+  for (const key of keys) {
+    if (params[key]) {
+      url.searchParams.append(key, params[key]);
     }
   }
 
-  async fetchPastEvents(): Promise<ApiPastEventsResponse> {
-    try {
-      console.log('=== API Service: Fetching past events ===');
-      console.log('URL:', `${this.baseUrl}/past-events`);
-      
-      const response = await fetch(`${this.baseUrl}/past-events`);
-      
-      if (!response.ok) {
-        console.error(`API Service: HTTP error! status: ${response.status}`);
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const result: ApiPastEventsResponse = await response.json();
-      console.log('API Service: Past events response status:', result.status);
-      console.log('API Service: Total past events count:', result.count);
-      console.log('API Service: Data array length:', result.data?.length || 0);
-      
-      // Log the structure of the first few events for debugging
-      if (result.data && result.data.length > 0) {
-        console.log('=== API Service: First event structure ===');
-        const firstEvent = result.data[0];
-        console.log('Event ID:', firstEvent.event_id);
-        console.log('Event Date:', firstEvent.event_date);
-        console.log('Teams string:', firstEvent.teams);
-        console.log('Results object:', firstEvent.results);
-        console.log('Leagues:', firstEvent.leagues);
-        console.log('Venues:', firstEvent.venues);
-        console.log('Seasons:', firstEvent.seasons);
-        
-        if (result.data.length > 1) {
-          console.log('=== API Service: Second event structure ===');
-          const secondEvent = result.data[1];
-          console.log('Event ID:', secondEvent.event_id);
-          console.log('Teams string:', secondEvent.teams);
-          console.log('Results object:', secondEvent.results);
-        }
-      } else {
-        console.warn('API Service: No events in data array');
-      }
-      
-      return result;
-    } catch (error) {
-      console.error('API Service: Error fetching past events:', error);
-      throw error;
-    }
-  }
+  console.log('API Service: Fetching events with URL:', url.toString());
 
-  async fetchGameById(gameId: string): Promise<ApiGameDetailsResponse> {
+  try {
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const result: ApiEventsResponse = await response.json();
+    console.log('API Service: Events response status:', result.status);
+    console.log('API Service: Total events count:', result.count);
+    return result;
+  } catch (error) {
+    console.error('API Service: Error fetching events:', error);
+    throw error;
+  }
+}
+
+  /**
+   * Получает детальную информацию об одной игре по ID
+   */
+  async fetchEventById(id: string): Promise<ApiGameDetailsResponse> {
+    const url = `${this.baseUrl}/event-by-id/${id}`;
+    console.log('API Service: Fetching event by ID:', url);
+
     try {
-      console.log('Fetching game details for ID:', gameId);
-      const response = await fetch(`${this.baseUrl}/events/${gameId}`);
-      
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
       const result: ApiGameDetailsResponse = await response.json();
-      console.log('Game details response:', result);
-      
+      console.log('API Service: Event details response:', result);
       return result;
     } catch (error) {
-      console.error('Error fetching game details:', error);
+      console.error('API Service: Error fetching event by ID:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получает список всех лиг
+   */
+  async fetchLeagues(): Promise<ApiLeaguesResponse> {
+    const url = `${this.baseUrl}/get-league`;
+    console.log('API Service: Fetching all leagues:', url);
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const result: ApiLeaguesResponse = await response.json();
+      console.log('API Service: Leagues response status:', result.status);
+      console.log('API Service: Total leagues count:', result.count);
+
+      // Обновляем кэш в памяти
+      result.data.forEach(league => {
+        this.leagueCache[league.id] = league;
+      });
+
+      return result;
+    } catch (error) {
+      console.error('API Service: Error fetching leagues:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получает список всех сезонов
+   */
+  async fetchSeasons(): Promise<ApiSeasonsResponse> {
+    const url = `${this.baseUrl}/get-season`;
+    console.log('API Service: Fetching all seasons:', url);
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const result: ApiSeasonsResponse = await response.json();
+      console.log('API Service: Seasons response status:', result.status);
+      console.log('API Service: Total seasons count:', result.count);
+
+      // Обновляем кэш в памяти
+      result.data.forEach(season => {
+        this.seasonCache[season.id] = season;
+      });
+
+      return result;
+    } catch (error) {
+      console.error('API Service: Error fetching seasons:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получает список всех мест проведения
+   */
+  async fetchVenues(): Promise<ApiVenuesResponse> {
+    const url = `${this.baseUrl}/get-venue`;
+    console.log('API Service: Fetching all venues:', url);
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const result: ApiVenuesResponse = await response.json();
+      console.log('API Service: Venues response status:', result.status);
+      console.log('API Service: Total venues count:', result.count);
+
+      // Обновляем кэш в памяти
+      result.data.forEach(venue => {
+        this.venueCache[venue.id] = venue;
+      });
+
+      return result;
+    } catch (error) {
+      console.error('API Service: Error fetching venues:', error);
+      throw error;
+    }
+  }
+
+  // --- МЕТОДЫ для получения данных из кэша ---
+  getLeagueById(id: string): ApiLeague | undefined {
+    return this.leagueCache[id];
+  }
+
+  getSeasonById(id: string): ApiSeason | undefined {
+    return this.seasonCache[id];
+  }
+
+  getVenueById(id: string): ApiVenue | undefined {
+    return this.venueCache[id];
+  }
+
+
+  // --- СТАРЫЕ МЕТОДЫ для игроков (оставлены) ---
+
+  async fetchPlayers(): Promise<ApiPlayerResponse[]> {
+    console.log("API Service: [LOG] fetchPlayers - Начало загрузки списка игроков с /players/"); // <-- НОВОЕ ЛОГИРОВАНИЕ
+    try {
+      console.log("API Service: Fetching all players from API..."); // <-- Старое логирование
+      const response = await fetch(`${this.baseUrl}/players/`);
+      if (!response.ok) {
+        const errorMessage = `API Service: Error accessing players API! Status: ${response.status}`;
+        console.error(errorMessage);
+        throw new Error(errorMessage);
+      }
+      const data: ApiPlayerResponse[] = await response.json();
+      console.log("API Service: [LOG] fetchPlayers - Raw API response data:", data); // <-- НОВОЕ ЛОГИРОВАНИЕ - смотрим сырой ответ
+      console.log("API Service: All player data fetched. Count:", data.length);
+
+      if (!Array.isArray(data)) {
+        console.error("API Service: Received data is not an array:", data);
+        throw new Error("Invalid data format from API");
+      }
+
+      // Log first few players for debugging
+      data.slice(0, 3).forEach((player, index) => {
+        console.log(`API Service: Player ${index + 1} from API:`, {
+          id: player.id,
+          // name: player.name, // <-- Старое логирование
+          // post_title: player.post_title, // <-- Добавьте, если ожидаете post_title
+          name: player.name, // <-- Логируем name
+          post_title: player.post_title, // <-- Логируем post_title для сравнения
+          position: player.position,
+        });
+      });
+
+      console.log("API Service: [LOG] fetchPlayers - Конец загрузки списка игроков"); // <-- НОВОЕ ЛОГИРОВАНИЕ
+      return data;
+    } catch (error) {
+      console.error("API Service: [LOG] fetchPlayers - Ошибка загрузки списка игроков:", error); // <-- НОВОЕ ЛОГИРОВАНИЕ
+      console.error("API Service: Error fetching players:", error);
+      throw error;
+    }
+  }
+
+  async fetchPlayerDetails(id: string): Promise<ApiPlayerDetailsResponse | null> {
+    try {
+      console.log(`API Service: Fetching player details for ID: ${id}`);
+      const response = await fetch(`${this.baseUrl}/player/${id}`);
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.log(`API Service: Player not found for ID: ${id}`);
+          return null;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const result: ApiPlayerDetailsResponse = await response.json();
+      console.log("API Service: Player details response:", result);
+      return result;
+    } catch (error) {
+      console.error("API Service: Error fetching player details:", error);
+      throw error;
+    }
+  }
+
+  async fetchPlayerPhoto(id: string): Promise<ApiPlayerPhotoResponse | null> {
+    try {
+      console.log(`API Service: Fetching photo for player ID: ${id}`);
+      const response = await fetch(`${this.baseUrl}/player/${id}/photo`);
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.log(`API Service: Photo not found for player ID: ${id}`);
+          return null;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const result: ApiPlayerPhotoResponse = await response.json();
+
+      const cleanPhotoUrl = result.photo_url?.trim();
+      if (!cleanPhotoUrl) {
+        console.log(`API Service: Photo URL is empty for player ${id}`);
+        return null;
+      }
+      console.log(`API Service: Photo URL fetched for player ${id}:`, cleanPhotoUrl);
+      return { photo_url: cleanPhotoUrl };
+    } catch (error) {
+      console.error(`API Service: Error fetching photo for player ${id}:`, error);
+      return null;
+    }
+  }
+
+  // LEGACY PLAYER API METHODS (kept for backward compatibility)
+  async checkPlayersApiAvailability(): Promise<boolean> {
+    try {
+      console.log("API Service: Checking players API endpoint availability...");
+      const response = await fetch(`${this.baseUrl}/players/`, {
+        method: "HEAD",
+      });
+      const isAvailable = response.ok;
+      console.log("API Service: Players API endpoint available:", isAvailable);
+      return isAvailable;
+    } catch (error) {
+      console.error("API Service: Error checking players API endpoint availability:", error);
+      return false;
+    }
+  }
+
+
+  // --- СТАРЫЕ МЕТОДЫ для команд (оставлены для получения логотипов/названий) ---
+
+  async fetchTeamList(): Promise<ApiTeam[]> {
+    if (this.teamListCache) {
+      console.log('API Service: Returning cached team list');
+      return this.teamListCache;
+    }
+
+    try {
+      console.log('API Service: Fetching full team list from /get-team');
+      const response = await fetch(`${this.baseUrl}/get-team`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const result = await response.json();
+
+      if (result.status !== 'success' || !result.data || !Array.isArray(result.data)) {
+        console.error('API Service: Invalid team list format:', result);
+        throw new Error('Invalid team list format');
+      }
+
+      const teams: ApiTeam[] = result.data.map((rawTeam: any) => ({
+        id: String(rawTeam.id),
+        name: rawTeam.name || `Team ${rawTeam.id}`,
+        logo_url: rawTeam.logo_url?.trim() || "",
+      }));
+
+      this.teamListCache = teams;
+      console.log(`API Service: Fetched and cached ${teams.length} teams`);
+      return teams;
+    } catch (error) {
+      console.error('API Service: Error fetching team list:', error);
       throw error;
     }
   }
@@ -141,436 +372,148 @@ class ApiService {
     }
 
     try {
-      console.log(`API Service: Fetching team details for ID: ${teamId}`);
-      const response = await fetch(`${this.baseUrl}/teams/${teamId}`);
-      
+      console.log(`API Service: Fetching team details for ID: ${teamId} from /get-team/${teamId}`);
+      const response = await fetch(`${this.baseUrl}/get-team/${teamId}`);
       if (!response.ok) {
         console.error(`API Service: Team fetch failed for ID ${teamId}, status: ${response.status}`);
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const team: ApiTeam = await response.json();
-      console.log(`API Service: Team fetched successfully - ID: ${teamId}, Name: ${team.name}`);
-      
-      // Cache the result
-      this.teamCache[teamId] = team;
-      
-      return team;
-    } catch (error) {
-      console.error(`API Service: Error fetching team details for ID ${teamId}:`, error);
-      // Return fallback data
-      const fallbackTeam = {
-        id: teamId,
-        name: `Team ${teamId}`,
-        logo_url: ''
-      };
-      console.log(`API Service: Using fallback team data for ID ${teamId}:`, fallbackTeam);
-      return fallbackTeam;
-    }
-  }
-
-  async fetchLeague(leagueId: string): Promise<ApiLeague> {
-    // Check cache first
-    if (this.leagueCache[leagueId]) {
-      console.log('Returning cached league data for ID:', leagueId);
-      return this.leagueCache[leagueId];
-    }
-
-    try {
-      console.log('Fetching league details for ID:', leagueId);
-      const response = await fetch(`${this.baseUrl}/leagues/${leagueId}`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const league: ApiLeague = await response.json();
-      console.log('League details fetched:', league);
-      
-      // Cache the result
-      this.leagueCache[leagueId] = league;
-      
-      return league;
-    } catch (error) {
-      console.error('Error fetching league details:', error);
-      // Return fallback data
-      return {
-        id: leagueId,
-        name: `League ${leagueId}`
-      };
-    }
-  }
-
-  async fetchSeason(seasonId: string): Promise<ApiSeason> {
-    // Check cache first
-    if (this.seasonCache[seasonId]) {
-      console.log('Returning cached season data for ID:', seasonId);
-      return this.seasonCache[seasonId];
-    }
-
-    try {
-      console.log('Fetching season details for ID:', seasonId);
-      const response = await fetch(`${this.baseUrl}/seasons/${seasonId}`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const season: ApiSeason = await response.json();
-      console.log('Season details fetched:', season);
-      
-      // Cache the result
-      this.seasonCache[seasonId] = season;
-      
-      return season;
-    } catch (error) {
-      console.error('Error fetching season details:', error);
-      // Return fallback data
-      return {
-        id: seasonId,
-        name: `Season ${seasonId}`
-      };
-    }
-  }
-
-  async fetchVenue(venueId: string): Promise<ApiVenue> {
-    // Check cache first
-    if (this.venueCache[venueId]) {
-      console.log('Returning cached venue data for ID:', venueId);
-      return this.venueCache[venueId];
-    }
-
-    try {
-      console.log('Fetching venue details for ID:', venueId);
-      const response = await fetch(`${this.baseUrl}/venues/${venueId}`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const venue: ApiVenue = await response.json();
-      console.log('Venue details fetched:', venue);
-      
-      // Cache the result
-      this.venueCache[venueId] = venue;
-      
-      return venue;
-    } catch (error) {
-      console.error('Error fetching venue details:', error);
-      // Return fallback data
-      return {
-        id: venueId,
-        name: `Venue ${venueId}`
-      };
-    }
-  }
-
-  // NEW PLAYER API METHODS
-
-  /**
-   * Fetch basic player list from new endpoint
-   * GET https://www.hc-forward.com/wp-json/app/v1/get-player/
-   */
-  async fetchPlayersList(): Promise<ApiPlayerListItem[]> {
-  try {
-      console.log('Fetching players list from new API endpoint...');
-      const response = await fetch(`${this.baseUrl}/get-player/`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        // Возвращаем fallback, чтобы приложение не ломалось
+        return {
+          id: teamId,
+          name: `Team ${teamId}`,
+          logo_url: '',
+        };
       }
       const result = await response.json();
 
-      // 🔥 ИСПРАВЛЕНИЕ: API возвращает { data: [...] }, а не массив напрямую
-      const playersData = Array.isArray(result) 
-        ? result 
-        : (Array.isArray(result.data) ? result.data : []);
+      if (result.status !== 'success' || !result.data) {
+        console.error(`API Service: Invalid team data for ID ${teamId}:`, result);
+        throw new Error('Invalid team data format');
+      }
 
-      console.log(`Fetched ${playersData.length} players from list endpoint`);
+      const team: ApiTeam = {
+        id: String(result.data.id),
+        name: result.data.name || `Team ${teamId}`,
+        logo_url: result.data.logo_url?.trim() || '',
+      };
 
-      // Ensure all IDs are strings
-      const players = playersData.map((player: any) => ({
-        ...player,
-        id: String(player.id)
-      }));
-      return players;
+      this.teamCache[teamId] = team;
+      return team;
     } catch (error) {
-      console.error('Error fetching players list:', error);
-      throw error;
+      console.error(`API Service: Error fetching team ${teamId}:`, error);
+      // Возвращаем fallback
+      return {
+        id: teamId,
+        name: `Team ${teamId}`,
+        logo_url: '',
+      };
     }
   }
 
-  /**
-   * Fetch detailed player data from new endpoint
-   * GET https://www.hc-forward.com/wp-json/app/v1/get-player/{id}
-   */
-/**
- * Fetch detailed player data from new endpoint
- * GET https://www.hc-forward.com/wp-json/app/v1/get-player/{id}
- */
-  /**
- * Fetch detailed player data from new endpoint
- * GET https://www.hc-forward.com/wp-json/app/v1/get-player/{id}
- */
-    async fetchPlayerDetails(id: string): Promise<ApiPlayerDetailsResponse> {
-      try {
-        console.log(`Fetching player details for ID: ${id}`);
-        const response = await fetch(`${this.baseUrl}/get-player/${id}`);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const result = await response.json();
-        console.log(`Fetched details for player ${id}`);
-
-        // 🔥 ИСПРАВЛЕНИЕ: API возвращает { status, data: { ... } }
-        if (!result || typeof result !== 'object' || !result.data) {
-          console.warn(`Invalid player data format for ID ${id}:`, result);
-          throw new Error('Invalid player data format');
-        }
-
-        const playerData = result.data;
-
-        // 🔒 Проверка обязательных полей внутри data
-        if (
-          typeof playerData.id === 'undefined' ||
-          typeof playerData.name === 'undefined' ||
-          typeof playerData.number === 'undefined' ||
-          typeof playerData.position === 'undefined'
-        ) {
-          console.warn(`Missing required fields in player data for ID ${id}:`, playerData);
-          throw new Error('Missing required player fields');
-        }
-
-        // 🔒 Безопасное приведение ID к строке
-        const safeId = String(playerData.id);
-
-        // 🔒 Обеспечиваем наличие metrics
-        const metrics = playerData.metrics || {
-          ka: '',
-          onetwofive: '',
-          height: '',
-          weight: ''
-        };
-
-        return {
-          id: safeId,
-          name: playerData.name,
-          number: playerData.number ?? 0,
-          position: playerData.position ?? '',
-          birth_date: playerData.birth_date ?? '',
-          nationality: playerData.nationality ?? '',
-          metrics: {
-            ka: metrics.ka ?? '',
-            onetwofive: metrics.onetwofive ?? '',
-            height: String(metrics.height ?? ''),
-            weight: String(metrics.weight ?? '')
-          }
-        };
-      } catch (error) {
-        console.error(`Error fetching player details for ID ${id}:`, error);
-        throw error;
-      }
-    }
-  /**
-   * Fetch player photo from new endpoint
-   * GET https://www.hc-forward.com/wp-json/app/v1/get-photo-players/{id}
-   */
-  async fetchPlayerPhoto(id: string): Promise<{ photo_url: string } | null> {
-    try {
-      console.log(`Fetching player photo for ID: ${id}`);
-      const response = await fetch(`${this.baseUrl}/get-photo-players/${id}`);
-      if (!response.ok) {
-        console.log(`No photo available for player ${id}`);
-        return null;
-      }
-      const result: ApiPlayerPhotoResponse = await response.json();
-      console.log(`Fetched photo for player ${id}:`, result.photo_url);
-
-      // 🔥 ИСПРАВЛЕНИЕ: удаляем пробелы в начале и конце URL
-      const cleanPhotoUrl = result.photo_url?.trim();
-      if (!cleanPhotoUrl) {
-        console.log(`Photo URL is empty for player ${id}`);
-        return null;
-      }
-
-      return { photo_url: cleanPhotoUrl };
-    } catch (error) {
-      console.error(`Error fetching photo for player ${id}:`, error);
-      return null;
-    }
+  // Алиас для fetchTeam (оставлен для совместимости, если используется)
+  async fetchTeamById(id: string): Promise<ApiTeam> {
+    return this.fetchTeam(id);
   }
 
-  // LEGACY PLAYER API METHODS (kept for backward compatibility)
 
-  async fetchPlayers(): Promise<ApiPlayerResponse[]> {
-    try {
-      console.log('Fetching all players from API...');
-      
-      const response = await fetch(`${this.baseUrl}/players/`);
-      
-      if (!response.ok) {
-        const errorMessage = `Error accessing players API! Status: ${response.status}`;
-        console.error(errorMessage);
-        throw new Error(errorMessage);
-      }
-      
-      const data = await response.json();
-      console.log('All player data fetched. Count:', data.length);
-      
-      if (!Array.isArray(data)) {
-        console.error('Received data is not an array:', data);
-        throw new Error('Invalid data format from API');
-      }
-      
-      // Log first few players for debugging
-      data.slice(0, 3).forEach((player: any, index: number) => {
-        console.log(`Player ${index + 1} from API:`, {
-          id: player.id,
-          name: player.post_title,
-          position: player.position,
-          number: player.sp_number,
-          sp_metrics: player.sp_metrics
-        });
-      });
-      
-      return data;
-    } catch (error) {
-      console.error('Error fetching players:', error);
-      throw error;
-    }
-  }
+  // --- ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ (оставлены, но parseIdNameString может не использоваться для лиг/сезонов/мест) ---
 
-  async fetchPlayerById(playerId: string): Promise<ApiPlayerResponse> {
-    try {
-      console.log('Fetching player details for ID:', playerId);
-      const response = await fetch(`${this.baseUrl}/players/${playerId}`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const player: ApiPlayerResponse = await response.json();
-      console.log('Player details fetched:', player);
-      
-      return player;
-    } catch (error) {
-      console.error('Error fetching player details:', error);
-      throw error;
-    }
-  }
-
-  async checkPlayersApiAvailability(): Promise<boolean> {
-    try {
-      console.log('Checking players API endpoint availability...');
-      const response = await fetch(`${this.baseUrl}/players/`, { method: 'HEAD' });
-      const isAvailable = response.ok;
-      console.log('Players API endpoint available:', isAvailable);
-      return isAvailable;
-    } catch (error) {
-      console.error('Error checking players API endpoint availability:', error);
-      return false;
-    }
-  }
-
-  // Helper function to parse "id:name" format strings
+  // Вспомогательный метод для парсинга строки ID:Name (может использоваться для старых API или вспомогательных функций)
+  // БОЛЬШЕ НЕ ИСПОЛЬЗУЕТСЯ для получения названий лиг/сезонов/мест из новых API-ответов
   parseIdNameString(idNameString: string | null): { id: string | null; name: string | null } {
-    if (!idNameString || idNameString.trim() === '' || idNameString === 'null') {
+    if (!idNameString || typeof idNameString !== 'string') {
       return { id: null, name: null };
     }
 
+    // Проверяем, содержит ли строка двоеточие
     const colonIndex = idNameString.indexOf(':');
     if (colonIndex === -1) {
-      // No colon found, treat entire string as name
-      return {
-        id: null,
-        name: idNameString.trim()
-      };
+      // Если двоеточия нет, возвращаем строку как ID, а имя как пустую строку или само ID
+      return { id: idNameString.trim(), name: null };
     }
 
     const id = idNameString.substring(0, colonIndex).trim();
     const name = idNameString.substring(colonIndex + 1).trim();
 
-    return {
-      id: id || null,
-      name: name || null
-    };
+    // Убираем кавычки из имени, если они есть
+    const cleanedName = name.replace(/^"|"$/g, '');
+
+    return { id, name: cleanedName };
   }
 
-  // Helper function to determine game status
+  // Форматирование даты и времени (для совместимости)
+  formatDateTime(dateString: string): { date: string; time: string } {
+    try {
+      const date = new Date(dateString);
+      const dateStringFormatted = date.toLocaleDateString('ru-RU', {
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric',
+      });
+      const timeStringFormatted = date.toLocaleTimeString('ru-RU', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      return { date: dateStringFormatted, time: timeStringFormatted };
+    } catch (error) {
+      console.error('API Service: Error formatting date/time:', error, dateString);
+      return { date: dateString, time: '00:00' };
+    }
+  }
+
+  // Определение статуса игры (для совместимости)
   determineGameStatus(eventDate: string, hasResults: boolean): 'upcoming' | 'live' | 'finished' {
+    const now = new Date();
+    const eventDateTime = new Date(eventDate);
+
     if (hasResults) {
       return 'finished';
     }
-    
-    const gameDate = new Date(eventDate);
-    const now = new Date();
-    
-    if (gameDate > now) {
-      return 'upcoming';
-    }
-    
-    const diffInHours = (now.getTime() - gameDate.getTime()) / (1000 * 60 * 60);
-    if (diffInHours >= 0 && diffInHours <= 3) {
-      return 'live';
-    }
-    
-    return 'finished';
-  }
 
-  // Helper function to format date and time - updated to handle time without seconds
-  formatDateTime(eventDate: string): { date: string; time: string } {
-    try {
-      const [datePart, timePart] = eventDate.split(' ');
-      
-      // Format time without seconds as specified
-      let formattedTime = '19:00'; // default
-      if (timePart) {
-        const timeParts = timePart.split(':');
-        if (timeParts.length >= 2) {
-          formattedTime = `${timeParts[0]}:${timeParts[1]}`;
-        }
+    if (eventDateTime <= now) {
+      // Предполагаем, что игра "живая" в течение 3 часов после начала
+      const timeDiffMs = now.getTime() - eventDateTime.getTime();
+      const threeHoursInMs = 3 * 60 * 60 * 1000;
+      if (timeDiffMs < threeHoursInMs) {
+        return 'live';
+      } else {
+        // Если результатов нет, но время прошло, и не попадает в "live", считаем незавершенной или отложенной
+        // Пока просто возвращаем 'finished', если результатов нет, но дата прошла - это может быть уточнено
+        return 'finished'; // или 'postponed', если есть статус отложенной игры
       }
-      
-      // Don't show time if it's 00:00 (unknown time)
-      if (formattedTime === '00:00') {
-        formattedTime = '';
-      }
-      
-      return {
-        date: datePart || eventDate,
-        time: formattedTime
-      };
-    } catch (error) {
-      console.error('Error formatting date/time:', error);
-      return {
-        date: eventDate,
-        time: '19:00'
-      };
     }
+
+    return 'upcoming';
   }
 
-  // Helper function to get outcome text in Russian
-  getOutcomeText(outcome: string): string {
-    switch (outcome) {
-      case 'win':
-        return 'Победа';
-      case 'loss':
-        return 'Поражение';
-      case 'nich':
-        return 'Ничья';
-      default:
-        return outcome;
+  // Получение результата из массива (для совместимости)
+  getOutcomeFromResult(outcomeArray: any): string {
+    if (Array.isArray(outcomeArray) && outcomeArray.length > 0) {
+      const outcome = outcomeArray[0].toLowerCase();
+      if (outcome === 'w' || outcome === 'win') return 'win';
+      if (outcome === 'l' || outcome === 'loss') return 'loss';
+      if (outcome === 't' || outcome === 'tie' || outcome === 'draw') return 'draw';
     }
+    return 'unknown';
   }
 
-  // Helper function to get tournament name from Leagues field
-  getTournamentName(leaguesString: string): string {
-    if (!leaguesString || leaguesString.trim() === '') {
-      return 'Товарищеский матч';
+  // Получение названия турнира из строки (ОБНОВЛЁН для работы с кэшем)
+  // Теперь используется для получения названия турнира из кэша по ID, полученному из нового API
+  getTournamentNameFromId(leagueId: string): string {
+    const league = this.getLeagueById(leagueId);
+    if (league) {
+      return league.name;
     }
-    
-    const parsed = this.parseIdNameString(leaguesString);
-    return parsed.name || 'Товарищеский матч';
+    return "Товарищеский матч"; // или другой fallback
   }
+
+  // Старый метод для получения названия турнира из строки (ID:Name) - БОЛЬШЕ НЕ ИСПОЛЬЗУЕТСЯ для новых API
+  // getTournamentName(leaguesString: string): string {
+  //   if (!leaguesString || leaguesString.trim() === "") {
+  //     return "Товарищеский матч";
+  //   }
+  //   const parsed = this.parseIdNameString(leaguesString);
+  //   return parsed.name || "Товарищеский матч";
+  // }
 }
 
 export const apiService = new ApiService();

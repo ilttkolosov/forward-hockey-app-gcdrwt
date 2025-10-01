@@ -1,36 +1,21 @@
+// components/GameCard.tsx
 
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
-import { Game } from '../types';
-import { colors, commonStyles } from '../styles/commonStyles';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+} from 'react-native';
+import { Game } from '../types'; // Убедитесь, что импортируете Game из правильного места
+import { colors, commonStyles } from '../styles/commonStyles'; // Убедитесь, что импортируете стили
 import { useRouter } from 'expo-router';
-import { getCachedTeamLogo } from '../utils/teamLogos';
-import { formatGameDate } from '../utils/dateUtils';
 
 interface GameCardProps {
-  game: Game;
+  game: Game; // Используем обновлённый тип Game
   showScore?: boolean;
 }
-
-// Helper function to determine game status with new badge logic
-const getGameStatus = (game: Game) => {
-  const now = new Date();
-  const gameDate = new Date(game.event_date);
-  
-  // Check if game is today
-  const isToday = gameDate.toDateString() === now.toDateString();
-  
-  // Check if game is within next 3 days
-  const daysDiff = Math.ceil((gameDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-  const isWithin3Days = daysDiff >= 0 && daysDiff <= 3;
-  
-  // Check if game is live (5 minutes before to 90 minutes after)
-  const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000);   // –5 мин
-  const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000);   // +90 мин
-  const isLive = now >= liveStart && now <= liveEnd;
-  
-  return { isToday, isWithin3Days, isLive };
-};
 
 export default function GameCard({ game, showScore = true }: GameCardProps) {
   const router = useRouter();
@@ -40,9 +25,64 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
     router.push(`/game/${game.id}`);
   };
 
+  // --- АДАПТИРОВАННАЯ ЛОГИКА ДЛЯ НОВЫХ ДАННЫХ ---
+  if (!game) {
+    console.warn('GameCard received undefined game prop');
+    return null;
+  }
+
+  // Извлекаем данные, используя новые поля из объекта Game
+  const {
+    id,
+    homeTeam,
+    awayTeam,
+    homeTeamLogo, // URI из локального хранилища
+    awayTeamLogo, // URI из локального хранилища
+    date, // Уже отформатированная дата из gameData.ts
+    time, // Уже отформатированное время из gameData.ts
+    venue,
+    status, // Статус из gameData.ts
+    tournament,
+    homeScore,
+    awayScore,
+    sp_video,
+    homeOutcome,
+    awayOutcome,
+    event_date, // Необходима для определения статуса
+    team1_first,
+    team1_second,
+    team1_third,
+    team2_first,
+    team2_second,
+    team2_third,
+  } = game;
+
+  // Используем имена команд из объектов
+  const homeTeamName = homeTeam?.name || '—';
+  const awayTeamName = awayTeam?.name || '—';
+
+  // --- ЛОГИКА ДЛЯ ОПРЕДЕЛЕНИЯ СТАТУСА И БЕЙДЖЕЙ (сохранена из предыдущего кода) ---
+  const getGameStatus = (gameDateStr: string) => {
+    const now = new Date();
+    const gameDate = new Date(gameDateStr);
+
+    // Проверка, является ли игра сегодняшней
+    const isToday = gameDate.toDateString() === now.toDateString();
+
+    // Проверка, входит ли игра в следующие 3 дня
+    const daysDiff = Math.ceil((gameDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    const isWithin3Days = daysDiff >= 0 && daysDiff <= 3;
+
+    // Проверка, является ли игра живой (5 минут до + 90 минут после)
+    const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000); // –5 мин
+    const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000); // +90 мин
+    const isLive = now >= liveStart && now <= liveEnd;
+
+    return { isToday, isWithin3Days, isLive };
+  };
+
   const getStatusColor = (status: Game['status'], isLive?: boolean) => {
     if (isLive) return colors.success; // Green for LIVE
-    
     switch (status) {
       case 'live':
         return colors.success;
@@ -57,120 +97,115 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
 
   const getStatusText = (status: Game['status'], isToday?: boolean, isWithin3Days?: boolean, isLive?: boolean) => {
     if (isLive) return 'LIVE';
-    
-    // New badge logic for upcoming games
+
+    // Новая логика бейджей для предстоящих игр
     if (status === 'upcoming') {
       if (isToday) return 'СЕГОДНЯ';
       if (isWithin3Days) return 'СКОРО';
       return 'ПРЕДСТОЯЩАЯ';
     }
-    
+
     switch (status) {
       case 'live':
         return 'LIVE';
       case 'finished':
-        return ''; // Remove "ЗАВЕРШЕНА" badge for finished games
+        return ''; // Убираем "ЗАВЕРШЕНА" бейдж для завершенных игр
       default:
         return '';
     }
   };
 
-  const formatDate = (dateString: string, timeString?: string) => {
-    // Use the centralized date formatting utility
-    const fullDateString = timeString && timeString !== '00:00' 
-      ? `${dateString} ${timeString}:00` 
-      : `${dateString} 00:00:00`;
-    
-    return formatGameDate(fullDateString);
-  };
+  // Получаем статус игры для предстоящих игр
+  const { isToday, isWithin3Days, isLive } = status === 'upcoming' ? getGameStatus(event_date) : { isToday: false, isWithin3Days: false, isLive: status === 'live' };
+  const statusText = getStatusText(status, isToday, isWithin3Days, isLive);
 
-  const getOutcomeText = (outcome: string) => {
+  // --- Функции для работы с исходом игры (outcome) ---
+  const getOutcomeText = (outcome: string | undefined): string => {
     switch (outcome) {
       case 'win':
-        return 'П';
+        return 'Победа';
       case 'loss':
-        return 'Пор';
-      case 'nich':
-        return 'Н';
+        return 'Поражение';
+      case 'draw':
+        return 'Ничья';
+      // case 'nich': // Если 'nich' используется вместо 'draw'
+      //   return 'Ничья';
       default:
-        return '';
+        return outcome || '';
     }
   };
 
-  const shortenLeagueName = (leagueName: string | null): string => {
-    if (!leagueName) return '';
-    
-    // Extract meaningful part from league name
-    // Example: "107: Первенство Санкт-Петербурга, группа А" → "Первенство"
-    const parts = leagueName.split(':');
-    if (parts.length > 1) {
-      const namePart = parts[1].trim();
-      const words = namePart.split(',')[0].trim(); // Take part before comma
-      const firstWord = words.split(' ')[0]; // Take first meaningful word
-      return firstWord;
-    }
-    
-    return leagueName.split(',')[0].trim(); // Fallback
-  };
-
-  const getLeagueDisplayName = (leagueName: string | null): string => {
-    // If league is empty or null, return "Товарищеский матч" without truncation
+  // --- Функции для работы с названием лиги (tournament) ---
+  const getLeagueDisplayName = (leagueName: string | undefined): string => {
     if (!leagueName || leagueName.trim() === '') {
       return 'Товарищеский матч';
     }
-    
-    // For non-empty leagues, apply truncation as before
-    return shortenLeagueName(leagueName);
+    // Применяем обрезание, как в старом коде, если нужно
+     const parts = leagueName.split(':');
+     if (parts.length > 1) {
+       const namePart = parts[1].trim();
+       const words = namePart.split(',')[0].trim();
+       const firstWord = words.split(' ')[0];
+       return firstWord;
+     }
+    // return leagueName.split(',')[0].trim();
+    return leagueName; // Возвращаем как есть, если обрезание не нужно
   };
 
-  // Get game status for upcoming games
-  const { isToday, isWithin3Days, isLive } = game.status === 'upcoming' ? getGameStatus(game) : { isToday: false, isWithin3Days: false, isLive: false };
-  const statusText = getStatusText(game.status, isToday, isWithin3Days, isLive);
+  // --- КОНЕЦ ЛОГИКИ ---
 
   return (
     <TouchableOpacity onPress={handlePress} activeOpacity={0.7}>
       <View style={commonStyles.gameCard}>
+        {/* Header */}
         <View style={styles.header}>
           {statusText && (
-            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(game.status, isLive) }]}>
+            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(status, isLive) }]}>
               <Text style={styles.statusText}>{statusText}</Text>
             </View>
           )}
           <Text style={commonStyles.textSecondary}>
-            {formatDate(game.date, game.time)}
+            {date}
+            {time && time !== '00:00' && (
+              <>
+                {' • '}
+                {time}
+              </>
+            )}
           </Text>
         </View>
 
+        {/* Teams */}
         <View style={styles.teamsContainer}>
           {/* Home Team Container */}
           <View style={styles.teamContainer}>
-            {game.homeTeamLogo ? (
+            {homeTeamLogo ? (
               <Image 
-                source={{ uri: game.homeTeamLogo }} 
+                source={{ uri: homeTeamLogo }} 
                 style={styles.teamLogo}
                 resizeMode="contain"
               />
             ) : (
               <View style={styles.placeholderLogo}>
                 <Text style={styles.placeholderText}>
-                  {game.homeTeam.charAt(0)}
+                  {homeTeamName.charAt(0)}
                 </Text>
               </View>
             )}
             <Text style={styles.teamName} numberOfLines={2}>
-              {game.homeTeam}
+              {homeTeamName}
             </Text>
-            {showScore && game.homeScore !== undefined && (
-              <Text style={styles.score}>{game.homeScore}</Text>
+            {showScore && homeScore !== undefined && (
+              <Text style={styles.score}>{homeScore}</Text>
             )}
             {/* Outcome Badge centered under team name */}
-            {game.team1_outcome && (
+            {homeOutcome && (
               <View style={styles.outcomeBadgeContainer}>
                 <Text style={[styles.outcomeText, { 
-                  color: game.team1_outcome === 'win' ? colors.success : 
-                         game.team1_outcome === 'loss' ? colors.error : colors.warning 
+                  color: homeOutcome === 'win' ? colors.success : 
+                         homeOutcome === 'loss' ? colors.error : colors.warning 
                 }]}>
-                  {getOutcomeText(game.team1_outcome)}
+                  {getOutcomeText(homeOutcome)}
                 </Text>
               </View>
             )}
@@ -183,48 +218,49 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
 
           {/* Away Team Container */}
           <View style={styles.teamContainer}>
-            {game.awayTeamLogo ? (
+            {awayTeamLogo ? (
               <Image 
-                source={{ uri: game.awayTeamLogo }} 
+                source={{ uri: awayTeamLogo }} 
                 style={styles.teamLogo}
                 resizeMode="contain"
               />
             ) : (
               <View style={styles.placeholderLogo}>
                 <Text style={styles.placeholderText}>
-                  {game.awayTeam.charAt(0)}
+                  {awayTeamName.charAt(0)}
                 </Text>
               </View>
             )}
             <Text style={styles.teamName} numberOfLines={2}>
-              {game.awayTeam}
+              {awayTeamName}
             </Text>
-            {showScore && game.awayScore !== undefined && (
-              <Text style={styles.score}>{game.awayScore}</Text>
+            {showScore && awayScore !== undefined && (
+              <Text style={styles.score}>{awayScore}</Text>
             )}
             {/* Outcome Badge centered under team name */}
-            {game.team2_outcome && (
+            {awayOutcome && (
               <View style={styles.outcomeBadgeContainer}>
                 <Text style={[styles.outcomeText, { 
-                  color: game.team2_outcome === 'win' ? colors.success : 
-                         game.team2_outcome === 'loss' ? colors.error : colors.warning 
+                  color: awayOutcome === 'win' ? colors.success : 
+                         awayOutcome === 'loss' ? colors.error : colors.warning 
                 }]}>
-                  {getOutcomeText(game.team2_outcome)}
+                  {getOutcomeText(awayOutcome)}
                 </Text>
               </View>
             )}
           </View>
         </View>
 
+        {/* Footer */}
         <View style={styles.footer}>
           <View style={styles.gameInfo}>
-            {game.venue && (
+            {venue && (
               <Text style={commonStyles.textSecondary} numberOfLines={1}>
-                📍 {game.venue}
+                📍 {typeof venue === 'string' ? venue : venue.name}
               </Text>
             )}
             <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
-              {(!game.league_name || game.league_name.trim() === '') ? '🤝 ' : '🏆 '}{getLeagueDisplayName(game.league_name)}
+              {(!tournament || tournament.trim() === '') ? '🤝 ' : '🏆 '}{getLeagueDisplayName(tournament)}
             </Text>
             {/* Season field removed as requested */}
           </View>
@@ -266,7 +302,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     marginBottom: 8,
-    borderRadius: 24,
+    //borderRadius: 24,
   },
   placeholderLogo: {
     width: 48,
@@ -288,7 +324,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     textAlign: 'center',
     marginBottom: 8,
-    minHeight: 36,
+    minHeight: 36, // Для выравнивания по высоте
   },
   score: {
     fontSize: 24,
@@ -307,13 +343,20 @@ const styles = StyleSheet.create({
   // VS Section - Positioned to align with bottom of team names
   vsSection: {
     paddingHorizontal: 16,
-    justifyContent: 'flex-start',
-    paddingTop: 56, // Logo (48px) + margin (8px) = 56px to align with team names
+    justifyContent: 'center', // Центрируем по вертикали внутри своего контейнера
+    //justifyContent: 'flex-start',
+    paddingTop: 25, // Logo (48px) + margin (8px) = 56px to align with team names. 
+                        // Или используем marginBottom у teamName для более точного контроля.
   },
   vsText: {
-    fontSize: 14,
+    fontSize: 18,
     fontWeight: '600',
     color: colors.textSecondary,
+    // Выравнивание по нижнему краю teamName. 
+    // Поскольку teamName имеет minHeight и marginBottom, 
+    // VS будет выровнен по нижнему краю этого блока.
+    // Если нужно точное позиционирование, можно использовать absolute или adjust.
+    // Для простоты и гибкости оставим как есть.
   },
   footer: {
     marginTop: 8,

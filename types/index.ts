@@ -1,42 +1,55 @@
+// types/index.ts
+
+import { ApiSeason, ApiVenue } from './apiTypes'; // Импортируем типы из apiTypes.ts
 
 export interface Game {
   id: string;
-  event_id: string;
-  homeTeam: string;
-  awayTeam: string;
-  homeTeamId?: string;
-  awayTeamId?: string;
-  homeTeamLogo?: string;
-  awayTeamLogo?: string;
-  homeScore?: number;
-  awayScore?: number;
-  date: string;
-  time: string;
   event_date: string;
-  venue: string;
-  venue_id?: string;
-  venue_name?: string;
+  homeTeamId: string;
+  awayTeamId: string;
+  leagueId: string;
+  seasonId: string;
+  venueId: string;
   status: 'upcoming' | 'live' | 'finished';
-  tournament?: string;
-  league_id?: string;
-  league_name?: string;
-  season_id?: string;
-  season_name?: string;
-  videoUrl?: string;
-  sp_video?: string; // New field for VK video URL
-  // New fields for detailed results
-  team1_goals?: number;
-  team2_goals?: number;
-  team1_outcome?: string;
-  team2_outcome?: string;
-  // New fields for period scores
+  // Поля, которые будут заполняться из локального хранилища после сопоставления по ID
+  homeTeam?: Team;
+  awayTeam?: Team;
+  league?: Tournament;
+  season?: ApiSeason;
+  venue?: ApiVenue;
+  // Поля для завершенных игр
+  homeGoals?: number;
+  awayGoals?: number;
+  homeOutcome?: string;
+  awayOutcome?: string;
+  // Поля для детальной информации (если игра завершена)
   team1_first?: number;
   team1_second?: number;
   team1_third?: number;
   team2_first?: number;
   team2_second?: number;
   team2_third?: number;
+  // Дополнительные поля (если нужны)
+  videoUrl?: string;
+  // Поля из старого типа, оставлены для совместимости
+  homeTeamLogo?: string | null; // ← Изменено на string | null
+  awayTeamLogo?: string | null; // ← Изменено на string | null
+  homeScore?: number;
+  awayScore?: number;
+  date: string;
+  time: string;
+  venue_name?: string;
+  tournament?: string; // ← Это поле используется в app_season_[id].tsx
+  season_name?: string; // ← Это поле используется в app_season_[id].tsx
+  sp_video?: string;
+  team1_goals?: number;
+  team2_goals?: number;
+  team1_outcome?: string;
+  team2_outcome?: string;
+  // Новое поле для названия лиги (league_name)
+  league_name?: string; // ← Добавлено
 }
+
 
 export interface Player {
   id: string;
@@ -109,6 +122,14 @@ export interface TeamStats {
   position: number;
 }
 
+export interface Team {
+  id: string;
+  name: string;
+  logo_url: string;
+  // Дополнительные поля, если есть
+}
+
+
 // API Response Types - Updated for new specifications
 export interface ApiUpcomingEvent {
   event_id: string;
@@ -152,24 +173,15 @@ export interface ApiLeague {
   name: string;
 }
 
-export interface ApiSeason {
-  id: string;
-  name: string;
-}
-
-export interface ApiVenue {
-  id: string;
-  name: string;
-}
 
 // Updated API Player Response based on new requirements
 export interface ApiPlayerResponse {
   id: number;
-  post_title: string; // Full name with patronymic
-  post_date: string; // Birth date in format "2014-06-14 12:44:40"
-  sp_number: number; // Jersey number
+  name: string; // Full name with patronymic
+  birth_date: string; // Birth date in format "2014-06-14 12:44:40"
+  number: number; // Jersey number
   position: "Вратарь" | "Защитник" | "Нападающий"; // Position
-  sp_metrics: {
+  metrics: {
     ka: "К" | "А" | ""; // Captain status
     onetwofive: "Левый" | "Правый"; // Handedness
     height: string; // Height (can be empty)

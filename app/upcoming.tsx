@@ -1,3 +1,4 @@
+// upcoming.tsx
 
 import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, RefreshControl } from 'react-native';
@@ -7,53 +8,15 @@ import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { Game } from '../types';
+// Импортируем функции из обновлённого gameData.ts
 import { getUpcomingGames, getUpcomingGamesCount } from '../data/gameData';
 import { Link } from 'expo-router';
 import { TouchableOpacity } from 'react-native';
 import Icon from '../components/Icon';
-
-// Helper function to determine game status with new badge logic
-const getGameStatus = (game: Game) => {
-  const now = new Date();
-  const gameDate = new Date(game.event_date);
-  
-  // Check if game is today
-  const isToday = gameDate.toDateString() === now.toDateString();
-  
-  // Check if game is within next 3 days
-  const daysDiff = Math.ceil((gameDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-  const isWithin3Days = daysDiff >= 0 && daysDiff <= 3;
-  
-  // Check if game is live (5 minutes before to 90 minutes after)
-  const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000);   // –5 мин
-  const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000);   // +90 мин
-  const isLive = now >= liveStart && now <= liveEnd;
-  
-  return { isToday, isWithin3Days, isLive };
-};
-
-// Helper function to sort upcoming games with new priority logic
-const sortUpcomingGames = (games: Game[]): Game[] => {
-  return [...games].sort((a, b) => {
-    const statusA = getGameStatus(a);
-    const statusB = getGameStatus(b);
-    
-    // LIVE games first
-    if (statusA.isLive && !statusB.isLive) return -1;
-    if (!statusA.isLive && statusB.isLive) return 1;
-    
-    // Today games second (but not LIVE)
-    if (statusA.isToday && !statusA.isLive && !statusB.isToday) return -1;
-    if (!statusA.isToday && statusB.isToday && !statusB.isLive) return 1;
-    
-    // Within 3 days games third
-    if (statusA.isWithin3Days && !statusB.isWithin3Days) return -1;
-    if (!statusA.isWithin3Days && statusB.isWithin3Days) return 1;
-    
-    // Rest by date
-    return new Date(a.event_date).getTime() - new Date(b.event_date).getTime();
-  });
-};
+// --- УДАЛЕНЫ неиспользуемые импорты ---
+// import { loadTeamList, loadTeamLogo } from '../services/teamStorage';
+// import { apiService } from '../services/apiService';
+// import { formatDateTimeWithoutSeconds } from '../utils/dateUtils';
 
 export default function UpcomingGamesScreen() {
   const [games, setGames] = useState<Game[]>([]);
@@ -65,21 +28,25 @@ export default function UpcomingGamesScreen() {
   const loadData = async () => {
     try {
       setError(null);
-      console.log('Loading upcoming games screen data...');
+      console.log('UpcomingGamesScreen: Loading data...');
+
+      // --- УПРОЩЕНАЯ ЛОГИКА ЗАГРУЗКИ ---
+      // Загружаем список предстоящих игр (уже отсортированный и с заполненными полями)
+      const upcomingGamesData = await getUpcomingGames();
+      console.log(`UpcomingGamesScreen: Loaded ${upcomingGamesData.length} games`);
+
+      // Загружаем общее количество предстоящих игр
+      //const totalCount = await getUpcomingGamesCount();
+      //console.log(`UpcomingGamesScreen: Total count is ${totalCount}`);
+
+      const totalCount = upcomingGamesData.length;
+
+      setGames(upcomingGamesData);
+      setGamesCount(totalCount);
+      // --- КОНЕЦ УПРОЩЕННОЙ ЛОГИКИ ---
       
-      // Load upcoming games and count concurrently
-      const [upcomingGames, count] = await Promise.all([
-        getUpcomingGames(),
-        getUpcomingGamesCount()
-      ]);
-      
-      // Sort games with new priority logic
-      const sortedGames = sortUpcomingGames(upcomingGames);
-      setGames(sortedGames);
-      setGamesCount(count);
-      console.log(`Loaded ${sortedGames.length} upcoming games, total count: ${count}`);
     } catch (err) {
-      console.log('Error loading upcoming games:', err);
+      console.error('UpcomingGamesScreen: Error loading data:', err);
       setError('Не удалось загрузить предстоящие игры. Попробуйте еще раз.');
     } finally {
       setLoading(false);
@@ -139,9 +106,11 @@ export default function UpcomingGamesScreen() {
         {/* Games List */}
         {games.length > 0 ? (
           <View style={{ gap: 16 }}>
+            {/* --- ИСПОЛЬЗУЕМ GameCard напрямую с объектом Game --- */}
             {games.map((game) => (
               <GameCard key={game.id} game={game} showScore={false} />
             ))}
+            {/* --- КОНЕЦ ИСПОЛЬЗОВАНИЯ GameCard --- */}
           </View>
         ) : (
           <View style={commonStyles.errorContainer}>

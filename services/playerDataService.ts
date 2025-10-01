@@ -1,3 +1,5 @@
+// services/playerDataService.ts
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   documentDirectory,
@@ -5,7 +7,7 @@ import {
   makeDirectoryAsync,
   downloadAsync,
   deleteAsync
-} from 'expo-file-system';
+} from 'expo-file-system/legacy'; // <-- ВАЖНО: /legacy в конце
 import { Player } from '../types';
 
 interface PlayerListItem {
@@ -37,10 +39,11 @@ interface PlayerPhoto {
 
 const PLAYERS_DATA_LOADED_KEY = 'playersDataLoaded';
 const PLAYERS_STORAGE_KEY = 'localPlayersData';
+const PLAYER_PHOTOS_DOWNLOADED_KEY = 'playerPhotosDownloaded'; // <-- НОВЫЙ ФЛАГ
 const PLAYERS_DIRECTORY = `${documentDirectory || ''}players/`;
 
 export class PlayerDownloadService {
-  private baseUrl = 'https://www.hc-forward.com/wp-json/app/v1'; // ← пробелы удалены
+  private baseUrl = 'https://www.hc-forward.com/wp-json/app/v1'; // Убраны пробелы
 
   async isDataLoaded(): Promise<boolean> {
     try {
@@ -49,6 +52,27 @@ export class PlayerDownloadService {
     } catch (error) {
       console.error('Error checking if data is loaded:', error);
       return false;
+    }
+  }
+
+  // --- НОВАЯ ФУНКЦИЯ ДЛЯ ПРОВЕРКИ ФЛАГА ФОТО ---
+  async arePhotosDownloaded(): Promise<boolean> {
+    try {
+      const downloaded = await AsyncStorage.getItem(PLAYER_PHOTOS_DOWNLOADED_KEY);
+      return downloaded === 'true';
+    } catch (error) {
+      console.error('Error checking if photos are downloaded:', error);
+      return false; // В случае ошибки считаем, что фото не загружены
+    }
+  }
+
+  // --- НОВАЯ ФУНКЦИЯ ДЛЯ РУЧНОЙ УСТАНОВКИ ФЛАГА (для отладки) ---
+  async setPhotosDownloadedFlag(downloaded: boolean): Promise<void> {
+    try {
+      await AsyncStorage.setItem(PLAYER_PHOTOS_DOWNLOADED_KEY, downloaded.toString());
+      console.log(`PlayerDownloadService: PLAYER_PHOTOS_DOWNLOADED_KEY set to ${downloaded}`);
+    } catch (error) {
+      console.error('Error setting photos downloaded flag:', error);
     }
   }
 
@@ -77,14 +101,14 @@ export class PlayerDownloadService {
       if (!url) return null;
 
       await this.ensurePlayersDirectoryExists();
-      
+
       const filename = `player_${playerId}.jpg`;
       const fileUri = PLAYERS_DIRECTORY + filename;
-      
+
       console.log(`Downloading image for player ${playerId} from ${url}`);
-      
+
       const downloadResult = await downloadAsync(url, fileUri);
-      
+
       if (downloadResult.status === 200) {
         console.log(`Successfully downloaded image for player ${playerId} to ${downloadResult.uri}`);
         return downloadResult.uri;
@@ -102,14 +126,14 @@ export class PlayerDownloadService {
     try {
       console.log('Fetching players list from API...');
       const response = await fetch(`${this.baseUrl}/get-player/`);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       const result = await response.json();
-      console.log(`Fetched ${result.data?.length || 0} players from list endpoint`);
-      
+      console.log(`Fetched ${result.data?.length || 0} players from list endpoint. Это функция fetchPlayersList() из файла playerDataService`);
+
       // 🔥 ИСПРАВЛЕНИЕ: приводим id к строке
       return (result.data || []).map((item: any) => ({
         id: String(item.id),
@@ -128,13 +152,13 @@ export class PlayerDownloadService {
     try {
       console.log(`Fetching details for player ${playerId}...`);
       const response = await fetch(`${this.baseUrl}/get-player/${playerId}`);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       const result = await response.json();
-      console.log(`Fetched details for player ${playerId}`);
+      console.log(`Fetched details for player ${playerId}. Это fetchPlayerDetails() из файла playerDataService`);
 
       // 🔥 ИСПРАВЛЕНИЕ: приводим id к строке
       return {
@@ -156,28 +180,51 @@ export class PlayerDownloadService {
     }
   }
 
-  async fetchPlayerPhoto(playerId: string): Promise<PlayerPhoto | null> {
-    try {
-      console.log(`Fetching photo for player ${playerId}...`);
-      const response = await fetch(`${this.baseUrl}/get-photo-players/${playerId}`);
-      
-      if (!response.ok) {
-        console.log(`No photo available for player ${playerId}`);
-        return null;
-      }
-      
-      const result = await response.json();
-      console.log(`Fetched photo for player ${playerId}`);
-      
-      return {
-        id: String(result.data.id),
-        photo_url: result.data.photo_url
-      };
-    } catch (error) {
-      console.error(`Error fetching photo for player ${playerId}:`, error);
+  // --- ОБНОВЛЁННАЯ ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ФОТО ---
+  // --- ОБНОВЛЁННАЯ ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ФОТО ---
+async fetchPlayerPhoto(playerId: string): Promise<PlayerPhoto | null> {
+  try {
+    console.log(`Fetching photo for player ${playerId}...`);
+    const response = await fetch(`${this.baseUrl}/get-photo-players/${playerId}`);
+
+    // Проверяем статус ответа
+    if (!response.ok) {
+      console.log(`No photo available for player ${playerId} (HTTP ${response.status})`);
+      return null; // Если сервер вернул 404 или другую ошибку, считаем, что фото нет
+    }
+
+    const result = await response.json();
+    console.log(`Fetched photo response for player ${playerId}:`, result); // Логируем ответ для отладки
+
+    // Проверяем, содержит ли ответ ожидаемую структуру
+    // Ожидаем: { id: "...", photo_url: "..." } (без обёртки data)
+    if (result && typeof result === "object" && result.id && result.photo_url) {
+        // Убедимся, что photo_url - это строка и уберём пробелы
+        const cleanPhotoUrl = result.photo_url?.trim();
+        if (cleanPhotoUrl) {
+          console.log(`Fetched photo for player ${playerId}:`, cleanPhotoUrl);
+          // Возвращаем объект с id (преобразованным в строку) и URL
+          return {
+            id: String(result.id),
+            photo_url: cleanPhotoUrl
+          };
+        } else {
+          console.log(`Photo URL is empty for player ${playerId} in response`);
+          return null;
+        }
+    } else {
+      // Если структура не соответствует
+      console.log(`Photo response for player ${playerId} is missing 'id' or 'photo_url' or is not an object`, result);
       return null;
     }
+
+  } catch (error) {
+    // Обработка ошибок сети или JSON.parse
+    console.error(`Error fetching photo for player ${playerId}:`, error);
+    return null; // Возвращаем null в случае любой ошибки
   }
+}
+
 
   private calculateAge(birthDate: string): number {
     try {
@@ -185,11 +232,11 @@ export class PlayerDownloadService {
       const today = new Date();
       let age = today.getFullYear() - birth.getFullYear();
       const monthDiff = today.getMonth() - birth.getMonth();
-      
+
       if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
         age--;
       }
-      
+
       return age;
     } catch (error) {
       console.error('Error calculating age:', error);
@@ -204,7 +251,7 @@ export class PlayerDownloadService {
   ): Player {
     const height = details.metrics?.height ? parseInt(details.metrics.height) || 0 : 0;
     const weight = details.metrics?.weight ? parseInt(details.metrics.weight) || 0 : 0;
-    
+
     return {
       id: listItem.id,
       fullName: details.name,
@@ -225,22 +272,24 @@ export class PlayerDownloadService {
     };
   }
 
+  // --- ОБНОВЛЁННАЯ ФУНКЦИЯ ДЛЯ ОБРАБОТКИ ИГРОКОВ ---
   async processPlayersConcurrently(
     playersList: PlayerListItem[],
     onProgress?: (stage: string, current?: number, total?: number) => void,
-    concurrencyLimit: number = 5
+    concurrencyLimit: number = 5,
+    skipPhotoDownload: boolean = false // <-- НОВЫЙ ПАРАМЕТР
   ): Promise<Player[]> {
     const allPlayers: Player[] = [];
     let processed = 0;
 
     for (let i = 0; i < playersList.length; i += concurrencyLimit) {
       const batch = playersList.slice(i, i + concurrencyLimit);
-      
+
       const batchPromises = batch.map(async (player) => {
         try {
           const [details, photoData] = await Promise.allSettled([
             this.fetchPlayerDetails(player.id),
-            this.fetchPlayerPhoto(player.id)
+            skipPhotoDownload ? null : this.fetchPlayerPhoto(player.id) // <-- УСЛОВИЕ НА ЗАГРУЗКУ ФОТО
           ]);
 
           let playerDetails: PlayerDetails;
@@ -264,25 +313,27 @@ export class PlayerDownloadService {
           }
 
           let photoPath: string | null = null;
-          if (photoData.status === 'fulfilled' && photoData.value?.photo_url) {
+          if (!skipPhotoDownload && photoData.status === 'fulfilled' && photoData.value?.photo_url) { // <-- УСЛОВИЕ НА ОБРАБОТКУ ФОТО
             try {
               photoPath = await this.downloadAndCacheImage(photoData.value.photo_url, player.id);
             } catch (photoError) {
               console.warn(`Failed to download photo for player ${player.id}:`, photoError);
             }
+          } else if (skipPhotoDownload) {
+             console.log(`Skipping photo download for player ${player.id} based on flag.`); // <-- ЛОГ ДЛЯ ОТЛАДКИ
           }
 
           const localPlayer = this.convertToPlayer(player, playerDetails, photoPath);
-          
+
           processed++;
           onProgress?.('Загрузка данных игроков…', processed, playersList.length);
-          
+
           return localPlayer;
         } catch (error) {
           console.error(`Failed to process player ${player.id}:`, error);
           processed++;
           onProgress?.('Загрузка данных игроков…', processed, playersList.length);
-          
+
           return this.convertToPlayer(player, {
             id: player.id,
             name: player.name,
@@ -306,12 +357,31 @@ export class PlayerDownloadService {
     return allPlayers;
   }
 
-  async loadAllPlayersData(
+  // --- ОБНОВЛЁННАЯ ФУНКЦИЯ ДЛЯ ЗАГРУЗКИ ВСЕХ ДАННЫХ ---
+   async loadAllPlayersData(
     onProgress?: (stage: string, current?: number, total?: number) => void
-  ): Promise<Player[]> {
+    ): Promise<Player[]> {
     try {
+            // --- НАЧАЛО: Принудительная очистка для отладки ---
+      // ВРЕМЕННО: Раскомментируйте следующую строку для принудительной перезагрузки
+       console.log('PlayerDownloadService: DEBUG - Clearing all data before loading...');
+       await this.clearAllData();
+      // --- КОНЕЦ: Принудительная очистка для отладки ---
+
+      // --- ПРИНУДИТЕЛЬНО УСТАНАВЛИВАЕМ ФЛАГ ФОТО В FALSE ДЛЯ ОТЛАДКИ ---
+      // ВРЕМЕННО: Раскомментируйте следующую строку, чтобы заставить загрузку фото
+      await this.setPhotosDownloadedFlag(false);
+      console.log(`PlayerDownloadService: DEBUG - PLAYER_PHOTOS_DOWNLOADED_KEY forcibly set to FALSE.`);
+
       console.log('Starting complete player data loading process...');
       
+      // --- ПРИНУДИТЕЛЬНО УСТАНАВЛИВАЕМ ФЛАГ В FALSE ДЛЯ ОТЛАДКИ ---
+      // ЗАКОММЕНТИРУЙТЕ ИЛИ УДАЛИТЕ ЭТУ СТРОКУ ПОСЛЕ ОТЛАДКИ
+      await this.setPhotosDownloadedFlag(false);
+      console.log(`PlayerDownloadService: DEBUG - PLAYER_PHOTOS_DOWNLOADED_KEY forcibly set to FALSE.`);
+
+      console.log('Starting complete player data loading process...');
+
       onProgress?.('Загрузка списка игроков…');
       const playersList = await this.fetchPlayersList();
       console.log(`Loaded ${playersList.length} players from list`);
@@ -321,10 +391,15 @@ export class PlayerDownloadService {
         return [];
       }
 
+      // --- ПРОВЕРКА ФЛАГА ПЕРЕД ЗАГРУЗКОЙ ФОТО ---
+      const photosDownloaded = await this.arePhotosDownloaded();
+      console.log(`PlayerDownloadService: Photos download flag is ${photosDownloaded ? 'TRUE' : 'FALSE'}.`);
+
       const allPlayers = await this.processPlayersConcurrently(
         playersList,
         onProgress,
-        5
+        5,
+        photosDownloaded // <-- ПЕРЕДАЁМ ФЛАГ В processPlayersConcurrently
       );
 
       allPlayers.sort((a, b) => a.number - b.number);
@@ -332,6 +407,15 @@ export class PlayerDownloadService {
       onProgress?.('Сохранение данных…');
       await this.savePlayersToStorage(allPlayers);
       await this.setDataLoaded(true);
+
+      // --- УСТАНОВКА ФЛАГА ПОСЛЕ УСПЕШНОЙ ЗАГРУЗКИ ВСЕГО ---
+      // Флаг устанавливается ТОЛЬКО если фото *не* были пропущены и *все* данные сохранены
+      if (!photosDownloaded) { // Если фото *не* были пропущены, значит они *должны* были быть загружены
+          await this.setPhotosDownloadedFlag(true); // <-- УСТАНАВЛИВАЕМ ФЛАГ В TRUE
+          console.log(`PlayerDownloadService: Set PLAYER_PHOTOS_DOWNLOADED_KEY to TRUE after successful download.`);
+      } else {
+          console.log(`PlayerDownloadService: PLAYER_PHOTOS_DOWNLOADED_KEY was TRUE, no new download attempt, flag remains TRUE.`);
+      }
 
       console.log(`Successfully loaded and cached ${allPlayers.length} players`);
       return allPlayers;
@@ -367,12 +451,15 @@ export class PlayerDownloadService {
     }
   }
 
+  // --- ОБНОВЛЁННАЯ ФУНКЦИЯ ДЛЯ ОБНОВЛЕНИЯ ---
   async refreshPlayersData(
     onProgress?: (stage: string, current?: number, total?: number) => void
   ): Promise<Player[]> {
     try {
       console.log('Refreshing players data...');
       await this.setDataLoaded(false);
+      // ВАЖНО: сбрасываем флаг фото при обновлении
+      await this.setPhotosDownloadedFlag(false); // <-- СБРОС ФЛАГА
       return await this.loadAllPlayersData(onProgress);
     } catch (error) {
       console.error('Error refreshing players data:', error);
@@ -380,13 +467,15 @@ export class PlayerDownloadService {
     }
   }
 
+  // --- ОБНОВЛЁННАЯ ФУНКЦИЯ ДЛЯ ОЧИСТКИ ---
   async clearAllData(): Promise<void> {
     try {
       console.log('Clearing all player data...');
-      
+
       await AsyncStorage.removeItem(PLAYERS_DATA_LOADED_KEY);
+      await AsyncStorage.removeItem(PLAYER_PHOTOS_DOWNLOADED_KEY); // <-- СБРОС ФЛАГА ФОТО
       await AsyncStorage.removeItem(PLAYERS_STORAGE_KEY);
-      
+
       try {
         const dirInfo = await getInfoAsync(PLAYERS_DIRECTORY);
         if (dirInfo.exists) {
@@ -396,7 +485,7 @@ export class PlayerDownloadService {
       } catch (error) {
         console.warn('Error clearing players directory:', error);
       }
-      
+
       console.log('All player data cleared');
     } catch (error) {
       console.error('Error clearing player data:', error);
