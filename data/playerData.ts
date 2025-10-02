@@ -88,15 +88,34 @@ export function searchPlayers(players: Player[], searchQuery: string): Player[] 
  * Group players by position
  * This logic remains the same, it just groups the provided array.
  */
-export function groupPlayersByPosition(players: Player[]): { [position: string]: Player[] } {
-  return players.reduce((acc, player) => {
-    if (!acc[player.position]) {
-      acc[player.position] = [];
+export const groupPlayersByPosition = (players: Player[]): Record<string, Player[]> => {
+  const groups: Record<string, Player[]> = {
+    'Вратарь': [],
+    'Защитник': [],
+    'Нападающий': [],
+  };
+
+  players.forEach((player) => {
+    // --- ИСПРАВЛЕНО: Используем точное совпадение ---
+    const position = player.position.trim(); // Убираем пробелы
+    if (position === 'Вратарь' || position === 'Защитник' || position === 'Нападающий') {
+      groups[position].push(player);
+    } else {
+      // Если позиция неизвестна, добавляем в "Нападающий" или другую группу по умолчанию
+      groups['Нападающий'].push(player);
+      console.warn(`Player ${player.id} has unknown position: "${player.position}", added to "Нападающий" group`);
     }
-    acc[player.position].push(player);
-    return acc;
-  }, {} as { [position: string]: Player[] });
-}
+    // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+  });
+
+  // Сортируем каждую группу по номеру
+  Object.keys(groups).forEach((position) => {
+    groups[position].sort((a, b) => a.number - b.number);
+  });
+
+  console.log('Grouped players by position:', groups);
+  return groups;
+};
 
 /**
  * Refresh players data (force reload from API)
