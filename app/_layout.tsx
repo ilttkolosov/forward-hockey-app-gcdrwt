@@ -11,6 +11,8 @@ import { apiService } from '../services/apiService';
 import { loadTeamList, saveTeamList, saveTeamLogo } from '../services/teamStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy'; // ✅ Импортируем основной модуль
+import { getGames } from '../data/gameData'; 
+import SplashScreen from '../components/SplashScreen'; 
 
 const shouldUpdateTeams = true; // Признак необходимости обновлять загрузки всех логотипов команд и их названия
 const shouldUpdatePlayers = false; // Признак необходимости обновить данные игроков (включая фото)
@@ -182,6 +184,68 @@ const initializeTeams = async () => {
   }
 };
 
+// --- ФУНКЦИИ ПРЕДЗАГРУЗКИ ---
+/**
+ * Предзагружает предшествующие игры (до сегодняшней даты) в фоне
+ */
+const preloadPastGames = async () => {
+  try {
+    console.log('🚀 Preloading past games in background...');
+    
+    // Определяем диапазон дат: последние 30 дней
+    const now = new Date();
+    const pastDate = new Date(now);
+    pastDate.setDate(pastDate.getDate() - 30);
+    const pastDateString = pastDate.toISOString().split('T')[0];
+    const todayString = now.toISOString().split('T')[0];
+
+    // Вызываем getGames с фильтром по дате "до сегодняшней"
+    // teams: '74' - фильтр по команде с ID 74
+    await getGames({
+      date_from: pastDateString,
+      date_to: todayString,
+      teams: '74',
+    });
+
+    console.log('✅ Past games preloaded successfully');
+  } catch (error) {
+    // ВАЖНО: Ловим ошибку внутри, чтобы она не "сломала" основной поток инициализации
+    console.warn('⚠️ Failed to preload past games (background task):', error);
+    // Не выбрасываем ошибку дальше, чтобы не нарушить инициализацию приложения
+  }
+};
+
+/**
+ * Предзагружает последние игры (после сегодняшней даты) в фоне
+ */
+const preloadUpcomingGames = async () => {
+  try {
+    console.log('🚀 Preloading upcoming games in background...');
+    
+    // Определяем диапазон дат: следующие 30 дней
+    const now = new Date();
+    const futureDate = new Date(now);
+    futureDate.setDate(futureDate.getDate() + 30);
+    const todayString = now.toISOString().split('T')[0];
+    const futureDateString = futureDate.toISOString().split('T')[0];
+
+    // Вызываем getGames с фильтром по дате "после сегодняшней"
+    // teams: '74' - фильтр по команде с ID 74
+    await getGames({
+      date_from: todayString,
+      date_to: futureDateString,
+      teams: '74',
+    });
+
+    console.log('✅ Upcoming games preloaded successfully');
+  } catch (error) {
+    // ВАЖНО: Ловим ошибку внутри, чтобы она не "сломала" основной поток инициализации
+    console.warn('⚠️ Failed to preload upcoming games (background task):', error);
+    // Не выбрасываем ошибку дальше, чтобы не нарушить инициализацию приложения
+  }
+};
+// --- КОНЕЦ ФУНКЦИЙ ПРЕДЗАГРУЗКИ ---
+
 
 export default function RootLayout() {
   const [isInitializing, setIsInitializing] = useState(true);
@@ -191,21 +255,41 @@ export default function RootLayout() {
     initializeApp();
   }, []);
 
+
+
   const initializeApp = async () => {
     try {
       console.log('🚀 Initializing app...');
       
-      // Потом обновляем команды, если флаг установлен
-      await initializeTeams(); // <-- Инициализация команд по флагу
-      
-      // Сначала загружаем/обновляем данные игроков, если флаг установлен
-      await initializePlayers(); // <-- НОВОЕ: Инициализация игроков по флагу
-      
-      // Затем загружаем основные данные игроков (из кэша или, если кэш пуст, загружает)
+      // --- ИСПРАВЛЕНО: Сначала загружаем/обновляем данные игроков, если флаг установлен ---
+      await initializePlayers(); // <-- Инициализация игроков по флагу
+      // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
+      // --- ИСПРАВЛЕНО: Затем загружаем основные данные игроков (из кэша или, если кэш пуст, загружает) ---
       await getPlayers(); // <-- Это основная загрузка данных для приложения
+      // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
+      // --- ИСПРАВЛЕНО: Потом обновляем команды, если флаг установлен ---
+      await initializeTeams(); // <-- Инициализация команд по флагу
+      // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
       console.log('✅ App initialization completed');
       setIsInitializing(false);
+
+      // --- ДОБАВЛЕНО: Предзагрузка игр в фоне ---
+      // Предзагружаем игры в фоне после завершения основной инициализации
+      // Это улучшит UX, так как данные будут уже в кэше, когда пользователь перейдёт на экраны игр
+      console.log('🚀 Starting background preload tasks...');
+      
+      // Предзагружаем предшествующие игры первыми (99% пользователей их просматривают)
+      preloadPastGames().catch(console.warn); // <-- .catch для обработки ошибок в фоне
+      
+      // Затем предзагружаем последние игры
+      preloadUpcomingGames().catch(console.warn); // <-- .catch для обработки ошибок в фоне
+      
+      console.log('🚀 Background preload tasks started');
+      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+      
     } catch (error) {
       console.error('💥 App initialization failed:', error);
       setInitializationError('Ошибка инициализации приложения');
@@ -214,7 +298,9 @@ export default function RootLayout() {
   };
 
   if (isInitializing) {
-    return <PlayerDataLoadingScreen />;
+    // --- ИСПРАВЛЕНО: Отображаем SplashScreen вместо LoadingSpinner ---
+    return <SplashScreen />;
+    // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
   }
 
   if (initializationError) {

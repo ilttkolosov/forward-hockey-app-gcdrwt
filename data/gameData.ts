@@ -12,6 +12,12 @@ const SEASONS_CACHE_KEY = 'seasons_cache';
 const VENUES_CACHE_KEY = 'venues_cache';
 const TEAMS_CACHE_KEY = 'teams_cache'; // Для кэширования команд, полученных через старый API
 
+// --- КЭШ ДЛЯ getGames ---
+let gamesCache: { [key: string]: { data: Game[]; timestamp: number } } = {};
+const GAMES_CACHE_DURATION = 5 * 60 * 1000; // 5 минут
+// --- КОНЕЦ КЭША ---
+
+
 // Флаги обновления
 let leaguesLoaded = false;
 let seasonsLoaded = false;
@@ -453,21 +459,45 @@ const getFallbackUpcomingGames = (): Game[] => {
  * Получает список игр с фильтрацией
  * Использует apiService.fetchEvents и сопоставляет данные
  */
-export const getGames = async (params: {
+/**
+ * Универсальная функция для получения списка игр с фильтрацией
+ * --- ОБНОВЛЕНО: Добавлено кэширование ---
+ */
+export async function getGames(params: {
   date_from?: string;
   date_to?: string;
   league?: string;
   season?: string;
   teams?: string;
-}): Promise<Game[]> => {
+  useCache?: boolean; // <-- НОВЫЙ ПАРАМЕТР
+  }): Promise<Game[]> {
   try {
+    console.log('Data/gameData: Getting games with params:', params);
+
+    // --- ДОБАВЛЕНО: Генерация ключа кэша ---
+    const cacheKey = JSON.stringify(params);
+    const now = Date.now();
+
+    // Проверяем кэш, если useCache !== false
+    if (params.useCache !== false) {
+      const cachedEntry = gamesCache[cacheKey];
+      if (cachedEntry && (now - cachedEntry.timestamp) < GAMES_CACHE_DURATION) {
+        console.log('✅ Returning games from memory cache for key:', cacheKey);
+        return cachedEntry.data;
+      }
+    }
+    // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
     // Проверяем, загружены ли справочные данные
     await loadLeagues();
     await loadSeasons();
     await loadVenues();
     await loadTeams(); // Загружаем команды для логотипов
 
+    // --- ИСПОЛЬЗУЕМ НОВЫЙ API ---
     const response = await apiService.fetchEvents(params);
+    // --- КОНЕЦ ИСПОЛЬЗОВАНИЯ НОВОГО API ---
+
     const apiEvents = response.data;
 
     const games: Game[] = [];
@@ -476,13 +506,27 @@ export const getGames = async (params: {
       games.push(game);
     }
 
-    console.log(`Loaded ${games.length} games with params:`, params);
-    return games;
+    // Сортируем игры по приоритету: live -> сегодня -> скоро -> по дате
+    const sortedGames = sortUpcomingGames(games);
+    console.log(`Data/gameData: Loaded ${sortedGames.length} games with params:`, params);
+
+    // --- ДОБАВЛЕНО: Сохраняем в кэш, если useCache !== false ---
+    if (params.useCache !== false) {
+      gamesCache[cacheKey] = {
+        data: sortedGames,
+        timestamp: now,
+      };
+      console.log('💾 Games saved to memory cache for key:', cacheKey);
+    }
+    // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
+    return sortedGames;
   } catch (error) {
-    console.error('❌ Failed to get games:', error);
-    return [];
+    console.error('Data/gameData: Error getting games:', error);
+    // Возврат фолбэка в случае ошибки
+    return getFallbackUpcomingGames();
   }
-};
+}
 
 /**
  * Получает одну игру по ID с детальной информацией

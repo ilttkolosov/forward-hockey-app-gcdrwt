@@ -84,17 +84,18 @@ export default function SeasonsScreen() {
     const startDateString = season.start.toISOString().split('T')[0];
     const endDateString = season.end.toISOString().split('T')[0];
     
-    // Навигируем на экран архива, передавая даты
+    
+    //router.push('/Test'); // <-- Навигируем на тестовую страницу
+    // Навигируем на тестовую страницу, передавая даты
     router.push({
-      pathname: '/archive', // <-- Без [id]
-      params: { 
+        pathname: '/archive', // <-- Навигируем на тестовую страницу
+        params: { 
         date_from: startDateString, 
         date_to: endDateString,
-        seasonName: season.name // <-- Опционально: передаем имя сезона для заголовка
-      }
+        seasonName: season.name // <-- Передаем имя сезона для отображения
+        }
     });
-    // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-  };
+  }// --- КОНЕЦ ОБНОВЛЕНИЯ ---
 
   const handleBackPress = () => {
     router.back();
