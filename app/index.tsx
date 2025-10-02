@@ -1,6 +1,15 @@
 
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, RefreshControl, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  RefreshControl,
+  Alert,
+  Dimensions,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
 import { commonStyles, colors } from '../styles/commonStyles';
@@ -123,41 +132,47 @@ export default function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const loadData = async () => {
+
+  const loadData = useCallback(async () => {
     try {
       setError(null);
+      setLoading(true);
       console.log('Loading home screen data...');
-      
-      // Load game data and player count
-      const [current, upcoming, upcomingCountData, players] = await Promise.all([
+
+      // --- ДОБАВЛЕНО: Сброс кэша перед загрузкой ---
+      // Это заставит getUpcomingGamesMasterData сделать новый запрос к API
+      //upcomingGamesMasterCache = null; // <-- Сброс кэша
+      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
+      // --- ОБНОВЛЕНО: Получаем данные через новые функции ---
+      const [current, upcoming, upcomingCount, players] = await Promise.all([
         getCurrentGame(),
         getFutureGames(),
         getUpcomingGamesCount(),
-        getPlayers() // This will initialize player data if needed
+        getPlayers(),
       ]);
-      
-      setCurrentGame(current);
-      
-      // Sort upcoming games with new logic
-      const sortedUpcoming = sortUpcomingGames(upcoming);
-      setUpcomingGames(sortedUpcoming);
-      setUpcomingCount(upcomingCountData);
+      // --- КОНЕЦ ОБНОВЛЕНИЯ ---
+
+      setCurrentGame(current ?? null);
+      setUpcomingGames(upcoming);
+      setUpcomingCount(upcomingCount);
       setPlayersCount(players.length);
-      
+
       console.log('Home screen data loaded:', {
         currentGame: current?.id,
-        upcomingGames: sortedUpcoming.length,
-        upcomingCount: upcomingCountData,
-        playersCount: players.length
+        playersCount: players.length,
+        upcomingCount: upcomingCount,
+        upcomingGames: upcoming.length,
       });
     } catch (err) {
-      console.log('Error loading home screen data:', err);
+      console.error('Error loading home screen data:', err);
       setError('Не удалось загрузить данные. Попробуйте еще раз.');
     } finally {
       setLoading(false);
-      setRefreshing(false);
+      setRefreshing(false); // <-- ДОБАВИТЬ
     }
-  };
+  }, []);
+  // --- КОНЕЦ ОБНОВЛЕНИЯ ---
 
   useEffect(() => {
     loadData();

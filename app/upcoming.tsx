@@ -9,7 +9,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { Game } from '../types';
 // Импортируем функции из обновлённого gameData.ts
-import { getUpcomingGames, getUpcomingGamesCount } from '../data/gameData';
+import { getUpcomingGamesCount, getUpcomingGamesMasterData } from '../data/gameData';
 import { Link } from 'expo-router';
 import { TouchableOpacity } from 'react-native';
 import Icon from '../components/Icon';
@@ -32,7 +32,7 @@ export default function UpcomingGamesScreen() {
 
       // --- УПРОЩЕНАЯ ЛОГИКА ЗАГРУЗКИ ---
       // Загружаем список предстоящих игр (уже отсортированный и с заполненными полями)
-      const upcomingGamesData = await getUpcomingGames();
+      const upcomingGamesData = await getUpcomingGamesMasterData();
       console.log(`UpcomingGamesScreen: Loaded ${upcomingGamesData.length} games`);
 
       // Загружаем общее количество предстоящих игр
