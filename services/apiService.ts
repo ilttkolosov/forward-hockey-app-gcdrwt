@@ -491,7 +491,7 @@ async fetchEvents(params: {
       const outcome = outcomeArray[0].toLowerCase();
       if (outcome === 'w' || outcome === 'win') return 'win';
       if (outcome === 'l' || outcome === 'loss') return 'loss';
-      if (outcome === 't' || outcome === 'tie' || outcome === 'draw') return 'draw';
+      if (outcome === 't' || outcome === 'tie' || outcome === 'draw' || outcome === 'nich') return 'draw';
     }
     return 'unknown';
   }

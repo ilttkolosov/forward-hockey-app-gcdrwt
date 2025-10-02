@@ -228,7 +228,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </Link>
 
-          <Link href="/archive" asChild>
+          <Link href="season" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
               <Icon 
                 name="archive" 

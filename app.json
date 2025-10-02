@@ -1,14 +1,14 @@
 {
   "expo": {
-    "name": "Natively",
-    "slug": "Natively",
+    "name": "Forward",
+    "slug": "Forward",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/natively-dark.png",
+    "icon": "./assets/icons/myIcon.png",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/natively-dark.png",
+      "image": "./assets/icons/myIcon.png",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
@@ -21,7 +21,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/natively-dark.png",
+        "foregroundImage": "./assets/icons/myIcon.png",
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,

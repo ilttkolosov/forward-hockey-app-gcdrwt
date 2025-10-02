@@ -12,7 +12,7 @@ import { loadTeamList, saveTeamList, saveTeamLogo } from '../services/teamStorag
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy'; // ✅ Импортируем основной модуль
 
-const shouldUpdateTeams = false; // Признак необходимости обновлять загрузки всех логотипов команд и их названия
+const shouldUpdateTeams = true; // Признак необходимости обновлять загрузки всех логотипов команд и их названия
 const shouldUpdatePlayers = false; // Признак необходимости обновить данные игроков (включая фото)
 
 // --- ФУНКЦИЯ ИНИЦИАЛИЗАЦИИ ИГРОКОВ ---

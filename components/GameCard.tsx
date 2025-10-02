@@ -155,6 +155,8 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
   // --- КОНЕЦ ЛОГИКИ ---
 
   return (
+
+    
     <TouchableOpacity onPress={handlePress} activeOpacity={0.7}>
       <View style={commonStyles.gameCard}>
         {/* Header */}
@@ -203,7 +205,7 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
               <View style={styles.outcomeBadgeContainer}>
                 <Text style={[styles.outcomeText, { 
                   color: homeOutcome === 'win' ? colors.success : 
-                         homeOutcome === 'loss' ? colors.error : colors.warning 
+                         homeOutcome === 'loss' ? colors.error : colors.warning
                 }]}>
                   {getOutcomeText(homeOutcome)}
                 </Text>

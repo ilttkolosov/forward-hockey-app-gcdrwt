@@ -206,14 +206,19 @@ const convertApiEventToGame = async (apiEvent: ApiEvent): Promise<Game> => {
 
   // Определяем статус игры
   // Пока простая логика: если в поле results есть данные, считаем игру завершенной
-  const hasResults = apiEvent.results && Array.isArray(apiEvent.results) && apiEvent.results.length > 0;
+  const hasResults = apiEvent.results && typeof apiEvent.results === 'object' && Object.keys(apiEvent.results).length > 0;
+  //const hasResults = apiEvent.results && Array.isArray(apiEvent.results) && apiEvent.results.length > 0;
   const status = apiService.determineGameStatus(apiEvent.date, hasResults);
+
 
   // Извлекаем результаты, если они есть
   let homeGoals, awayGoals, homeOutcome, awayOutcome, team1_first, team1_second, team1_third, team2_first, team2_second, team2_third;
   if (hasResults && homeTeamInfo && awayTeamInfo) {
     const homeTeamResults = (apiEvent.results as any)[homeTeamInfo.id];
     const awayTeamResults = (apiEvent.results as any)[awayTeamInfo.id];
+
+    console.log(`Home team results for ID ${homeTeamInfo.id}:`, homeTeamResults); // <-- ДОБАВИЛ ЛОГ
+    console.log(`Away team results for ID ${awayTeamInfo.id}:`, awayTeamResults); // <-- ДОБАВИЛ ЛОГ
 
     if (homeTeamResults && awayTeamResults) {
       homeGoals = safeInt(homeTeamResults.goals);
