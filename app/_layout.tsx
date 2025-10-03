@@ -320,6 +320,7 @@ export default function RootLayout() {
         <Stack.Screen name="season/[id]" />
         <Stack.Screen name="tournaments" />
         <Stack.Screen name="coaches" />
+        <Stack.Screen name="test-tabs" /> {/* <-- ДОБАВИТЬ */}
       </Stack>
     </GestureHandlerRootView>
   );

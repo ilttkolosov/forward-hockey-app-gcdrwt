@@ -700,8 +700,9 @@ export async function getCurrentGame(): Promise<Game | null> {
         return currentGame;
       } else {
         // Если нет игр в текущем дне, возвращаем первую игру из списка
-        console.log('No game found for current day, returning first upcoming game');
-        return allUpcomingGames[0];
+        console.log('No game found for current day, returning NULL');
+        //return allUpcomingGames[0];
+        return null;
       }
     }
 

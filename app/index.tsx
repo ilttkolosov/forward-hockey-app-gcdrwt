@@ -256,7 +256,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </Link>
 
-          <Link href="/tournaments" asChild>
+          <Link href="/test-tabs" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
               <Icon 
                 name="trophy" 
@@ -309,6 +309,7 @@ export default function HomeScreen() {
             ))}
           </View>
         )}
+
 
         {/* Bottom spacing */}
         <View style={{ height: 32 }} />
