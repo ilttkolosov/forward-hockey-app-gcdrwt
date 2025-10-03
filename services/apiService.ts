@@ -6,6 +6,7 @@ import {
   ApiUpcomingEventsResponse, 
   ApiPastEventsResponse, 
   ApiLeague, 
+  Game,
   ApiGameDetailsResponse as LegacyApiGameDetailsResponse // Переименовываем, чтобы избежать конфликта
 } from '../types';
 
@@ -460,30 +461,37 @@ async fetchEvents(params: {
     }
   }
 
-  // Определение статуса игры (для совместимости)
-  determineGameStatus(eventDate: string, hasResults: boolean): 'upcoming' | 'live' | 'finished' {
-    const now = new Date();
-    const eventDateTime = new Date(eventDate);
-
+  /**
+   * Определяет статус игры на основе даты и наличия результатов
+   * --- ОБНОВЛЕНО: Корректная логика определения статуса ---
+   */
+  determineGameStatus(eventDateStr: string, hasResults: boolean): Game['status'] {
+    // Если есть результаты, игра завершена
     if (hasResults) {
       return 'finished';
     }
 
-    if (eventDateTime <= now) {
-      // Предполагаем, что игра "живая" в течение 3 часов после начала
-      const timeDiffMs = now.getTime() - eventDateTime.getTime();
-      const threeHoursInMs = 3 * 60 * 60 * 1000;
-      if (timeDiffMs < threeHoursInMs) {
-        return 'live';
-      } else {
-        // Если результатов нет, но время прошло, и не попадает в "live", считаем незавершенной или отложенной
-        // Пока просто возвращаем 'finished', если результатов нет, но дата прошла - это может быть уточнено
-        return 'finished'; // или 'postponed', если есть статус отложенной игры
-      }
+    // Преобразуем строку даты в объект Date
+    // !! ИСПРАВЛЕНО: Приведение к ISO для форматирования !!
+    const isoDateString = eventDateStr.replace(' ', 'T');
+    const eventDate = new Date(isoDateString);
+    const now = new Date();
+
+    // Если дата события в будущем, игра предстоящая
+    if (eventDate > now) {
+      return 'upcoming';
     }
 
+    // Если дата события в прошлом, но результатов нет, игра считается завершённой (без результата)
+    // Это может быть для очень старых игр или игр, которые были отменены
+    if (eventDate < now) {
+      return 'finished';
+    }
+
+    // Если дата события совпадает с текущей, но результатов нет, игра предстоящая
     return 'upcoming';
   }
+
 
   // Получение результата из массива (для совместимости)
   getOutcomeFromResult(outcomeArray: any): string {

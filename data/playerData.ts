@@ -17,7 +17,7 @@ let massiv3: Player[] = []; // Нападающие
  * @param players - Массив всех игроков
  */
 export const splitPlayersIntoGroups = (players: Player[]) => {
-  console.log('Data/playerData: Splitting players into groups...');
+  //console.log('Data/playerData: Splitting players into groups...');
   
   // Очищаем глобальные массивы перед заполнением
   massiv1 = [];
@@ -26,20 +26,17 @@ export const splitPlayersIntoGroups = (players: Player[]) => {
 
   players.forEach((player) => {
     const position = player.position?.trim();
-    console.log(`Data/playerData: Processing player ${player.id} (${player.name}), position: "${position}"`);
+    //console.log(`Data/playerData: Processing player ${player.id} (${player.name}), position: "${position}"`);
 
     switch (position) {
       case 'Вратарь':
         massiv1.push(player);
-        console.log(`Data/playerData: Added player ${player.id} to massiv1 (Вратарь)`);
         break;
       case 'Защитник':
         massiv2.push(player);
-        console.log(`Data/playerData: Added player ${player.id} to massiv2 (Защитник)`);
         break;
       case 'Нападающий':
         massiv3.push(player);
-        console.log(`Data/playerData: Added player ${player.id} to massiv3 (Нападающий)`);
         break;
       default:
         // Если позиция неизвестна, добавляем в "Нападающие" или другую группу по умолчанию

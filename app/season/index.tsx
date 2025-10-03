@@ -15,6 +15,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Icon from '../../components/Icon';
 import { colors, commonStyles } from '../../styles/commonStyles';
+import { getPastGames } from '../../data/gameData';
+import { getGameById } from '../../data/gameData';
 
 const { width } = Dimensions.get('window');
 
@@ -77,6 +79,33 @@ const seasonIcons = ['🏆', '📅', '⏳', '🗓️', '📉'];
 export default function SeasonsScreen() {
   const router = useRouter();
 
+// Фоновая предзагрузка деталей недавних игр
+React.useEffect(() => {
+  const preloadRecentGamesDetails = async () => {
+    try {
+      console.log('🔍 Preloading details for recent games...');
+      const recentGames = await getPastGames(); // Получаем из кэша или API
+
+      // Ограничиваем количество (например, первые 10 игр)
+      const gamesToPreload = recentGames.slice(0, 10);
+
+      // Запускаем фоновую загрузку деталей
+      gamesToPreload.forEach((game) => {
+        getGameById(game.id).catch((err) => {
+          console.warn(`⚠️ Failed to preload details for game ${game.id}:`, err);
+        });
+      });
+
+      console.log(`✅ Triggered preload for ${gamesToPreload.length} recent games`);
+    } catch (error) {
+      console.error('❌ Error during recent games preload:', error);
+      // Не показываем ошибку пользователю — это фоновая задача
+    }
+  };
+
+  preloadRecentGamesDetails();
+}, []);
+
   const handleSeasonPress = (season: SeasonOption) => {
     console.log('SeasonsScreen: Season selected:', season.id);
     
@@ -85,10 +114,9 @@ export default function SeasonsScreen() {
     const endDateString = season.end.toISOString().split('T')[0];
     
     
-    //router.push('/Test'); // <-- Навигируем на тестовую страницу
-    // Навигируем на тестовую страницу, передавая даты
+
     router.push({
-        pathname: '/archive', // <-- Навигируем на тестовую страницу
+        pathname: '/archive',
         params: { 
         date_from: startDateString, 
         date_to: endDateString,

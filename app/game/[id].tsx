@@ -419,10 +419,10 @@ export default function GameDetailsScreen() {
             <View style={styles.periodTable}>
               <View style={styles.periodHeader}>
                 <Text style={styles.periodHeaderText}>Команда</Text>
-                <Text style={styles.periodHeaderText}>1</Text>
-                <Text style={styles.periodHeaderText}>2</Text>
-                <Text style={styles.periodHeaderText}>3</Text>
-                <Text style={styles.periodHeaderText}>Итого</Text>
+                <Text style={styles.periodHeaderNumber}>1</Text>
+                <Text style={styles.periodHeaderNumber}>2</Text>
+                <Text style={styles.periodHeaderNumber}>3</Text>
+                <Text style={styles.periodHeaderNumber}>Итого</Text>
               </View>
               <View style={styles.periodRow}>
                 <Text style={styles.periodTeam}>{homeTeamName}</Text>
@@ -631,12 +631,20 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 16,
   },
-  periodHeaderText: {
+  periodHeaderNumber: {
     flex: 1,
     color: colors.background,
     fontWeight: '600',
     textAlign: 'center',
     fontSize: 14,
+  },
+  periodHeaderText: {
+    flex: 4, // ← Команда — в 4 раза шире
+    color: colors.background,
+    fontWeight: '600',
+    textAlign: 'left',
+    fontSize: 14,
+    paddingLeft: 8,
   },
   periodRow: {
     flexDirection: 'row',
@@ -646,10 +654,12 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   periodTeam: {
-    flex: 1,
+    flex: 4, // ← Команда — в 4 раза шире
     color: colors.text,
     fontWeight: '500',
     fontSize: 14,
+    textAlign: 'left',
+    paddingLeft: 8,
   },
   periodScore: {
     flex: 1,

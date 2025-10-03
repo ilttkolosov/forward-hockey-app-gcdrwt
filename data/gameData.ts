@@ -17,6 +17,11 @@ let gamesCache: { [key: string]: { data: Game[]; timestamp: number } } = {};
 const GAMES_CACHE_DURATION = 5 * 60 * 1000; // 5 минут
 // --- КОНЕЦ КЭША ---
 
+// --- КЭШ ДЛЯ ДЕТАЛЕЙ ИГР ---
+let gameDetailsCache: { [gameId: string]: { data: Game; timestamp: number } } = {};
+const GAME_DETAILS_CACHE_DURATION = 10 * 60 * 1000; // 10 минут
+// --- КОНЕЦ КЭША ---
+
 // --- КЭШ ДЛЯ МАСТЕР-ДАННЫХ ПРЕДСТОЯЩИХ ИГР ---
 let upcomingGamesMasterCache: { data: Game[]; timestamp: number } | null = null;
 const UPCOMING_MASTER_CACHE_DURATION = 5 * 60 * 1000; // 5 минут
@@ -205,6 +210,8 @@ const getTeamFromCache = (teamId: string): Team | undefined => {
 /**
  * Преобразует ApiEvent (из fetchEvents) в Game, заполняя информацию из кэшей
  */
+// data/gameData.ts
+
 const convertApiEventToGame = async (apiEvent: ApiEvent): Promise<Game> => {
   // Извлекаем ID команд, лиги, сезона, места проведения
   // В новом API teams - массив строк, leagues, seasons, venues - массивы чисел
@@ -227,21 +234,20 @@ const convertApiEventToGame = async (apiEvent: ApiEvent): Promise<Game> => {
   const seasonInfo = cachedSeasons[seasonId];
   const venueInfo = cachedVenues[venueId];
 
-  // Определяем статус игры
+  // --- ИСПРАВЛЕНО: Определяем статус игры ---
   // Пока простая логика: если в поле results есть данные, считаем игру завершенной
+  // В новом API results - это объект, ключи которого - ID команд
   const hasResults = apiEvent.results && typeof apiEvent.results === 'object' && Object.keys(apiEvent.results).length > 0;
-  //const hasResults = apiEvent.results && Array.isArray(apiEvent.results) && apiEvent.results.length > 0;
   const status = apiService.determineGameStatus(apiEvent.date, hasResults);
-
+  // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
   // Извлекаем результаты, если они есть
   let homeGoals, awayGoals, homeOutcome, awayOutcome, team1_first, team1_second, team1_third, team2_first, team2_second, team2_third;
   if (hasResults && homeTeamInfo && awayTeamInfo) {
+    // --- ИСПРАВЛЕНО: results - это объект, ключи которого - ID команд ---
     const homeTeamResults = (apiEvent.results as any)[homeTeamInfo.id];
     const awayTeamResults = (apiEvent.results as any)[awayTeamInfo.id];
-
-    console.log(`Home team results for ID ${homeTeamInfo.id}:`, homeTeamResults); // <-- ДОБАВИЛ ЛОГ
-    console.log(`Away team results for ID ${awayTeamInfo.id}:`, awayTeamResults); // <-- ДОБАВИЛ ЛОГ
+    // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
     if (homeTeamResults && awayTeamResults) {
       homeGoals = safeInt(homeTeamResults.goals);
@@ -258,9 +264,9 @@ const convertApiEventToGame = async (apiEvent: ApiEvent): Promise<Game> => {
   }
 
   // Форматируем дату и время
-  // Используем apiService.formatDateTime, который ожидает строку в формате ISO или 'YYYY-MM-DD HH:MM:SS'
-  // apiEvent.date уже в нужном формате, передаем его напрямую
-  const { date, time } = apiService.formatDateTime(apiEvent.date); // <- ИСПРАВЛЕНО
+  // !! ИСПРАВЛЕНО: Приведение к ISO для форматирования !!
+  const isoDateString = apiEvent.date.replace(' ', 'T');
+  const { date, time } = apiService.formatDateTime(isoDateString);
 
   // --- ЗАГРУЖАЕМ URI ЛОГОТИПОВ ИЗ ЛОКАЛЬНОГО ХРАНИЛИЩА ---
   const homeTeamLogoUri = homeTeamInfo ? await loadTeamLogo(homeTeamInfo.id) ?? '' : '';
@@ -549,24 +555,43 @@ export async function getGames(params: {
 }
 
 /**
- * Получает одну игру по ID с детальной информацией
- * Использует apiService.fetchEventById и сопоставляет данные
+ * Получает одну игру по ID с детальной информацией и кэшированием
  */
-export const getGameById = async (id: string): Promise<Game | null> => {
+export const getGameById = async (id: string, useCache = true): Promise<Game | null> => {
+  const now = Date.now();
+
+  // 1. Проверяем кэш в памяти
+  if (useCache && gameDetailsCache[id]) {
+    const cached = gameDetailsCache[id];
+    if (now - cached.timestamp < GAME_DETAILS_CACHE_DURATION) {
+      console.log(`✅ Game details for ID ${id} returned from memory cache`);
+      return cached.data;
+    }
+  }
+
   try {
-    // Проверяем, загружены ли справочные данные
+    // 2. Загружаем справочные данные (если ещё не загружены)
     await loadLeagues();
     await loadSeasons();
     await loadVenues();
-    await loadTeams(); // Загружаем команды для логотипов
+    await loadTeams();
 
+    // 3. Запрашиваем детали из API
     const apiGameDetails = await apiService.fetchEventById(id);
     const game = await convertApiGameDetailsToGame(apiGameDetails);
 
-    console.log(`Loaded game by ID: ${id}`);
+    // 4. Сохраняем в кэш
+    if (useCache) {
+      gameDetailsCache[id] = {
+        data: game,
+        timestamp: now,
+      };
+      console.log(`💾 Game details for ID ${id} saved to memory cache`);
+    }
+
     return game;
   } catch (error) {
-    console.error('❌ Failed to get game by ID:', error);
+    console.error(`❌ Failed to get game by ID ${id}:`, error);
     return null;
   }
 };
@@ -593,7 +618,7 @@ function isCacheValid<T>(cache: CachedData<T> | null): boolean {
 * --- ОБНОВЛЕНО: Использует getGames с фильтром по дате ---
 * Диапазон: с сегодня на 37 дней вперёд.
 */
-async function getUpcomingGamesMasterData(): Promise<Game[]> {
+export async function getUpcomingGamesMasterData(): Promise<Game[]> {
   const now = Date.now();
   // 1. Проверяем кэш
   if (isCacheValid(upcomingGamesMasterCache)) {
@@ -662,50 +687,50 @@ async function getUpcomingGamesMasterData(): Promise<Game[]> {
 
 /**
  * Получает текущую игру (ближайшая предстоящая или идущая)
- * --- ОБНОВЛЕНО: Использует getUpcomingGamesMasterData и логику бейджей ---
  * Игра считается текущей, если она попадает в текущий день (с 00:00 до 23:59:59).
- * Алгоритм бейджей:
- * - Если игра "Текущая", то ставим бейдж "Скоро".
- * - За 5 минут до времени начала игры ставим бейдж "LIVE".
- * - По прошествии 90 минут с времени начала игры меняем бейдж на "Завершена".
+ * Также включает игры, которые идут прямо сейчас (LIVE).
  */
 export async function getCurrentGame(): Promise<Game | null> {
   try {
     console.log('Getting current game from master data...');
     const allUpcomingGames = await getUpcomingGamesMasterData();
 
-    if (allUpcomingGames && allUpcomingGames.length > 0) {
-      // Сортируем по дате (ближайшая первая)
-      allUpcomingGames.sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
-
-      const now = new Date();
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // 00:00:00 текущего дня
-      const todayEnd = new Date(todayStart);
-      todayEnd.setDate(todayEnd.getDate() + 1); // 00:00:00 следующего дня
-
-      // Ищем игру, которая "живая" или самая ближайшая по времени в текущем дне
-      const currentGame = allUpcomingGames.find(game => {
-        const gameDate = new Date(game.event_date);
-        // Если игра "живая" или дата совпадает с сегодняшней и время еще не прошло
-        // или если это ближайшая игра на будущее в текущем дне
-        return (
-          game.status === 'live' ||
-          (gameDate >= todayStart && gameDate < todayEnd && game.status === 'upcoming')
-        );
-      });
-
-      // Если не нашли "живую", возвращаем ближайшую в текущем дне
-      if (currentGame) {
-        console.log('Found current game:', currentGame.id);
-        return currentGame;
-      } else {
-        // Если нет игр в текущем дне, возвращаем первую игру из списка
-        console.log('No game found for current day, returning NULL');
-        //return allUpcomingGames[0];
-        return null;
-      }
+    if (!allUpcomingGames || allUpcomingGames.length === 0) {
+      return null;
     }
 
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // 00:00:00
+    const todayEnd = new Date(todayStart);
+    todayEnd.setDate(todayEnd.getDate() + 1); // 00:00:00 следующего дня
+
+    // Сортируем по дате (ближайшая первая)
+    const sortedGames = [...allUpcomingGames].sort(
+      (a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime()
+    );
+
+    // Ищем первую игру, которая:
+    // - либо идёт прямо сейчас (LIVE: за 5 мин до — до 90 мин после),
+    // - либо проходит сегодня (даже если ещё не началась)
+    const currentGame = sortedGames.find(game => {
+      const gameDate = new Date(game.event_date);
+      
+      // LIVE: за 5 минут до начала и до 90 минут после
+      const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000);
+      const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000);
+      const isLive = now >= liveStart && now <= liveEnd;
+
+      const isToday = gameDate >= todayStart && gameDate < todayEnd;
+
+      return isLive || isToday;
+    });
+
+    if (currentGame) {
+      console.log('Found current game:', currentGame.id);
+      return currentGame;
+    }
+
+    console.log('No game found for current day or live window, returning NULL');
     return null;
   } catch (error) {
     console.error('Error getting current game from master data:', error);
@@ -714,25 +739,40 @@ export async function getCurrentGame(): Promise<Game | null> {
 }
 
 /**
- * Получает список будущих игр (до 5 штук)
- * --- ОБНОВЛЕНО: Использует getUpcomingGamesMasterData и логику бейджей ---
- * На главном экране отображается только 5 ближайших игр.
- * Система бейджей:
- * - Изначально на всех играх присутствует бейдж "предшествующая".
- * - Далее, в 00:00 дня, предшествующего перед днём игры, бейдж меняется на "Скоро".
+ * Получает список будущих игр (до 5 штук), исключая текущую игру (если она есть)
  */
 export async function getFutureGames(): Promise<Game[]> {
   try {
     console.log('Getting future games from master data...');
     const allUpcomingGames = await getUpcomingGamesMasterData();
 
-    // Сортируем по дате (новые первые)
-    allUpcomingGames.sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(todayStart);
+    todayEnd.setDate(todayEnd.getDate() + 1);
 
-    // Берем первые 5 игр
-    const futureGames = allUpcomingGames.slice(0, 5);
+    // Фильтруем: исключаем игры, которые считаются "текущими"
+    const filteredGames = allUpcomingGames.filter(game => {
+      const gameDate = new Date(game.event_date);
+      
+      // LIVE: за 5 минут до начала и до 90 минут после
+      const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000);
+      const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000);
+      const isLive = now >= liveStart && now <= liveEnd;
 
-    console.log(`Loaded ${futureGames.length} future games`);
+      const isToday = gameDate >= todayStart && gameDate < todayEnd;
+
+      // Исключаем, если игра "текущая" (LIVE или сегодня)
+      return !(isLive || isToday);
+    });
+
+    // Сортируем по дате (ближайшие первыми)
+    filteredGames.sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
+
+    // Берём первые 5
+    const futureGames = filteredGames.slice(0, 5);
+
+    console.log(`Loaded ${futureGames.length} future games (after excluding current)`);
     return futureGames;
   } catch (error) {
     console.error('Error loading future games from master data:', error);

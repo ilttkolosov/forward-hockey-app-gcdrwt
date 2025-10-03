@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
 import { commonStyles, colors } from '../styles/commonStyles';
 import { Game } from '../types';
-import { getCurrentGame, getFutureGames, getUpcomingGamesCount } from '../data/gameData';
+import { getCurrentGame, getFutureGames, getUpcomingGamesCount, getGameById } from '../data/gameData';
 import { getPlayers } from '../data/playerData';
 import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -133,31 +133,41 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (force = false) => {
+    // Если данные уже есть и перезагрузка не принудительная — выходим
+    if (!force && currentGame !== null && upcomingGames.length > 0) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
     try {
       setError(null);
       setLoading(true);
       console.log('Loading home screen data...');
 
-      // --- ДОБАВЛЕНО: Сброс кэша перед загрузкой ---
-      // Это заставит getUpcomingGamesMasterData сделать новый запрос к API
-      //upcomingGamesMasterCache = null; // <-- Сброс кэша
-      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
-
-      // --- ОБНОВЛЕНО: Получаем данные через новые функции ---
       const [current, upcoming, upcomingCount, players] = await Promise.all([
         getCurrentGame(),
         getFutureGames(),
         getUpcomingGamesCount(),
         getPlayers(),
       ]);
-      // --- КОНЕЦ ОБНОВЛЕНИЯ ---
+
+
+      // --- ФОНОВАЯ ПРЕДЗАГРУЗКА ДЕТАЛЕЙ ТЕКУЩЕЙ ИГРЫ ---
+      if (current) {
+        console.log('Preloading details for current game:', current.id);
+        getGameById(current.id).catch(err => {
+          console.warn('Background preload of current game details failed:', err);
+        });
+      }
+      // --- КОНЕЦ ПРЕДЗАГРУЗКИ ---
+
 
       setCurrentGame(current ?? null);
       setUpcomingGames(upcoming);
       setUpcomingCount(upcomingCount);
       setPlayersCount(players.length);
-
       console.log('Home screen data loaded:', {
         currentGame: current?.id,
         playersCount: players.length,
@@ -169,18 +179,21 @@ export default function HomeScreen() {
       setError('Не удалось загрузить данные. Попробуйте еще раз.');
     } finally {
       setLoading(false);
-      setRefreshing(false); // <-- ДОБАВИТЬ
+      setRefreshing(false);
     }
-  }, []);
+  }, [currentGame, upcomingGames.length]);
   // --- КОНЕЦ ОБНОВЛЕНИЯ ---
 
-  useEffect(() => {
+useEffect(() => {
+  // Загружаем только если ещё не загружено
+  if (currentGame === null && upcomingGames.length === 0) {
     loadData();
-  }, []);
+  }
+}, [loadData, currentGame, upcomingGames.length]);
 
   const onRefresh = () => {
     setRefreshing(true);
-    loadData();
+    loadData(true); // <-- принудительная перезагрузка
   };
 
   if (loading) {
@@ -218,7 +231,7 @@ export default function HomeScreen() {
 
         {/* Current Game */}
         {currentGame && (
-          <View style={{ marginBottom: 24 }}>
+          <View style={{ marginBottom: 0 }}>
             <Text style={[commonStyles.subtitle, { marginBottom: 12 }]}>
               Текущая игра
             </Text>

@@ -12,6 +12,7 @@ import { Game } from '../types'; // Убедитесь, что импортир�
 import { colors, commonStyles } from '../styles/commonStyles'; // Убедитесь, что импортируете стили
 import { useRouter } from 'expo-router';
 
+
 interface GameCardProps {
   game: Game; // Используем обновлённый тип Game
   showScore?: boolean;
@@ -62,62 +63,44 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
   const awayTeamName = awayTeam?.name || '—';
 
   // --- ЛОГИКА ДЛЯ ОПРЕДЕЛЕНИЯ СТАТУСА И БЕЙДЖЕЙ (сохранена из предыдущего кода) ---
-  const getGameStatus = (gameDateStr: string) => {
+  // --- ДИНАМИЧЕСКАЯ ЛОГИКА СТАТУСА И БЕЙДЖЕЙ (на основе event_date, игнорируем game.status) ---
+  const getDynamicGameStatus = (gameDateStr: string) => {
     const now = new Date();
     const gameDate = new Date(gameDateStr);
 
-    // Проверка, является ли игра сегодняшней
     const isToday = gameDate.toDateString() === now.toDateString();
-
-    // Проверка, входит ли игра в следующие 3 дня
     const daysDiff = Math.ceil((gameDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
     const isWithin3Days = daysDiff >= 0 && daysDiff <= 3;
 
-    // Проверка, является ли игра живой (5 минут до + 90 минут после)
-    const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000); // –5 мин
-    const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000); // +90 мин
+    const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000);
+    const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000);
     const isLive = now >= liveStart && now <= liveEnd;
 
-    return { isToday, isWithin3Days, isLive };
+    const isFinished = now > liveEnd;
+
+    return { isToday, isWithin3Days, isLive, isFinished };
   };
 
-  const getStatusColor = (status: Game['status'], isLive?: boolean) => {
-    if (isLive) return colors.success; // Green for LIVE
-    switch (status) {
-      case 'live':
-        return colors.success;
-      case 'upcoming':
-        return colors.warning;
-      case 'finished':
-        return colors.textSecondary;
-      default:
-        return colors.textSecondary;
-    }
+  const getStatusColor = (isLive: boolean, isFinished: boolean) => {
+    if (isLive) return colors.success;
+    if (isFinished) return colors.textSecondary;
+    return colors.warning; // для "Скоро" и "Предстоящая"
   };
 
-  const getStatusText = (status: Game['status'], isToday?: boolean, isWithin3Days?: boolean, isLive?: boolean) => {
+  const getStatusText = (isToday: boolean, isWithin3Days: boolean, isLive: boolean, isFinished: boolean) => {
     if (isLive) return 'LIVE';
-
-    // Новая логика бейджей для предстоящих игр
-    if (status === 'upcoming') {
-      if (isToday) return 'СЕГОДНЯ';
-      if (isWithin3Days) return 'СКОРО';
-      return 'ПРЕДСТОЯЩАЯ';
-    }
-
-    switch (status) {
-      case 'live':
-        return 'LIVE';
-      case 'finished':
-        return ''; // Убираем "ЗАВЕРШЕНА" бейдж для завершенных игр
-      default:
-        return '';
-    }
+    if (isFinished) return ''; // бейдж "Завершена" не показываем
+    if (isToday) return 'СЕГОДНЯ';
+    if (isWithin3Days) return 'СКОРО';
+    return 'ПРЕДСТОЯЩАЯ';
   };
+  // --- КОНЕЦ ДИНАМИЧЕСКОЙ ЛОГИКИ ---
+
 
   // Получаем статус игры для предстоящих игр
-  const { isToday, isWithin3Days, isLive } = status === 'upcoming' ? getGameStatus(event_date) : { isToday: false, isWithin3Days: false, isLive: status === 'live' };
-  const statusText = getStatusText(status, isToday, isWithin3Days, isLive);
+  const { isToday, isWithin3Days, isLive, isFinished } = getDynamicGameStatus(event_date);
+  const statusText = getStatusText(isToday, isWithin3Days, isLive, isFinished);
+
 
   // --- Функции для работы с исходом игры (outcome) ---
   const getOutcomeText = (outcome: string | undefined): string => {
@@ -162,7 +145,7 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
         {/* Header */}
         <View style={styles.header}>
           {statusText && (
-            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(status, isLive) }]}>
+            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(isLive, isFinished) }]}>
               <Text style={styles.statusText}>{statusText}</Text>
             </View>
           )}
@@ -197,11 +180,11 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
             <Text style={styles.teamName} numberOfLines={2}>
               {homeTeamName}
             </Text>
-            {showScore && homeScore !== undefined && (
-              <Text style={styles.score}>{homeScore}</Text>
+            {showScore && (isLive || isFinished) && (
+              <Text style={styles.score}>{homeScore ?? 0}</Text>
             )}
             {/* Outcome Badge centered under team name */}
-            {homeOutcome && (
+            {isFinished && homeOutcome && (
               <View style={styles.outcomeBadgeContainer}>
                 <Text style={[styles.outcomeText, { 
                   color: homeOutcome === 'win' ? colors.success : 
@@ -236,11 +219,11 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
             <Text style={styles.teamName} numberOfLines={2}>
               {awayTeamName}
             </Text>
-            {showScore && awayScore !== undefined && (
-              <Text style={styles.score}>{awayScore}</Text>
+            {showScore && (isLive || isFinished) && (
+              <Text style={styles.score}>{awayScore ?? 0}</Text>
             )}
             {/* Outcome Badge centered under team name */}
-            {awayOutcome && (
+            {isFinished && awayOutcome && (
               <View style={styles.outcomeBadgeContainer}>
                 <Text style={[styles.outcomeText, { 
                   color: awayOutcome === 'win' ? colors.success : 
