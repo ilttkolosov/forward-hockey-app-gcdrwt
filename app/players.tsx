@@ -1,6 +1,16 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Dimensions, Animated, Modal } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  Dimensions,
+  Animated,
+  Modal,
+  RefreshControl,
+  FlatList,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { TabView, SceneMap, TabBar } from 'react-native-tab-view';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
@@ -9,10 +19,25 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import Icon from '../components/Icon';
 import { Player } from '../types';
-import { getPlayers, searchPlayers, groupPlayersByPosition } from '../data/playerData';
+// --- ИЗМЕНЕНО: Импортируем новые функции ---
+import { getPlayers, searchPlayers, getMassiv1, getMassiv2, getMassiv3 } from '../data/playerData';
+// --- КОНЕЦ ИЗМЕНЕНИЯ ---
 import { getPositionTabName, getCaptainBadgeText, getHandednessText } from '../utils/playerUtils';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
+
+const { width } = Dimensions.get('window');
+
+// --- ИЗМЕНЕНО: Определяем позиции и маршруты ---
+const positions = ['Вратарь', 'Защитник', 'Нападающий'];
+const routes = positions.map(position => ({
+  key: position,
+  title: getPositionTabName(position),
+}));
+// --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
+
+
 
 const styles = StyleSheet.create({
   container: {
@@ -27,6 +52,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    justifyContent: 'space-between',
   },
   backButton: {
     marginRight: 16,
@@ -203,7 +229,6 @@ interface PlayerCardProps {
   onPress: (player: Player) => void;
 }
 
-
 const formatName = (fullName: string | null | undefined): string => {
   if (!fullName) {
     return 'Игрок'; // или '', но лучше что-то понятное
@@ -222,7 +247,6 @@ const formatName = (fullName: string | null | undefined): string => {
 
   return fullName;
 };
-
 
 const PlayerCard: React.FC<PlayerCardProps> = ({ player, onPress }) => {
   const captainBadgeText = player.captainStatus;
@@ -335,7 +359,7 @@ const PlayerList: React.FC<PlayerListProps> = ({
 
 export default function PlayersScreen() {
   const router = useRouter();
-  const [players, setPlayers] = useState<Player[]>([]);
+  const [players, setPlayers] = useState<Player[]>([]); // Общий массив игроков
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -349,23 +373,19 @@ export default function PlayersScreen() {
     new Animated.Value(0), // Forwards
   ]).current;
 
-  const positions = ['Вратарь', 'Защитник', 'Нападающий'];
-  const [routes] = useState(
-    positions.map(position => ({
-      key: position,
-      title: getPositionTabName(position),
-    }))
-  );
-
   const loadData = async () => {
     try {
       setError(null);
+      setLoading(true);
       console.log('Loading players data...');
+
+      // --- ИЗМЕНЕНО: Загружаем всех игроков ---
       const playersData = await getPlayers();
-      setPlayers(playersData);
+      setPlayers(playersData); // <-- Устанавливаем общий массив игроков
       console.log(`Loaded ${playersData.length} players`);
+      // --- КОНЕЦ ИЗМЕНЕНИЯ ---
     } catch (err) {
-      console.log('Error loading players:', err);
+      console.error('Error loading players:', err);
       setError('Не удалось загрузить список игроков. Попробуйте еще раз.');
     } finally {
       setLoading(false);
@@ -415,24 +435,56 @@ export default function PlayersScreen() {
     setSearchQuery('');
   };
 
-  const groupedPlayers = groupPlayersByPosition(players);
-
-  // Get all players for search (across all positions)
-  const allPlayersForSearch = Object.values(groupedPlayers).flat();
-
+  // --- ИЗМЕНЕНО: Функция рендеринга списка игроков для вкладки ---
   const renderScene = ({ route }: { route: { key: string } }) => {
-    const positionIndex = positions.indexOf(route.key);
+    console.log('PlayersScreen: Rendering scene for route:', route);
+    let playersForTab: Player[] = [];
+
+    switch (route.key) {
+      case 'Вратарь':
+        playersForTab = getMassiv1(); // <-- Используем getMassiv1
+        break;
+      case 'Защитник':
+        playersForTab = getMassiv2(); // <-- Используем getMassiv2
+        break;
+      case 'Нападающий':
+        playersForTab = getMassiv3(); // <-- Используем getMassiv3
+        break;
+      default:
+        playersForTab = [];
+        break;
+    }
+
+    console.log(`PlayersScreen: Rendering ${playersForTab.length} players for tab ${route.key}`);
+
     return (
-      <PlayerList
-        players={groupedPlayers[route.key] || []}
-        searchQuery=""
-        onPlayerPress={handlePlayerPress}
-        onPullDown={handleSearchPress}
-        animatedValue={animatedValues[positionIndex]}
-        isActive={positionIndex === index}
+      <FlatList
+        data={playersForTab}
+        renderItem={({ item: player }) => (
+          <PlayerCard
+            key={player.id}
+            player={player}
+            onPress={handlePlayerPress}
+          />
+        )}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContainer}
+        refreshControl={
+          <RefreshControl refreshing={false} onRefresh={loadData} />
+        }
+        ListEmptyComponent={
+          <View style={commonStyles.errorContainer}>
+            <Text style={commonStyles.text}>Нет игроков в этой позиции.</Text>
+            <Text style={commonStyles.textSecondary}>
+              Попробуйте выбрать другую позицию или обновить страницу.
+            </Text>
+          </View>
+        }
+        showsVerticalScrollIndicator={false}
       />
     );
   };
+  // --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
   const renderTabBar = (props: any) => (
     <TabBar
@@ -447,7 +499,7 @@ export default function PlayersScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={commonStyles.container}>
         <LoadingSpinner />
       </SafeAreaView>
     );
@@ -455,24 +507,24 @@ export default function PlayersScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={commonStyles.container}>
         <ErrorMessage message={error} onRetry={loadData} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={commonStyles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
+        <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
           <Icon name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <View style={styles.headerTitle}>
-          <Text style={styles.title}>Игроки</Text>
-          <Text style={styles.subtitle}>{players.length} игроков</Text>
+        <View style={styles.headerTitleContainer}>
+          <Text style={commonStyles.title}>Игроки</Text>
+          <Text style={commonStyles.textSecondary}>{players.length} игроков</Text>
         </View>
-        <TouchableOpacity style={styles.searchButton} onPress={handleSearchPress}>
+        <TouchableOpacity onPress={handleSearchPress} style={styles.searchButton}>
           <Icon name="search" size={24} color={colors.text} />
         </TouchableOpacity>
       </View>
@@ -480,7 +532,7 @@ export default function PlayersScreen() {
       {/* Tab View with Smooth Animations */}
       <TabView
         navigationState={{ index, routes }}
-        renderScene={renderScene}
+        renderScene={renderScene} // <-- Используем новую функцию рендеринга
         renderTabBar={renderTabBar}
         onIndexChange={setIndex}
         initialLayout={{ width: Dimensions.get('window').width }}
@@ -517,30 +569,36 @@ export default function PlayersScreen() {
                 autoFocus
               />
               {searchQuery.length > 0 && (
-                <TouchableOpacity style={styles.clearButton} onPress={handleClearSearch}>
+                <TouchableOpacity onPress={handleClearSearch} style={styles.clearButton}>
                   <Icon name="close" size={20} color={colors.textSecondary} />
                 </TouchableOpacity>
               )}
             </View>
 
             {/* Search Results */}
-            <Animated.ScrollView
-              style={styles.searchResults}
-              contentContainerStyle={{ paddingVertical: 8 }}
-              showsVerticalScrollIndicator={false}
-            >
-              {searchPlayers(allPlayersForSearch, searchQuery).map((player, index) => (
+            <FlatList
+              data={searchPlayers(players, searchQuery)} // <-- Используем общий массив players для поиска
+              renderItem={({ item: player }) => (
                 <PlayerCard key={player.id} player={player} onPress={handlePlayerPress} />
-              ))}
-              {searchQuery && searchPlayers(allPlayersForSearch, searchQuery).length === 0 && (
-                <View style={styles.emptyContainer}>
-                  <Text style={styles.emptyText}>Игроки не найдены</Text>
-                </View>
               )}
-            </Animated.ScrollView>
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.searchResults}
+              showsVerticalScrollIndicator={false}
+              ListEmptyComponent={
+                <View style={commonStyles.errorContainer}>
+                  <Text style={commonStyles.text}>Игроки не найдены.</Text>
+                  <Text style={commonStyles.textSecondary}>
+                    Попробуйте изменить поисковый запрос или обновить страницу.
+                  </Text>
+                </View>
+              }
+            />
           </View>
         </View>
       </Modal>
+
+      {/* Bottom spacing */}
+      <View style={{ height: 32 }} />
     </SafeAreaView>
   );
 }
