@@ -1,19 +1,24 @@
 // app/test-tabs.tsx
 
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
-  Dimensions,
-} from 'react-native';
+import React from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { TabView, SceneMap, TabBar } from 'react-native-tab-view';
+import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
+import { useRouter } from 'expo-router';
+import Icon from '../components/Icon';
+
 import { commonStyles, colors } from '../styles/commonStyles';
 
-const { width } = Dimensions.get('window');
+const Tab = createMaterialTopTabNavigator();
+
+const router = useRouter(); // <-- Убедитесь, что это есть
+
+// --- ДОБАВЛЕНО: Функция возврата ---
+const handleBackPress = () => {
+router.back();
+};
+// --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
 
 // --- ТЕСТОВЫЕ ДАННЫЕ ---
 const testData1 = [
@@ -41,48 +46,47 @@ const TestList = ({ data }: { data: { id: string; name: string }[] }) => (
 );
 // --- КОНЕЦ КОМПОНЕНТА ---
 
-// --- СЦЕНЫ ДЛЯ TABVIEW ---
-const FirstRoute = () => <TestList data={testData1} />;
-const SecondRoute = () => <TestList data={testData2} />;
-// --- КОНЕЦ СЦЕН ---
+// --- ЭКРАНЫ ДЛЯ TABS ---
+function FirstTab() {
+  return <TestList data={testData1} />;
+}
+
+function SecondTab() {
+  return <TestList data={testData2} />;
+}
+// --- КОНЕЦ ЭКРАНОВ ---
 
 export default function TestTabsScreen() {
-  const [index, setIndex] = useState(0);
-  const [routes] = useState([
-    { key: 'first', title: 'Вкладка 1' },
-    { key: 'second', title: 'Вкладка 2' },
-  ]);
-
-  const renderScene = SceneMap({
-    first: FirstRoute,
-    second: SecondRoute,
-  });
-
-  const renderTabBar = (props: any) => (
-    <TabBar
-      {...props}
-      style={styles.tabBar}
-      indicatorStyle={styles.tabIndicator}
-      labelStyle={styles.tabLabel}
-      activeColor={colors.primary}
-      inactiveColor={colors.textSecondary}
-    />
-  );
-
   return (
     <SafeAreaView style={commonStyles.container}>
       <View style={styles.header}>
-        <Text style={commonStyles.title}>Тест вкладок</Text>
+        <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
+          <Icon name="chevron-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <View style={styles.headerTitleContainer}>
+          <Text style={commonStyles.title}>Тест вкладок</Text>
+          <Text style={commonStyles.textSecondary}>проверка...</Text>
+        </View>
       </View>
-      <TabView
-        navigationState={{ index, routes }}
-        renderScene={renderScene}
-        renderTabBar={renderTabBar}
-        onIndexChange={setIndex}
-        initialLayout={{ width }}
-        animationEnabled={true}
-        swipeEnabled={true}
-      />
+
+      {/* Tab Navigator */}
+      {/* --- ИСПРАВЛЕНО: Убран NavigationContainer, так как он уже есть на корневом уровне --- */}
+      <Tab.Navigator
+        screenOptions={{
+          tabBarActiveTintColor: colors.primary,
+          tabBarInactiveTintColor: colors.textSecondary,
+          tabBarLabelStyle: styles.tabLabel,
+          tabBarIndicatorStyle: styles.tabIndicator,
+          tabBarStyle: styles.tabBar,
+        }}
+      >
+        <Tab.Screen name="First" component={FirstTab} options={{ title: 'Вкладка 1' }} />
+        <Tab.Screen name="Second" component={SecondTab} options={{ title: 'Вкладка 2' }} />
+      </Tab.Navigator>
+      {/* --- КОНЕЦ ИСПРАВЛЕНИЯ --- */}
+
+      {/* Bottom spacing */}
+      <View style={{ height: 32 }} />
     </SafeAreaView>
   );
 }
