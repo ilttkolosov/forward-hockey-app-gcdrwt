@@ -397,7 +397,7 @@ export default function PlayersScreen() {
   }, []);
 
   // Animate tab transitions
-  useEffect(() => {
+/*   useEffect(() => {
     animatedValues.forEach((animValue, i) => {
       Animated.spring(animValue, {
         toValue: i === index ? 1 : 0,
@@ -406,7 +406,7 @@ export default function PlayersScreen() {
         friction: 8,
       }).start();
     });
-  }, [index, animatedValues]);
+  }, [index, animatedValues]); */
 
   const handlePlayerPress = (player: Player) => {
     // Close search modal if open
@@ -469,9 +469,6 @@ export default function PlayersScreen() {
         )}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContainer}
-        refreshControl={
-          <RefreshControl refreshing={false} onRefresh={loadData} />
-        }
         ListEmptyComponent={
           <View style={commonStyles.errorContainer}>
             <Text style={commonStyles.text}>Нет игроков в этой позиции.</Text>
@@ -482,9 +479,9 @@ export default function PlayersScreen() {
         }
         showsVerticalScrollIndicator={false}
       />
-    );
-  };
-  // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+      );
+    };
+    // --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
   const renderTabBar = (props: any) => (
     <TabBar
