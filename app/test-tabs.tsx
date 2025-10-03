@@ -1,24 +1,26 @@
 // app/test-tabs.tsx
 
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
 import { useRouter } from 'expo-router';
 import Icon from '../components/Icon';
-
+import SegmentedControl from '@react-native-segmented-control/segmented-control'; // <-- Импортируем SegmentedControl
 import { commonStyles, colors } from '../styles/commonStyles';
-
-const Tab = createMaterialTopTabNavigator();
 
 const router = useRouter(); // <-- Убедитесь, что это есть
 
 // --- ДОБАВЛЕНО: Функция возврата ---
 const handleBackPress = () => {
-router.back();
+  router.back();
 };
 // --- КОНЕЦ ДОБАВЛЕНИЯ ---
-
 
 // --- ТЕСТОВЫЕ ДАННЫЕ ---
 const testData1 = [
@@ -46,19 +48,12 @@ const TestList = ({ data }: { data: { id: string; name: string }[] }) => (
 );
 // --- КОНЕЦ КОМПОНЕНТА ---
 
-// --- ЭКРАНЫ ДЛЯ TABS ---
-function FirstTab() {
-  return <TestList data={testData1} />;
-}
-
-function SecondTab() {
-  return <TestList data={testData2} />;
-}
-// --- КОНЕЦ ЭКРАНОВ ---
-
 export default function TestTabsScreen() {
+  const [index, setIndex] = useState(0); // <-- Состояние для SegmentedControl
+
   return (
     <SafeAreaView style={commonStyles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
           <Icon name="chevron-back" size={24} color={colors.text} />
@@ -69,21 +64,21 @@ export default function TestTabsScreen() {
         </View>
       </View>
 
-      {/* Tab Navigator */}
-      {/* --- ИСПРАВЛЕНО: Убран NavigationContainer, так как он уже есть на корневом уровне --- */}
-      <Tab.Navigator
-        screenOptions={{
-          tabBarActiveTintColor: colors.primary,
-          tabBarInactiveTintColor: colors.textSecondary,
-          tabBarLabelStyle: styles.tabLabel,
-          tabBarIndicatorStyle: styles.tabIndicator,
-          tabBarStyle: styles.tabBar,
+      {/* Segmented Control */}
+      <SegmentedControl
+        values={['Вкладка 1', 'Вкладка 2']} // <-- Названия вкладок
+        selectedIndex={index} // <-- Текущий индекс
+        onChange={(event) => {
+          setIndex(event.nativeEvent.selectedSegmentIndex); // <-- Обновляем индекс
         }}
-      >
-        <Tab.Screen name="First" component={FirstTab} options={{ title: 'Вкладка 1' }} />
-        <Tab.Screen name="Second" component={SecondTab} options={{ title: 'Вкладка 2' }} />
-      </Tab.Navigator>
-      {/* --- КОНЕЦ ИСПРАВЛЕНИЯ --- */}
+        style={styles.segmentedControl} // <-- Стиль
+      />
+
+      {/* Content */}
+      <View style={styles.content}>
+        {/* Отображаем нужный список в зависимости от индекса */}
+        {index === 0 ? <TestList data={testData1} /> : <TestList data={testData2} />}
+      </View>
 
       {/* Bottom spacing */}
       <View style={{ height: 32 }} />
@@ -101,24 +96,22 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  tabBar: {
-    backgroundColor: colors.background,
-    elevation: 0,
-    shadowOpacity: 0,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+  backButton: {
+    marginRight: 16,
+    padding: 4,
   },
-  tabIndicator: {
-    backgroundColor: colors.primary,
-    height: 3,
+  headerTitleContainer: {
+    flex: 1,
+    alignItems: 'center',
   },
-  tabLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    textTransform: 'none',
+  segmentedControl: {
+    marginHorizontal: 16,
+    marginVertical: 16,
+  },
+  content: {
+    flex: 1,
   },
   listContainer: {
-    flex: 1,
     padding: 16,
   },
   listItem: {
