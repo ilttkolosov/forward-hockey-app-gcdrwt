@@ -56,6 +56,8 @@ interface ApiPlayerPhotoResponse {
   photo_url: string;
 }
 
+//export const BASE_URL = "https://www.hc-forward.com/wp-json/app/v1";
+
 class ApiService {
   private baseUrl = "https://www.hc-forward.com/wp-json/app/v1";
 
@@ -522,6 +524,18 @@ async fetchEvents(params: {
   //   const parsed = this.parseIdNameString(leaguesString);
   //   return parsed.name || "Товарищеский матч";
   // }
+
+  // Универсальный GET-метод для произвольных эндпоинтов
+  async get<T = any>(endpoint: string): Promise<T> {
+    const url = `${this.baseUrl}${endpoint}`;
+    console.log('API Service: GET request to', url);
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} for ${url}`);
+    }
+    return response.json() as Promise<T>;
+  }
+
 }
 
 export const apiService = new ApiService();

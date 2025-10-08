@@ -18,6 +18,11 @@ interface GameCardProps {
   showScore?: boolean;
 }
 
+  const hasValidOutcome = (outcome: string | undefined): boolean => {
+    return outcome != null && outcome !== '' && outcome !== 'unknown';
+  };
+
+
 export default function GameCard({ game, showScore = true }: GameCardProps) {
   const router = useRouter();
 
@@ -62,9 +67,25 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
   const homeTeamName = homeTeam?.name || '—';
   const awayTeamName = awayTeam?.name || '—';
 
-  // --- ЛОГИКА ДЛЯ ОПРЕДЕЛЕНИЯ СТАТУСА И БЕЙДЖЕЙ (сохранена из предыдущего кода) ---
-  // --- ДИНАМИЧЕСКАЯ ЛОГИКА СТАТУСА И БЕЙДЖЕЙ (на основе event_date, игнорируем game.status) ---
-  const getDynamicGameStatus = (gameDateStr: string) => {
+
+
+ 
+  // --- ДИНАМИЧЕСКАЯ ЛОГИКА СТАТУСА И БЕЙДЖЕЙ (с учётом результатов) ---
+  const getDynamicGameStatus = (gameDateStr: string, homeOutcome?: string, awayOutcome?: string) => {
+    
+    //console.log(`Сморим что пришло в getDynamicGameStatus`, gameDateStr, hasValidOutcome(homeOutcome), hasValidOutcome(awayOutcome));
+
+      // 🔹 Если хотя бы у одной команды есть ВАЛИДНЫЙ исход — игра завершена
+    if (hasValidOutcome(homeOutcome) || hasValidOutcome(awayOutcome)) {
+      return {
+        isToday: false,
+        isWithin3Days: false,
+        isLive: false,
+        isFinished: true,
+      };
+    }
+    
+    
     const now = new Date();
     const gameDate = new Date(gameDateStr);
 
@@ -98,7 +119,19 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
 
 
   // Получаем статус игры для предстоящих игр
-  const { isToday, isWithin3Days, isLive, isFinished } = getDynamicGameStatus(event_date);
+
+  //const hasOutcome = (homeOutcome && homeOutcome !== 'unknown') || (awayOutcome && awayOutcome !== 'unknown');
+  
+  const hasValidOutcome = (outcome: string | undefined): boolean => {
+  return outcome != null && outcome !== '' && outcome !== 'unknown';
+  };
+ 
+
+
+
+  const { isToday, isWithin3Days, isLive, isFinished } = getDynamicGameStatus(event_date, homeOutcome, awayOutcome);
+  //console.log(`Значения getDynamicGameStatusTest, для игры  ${getDynamicGameStatusTest}`, homeOutcome, awayOutcome)
+  //const { isToday, isWithin3Days, isLive, isFinished } = getDynamicGameStatus(event_date);
   const statusText = getStatusText(isToday, isWithin3Days, isLive, isFinished);
 
 

@@ -1,5 +1,4 @@
 // _layout.tsx
-
 import React, { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -10,286 +9,230 @@ import PlayerDataLoadingScreen from '../components/PlayerDataLoadingScreen';
 import { apiService } from '../services/apiService';
 import { loadTeamList, saveTeamList, saveTeamLogo } from '../services/teamStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system/legacy'; // ✅ Импортируем основной модуль
+import * as FileSystem from 'expo-file-system/legacy';
 import { getGames } from '../data/gameData'; 
 import SplashScreen from '../components/SplashScreen'; 
+import { fetchStartupConfig, StartupConfig } from '../services/startupApi';
+import { fetchTournamentTable } from '../services/tournamentsApi';
 
-const shouldUpdateTeams = true; // Признак необходимости обновлять загрузки всех логотипов команд и их названия
-const shouldUpdatePlayers = false; // Признак необходимости обновить данные игроков (включая фото)
+// === НОВЫЕ КОНСТАНТЫ ДЛЯ ХРАНЕНИЯ ТУРНИРОВ ===
+const TOURNAMENTS_NOW_KEY = 'tournaments_now';
+const TOURNAMENTS_PAST_KEY = 'tournaments_past';
+const CURRENT_TOURNAMENT_ID_KEY = 'current_tournament_id';
 
-// --- ФУНКЦИЯ ИНИЦИАЛИЗАЦИИ ИГРОКОВ ---
+// Ключи для хранения версий в AsyncStorage
+const TEAMS_VERSION_KEY = 'teams_version';
+const PLAYERS_VERSION_KEY = 'players_version';
+
+// --- ФУНКЦИЯ ИНИЦИАЛИЗАЦИИ ИГРОКОВ (без проверки флага) ---
 const initializePlayers = async () => {
-  if (!shouldUpdatePlayers) {
-    console.log('Player initialization skipped by flag (shouldUpdatePlayers = false)');
-    return;
-  }
-
   try {
-    console.log('🔄 Player initialization triggered by flag (shouldUpdatePlayers = true)...');
-    // Здесь можно выбрать способ обновления:
-    // 1. Полная очистка и перезагрузка:
-    // await clearPlayersData(); // Очищает ВСЁ (данные, фото, флаги)
-    // await getPlayers(); // Загружает снова
-
-    // 2. Принудительная перезагрузка (если ваш playerDownloadService поддерживает это):
-    // await refreshPlayersData(); // Реализация зависит от того, как вы обновили playerData.ts/playerDownloadService.ts
-
-    // 3. Принудительная перезагрузка ТОЛЬКО фото (если ваш playerDownloadService поддерживает флаг PLAYER_PHOTOS_DOWNLOADED_KEY):
-    // Это требует доработки playerDownloadService.ts, чтобы refresh/loadAllPlayersData учитывал этот флаг.
-    // Например, можно добавить параметр forcePhotoReload в loadAllPlayersData.
-    // Пока используем полную перезагрузку.
-
-    await clearPlayersData(); // Проще и надежнее для начала
+    console.log('🔄 Player initialization triggered (shouldUpdatePlayers = true)...');
+    await clearPlayersData();
     console.log('🗑️ Previous player data cleared.');
-
     console.log('📥 Re-fetching player data...');
-    const players = await getPlayers(); // Это вызовет loadAllPlayersData, так как флаги сброшены
+    const players = await getPlayers();
     console.log(`✅ Re-loaded ${players.length} players.`);
   } catch (error) {
     console.error('💥 Failed to re-initialize players:', error);
-    // Можно показать уведомление об ошибке пользователю
   }
 };
 
-
-// --- ИСПРАВЛЕННАЯ ФУНКЦИЯ ИНИЦИАЛИЗАЦИИ КОМАНД ---
+// --- ФУНКЦИЯ ИНИЦИАЛИЗАЦИИ КОМАНД (без проверки флага) с возможностью очистки изображений ---
 const initializeTeams = async () => {
-  if (!shouldUpdateTeams) {
-    console.log('📥 Team initialization skipped by flag (shouldUpdateTeams = false)');
-    return;
-  }
-
   try {
     console.log('📥 Fetching team list from API...');
-    const teams = await apiService.fetchTeamList(); // Получаем список команд
+    const teams = await apiService.fetchTeamList();
     console.log(`✅ Fetched ${teams.length} teams`);
-
-    await saveTeamList(teams); // Сохраняем список в AsyncStorage
+    await saveTeamList(teams);
     console.log('💾 Team list saved to AsyncStorage');
 
-    // --- РАБОТА С ФАЙЛОВОЙ СИСТЕМОЙ ---
-      console.log('📂 Attempting to get document directory...');
-      let documentDir = FileSystem.documentDirectory;
-
-      // Простая задержка на случай, если documentDirectory ещё не инициализирован
-      if (!documentDir) {
-          console.warn('⚠️ documentDirectory is null, waiting briefly...');
-          await new Promise(resolve => setTimeout(resolve, 150)); // Подождать 150мс
-          documentDir = FileSystem.documentDirectory;
-      }
-
-      if (!documentDir) {
-        const errorMsg = '💥 Could not get document directory from FileSystem (legacy). Skipping logo download.';
-        console.error(errorMsg);
-        return;
-      }
-      console.log('📂 Document directory obtained (legacy):', documentDir);
-        // --- КОНЕЦ НАДЕЖНОГО ПОЛУЧЕНИЯ ---
-
-    // 2. Формируем путь к папке для логотипов
+    let documentDir = FileSystem.documentDirectory;
+    if (!documentDir) {
+      console.warn('⚠️ documentDirectory is null, waiting briefly...');
+      await new Promise(resolve => setTimeout(resolve, 150));
+      documentDir = FileSystem.documentDirectory;
+    }
+    if (!documentDir) {
+      console.error('💥 Could not get document directory. Skipping logo download.');
+      return;
+    }
     const logoDirPath = `${documentDir}team_logos`;
-
-    // 3. Создаём папку для логотипов, если она не существует
-    console.log('📂 Ensuring team logos directory exists...');
     const dirInfo = await FileSystem.getInfoAsync(logoDirPath);
     if (!dirInfo.exists) {
       await FileSystem.makeDirectoryAsync(logoDirPath, { intermediates: true });
       console.log('✅ Team logos directory created');
     } else {
-      console.log('✅ Team logos directory already exists');
+      // === ОЧИСТКА ПАПКИ С ЛОГОТИПАМИ ===
+      console.log('🧹 Clearing existing team logos directory...');
+      const files = await FileSystem.readDirectoryAsync(logoDirPath);
+      await Promise.all(
+        files.map(file => 
+          FileSystem.deleteAsync(`${logoDirPath}/${file}`, { idempotent: true })
+        )
+      );
+      console.log(`✅ Cleared ${files.length} existing logo files`);
     }
 
-    // 4. (Опционально) Очищаем папку перед загрузкой (если нужно)
-    // ⚠️ ВНИМАНИЕ: Это удалит ВСЕ файлы в папке!
-    // console.log('🧹 Clearing existing logo directory contents...');
-    // try {
-    //   const files = await FileSystem.readDirectoryAsync(logoDirPath);
-    //   await Promise.all(files.map(file => FileSystem.deleteAsync(`${logoDirPath}/${file}`, { idempotent: true })));
-    //   console.log('✅ Logo directory contents cleared');
-    // } catch (error) {
-    //   console.warn('⚠️ Failed to clear logo directory contents:', error);
-    // }
+    // === ОЧИСТКА КЭША URI В ASYNCSTORAGE ===
+    console.log('🧹 Clearing team logo URI cache in AsyncStorage...');
+    const logoKeys = teams.map(team => `team_logo_${team.id}`);
+    await AsyncStorage.multiRemove(logoKeys);
+    console.log('✅ Team logo URI cache cleared');
 
-    // 5. Загружаем логотипы для каждой команды
-    console.log('⬇️ Starting team logo downloads...');
-    // Используем Promise.allSettled, чтобы ошибка загрузки одного логотипа не остановила весь процесс
+    console.log('⬇️ Starting fresh team logo downloads...');
     const downloadPromises = teams.map(async (team) => {
       if (team.logo_url) {
+        const fileName = `team_${team.id}.jpg`;
+        const fileUri = `${logoDirPath}/${fileName}`;
         try {
-          console.log(`🖼️  Preparing download for logo of team ${team.id}: ${team.name}`);
-          // Формируем уникальное имя файла для логотипа
-          const fileName = `team_${team.id}.jpg`; // Или .png, проверьте формат на сервере
-          const fileUri = `${logoDirPath}/${fileName}`;
-
-          // Проверяем, существует ли файл уже
-          const fileInfo = await FileSystem.getInfoAsync(fileUri);
-          if (fileInfo.exists) {
-             console.log(`ℹ️  Logo for team ${team.id} already exists locally, skipping download.`);
-             // Убедимся, что URI сохранен в AsyncStorage
-             await saveTeamLogo(team.id, fileUri);
-             return `Skipped ${team.id}`; // Возвращаем результат для Promise.allSettled
-          }
-
-          // Загружаем файл
-          console.log(`⬇️  Downloading logo for team ${team.id} from ${team.logo_url}`);
           const downloadResult = await FileSystem.downloadAsync(team.logo_url, fileUri);
-
           if (downloadResult.status === 200) {
-            console.log(`✅ Logo downloaded for team ${team.id}: ${downloadResult.uri}`);
-            // Сохраняем URI локального файла в AsyncStorage
             await saveTeamLogo(team.id, downloadResult.uri);
-            console.log(`💾 Logo URI saved for team ${team.id}`);
             return `Success ${team.id}`;
           } else {
-            const warnMsg = `⚠️ Failed to download logo for team ${team.id}. Status: ${downloadResult.status}`;
-            console.warn(warnMsg);
-            return `Failed ${team.id} (Status ${downloadResult.status})`;
+            console.warn(`⚠️ Failed to download logo for team ${team.id}. Status: ${downloadResult.status}`);
+            return `Failed ${team.id}`;
           }
         } catch (err) {
-          // Обрабатываем ошибки загрузки конкретного файла
-          const errMsg = `❌ Error downloading logo for team ${team.id}: ${err.message || err}`;
-          console.error(errMsg);
-          // Можно сохранить null или пустую строку, если логотип не загрузился
-          // await saveTeamLogo(team.id, null);
+          console.error(`❌ Error downloading logo for team ${team.id}:`, err);
           return `Error ${team.id}`;
         }
       } else {
         console.log(`ℹ️ Team ${team.id} has no logo URL`);
-        // Опционально: сохранить null/пустую строку для команд без логотипа
-        // await saveTeamLogo(team.id, null);
         return `No URL ${team.id}`;
       }
     });
 
-    // Ждем завершения всех загрузок
     const downloadResults = await Promise.allSettled(downloadPromises);
-    
-    // Анализируем результаты (опционально)
-    const successfulDownloads = downloadResults.filter(r => r.status === 'fulfilled' && r.value?.startsWith('Success')).length;
-    const skippedDownloads = downloadResults.filter(r => r.status === 'fulfilled' && r.value?.startsWith('Skipped')).length;
-    const failedDownloads = downloadResults.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && r.value?.startsWith('Failed'))).length;
-    const errorDownloads = downloadResults.filter(r => r.status === 'fulfilled' && r.value?.startsWith('Error')).length;
-
-    console.log(`📊 Team logo download summary: Success: ${successfulDownloads}, Skipped: ${skippedDownloads}, Failed (HTTP): ${failedDownloads}, Errored: ${errorDownloads}`);
-
-    console.log('✅ Teams and logos initialized successfully (or attempted)');
+    const successful = downloadResults.filter(r => r.status === 'fulfilled' && r.value?.startsWith('Success')).length;
+    console.log(`📊 Logo download summary: Success: ${successful}`);
+    console.log('✅ Teams and logos initialized successfully');
   } catch (error) {
-    // Перехватываем и логируем любые ошибки в этой асинхронной функции
     console.error('💥 Failed to initialize teams:', error);
-    // ВАЖНО: Не выбрасываем ошибку дальше с помощью `throw error;`
-    // Это предотвратит "падение" всего процесса инициализации приложения (_layout.tsx -> initializeApp)
-    // из-за ошибки в инициализации команд. Приложение продолжит работать.
-    // Если нужно, чтобы ошибка влияла на initializeApp, раскомментируйте следующую строку:
-    // throw error; 
+  }
+};
+
+// --- ФУНКЦИЯ ОБНОВЛЕНИЯ ТУРНИРОВ ---
+const initializeTournaments = async (config: StartupConfig) => {
+  try {
+    console.log('📥 Saving tournament lists to AsyncStorage...');
+    await AsyncStorage.setItem(TOURNAMENTS_NOW_KEY, JSON.stringify(config.tournamentsNow || []));
+    await AsyncStorage.setItem(TOURNAMENTS_PAST_KEY, JSON.stringify(config.tournamentsPast || []));
+    console.log('✅ Tournament lists saved.');
+
+    // === ЗАГРУЗКА ТАБЛИЦ ВСЕХ ТУРНИРОВ В КЭШ ===
+    const allTournaments = [...(config.tournamentsNow || []), ...(config.tournamentsPast || [])];
+    if (allTournaments.length > 0) {
+      console.log(`🔄 Загружаем таблицы для ${allTournaments.length} турниров...`);
+      await Promise.all(
+        allTournaments.map(async (t) => {
+          console.log(`🔄 Загружаем таблицу для турнира: ${t.tournament_Name} (${t.tournament_ID})`);
+          const table = await fetchTournamentTable(t.tournament_ID);
+          console.log(`✅ Таблица турнира ${t.tournament_Name} загружена и сохранена`);
+        })
+      );
+      console.log('✅ Все таблицы турниров сохранены в кэш');
+    }
+
+    // === ОПРЕДЕЛЕНИЕ И СОХРАНЕНИЕ ТЕКУЩЕГО ТУРНИРА ===
+    const currentTournament = config.tournamentsNow?.[0]; // Берём первый из текущих турниров
+    if (currentTournament) {
+      const tournamentId = currentTournament.tournament_ID;
+      console.log(`🔄 Fetching current tournament data for ID: ${tournamentId}`);
+      await AsyncStorage.setItem(CURRENT_TOURNAMENT_ID_KEY, tournamentId); // Сохраняем ID текущего турнира
+    } else {
+      console.log('ℹ️ No current tournament found in config');
+      await AsyncStorage.removeItem(CURRENT_TOURNAMENT_ID_KEY);
+    }
+  } catch (error) {
+    console.error('💥 Failed to initialize tournaments:', error);
   }
 };
 
 // --- ФУНКЦИИ ПРЕДЗАГРУЗКИ ---
-/**
- * Предзагружает предшествующие игры (до сегодняшней даты) в фоне
- */
 const preloadPastGames = async () => {
   try {
-    console.log('🚀 Preloading past games in background...');
-    
-    // Определяем диапазон дат: последние 30 дней
     const now = new Date();
     const pastDate = new Date(now);
     pastDate.setDate(pastDate.getDate() - 30);
-    const pastDateString = pastDate.toISOString().split('T')[0];
-    const todayString = now.toISOString().split('T')[0];
-
-    // Вызываем getGames с фильтром по дате "до сегодняшней"
-    // teams: '74' - фильтр по команде с ID 74
     await getGames({
-      date_from: pastDateString,
-      date_to: todayString,
+      date_from: pastDate.toISOString().split('T')[0],
+      date_to: now.toISOString().split('T')[0],
       teams: '74',
     });
-
     console.log('✅ Past games preloaded successfully');
   } catch (error) {
-    // ВАЖНО: Ловим ошибку внутри, чтобы она не "сломала" основной поток инициализации
-    console.warn('⚠️ Failed to preload past games (background task):', error);
-    // Не выбрасываем ошибку дальше, чтобы не нарушить инициализацию приложения
+    console.warn('⚠️ Failed to preload past games:', error);
   }
 };
 
-/**
- * Предзагружает последние игры (после сегодняшней даты) в фоне
- */
 const preloadUpcomingGames = async () => {
   try {
-    console.log('🚀 Preloading upcoming games in background...');
-    
-    // Определяем диапазон дат: следующие 30 дней
     const now = new Date();
     const futureDate = new Date(now);
     futureDate.setDate(futureDate.getDate() + 30);
-    const todayString = now.toISOString().split('T')[0];
-    const futureDateString = futureDate.toISOString().split('T')[0];
-
-    // Вызываем getGames с фильтром по дате "после сегодняшней"
-    // teams: '74' - фильтр по команде с ID 74
     await getGames({
-      date_from: todayString,
-      date_to: futureDateString,
+      date_from: now.toISOString().split('T')[0],
+      date_to: futureDate.toISOString().split('T')[0],
       teams: '74',
     });
-
     console.log('✅ Upcoming games preloaded successfully');
   } catch (error) {
-    // ВАЖНО: Ловим ошибку внутри, чтобы она не "сломала" основной поток инициализации
-    console.warn('⚠️ Failed to preload upcoming games (background task):', error);
-    // Не выбрасываем ошибку дальше, чтобы не нарушить инициализацию приложения
+    console.warn('⚠️ Failed to preload upcoming games:', error);
   }
 };
-// --- КОНЕЦ ФУНКЦИЙ ПРЕДЗАГРУЗКИ ---
 
-
+// --- ОСНОВНОЙ КОМПОНЕНТ ---
 export default function RootLayout() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [initializationError, setInitializationError] = useState<string | null>(null);
+  const [startupConfig, setStartupConfig] = useState<StartupConfig | null>(null);
 
   useEffect(() => {
     initializeApp();
   }, []);
 
-
-
   const initializeApp = async () => {
     try {
-      console.log('🚀 Initializing app...');
-      
-      // --- ИСПРАВЛЕНО: Сначала загружаем/обновляем данные игроков, если флаг установлен ---
-      await initializePlayers(); // <-- Инициализация игроков по флагу
-      // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+      console.log('🚀 Fetching startup configuration...');
+      const config = await fetchStartupConfig();
+      setStartupConfig(config);
+      console.log('✅ Startup config loaded:', config);
 
-      // --- ИСПРАВЛЕНО: Затем загружаем основные данные игроков (из кэша или, если кэш пуст, загружает) ---
-      await getPlayers(); // <-- Это основная загрузка данных для приложения
-      // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+      // === СОХРАНЕНИЕ ТУРНИРОВ ===
+      await initializeTournaments(config);
 
-      // --- ИСПРАВЛЕНО: Потом обновляем команды, если флаг установлен ---
-      await initializeTeams(); // <-- Инициализация команд по флагу
-      // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+      // Получаем локальные версии
+      const localTeamsVersion = parseInt(await AsyncStorage.getItem(TEAMS_VERSION_KEY) || '0');
+      const localPlayersVersion = parseInt(await AsyncStorage.getItem(PLAYERS_VERSION_KEY) || '0');
+      const shouldUpdateTeams = config.teams_version > localTeamsVersion;
+      const shouldUpdatePlayers = config.players_version > localPlayersVersion;
 
+      if (shouldUpdateTeams) {
+        console.log(`📥 Teams update required: server=${config.teams_version}, local=${localTeamsVersion}`);
+        await initializeTeams();
+        await AsyncStorage.setItem(TEAMS_VERSION_KEY, String(config.teams_version));
+      } else {
+        console.log(`⏭️ Team initialization skipped: server=${config.teams_version} <= local=${localTeamsVersion}`);
+      }
+
+      if (shouldUpdatePlayers) {
+        console.log(`📥 Players update required: server=${config.players_version}, local=${localPlayersVersion}`);
+        await initializePlayers();
+        await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(config.players_version));
+      } else {
+        console.log(`⏭️ Player initialization skipped: server=${config.players_version} <= local=${localPlayersVersion}`);
+      }
+
+      // Загрузка основных данных игроков
+      await getPlayers();
       console.log('✅ App initialization completed');
       setIsInitializing(false);
 
-      // --- ДОБАВЛЕНО: Предзагрузка игр в фоне ---
-      // Предзагружаем игры в фоне после завершения основной инициализации
-      // Это улучшит UX, так как данные будут уже в кэше, когда пользователь перейдёт на экраны игр
-      console.log('🚀 Starting background preload tasks...');
-      
-      // Предзагружаем предшествующие игры первыми (99% пользователей их просматривают)
-      preloadPastGames().catch(console.warn); // <-- .catch для обработки ошибок в фоне
-      
-      // Затем предзагружаем последние игры
-      preloadUpcomingGames().catch(console.warn); // <-- .catch для обработки ошибок в фоне
-      
-      console.log('🚀 Background preload tasks started');
-      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
-      
+      // Предзагрузка игр в фоне
+      preloadPastGames().catch(console.warn);
+      preloadUpcomingGames().catch(console.warn);
     } catch (error) {
       console.error('💥 App initialization failed:', error);
       setInitializationError('Ошибка инициализации приложения');
@@ -298,9 +241,7 @@ export default function RootLayout() {
   };
 
   if (isInitializing) {
-    // --- ИСПРАВЛЕНО: Отображаем SplashScreen вместо LoadingSpinner ---
     return <SplashScreen />;
-    // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
   }
 
   if (initializationError) {
@@ -319,8 +260,9 @@ export default function RootLayout() {
         <Stack.Screen name="game/[id]" />
         <Stack.Screen name="season/[id]" />
         <Stack.Screen name="tournaments" />
+        <Stack.Screen name="tournaments/[id]" />
         <Stack.Screen name="coaches" />
-        <Stack.Screen name="test-tabs" /> {/* <-- ДОБАВИТЬ */}
+        <Stack.Screen name="test-tabs" />
       </Stack>
     </GestureHandlerRootView>
   );

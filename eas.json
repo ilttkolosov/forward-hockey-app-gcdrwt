@@ -6,6 +6,9 @@
       "autoIncrement": true
     },
     "preview": {
+      "android": {
+        "buildType": "apk"
+      },
       "distribution": "internal",
       "autoIncrement": true
     },

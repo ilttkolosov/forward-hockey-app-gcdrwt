@@ -321,7 +321,7 @@ const convertApiEventToGame = async (apiEvent: ApiEvent): Promise<Game> => {
     videoUrl: (apiEvent as any).sp_video || '',
   };
 
-  console.log(`Converted Game object:`, game);
+  //console.log(`Converted Game object:`, game);
 
   return game;
 };

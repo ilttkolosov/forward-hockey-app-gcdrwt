@@ -1,260 +1,312 @@
+// app/tournaments.tsx
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
+import SegmentedControl from '@react-native-segmented-control/segmented-control';
+import { colors } from '../styles/commonStyles';
+import { fetchTournamentTable, getCachedTournamentTable, TournamentTable } from '../services/tournamentsApi';
+import { useNavigation } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, RefreshControl, TouchableOpacity, TextInput, Modal } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { commonStyles, colors } from '../styles/commonStyles';
-import TournamentCard from '../components/TournamentCard';
-import LoadingSpinner from '../components/LoadingSpinner';
-import ErrorMessage from '../components/ErrorMessage';
-import { Tournament } from '../types';
-import { mockTournaments } from '../data/mockData';
-import { Link } from 'expo-router';
-import Icon from '../components/Icon';
+const TOURNAMENTS_NOW_KEY = 'tournaments_now';
+const TOURNAMENTS_PAST_KEY = 'tournaments_past';
+const CURRENT_TOURNAMENT_ID_KEY = 'current_tournament_id';
 
 export default function TournamentsScreen() {
-  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [activeTab, setActiveTab] = useState<number>(0);
+    const [tables, setTables] = useState<{
+    current: { name: string; id: string; data: TournamentTable[] }[];
+    past: { name: string; id: string; data: TournamentTable[] }[];
+    }>({ current: [], past: [] });
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showSearchModal, setShowSearchModal] = useState(false);
+  const navigation = useNavigation();
 
-  const loadData = async () => {
+  useEffect(() => {
+    console.log('🔄 [Tournaments] useEffect запущен');
+    loadTournamentsFromCache();
+  }, []);
+
+  const loadTournamentsFromCache = async () => {
+    console.log('🔄 [Tournaments] loadTournamentsFromCache запущен');
     try {
-      setError(null);
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
-      setTournaments(mockTournaments);
-    } catch (err) {
-      console.log('Error loading tournaments:', err);
-      setError('Failed to load tournaments. Please try again.');
+      // Загружаем текущие турниры из кэша
+      const cachedTournamentsNow = await AsyncStorage.getItem(TOURNAMENTS_NOW_KEY);
+      console.log('🔄 [Tournaments] Загружаем current tournaments из кэша...');
+
+      if (cachedTournamentsNow) {
+        const currentTournaments = JSON.parse(cachedTournamentsNow);
+        console.log(`✅ [Tournaments] Загружено ${currentTournaments.length} текущих турниров из кэша`);
+
+        // Загружаем таблицы для текущих турниров из кэша
+        const currentData = await Promise.all(
+          currentTournaments.map(async (t: any) => {
+            console.log(`🔄 [Tournaments] Получаем таблицу из кэша для текущего турнира: ${t.tournament_Name} (${t.tournament_ID})`);
+            const data = await getCachedTournamentTable(t.tournament_ID);
+            console.log(`✅ [Tournaments] Таблица для текущего турнира ${t.tournament_Name} загружена из кэша`);
+            return {
+              name: t.tournament_Name,
+              id: t.tournament_ID,
+              data,
+            };
+          })
+        );
+
+        console.log('✅ [Tournaments] Все текущие турниры загружены из кэша');
+        setTables(prev => ({ ...prev, current: currentData }));
+      } else {
+        console.log('❌ [Tournaments] Нет данных о текущих турнирах в кэше');
+      }
+
+      // Загружаем прошедшие турниры из кэша (в фоне)
+      const cachedTournamentsPast = await AsyncStorage.getItem(TOURNAMENTS_PAST_KEY);
+      console.log('🔄 [Tournaments] Загружаем past tournaments из кэша...');
+
+      if (cachedTournamentsPast) {
+        const pastTournaments = JSON.parse(cachedTournamentsPast);
+        console.log(`✅ [Tournaments] Загружено ${pastTournaments.length} прошедших турниров из кэша`);
+
+        // Загружаем таблицы для прошедших турниров из кэша
+        const pastData = await Promise.all(
+          pastTournaments.map(async (t: any) => {
+            console.log(`🔄 [Tournaments] Получаем таблицу из кэша для прошедшего турнира: ${t.tournament_Name} (${t.tournament_ID})`);
+            const data = await getCachedTournamentTable(t.tournament_ID);
+            console.log(`✅ [Tournaments] Таблица для прошедшего турнира ${t.tournament_Name} загружена из кэша`);
+            return {
+              name: t.tournament_Name,
+              id: t.tournament_ID,
+              data,
+            };
+          })
+        );
+
+        console.log('✅ [Tournaments] Все прошедшие турниры загружены из кэша');
+        setTables(prev => ({ ...prev, past: pastData }));
+      } else {
+        console.log('❌ [Tournaments] Нет данных о прошедших турнирах в кэше');
+      }
+    } catch (e) {
+      console.error('❌ [Tournaments] Error loading tournaments from cache:', e);
     } finally {
       setLoading(false);
-      setRefreshing(false);
+      console.log('✅ [Tournaments] setLoading(false) вызван');
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const onRefresh = () => {
+  const onRefresh = async () => {
+    console.log('🔄 [Tournaments] pullToRefresh запущен');
     setRefreshing(true);
-    loadData();
+    try {
+      // Обновляем только текущие турниры (через API и сохранение в кэш)
+      const cachedTournamentsNow = await AsyncStorage.getItem(TOURNAMENTS_NOW_KEY);
+      if (cachedTournamentsNow) {
+        const currentTournaments = JSON.parse(cachedTournamentsNow);
+        const currentData = await Promise.all(
+          currentTournaments.map(async (t: any) => {
+            console.log(`🔄 [Tournaments] Обновляем таблицу для текущего турнира: ${t.tournament_Name} (${t.tournament_ID})`);
+            const data = await fetchTournamentTable(t.tournament_ID); // Обновляем кэш
+            console.log(`✅ [Tournaments] Таблица для текущего турнира ${t.tournament_Name} обновлена`);
+            return {
+              name: t.tournament_Name,
+              id: t.tournament_ID,
+              data,
+            };
+          })
+        );
+        setTables(prev => ({ ...prev, current: currentData }));
+        console.log('✅ [Tournaments] Все текущие турниры обновлены');
+      }
+    } catch (e) {
+      console.error('❌ [Tournaments] Error refreshing tournament ', e);
+    } finally {
+      setRefreshing(false);
+      console.log('✅ [Tournaments] pullToRefresh завершён');
+    }
   };
 
-  const handleSearchPress = () => {
-    console.log('Search icon pressed - opening search modal');
-    setShowSearchModal(true);
-  };
+  const renderTable = (name: string, tournamentId: string, data: TournamentTable[]) => {
+    if (!data || !Array.isArray(data)) {
+      console.log(`⚠️ [Tournaments] Нет данных для турнира ${name}`);
+      return null;
+    }
 
-  const handleCloseSearch = () => {
-    setShowSearchModal(false);
-    setSearchQuery('');
+    console.log(`🖼️ [Tournaments] Рендер таблицы: ${name}, данных: ${data.length} строк`);
+    return (
+      <View key={tournamentId} style={styles.tableContainer}>
+        <Text style={styles.tableTitle}>{name}</Text>
+        <View style={styles.tableHeader}>
+          <Text style={[styles.headerCell, styles.position]}>Поз.</Text>
+          <Text style={[styles.headerCell, styles.team]}>Команда</Text>
+          <Text style={[styles.headerCell, styles.games]}>И</Text>
+          <Text style={[styles.headerCell, styles.points]}>О</Text>
+        </View>
+        {data.map((row, index) => (
+          <View
+            key={row.team_id}
+            style={[
+              styles.tableRow,
+              index % 2 === 0 ? styles.evenRow : styles.oddRow
+            ]}
+          >
+            <Text style={[styles.cell, styles.position]}>{row.position}</Text>
+            <Text style={[styles.cell, styles.team]}>{row.team_name}</Text>
+            <Text style={[styles.cell, styles.games]}>{row.games}</Text>
+            <Text style={[styles.cell, styles.points]}>{row.points_2x}</Text>
+          </View>
+        ))}
+        <TouchableOpacity
+          style={styles.detailButton}
+          onPress={() => navigation.navigate('tournaments/[id]', { id: tournamentId })}
+        >
+          <Text style={styles.detailButtonText}>Подробнее</Text>
+        </TouchableOpacity>
+      </View>
+    );
   };
-
-  const handleClearSearch = () => {
-    setSearchQuery('');
-  };
-
-  // Filter tournaments based on search query
-  const filteredTournaments = searchQuery.trim() 
-    ? tournaments.filter(tournament => 
-        tournament.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        tournament.description?.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : tournaments;
 
   if (loading) {
+    console.log('🔄 [Tournaments] Отображаем Loading...');
     return (
-      <SafeAreaView style={commonStyles.container}>
-        <LoadingSpinner />
-      </SafeAreaView>
+      <View style={styles.container}>
+        <Text>Loading...</Text>
+      </View>
     );
   }
-
-  if (error) {
-    return (
-      <SafeAreaView style={commonStyles.container}>
-        <ErrorMessage message={error} onRetry={loadData} />
-      </SafeAreaView>
-    );
-  }
-
-  const activeTournaments = filteredTournaments.filter(t => t.status === 'active');
-  const upcomingTournaments = filteredTournaments.filter(t => t.status === 'upcoming');
-  const finishedTournaments = filteredTournaments.filter(t => t.status === 'finished');
 
   return (
-    <SafeAreaView style={commonStyles.container}>
-      <ScrollView
-        style={commonStyles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24, paddingHorizontal: 16 }}>
-          <Link href="/" asChild>
-            <TouchableOpacity style={{ marginRight: 16, padding: 4 }}>
-              <Icon name="chevron-back" size={24} color={colors.text} />
-            </TouchableOpacity>
-          </Link>
-          <View style={{ flex: 1 }}>
-            <Text style={commonStyles.title}>Турниры</Text>
-            <Text style={commonStyles.textSecondary}>{tournaments.length} турниров</Text>
-          </View>
-          <TouchableOpacity style={{ padding: 8, marginLeft: 8 }} onPress={handleSearchPress}>
-            <Icon name="search" size={24} color={colors.text} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Active Tournaments */}
-        {activeTournaments.length > 0 && (
-          <View style={[commonStyles.section, { paddingHorizontal: 16 }]}>
-            <Text style={commonStyles.subtitle}>Активные турниры</Text>
-            {activeTournaments.map((tournament) => (
-              <TournamentCard key={tournament.id} tournament={tournament} />
-            ))}
-          </View>
-        )}
-
-        {/* Upcoming Tournaments */}
-        {upcomingTournaments.length > 0 && (
-          <View style={[commonStyles.section, { paddingHorizontal: 16 }]}>
-            <Text style={commonStyles.subtitle}>Предстоящие турниры</Text>
-            {upcomingTournaments.map((tournament) => (
-              <TournamentCard key={tournament.id} tournament={tournament} />
-            ))}
-          </View>
-        )}
-
-        {/* Finished Tournaments */}
-        {finishedTournaments.length > 0 && (
-          <View style={[commonStyles.section, { paddingHorizontal: 16 }]}>
-            <Text style={commonStyles.subtitle}>Завершенные турниры</Text>
-            {finishedTournaments.map((tournament) => (
-              <TournamentCard key={tournament.id} tournament={tournament} />
-            ))}
-          </View>
-        )}
-
-        {filteredTournaments.length === 0 && (
-          <View style={commonStyles.errorContainer}>
-            <Text style={commonStyles.text}>
-              {searchQuery ? 'Турниры не найдены' : 'Нет информации о турнирах.'}
-            </Text>
-            {searchQuery && (
-              <Text style={commonStyles.textSecondary}>
-                Попробуйте изменить поисковый запрос
-              </Text>
-            )}
-          </View>
-        )}
-
-        {/* Bottom spacing */}
-        <View style={{ height: 32 }} />
-      </ScrollView>
-
-      {/* Search Modal */}
-      <Modal
-        visible={showSearchModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={handleCloseSearch}
-      >
-        <View style={{
-          flex: 1,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
-          justifyContent: 'flex-start',
-        }}>
-          <View style={{
-            backgroundColor: colors.background,
-            borderBottomLeftRadius: 16,
-            borderBottomRightRadius: 16,
-            paddingTop: 50, // Account for status bar
-            paddingBottom: 20,
-            paddingHorizontal: 16,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.25,
-            shadowRadius: 8,
-            elevation: 8,
-            maxHeight: '80%',
-          }}>
-            <View style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              marginBottom: 16,
-            }}>
-              <Text style={{
-                fontSize: 18,
-                fontWeight: '600',
-                color: colors.text,
-                flex: 1,
-              }}>Поиск турниров</Text>
-              <TouchableOpacity style={{ padding: 8 }} onPress={handleCloseSearch}>
-                <Icon name="close" size={24} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              backgroundColor: colors.surface,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: colors.border,
-              paddingHorizontal: 12,
-              height: 48,
-              marginBottom: 16,
-            }}>
-              <Icon name="search" size={20} color={colors.textSecondary} style={{ marginRight: 8 }} />
-              <TextInput
-                style={{
-                  flex: 1,
-                  fontSize: 16,
-                  color: colors.text,
-                  paddingVertical: 0,
-                }}
-                placeholder="Поиск турниров..."
-                placeholderTextColor={colors.textSecondary}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoFocus
-              />
-              {searchQuery.length > 0 && (
-                <TouchableOpacity style={{ padding: 4, marginLeft: 8 }} onPress={handleClearSearch}>
-                  <Icon name="close" size={20} color={colors.textSecondary} />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Search Results */}
-            <ScrollView
-              style={{ maxHeight: 400 }}
-              contentContainerStyle={{ paddingBottom: 20 }}
-              showsVerticalScrollIndicator={false}
-            >
-              {searchQuery && filteredTournaments.map((tournament) => (
-                <TournamentCard key={tournament.id} tournament={tournament} />
-              ))}
-              {searchQuery && filteredTournaments.length === 0 && (
-                <View style={commonStyles.errorContainer}>
-                  <Text style={commonStyles.text}>Турниры не найдены</Text>
-                  <Text style={commonStyles.textSecondary}>
-                    Попробуйте изменить поисковый запрос
-                  </Text>
-                </View>
-              )}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-    </SafeAreaView>
+    <ScrollView
+      style={styles.container}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      }
+    >
+      <Text style={styles.title}>Турниры</Text>
+      <SegmentedControl
+        values={['Текущие', 'Прошедшие']}
+        selectedIndex={activeTab}
+        onChange={(event) => {
+          setActiveTab(event.nativeEvent.selectedSegmentIndex);
+        }}
+        style={styles.segmentedControl}
+      />
+      {activeTab === 0 && (
+        <>
+          {tables.current.length > 0 ? (
+            tables.current.map(table => renderTable(table.name, table.id, table.data))
+          ) : (
+            <Text style={styles.emptyText}>Нет текущих турниров</Text>
+          )}
+        </>
+      )}
+      {activeTab === 1 && (
+        <>
+          {tables.past.length > 0 ? (
+            tables.past.map(table => renderTable(table.name, table.id, table.data))
+          ) : (
+            <Text style={styles.emptyText}>Нет прошедших турниров</Text>
+          )}
+        </>
+      )}
+    </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+    padding: 16,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: colors.text,
+    marginBottom: 16,
+  },
+  segmentedControl: {
+    marginBottom: 20,
+  },
+  tableContainer: {
+    marginBottom: 24,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  tableTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.text,
+    marginBottom: 12,
+  },
+  tableHeader: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#ddd',
+    paddingBottom: 8,
+    marginBottom: 8,
+  },
+  headerCell: {
+    textAlign: 'center',
+    fontWeight: 'bold',
+    color: colors.text,
+  },
+  position: {
+    width: 50,
+  },
+  team: {
+    flex: 1,
+    textAlign: 'left',
+    paddingLeft: 8,
+  },
+  games: {
+    width: 40,
+  },
+  wins: {
+    width: 40,
+  },
+  losses: {
+    width: 40,
+  },
+  points: {
+    width: 40,
+    fontWeight: 'bold',
+  },
+  tableRow: {
+    flexDirection: 'row',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  evenRow: {
+    backgroundColor: '#f9f9f9',
+  },
+  oddRow: {
+    backgroundColor: '#fff',
+  },
+  cell: {
+    textAlign: 'center',
+    color: colors.text,
+  },
+  detailButton: {
+    marginTop: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  detailButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: colors.text,
+    fontSize: 16,
+    marginTop: 20,
+  },
+});

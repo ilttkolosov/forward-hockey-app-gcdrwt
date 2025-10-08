@@ -43,7 +43,7 @@ const PLAYER_PHOTOS_DOWNLOADED_KEY = 'playerPhotosDownloaded'; // <-- НОВЫЙ
 const PLAYERS_DIRECTORY = `${documentDirectory || ''}players/`;
 
 export class PlayerDownloadService {
-  private baseUrl = 'https://www.hc-forward.com/wp-json/app/v1'; // Убраны пробелы
+  private baseUrl = 'https://www.hc-forward.com/wp-json/app/v1';
 
   async isDataLoaded(): Promise<boolean> {
     try {

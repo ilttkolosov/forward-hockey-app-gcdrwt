@@ -269,7 +269,7 @@ useEffect(() => {
             </TouchableOpacity>
           </Link>
 
-          <Link href="/test-tabs" asChild>
+          <Link href="/tournaments" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
               <Icon 
                 name="trophy" 
