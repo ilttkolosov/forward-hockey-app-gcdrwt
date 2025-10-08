@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type TournamentTable = {
   position: string;
-  team_id: number;
+  team_id: string;
   team_name: string;
   games: string;
   wins: string;
