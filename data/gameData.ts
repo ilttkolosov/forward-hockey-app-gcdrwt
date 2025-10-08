@@ -201,7 +201,7 @@ export const loadTeams = async (): Promise<void> => {
 const getTeamFromCache = (teamId: string): Team | undefined => {
   console.log(`Looking up team in cache by ID: ${teamId}, Cache size: ${Object.keys(cachedTeams).length}`);
   const team = cachedTeams[teamId];
-  console.log(`Found team:`, team);
+  console.log(`Found team by [getTeamFromCache]. Team ID is:`, team.id);
   return team;
 };
 
@@ -226,8 +226,8 @@ const convertApiEventToGame = async (apiEvent: ApiEvent): Promise<Game> => {
   const homeTeamInfo = getTeamFromCache(teamIds[0]);
   const awayTeamInfo = getTeamFromCache(teamIds[1]);
 
-  console.log(`Team ID ${teamIds[0]} lookup result:`, homeTeamInfo);
-  console.log(`Team ID ${teamIds[1]} lookup result:`, awayTeamInfo);
+  //console.log(`Team ID ${teamIds[0]} lookup result:`, homeTeamInfo);
+  //console.log(`Team ID ${teamIds[1]} lookup result:`, awayTeamInfo);
 
   // Получаем информацию о лиге, сезоне, месте проведения из кэша
   const leagueInfo = cachedLeagues[leagueId];
@@ -787,22 +787,28 @@ export async function getFutureGames(): Promise<Game[]> {
 export async function getUpcomingGamesCount(): Promise<number> {
   try {
     console.log('Getting upcoming games count...');
-    // Определяем диапазон дат: сегодня + 37 дней
+    // Попробовать использовать мастер-кэш
+    const allUpcomingGames = await getUpcomingGamesMasterData(); // Это использует кэш
+    if (allUpcomingGames) {
+      const count = allUpcomingGames.length;
+      console.log('Upcoming games count (from master cache):', count);
+      return count;
+    }
+
+    // Если мастер-кэш недоступен по какой-то причине, сделать отдельный вызов
     const now = new Date();
     const futureDate = new Date(now);
     futureDate.setDate(futureDate.getDate() + 37);
     const todayString = now.toISOString().split('T')[0];
     const futureDateString = futureDate.toISOString().split('T')[0];
 
-    // Получаем только count, не загружая все данные
-    // ВАЖНО: Новый эндпоинт /get-events возвращает count в ответе
     const response = await apiService.fetchEvents({
       date_from: todayString,
       date_to: futureDateString,
-      teams: '74', // <-- Фильтр по команде с ID 74
+      teams: '74',
     });
     const count = response.count || 0;
-    console.log('Upcoming games count:', count);
+    console.log('Upcoming games count (from API):', count);
     return count;
   } catch (error) {
     console.error('Error getting upcoming games count:', error);

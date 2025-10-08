@@ -8,7 +8,11 @@ export default function SplashScreen() {
   return (
     <View style={styles.container}>
       <ActivityIndicator size="large" color={colors.primary} />
-      <Text style={styles.text}>Загрузка данных...</Text>
+      <Text style={styles.text}>Не торопитесь.</Text>
+      <Text style={styles.text}>Мы загружаем актуальные данные</Text>
+      <Text style={styles.text}>с сайта www.hc-forward.com</Text>
+      <Text style={styles.text}>www.hc-forward.com</Text>
+      <Text style={styles.text}>необходимо немного подождать ...</Text>
     </View>
   );
 }

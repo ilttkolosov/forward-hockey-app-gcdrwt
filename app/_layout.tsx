@@ -10,7 +10,7 @@ import { apiService } from '../services/apiService';
 import { loadTeamList, saveTeamList, saveTeamLogo } from '../services/teamStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
-import { getGames } from '../data/gameData'; 
+import { getGames,  getUpcomingGamesMasterData} from '../data/gameData'; 
 import SplashScreen from '../components/SplashScreen'; 
 import { fetchStartupConfig, StartupConfig } from '../services/startupApi';
 import { fetchTournamentTable } from '../services/tournamentsApi';
@@ -228,6 +228,15 @@ export default function RootLayout() {
       // Загрузка основных данных игроков
       await getPlayers();
       console.log('✅ App initialization completed');
+
+      // --- ДОБАВЛЯЕМ ЭТО ---
+      console.log('🔄 Preloading master upcoming games cache...');
+      // Это вызовет getUpcomingGamesMasterData, который сохранит результат в upcomingGamesMasterCache
+      await getUpcomingGamesMasterData();
+      console.log('✅ Master upcoming games cache preloaded.');
+      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
+
       setIsInitializing(false);
 
       // Предзагрузка игр в фоне
