@@ -120,7 +120,7 @@ async fetchEvents(params: {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const result: ApiGameDetailsResponse = await response.json();
-      console.log('API Service: Event details response:', result);
+      //console.log('API Service: Event details response:', result);
       return result;
     } catch (error) {
       console.error('API Service: Error fetching event by ID:', error);

@@ -10,7 +10,7 @@ import { apiService } from '../services/apiService';
 import { loadTeamList, saveTeamList, saveTeamLogo } from '../services/teamStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
-import { getGames,  getUpcomingGamesMasterData} from '../data/gameData'; 
+import { getGames,  getUpcomingGamesMasterData, getFutureGames, getGameById, getGameDetailsCacheKeys} from '../data/gameData'; 
 import SplashScreen from '../components/SplashScreen'; 
 import { fetchStartupConfig, StartupConfig } from '../services/startupApi';
 import { fetchTournamentTable } from '../services/tournamentsApi';
@@ -229,19 +229,35 @@ export default function RootLayout() {
       await getPlayers();
       console.log('✅ App initialization completed');
 
-      // --- ДОБАВЛЯЕМ ЭТО ---
+      // --- ДОБАВЛЯЕМ КЭШИРОВАНИЕ ВСЕХ ПОЛУЧЕННЫХ ИГР ---
       console.log('🔄 Preloading master upcoming games cache...');
       // Это вызовет getUpcomingGamesMasterData, который сохранит результат в upcomingGamesMasterCache
       await getUpcomingGamesMasterData();
       console.log('✅ Master upcoming games cache preloaded.');
       // --- КОНЕЦ ДОБАВЛЕНИЯ ---
 
+      // --- ПРЕДЗАГРУЗКА ДЕТАЛЕЙ БЛИЖАЙШИХ ИГР (в фоне) ---
+      console.log('🔄 Preloading details for future games...');
+      const futureGames = await getFutureGames();
+      const futureGameIds = futureGames.map(g => g.id);
+      console.log(`📥 Preloading details for ${futureGameIds.length} future games:`, futureGameIds);
+
+      // 🔥 ЗАПУСКАЕМ В ФОНЕ, НЕ ЖДЁМ!
+      futureGameIds.forEach(id => {
+        getGameById(id, true).catch(err => {
+          console.warn(`⚠️ Preload of future game ${id} details failed:`, err);
+        });
+      });
+
+      console.log('✅ Future games details preloading initiated (background).');
+
+
 
       setIsInitializing(false);
 
       // Предзагрузка игр в фоне
-      preloadPastGames().catch(console.warn);
-      preloadUpcomingGames().catch(console.warn);
+      //preloadPastGames().catch(console.warn);
+      //preloadUpcomingGames().catch(console.warn);
     } catch (error) {
       console.error('💥 App initialization failed:', error);
       setInitializationError('Ошибка инициализации приложения');

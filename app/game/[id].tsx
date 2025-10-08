@@ -1,5 +1,4 @@
 // app/game/[id].tsx
-
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -8,44 +7,25 @@ import {
   StyleSheet,
   TouchableOpacity,
   RefreshControl,
-  Dimensions,
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
-import { Game } from '../../types'; // Используем обновлённый тип Game
-import { getGameById } from '../../data/gameData'; // Импортируем новую функцию
+import { Game } from '../../types';
+import { getGameById, getStaleGameById, isGameDetailsCacheFresh, loadVenues } from '../../data/gameData';
 import { colors, commonStyles } from '../../styles/commonStyles';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
 import Icon from '../../components/Icon';
-import { getCachedTeamLogo } from '../../utils/teamLogos'; // Возможно, не понадобится, так как logo_uri уже в Game
-import { formatDateTimeWithoutSeconds } from '../../utils/dateUtils'; // Возможно, не понадобится, так как date/time уже в Game
 
-const { width } = Dimensions.get('window');
-
-// VK Video Utilities - Inline implementation to avoid import issues
 const parseVKVideoUrl = (url: string): { ownerId: string; videoId: string } | null => {
   try {
-    console.log('Parsing VK video URL:', url);
-    
-    // Check if it's already an embed URL
-    if (url.includes('video_ext.php')) {
-      console.log('URL is already an embed URL');
-      return null; // Return null to use the URL as-is
-    }
-    
-    // Parse URLs like https://vkvideo.ru/video-211881014_456240669  
+    if (url.includes('video_ext.php')) return null;
     const videoMatch = url.match(/video(-?\d+)_(\d+)/);
     if (videoMatch) {
-      const ownerId = videoMatch[1]; // Already includes the minus sign if present
-      const videoId = videoMatch[2];
-      console.log('Extracted VK video IDs:', { ownerId, videoId });
-      return { ownerId, videoId };
+      return { ownerId: videoMatch[1], videoId: videoMatch[2] };
     }
-    
-    console.log('Could not parse VK video URL');
     return null;
   } catch (error) {
     console.error('Error parsing VK video URL:', error);
@@ -54,50 +34,27 @@ const parseVKVideoUrl = (url: string): { ownerId: string; videoId: string } | nu
 };
 
 const constructVKEmbedUrl = (ownerId: string, videoId: string): string => {
-  // Use the parameters specified in the requirements:
-  // - hd=4 for 1920×1080 resolution
-  // - autoplay=1 to enable autostart
-  // - js_api=1 to enable JavaScript API for player control
-  const embedUrl = `https://vk.com/video_ext.php?oid=${ownerId}&id=${videoId}&hd=4&autoplay=1&js_api=1`;
-  console.log('Constructed VK embed URL:', embedUrl);
-  return embedUrl;
+  return `https://vk.com/video_ext.php?oid=${ownerId}&id=${videoId}&hd=4&autoplay=1&js_api=1`;
 };
 
 const getVKEmbedUrl = (videoUrl: string): string => {
   try {
-    // If it's already an embed URL, enhance it with our preferred parameters
     if (videoUrl.includes('video_ext.php')) {
       const url = new URL(videoUrl);
-      
-      // Add our preferred parameters if they're not already there
       if (!url.searchParams.has('hd')) url.searchParams.set('hd', '4');
       if (!url.searchParams.has('autoplay')) url.searchParams.set('autoplay', '1');
       if (!url.searchParams.has('js_api')) url.searchParams.set('js_api', '1');
-      
-      const enhancedUrl = url.toString();
-      console.log('Enhanced existing embed URL:', enhancedUrl);
-      return enhancedUrl;
+      return url.toString();
     }
-    
-    // Parse the VK video URL and construct embed URL
     const parsed = parseVKVideoUrl(videoUrl);
-    if (parsed) {
-      return constructVKEmbedUrl(parsed.ownerId, parsed.videoId);
-    }
-    
-    // If we can't parse it, return the original URL as fallback
-    console.log('Using original URL as fallback:', videoUrl);
+    if (parsed) return constructVKEmbedUrl(parsed.ownerId, parsed.videoId);
     return videoUrl;
   } catch (error) {
     console.error('Error processing VK video URL:', error);
-    return videoUrl; // Return original URL as fallback
+    return videoUrl;
   }
 };
 
-// --- Вспомогательные функции для работы с новым типом Game ---
-// Эти функции адаптируют данные из нового Game к структуре EnrichedGameDetails
-
-// Извлечение результата (outcome) из массива
 const extractOutcome = (outcomeArray: any): string => {
   if (Array.isArray(outcomeArray) && outcomeArray.length > 0) {
     const outcome = outcomeArray[0].toLowerCase();
@@ -108,7 +65,6 @@ const extractOutcome = (outcomeArray: any): string => {
   return '';
 };
 
-// Извлечение имени из объекта сущности (лиги, сезона, места проведения)
 const extractNameFromEntity = (entity: any): string | undefined => {
   if (entity && typeof entity === 'object' && 'name' in entity) {
     return entity.name;
@@ -116,46 +72,34 @@ const extractNameFromEntity = (entity: any): string | undefined => {
   return undefined;
 };
 
-// Форматирование даты и времени (если нужно, но в Game уже отформатировано)
-// const formatDateTimeWithoutSeconds = (dateString: string): { formattedDate: string; formattedTime: string } => {
-//   // Реализация может быть в utils/dateUtils, но если Game.date и Game.time уже отформатированы, это не нужно.
-//   // const date = new Date(dateString);
-//   // const formattedDate = date.toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' });
-//   // const formattedTime = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-//   // return { formattedDate, formattedTime };
-//   // return { formattedDate: '', formattedTime: '' };
-// };
-
 export default function GameDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const [gameDetails, setGameDetails] = useState<Game | null>(null); // Используем Game, а не EnrichedGameDetails
+  const [gameDetails, setGameDetails] = useState<Game | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  // const [teamsLoading, setTeamsLoading] = useState(false); // Больше не нужно, так как данные уже обогащены в gameData.ts
 
-  const loadGameData = useCallback(async () => {
+  const loadGameData = useCallback(async (forceRefresh = false) => {
     try {
-      console.log('Loading game data for ID:', id);
+      console.log('Loading game data for ID:', id, { forceRefresh });
       setLoading(true);
       setError(null);
 
-      // Используем новую функцию getGameById
-      const gameData = await getGameById(id);
-
-      if (!gameData) {
-        setError('Игра не найдена');
-        return;
-      }
-
+      // Передаём forceRefresh в getGameById как useCache = !forceRefresh
+      const gameData = await getGameById(id, !forceRefresh);
+        if (!gameData) {
+          setError('Игра не найдена');
+          return;
+        }
       setGameDetails(gameData);
-    } catch (err) {
-      console.error('Error loading game data:', err);
-      setError('Не удалось загрузить данные игры');
-    } finally {
-      setLoading(false);
-    }
+      } catch (err) {
+        console.error('Error loading game ', err);
+        setError('Не удалось загрузить данные игры');
+      } finally {
+        setLoading(false);
+        if (forceRefresh) setRefreshing(false);
+      }
   }, [id]);
 
   useEffect(() => {
@@ -166,38 +110,28 @@ export default function GameDetailsScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadGameData();
+    await loadGameData(true);
     setRefreshing(false);
   };
 
-  // --- Адаптация функций для нового типа Game ---
   const getOutcomeText = (outcome: string): string => {
     switch (outcome) {
-      case 'win':
-        return 'Победа';
-      case 'loss':
-        return 'Поражение';
-      case 'nich':
-        return 'Ничья';
-      default:
-        return outcome || '';
+      case 'win': return 'Победа';
+      case 'loss': return 'Поражение';
+      case 'nich': return 'Ничья';
+      default: return outcome || '';
     }
   };
 
   const getOutcomeColor = (outcome: string): string => {
     switch (outcome) {
-      case 'win':
-        return colors.success;
-      case 'loss':
-        return colors.error;
-      case 'nich':
-        return colors.warning;
-      default:
-        return colors.textSecondary;
+      case 'win': return colors.success;
+      case 'loss': return colors.error;
+      case 'nich': return colors.warning;
+      default: return colors.textSecondary;
     }
   };
 
-  // --- Рендеринг компонента ---
   if (loading) {
     return (
       <SafeAreaView style={commonStyles.container}>
@@ -234,45 +168,33 @@ export default function GameDetailsScreen() {
     );
   }
 
-  // --- Используем данные из gameDetails (нового типа Game) ---
-  // Извлекаем нужные поля
   const {
-    id: gameId, // Не используется в отображении
-    date: formattedDate, // Уже отформатированная дата из gameData.ts
-    time: formattedTime, // Уже отформатированное время из gameData.ts
+    date: formattedDate,
+    time: formattedTime,
     homeTeam,
     awayTeam,
-    homeTeamLogo, // URI из локального хранилища
-    awayTeamLogo, // URI из локального хранилища
+    homeTeamLogo,
+    awayTeamLogo,
     homeScore,
     awayScore,
     homeOutcome,
     awayOutcome,
-    team1_first, // Результаты по периодам
+    team1_first,
     team1_second,
     team1_third,
     team2_first,
     team2_second,
     team2_third,
-    league, // Объект лиги
-    season, // Объект сезона
-    venue, // Объект места проведения
-    sp_video, // URL видео
-    event_date, // Не используется напрямую
-    status, // Не используется напрямую
-    // ... другие поля, если нужны
+    league,
+    venue,
+    sp_video,
   } = gameDetails;
 
-  // Извлекаем имена команд из объектов
   const homeTeamName = homeTeam?.name || 'Команда 1';
   const awayTeamName = awayTeam?.name || 'Команда 2';
-
-  // Извлекаем имена лиги, сезона, места проведения
   const leagueName = extractNameFromEntity(league);
-  const seasonName = extractNameFromEntity(season);
   const venueName = extractNameFromEntity(venue);
 
-  // Извлекаем результаты по периодам
   const homeFirstPeriod = team1_first;
   const homeSecondPeriod = team1_second;
   const homeThirdPeriod = team1_third;
@@ -280,11 +202,12 @@ export default function GameDetailsScreen() {
   const awaySecondPeriod = team2_second;
   const awayThirdPeriod = team2_third;
 
-  // Извлекаем итоговые результаты
   const homeGoals = homeScore;
   const awayGoals = awayScore;
   const homeOutcomeText = extractOutcome(homeOutcome);
   const awayOutcomeText = extractOutcome(awayOutcome);
+
+
 
   return (
     <SafeAreaView style={commonStyles.container}>
@@ -298,12 +221,10 @@ export default function GameDetailsScreen() {
           <Text style={styles.headerLocation}>Санкт-Петербург</Text>
         </View>
       </View>
-
       <ScrollView
         style={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* VK Video Player - Using official VK embed API */}
         {sp_video && (
           <View style={styles.videoContainer}>
             <Text style={styles.sectionTitle}>Видео матча</Text>
@@ -323,51 +244,26 @@ export default function GameDetailsScreen() {
                 scrollEnabled={false}
                 showsHorizontalScrollIndicator={false}
                 showsVerticalScrollIndicator={false}
-                onLoadStart={() => {
-                  console.log('VK video embed started loading for URL:', getVKEmbedUrl(sp_video));
-                }}
-                onLoadEnd={() => {
-                  console.log('VK video embed loaded successfully');
-                }}
-                onError={(syntheticEvent) => {
-                  const { nativeEvent } = syntheticEvent;
-                  console.error('VK video embed error:', nativeEvent);
-                }}
-                onHttpError={(syntheticEvent) => {
-                  const { nativeEvent } = syntheticEvent;
-                  console.error('VK video embed HTTP error:', nativeEvent);
-                }}
                 userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"
               />
             </View>
           </View>
         )}
 
-        {/* Main Game Info */}
         <View style={styles.gameInfo}>
           <View style={styles.gameHeader}>
             <Text style={styles.gameDate}>{formattedDate} • {formattedTime}</Text>
           </View>
-
-          {/* Teams with Logos Above Names */}
           <View style={styles.teamsContainer}>
-            {/* Home Team Column */}
             <View style={styles.teamColumn}>
               {homeTeamLogo ? (
-                <Image 
-                  source={{ uri: homeTeamLogo }} 
-                  style={styles.teamLogo}
-                  onError={() => console.log('Failed to load home team logo')}
-                />
+                <Image source={{ uri: homeTeamLogo }} style={styles.teamLogo} />
               ) : (
                 <View style={styles.teamLogoPlaceholder}>
                   <Icon name="shield" size={32} color={colors.textSecondary} />
                 </View>
               )}
-              <Text style={styles.teamName} numberOfLines={2}>
-                {homeTeamName}
-              </Text>
-              {/* Outcome Badge centered under team name */}
+              <Text style={styles.teamName} numberOfLines={2}>{homeTeamName}</Text>
               {homeOutcomeText && (
                 <View style={styles.outcomeBadgeContainer}>
                   <View style={[styles.outcomeBadge, { backgroundColor: getOutcomeColor(homeOutcomeText) }]}>
@@ -376,31 +272,18 @@ export default function GameDetailsScreen() {
                 </View>
               )}
             </View>
-
-            {/* Score - Aligned with bottom of team names */}
             <View style={styles.scoreContainer}>
-              <Text style={styles.score}>
-                {homeGoals} : {awayGoals}
-              </Text>
+              <Text style={styles.score}>{homeGoals} : {awayGoals}</Text>
             </View>
-
-            {/* Away Team Column */}
             <View style={styles.teamColumn}>
               {awayTeamLogo ? (
-                <Image 
-                  source={{ uri: awayTeamLogo }} 
-                  style={styles.teamLogo}
-                  onError={() => console.log('Failed to load away team logo')}
-                />
+                <Image source={{ uri: awayTeamLogo }} style={styles.teamLogo} />
               ) : (
                 <View style={styles.teamLogoPlaceholder}>
                   <Icon name="shield" size={32} color={colors.textSecondary} />
                 </View>
               )}
-              <Text style={styles.teamName} numberOfLines={2}>
-                {awayTeamName}
-              </Text>
-              {/* Outcome Badge centered under team name */}
+              <Text style={styles.teamName} numberOfLines={2}>{awayTeamName}</Text>
               {awayOutcomeText && (
                 <View style={styles.outcomeBadgeContainer}>
                   <View style={[styles.outcomeBadge, { backgroundColor: getOutcomeColor(awayOutcomeText) }]}>
@@ -412,7 +295,6 @@ export default function GameDetailsScreen() {
           </View>
         </View>
 
-        {/* Period Scores */}
         {(homeFirstPeriod !== undefined || awayFirstPeriod !== undefined) && (
           <View style={styles.periodScores}>
             <Text style={styles.sectionTitle}>Счет по периодам</Text>
@@ -442,12 +324,11 @@ export default function GameDetailsScreen() {
           </View>
         )}
 
-        {/* Tournament, Arena Info (Season removed as requested) */}
         <View style={styles.gameDetails}>
           {leagueName && (
             <View style={styles.detailItem}>
               <Icon name="trophy" size={16} color={colors.textSecondary} />
-              <Text style={styles.detailText}>Турнир: {leagueName}</Text>
+              <Text style={styles.detailText}>{leagueName}</Text>
             </View>
           )}
           {venueName && (
@@ -457,14 +338,6 @@ export default function GameDetailsScreen() {
             </View>
           )}
         </View>
-
-        {/* teamsLoading больше не используется, так как данные уже загружены в gameData.ts */}
-        {/* {teamsLoading && (
-          <View style={styles.loadingContainer}>
-            <LoadingSpinner />
-            <Text style={styles.loadingText}>Загрузка данных команд...</Text>
-          </View>
-        )} */}
       </ScrollView>
     </SafeAreaView>
   );
@@ -521,16 +394,15 @@ const styles = StyleSheet.create({
   },
   videoFrame: {
     width: '100%',
-    aspectRatio: 16 / 9, // Fixed aspect ratio for video
-    backgroundColor: '#000', // Black background for video
+    aspectRatio: 16 / 9,
+    backgroundColor: '#000',
     borderRadius: 12,
     overflow: 'hidden',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-    elevation: 4, // Android shadow
+    elevation: 4,
   },
   webview: {
     flex: 1,
-    backgroundColor: '#000', // Black background for video
+    backgroundColor: '#000',
     borderRadius: 12,
   },
   gameInfo: {
@@ -584,12 +456,11 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginBottom: 12,
   },
-  // Score Container - Positioned to align with bottom of team names
   scoreContainer: {
     alignItems: 'center',
     justifyContent: 'flex-start',
     paddingHorizontal: 16,
-    paddingTop: 76, // Logo (64px) + margin (12px) = 76px to align with team names
+    paddingTop: 76,
   },
   score: {
     fontSize: 32,
@@ -623,7 +494,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: 12,
     overflow: 'hidden',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
   },
   periodHeader: {
     flexDirection: 'row',
@@ -639,7 +509,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   periodHeaderText: {
-    flex: 4, // ← Команда — в 4 раза шире
+    flex: 4,
     color: colors.background,
     fontWeight: '600',
     textAlign: 'left',
@@ -654,7 +524,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   periodTeam: {
-    flex: 4, // ← Команда — в 4 раза шире
+    flex: 4,
     color: colors.text,
     fontWeight: '500',
     fontSize: 14,
@@ -681,7 +551,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginHorizontal: 16,
     marginBottom: 16,
-    boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
   },
   detailItem: {
     flexDirection: 'row',
@@ -693,14 +562,5 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginLeft: 12,
     fontWeight: '500',
-  },
-  loadingContainer: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  loadingText: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginTop: 12,
   },
 });

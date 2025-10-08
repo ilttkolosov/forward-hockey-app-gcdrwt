@@ -134,46 +134,43 @@ export default function HomeScreen() {
 
 
   const loadData = useCallback(async (force = false) => {
-    // Если данные уже есть и перезагрузка не принудительная — выходим
-    if (!force && currentGame !== null && upcomingGames.length > 0) {
-      setLoading(false);
-      setRefreshing(false);
-      return;
-    }
-
     try {
       setError(null);
       setLoading(true);
-      console.log('Loading home screen data...');
+
+      console.log('Loading home screen data...', { force });
 
       const [current, upcoming, upcomingCount, players] = await Promise.all([
-        getCurrentGame(),
-        getFutureGames(),
-        getUpcomingGamesCount(),
+        getCurrentGame(force),
+        getFutureGames(force),
+        getUpcomingGamesCount(), // она использует мастер-кэш → будет свежей
         getPlayers(),
       ]);
-
-
-      // --- ФОНОВАЯ ПРЕДЗАГРУЗКА ДЕТАЛЕЙ ТЕКУЩЕЙ ИГРЫ ---
-      if (current) {
-        console.log('Preloading details for current game:', current.id);
-        getGameById(current.id).catch(err => {
-          console.warn('Background preload of current game details failed:', err);
-        });
-      }
-      // --- КОНЕЦ ПРЕДЗАГРУЗКИ ---
-
 
       setCurrentGame(current ?? null);
       setUpcomingGames(upcoming);
       setUpcomingCount(upcomingCount);
       setPlayersCount(players.length);
-      console.log('Home screen data loaded:', {
-        currentGame: current?.id,
-        playersCount: players.length,
-        upcomingCount: upcomingCount,
-        upcomingGames: upcoming.length,
-      });
+
+      // === ФОНОВОЕ ОБНОВЛЕНИЕ ДЕТАЛЕЙ ВСЕХ ИГР ПРИ force ===
+      if (force) {
+        const allGameIds = [
+          ...(current ? [current.id] : []),
+          ...upcoming.map(g => g.id),
+        ];
+        console.log('Force-refresh: Preloading details for games:', allGameIds);
+        allGameIds.forEach(id => {
+          // useCache = false → игнорировать кэш, запросить с API
+          getGameById(id, false).catch(err => {
+            console.warn(`Background update of game ${id} details failed:`, err);
+          });
+        });
+      } else {
+        // Только для текущей игры — как раньше
+        if (current) {
+          getGameById(current.id).catch(console.warn);
+        }
+      }
     } catch (err) {
       console.error('Error loading home screen data:', err);
       setError('Не удалось загрузить данные. Попробуйте еще раз.');
@@ -181,7 +178,7 @@ export default function HomeScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [currentGame, upcomingGames.length]);
+  }, []);
   // --- КОНЕЦ ОБНОВЛЕНИЯ ---
 
 useEffect(() => {

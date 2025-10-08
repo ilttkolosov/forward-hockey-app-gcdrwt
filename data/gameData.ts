@@ -58,6 +58,7 @@ const safeInt = (value: any): number => {
   return isNaN(num) ? 0 : num;
 };
 
+
 // --- Функции загрузки справочных данных ---
 
 /**
@@ -199,7 +200,7 @@ export const loadTeams = async (): Promise<void> => {
  * Получает команду из кэша
  */
 const getTeamFromCache = (teamId: string): Team | undefined => {
-  console.log(`Looking up team in cache by ID: ${teamId}, Cache size: ${Object.keys(cachedTeams).length}`);
+  //console.log(`Looking up team in cache by ID: ${teamId}, Cache size: ${Object.keys(cachedTeams).length}`);
   const team = cachedTeams[teamId];
   console.log(`Found team by [getTeamFromCache]. Team ID is:`, team.id);
   return team;
@@ -559,7 +560,7 @@ export async function getGames(params: {
  */
 export const getGameById = async (id: string, useCache = true): Promise<Game | null> => {
   const now = Date.now();
-
+  console.log(`🔍 getGameById called for ID ${id}, useCache=${useCache}`);
   // 1. Проверяем кэш в памяти
   if (useCache && gameDetailsCache[id]) {
     const cached = gameDetailsCache[id];
@@ -618,67 +619,60 @@ function isCacheValid<T>(cache: CachedData<T> | null): boolean {
 * --- ОБНОВЛЕНО: Использует getGames с фильтром по дате ---
 * Диапазон: с сегодня на 37 дней вперёд.
 */
-export async function getUpcomingGamesMasterData(): Promise<Game[]> {
+export async function getUpcomingGamesMasterData(forceRefresh = false): Promise<Game[]> {
   const now = Date.now();
-  // 1. Проверяем кэш
-  if (isCacheValid(upcomingGamesMasterCache)) {
+
+  // Проверяем кэш ТОЛЬКО если не принудительное обновление
+  if (!forceRefresh && isCacheValid(upcomingGamesMasterCache)) {
     console.log('✅ Returning master upcoming games data from cache');
     return upcomingGamesMasterCache!.data;
   }
 
-  // 2. Проверяем, идет ли уже загрузка
-  if (isMasterDataLoading && masterDataLoadPromise) {
-    console.log('⏳ Master data loading is already in progress, waiting for it to finish...');
-    // Дожидаемся завершения текущей загрузки
+  // Если уже идёт загрузка — дожидаемся её (но если forceRefresh — всё равно делаем новую)
+  if (!forceRefresh && isMasterDataLoading && masterDataLoadPromise) {
+    console.log('⏳ Master data loading is already in progress, waiting...');
     return await masterDataLoadPromise;
   }
 
-  // 3. Начинаем новую загрузку
   isMasterDataLoading = true;
-  // Создаем Promise для этой загрузки
+
   masterDataLoadPromise = (async () => {
     try {
-      console.log('🔄 Loading master upcoming games data from API...');
-      // --- ИСПОЛЬЗУЕМ getGames с фильтром по дате ---
-      // Определяем диапазон дат: сегодня + 37 дней
+      console.log(forceRefresh ? '🔄 Force-refreshing master upcoming games from API...' : '🔄 Loading master upcoming games from API...');
+
       const nowDate = new Date();
       const futureDate = new Date(nowDate);
       futureDate.setDate(futureDate.getDate() + 37);
       const todayString = nowDate.toISOString().split('T')[0];
       const futureDateString = futureDate.toISOString().split('T')[0];
 
-      // Передаем параметры фильтрации, включая teams=74
+      // Передаём useCache: false при forceRefresh
       const games = await getGames({
         date_from: todayString,
         date_to: futureDateString,
-        teams: '74', // <-- Фильтр по команде с ID 74
+        teams: '74',
+        useCache: !forceRefresh, // если force — не используем кэш для getGames
       });
-      // --- КОНЕЦ ИСПОЛЬЗОВАНИЯ getGames ---
 
-      // Сортируем игры по приоритету: live -> сегодня -> скоро -> по дате
       const sortedGames = sortUpcomingGames(games);
       console.log(`Loaded ${sortedGames.length} master upcoming games`);
 
+      // Обновляем кэш только если не force? — НЕТ, обновляем ВСЕГДА при успешной загрузке
       upcomingGamesMasterCache = {
         data: sortedGames,
         timestamp: now,
       };
 
-      console.log('✅ Master upcoming games loaded and cached');
       return sortedGames;
     } catch (error) {
       console.error('❌ Failed to load master upcoming games:', error);
-      // Возврат фолбэка в случае ошибки
       return getFallbackUpcomingGames();
     } finally {
-      // Сбрасываем флаги и Promise после завершения
       isMasterDataLoading = false;
       masterDataLoadPromise = null;
-      console.log('🔄 Master upcoming games data loading process finished.');
     }
   })();
 
-  // Возвращаем Promise текущей загрузки
   return await masterDataLoadPromise;
 }
 // --- КОНЕЦ МАСТЕР-ФУНКЦИИ ---
@@ -690,10 +684,12 @@ export async function getUpcomingGamesMasterData(): Promise<Game[]> {
  * Игра считается текущей, если она попадает в текущий день (с 00:00 до 23:59:59).
  * Также включает игры, которые идут прямо сейчас (LIVE).
  */
-export async function getCurrentGame(): Promise<Game | null> {
+export async function getCurrentGame(forceRefresh = false): Promise<Game | null> {
   try {
     console.log('Getting current game from master data...');
-    const allUpcomingGames = await getUpcomingGamesMasterData();
+    const allUpcomingGames = await getUpcomingGamesMasterData(forceRefresh);
+    
+    
 
     if (!allUpcomingGames || allUpcomingGames.length === 0) {
       return null;
@@ -741,10 +737,10 @@ export async function getCurrentGame(): Promise<Game | null> {
 /**
  * Получает список будущих игр (до 5 штук), исключая текущую игру (если она есть)
  */
-export async function getFutureGames(): Promise<Game[]> {
+export async function getFutureGames(forceRefresh = false): Promise<Game[]> {
   try {
     console.log('Getting future games from master data...');
-    const allUpcomingGames = await getUpcomingGamesMasterData();
+    const allUpcomingGames = await getUpcomingGamesMasterData(forceRefresh);
 
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -869,3 +865,23 @@ export async function getPastGamesCount(): Promise<number> {
     return 0;
   }
 }
+
+export const getStaleGameById = (id: string): Game | null => {
+  const cached = gameDetailsCache[id];
+  if (cached) {
+    console.log(`🎮 Returning STALE game details for ID ${id} (bypassing TTL)`);
+    return cached.data;
+  }
+  return null;
+};
+
+// Проверяет, есть ли в кэше свежие данные для игры
+export const isGameDetailsCacheFresh = (id: string): boolean => {
+  const cached = gameDetailsCache[id];
+  if (!cached) return false;
+  return Date.now() - cached.timestamp < GAME_DETAILS_CACHE_DURATION;
+};
+
+export const getGameDetailsCacheKeys = (): string[] => {
+  return Object.keys(gameDetailsCache);
+};
