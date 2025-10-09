@@ -1,18 +1,14 @@
 // components/SplashScreen.tsx
-
 import React from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
-import { colors, commonStyles } from '../styles/commonStyles';
+import { colors } from '../styles/commonStyles';
 
-export default function SplashScreen() {
+export default function SplashScreen({ message = 'Загрузка...' }: { message?: string }) {
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color={colors.primary} />
-      <Text style={styles.text}>Не торопитесь.</Text>
-      <Text style={styles.text}>Мы загружаем актуальные данные</Text>
-      <Text style={styles.text}>с сайта</Text>
-      <Text style={styles.text}>www.hc-forward.com</Text>
-      <Text style={styles.text}>необходимо немного подождать ...</Text>
+      <Text style={styles.title}>ХК Динамо Форвард 2014</Text>
+      <ActivityIndicator size="large" color={colors.primary} style={styles.loader} />
+      <Text style={styles.message}>{message}</Text>
     </View>
   );
 }
@@ -24,9 +20,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.background,
   },
-  text: {
-    marginTop: 16,
-    fontSize: 16,
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 24,
+  },
+  loader: {
+    marginBottom: 16,
+  },
+  message: {
+    fontSize: 14,
     color: colors.textSecondary,
+    textAlign: 'center',
+    paddingHorizontal: 32,
   },
 });

@@ -82,7 +82,7 @@ export default function GameDetailsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [tabIndex, setTabIndex] = useState(0);
-  const tabs = ['Арена', 'Статистика', 'FTF'];
+  const tabs = ['Арена', 'Статистика', 'F2F'];
 
   const loadGameData = useCallback(async (forceRefresh = false) => {
     try {
@@ -372,7 +372,7 @@ export default function GameDetailsScreen() {
                     }}
                     style={styles.mapLinkButton}
                   >
-                    <Text style={styles.mapLinkText}>Открыть в Яндекс.Картах</Text>
+                    <Text style={styles.mapLinkText}>Открыть в </Text>
                     {/* === 5. Иконка YandexMap.png === */}
                     <Image
                       source={require('../../assets/icons/YandexMap.png')}

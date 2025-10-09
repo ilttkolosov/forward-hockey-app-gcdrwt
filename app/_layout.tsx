@@ -1,193 +1,188 @@
 // _layout.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Animated,
+  Easing,
+  Dimensions,
+} from 'react-native';
 import { colors } from '../styles/commonStyles';
-import { getPlayers, refreshPlayersData, clearPlayersData } from '../data/playerData';
+import { getPlayers, clearPlayersData } from '../data/playerData';
 import PlayerDataLoadingScreen from '../components/PlayerDataLoadingScreen';
 import { apiService } from '../services/apiService';
 import { loadTeamList, saveTeamList, saveTeamLogo } from '../services/teamStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
-import { getGames,  getUpcomingGamesMasterData, getFutureGames, getGameById, getGameDetailsCacheKeys} from '../data/gameData'; 
-import SplashScreen from '../components/SplashScreen'; 
+import { getGames, getUpcomingGamesMasterData, getFutureGames, getGameById } from '../data/gameData';
+import SplashScreen from '../components/SplashScreen';
 import { fetchStartupConfig, StartupConfig } from '../services/startupApi';
 import { fetchTournamentTable } from '../services/tournamentsApi';
 
-// === НОВЫЕ КОНСТАНТЫ ДЛЯ ХРАНЕНИЯ ТУРНИРОВ ===
+// === КОНСТАНТЫ ===
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 const TOURNAMENTS_PAST_KEY = 'tournaments_past';
 const CURRENT_TOURNAMENT_ID_KEY = 'current_tournament_id';
-
-// Ключи для хранения версий в AsyncStorage
 const TEAMS_VERSION_KEY = 'teams_version';
 const PLAYERS_VERSION_KEY = 'players_version';
 
-// --- ФУНКЦИЯ ИНИЦИАЛИЗАЦИИ ИГРОКОВ (без проверки флага) ---
+// --- ФУНКЦИИ ИНИЦИАЛИЗАЦИИ ---
 const initializePlayers = async () => {
   try {
-    console.log('🔄 Player initialization triggered (shouldUpdatePlayers = true)...');
     await clearPlayersData();
-    console.log('🗑️ Previous player data cleared.');
-    console.log('📥 Re-fetching player data...');
-    const players = await getPlayers();
-    console.log(`✅ Re-loaded ${players.length} players.`);
-  } catch (error) {
-    console.error('💥 Failed to re-initialize players:', error);
+    await getPlayers();
+  } catch (e) {
+    console.error('Failed to initialize players:', e);
   }
 };
 
-// --- ФУНКЦИЯ ИНИЦИАЛИЗАЦИИ КОМАНД (без проверки флага) с возможностью очистки изображений ---
-const initializeTeams = async () => {
+const initializeTeams = async (): Promise<number> => {
   try {
-    console.log('📥 Fetching team list from API...');
     const teams = await apiService.fetchTeamList();
-    console.log(`✅ Fetched ${teams.length} teams`);
     await saveTeamList(teams);
-    console.log('💾 Team list saved to AsyncStorage');
 
     let documentDir = FileSystem.documentDirectory;
     if (!documentDir) {
-      console.warn('⚠️ documentDirectory is null, waiting briefly...');
       await new Promise(resolve => setTimeout(resolve, 150));
       documentDir = FileSystem.documentDirectory;
     }
-    if (!documentDir) {
-      console.error('💥 Could not get document directory. Skipping logo download.');
-      return;
-    }
+    if (!documentDir) return 0;
+
     const logoDirPath = `${documentDir}team_logos`;
     const dirInfo = await FileSystem.getInfoAsync(logoDirPath);
     if (!dirInfo.exists) {
       await FileSystem.makeDirectoryAsync(logoDirPath, { intermediates: true });
-      console.log('✅ Team logos directory created');
     } else {
-      // === ОЧИСТКА ПАПКИ С ЛОГОТИПАМИ ===
-      console.log('🧹 Clearing existing team logos directory...');
       const files = await FileSystem.readDirectoryAsync(logoDirPath);
       await Promise.all(
-        files.map(file => 
-          FileSystem.deleteAsync(`${logoDirPath}/${file}`, { idempotent: true })
-        )
+        files.map(file => FileSystem.deleteAsync(`${logoDirPath}/${file}`, { idempotent: true }))
       );
-      console.log(`✅ Cleared ${files.length} existing logo files`);
     }
 
-    // === ОЧИСТКА КЭША URI В ASYNCSTORAGE ===
-    console.log('🧹 Clearing team logo URI cache in AsyncStorage...');
     const logoKeys = teams.map(team => `team_logo_${team.id}`);
     await AsyncStorage.multiRemove(logoKeys);
-    console.log('✅ Team logo URI cache cleared');
 
-    console.log('⬇️ Starting fresh team logo downloads...');
     const downloadPromises = teams.map(async (team) => {
       if (team.logo_url) {
         const fileName = `team_${team.id}.jpg`;
         const fileUri = `${logoDirPath}/${fileName}`;
         try {
-          const downloadResult = await FileSystem.downloadAsync(team.logo_url, fileUri);
-          if (downloadResult.status === 200) {
-            await saveTeamLogo(team.id, downloadResult.uri);
-            return `Success ${team.id}`;
-          } else {
-            console.warn(`⚠️ Failed to download logo for team ${team.id}. Status: ${downloadResult.status}`);
-            return `Failed ${team.id}`;
+          const result = await FileSystem.downloadAsync(team.logo_url, fileUri);
+          if (result.status === 200) {
+            await saveTeamLogo(team.id, result.uri);
+            return true;
           }
         } catch (err) {
-          console.error(`❌ Error downloading logo for team ${team.id}:`, err);
-          return `Error ${team.id}`;
+          console.warn(`Failed to download logo for team ${team.id}:`, err);
         }
-      } else {
-        console.log(`ℹ️ Team ${team.id} has no logo URL`);
-        return `No URL ${team.id}`;
       }
+      return false;
     });
 
-    const downloadResults = await Promise.allSettled(downloadPromises);
-    const successful = downloadResults.filter(r => r.status === 'fulfilled' && r.value?.startsWith('Success')).length;
-    console.log(`📊 Logo download summary: Success: ${successful}`);
-    console.log('✅ Teams and logos initialized successfully');
+    const results = await Promise.all(downloadPromises);
+    const successCount = results.filter(Boolean).length;
+    return teams.length;
   } catch (error) {
     console.error('💥 Failed to initialize teams:', error);
+    return 0;
   }
 };
 
-// --- ФУНКЦИЯ ОБНОВЛЕНИЯ ТУРНИРОВ ---
 const initializeTournaments = async (config: StartupConfig) => {
   try {
-    console.log('📥 Saving tournament lists to AsyncStorage...');
     await AsyncStorage.setItem(TOURNAMENTS_NOW_KEY, JSON.stringify(config.tournamentsNow || []));
     await AsyncStorage.setItem(TOURNAMENTS_PAST_KEY, JSON.stringify(config.tournamentsPast || []));
-    console.log('✅ Tournament lists saved.');
 
-    // === ЗАГРУЗКА ТАБЛИЦ ВСЕХ ТУРНИРОВ В КЭШ ===
     const allTournaments = [...(config.tournamentsNow || []), ...(config.tournamentsPast || [])];
     if (allTournaments.length > 0) {
-      console.log(`🔄 Загружаем таблицы для ${allTournaments.length} турниров...`);
       await Promise.all(
         allTournaments.map(async (t) => {
-          console.log(`🔄 Загружаем таблицу для турнира: ${t.tournament_Name} (${t.tournament_ID})`);
-          const table = await fetchTournamentTable(t.tournament_ID);
-          console.log(`✅ Таблица турнира ${t.tournament_Name} загружена и сохранена`);
+          await fetchTournamentTable(t.tournament_ID);
         })
       );
-      console.log('✅ Все таблицы турниров сохранены в кэш');
     }
 
-    // === ОПРЕДЕЛЕНИЕ И СОХРАНЕНИЕ ТЕКУЩЕГО ТУРНИРА ===
-    const currentTournament = config.tournamentsNow?.[0]; // Берём первый из текущих турниров
+    const currentTournament = config.tournamentsNow?.[0];
     if (currentTournament) {
-      const tournamentId = currentTournament.tournament_ID;
-      console.log(`🔄 Fetching current tournament data for ID: ${tournamentId}`);
-      await AsyncStorage.setItem(CURRENT_TOURNAMENT_ID_KEY, tournamentId); // Сохраняем ID текущего турнира
+      await AsyncStorage.setItem(CURRENT_TOURNAMENT_ID_KEY, currentTournament.tournament_ID);
     } else {
-      console.log('ℹ️ No current tournament found in config');
       await AsyncStorage.removeItem(CURRENT_TOURNAMENT_ID_KEY);
     }
-  } catch (error) {
-    console.error('💥 Failed to initialize tournaments:', error);
+  } catch (e) {
+    console.error('Failed to initialize tournaments:', e);
   }
 };
 
-// --- ФУНКЦИИ ПРЕДЗАГРУЗКИ ---
-const preloadPastGames = async () => {
-  try {
-    const now = new Date();
-    const pastDate = new Date(now);
-    pastDate.setDate(pastDate.getDate() - 30);
-    await getGames({
-      date_from: pastDate.toISOString().split('T')[0],
-      date_to: now.toISOString().split('T')[0],
-      teams: '74',
-    });
-    console.log('✅ Past games preloaded successfully');
-  } catch (error) {
-    console.warn('⚠️ Failed to preload past games:', error);
-  }
+// --- КОМПОНЕНТ С АНИМИРОВАННЫМ ПРОГРЕСС-БАРОМ ---
+const SplashScreenWithProgress = ({ message, progressAnimated }: { message: string; progressAnimated: Animated.Value }) => {
+  const progressInterpolated = progressAnimated.interpolate({
+    inputRange: [0, 100],
+    outputRange: ['0%', '100%'],
+  });
+
+  return (
+    <View style={progressStyles.container}>
+      <Text style={progressStyles.title}>ХК Динамо Форвард 2014</Text>
+      <Text style={progressStyles.message}>{message}</Text>
+      <View style={progressStyles.progressBarContainer}>
+        <Animated.View style={[progressStyles.progressBar, { width: progressInterpolated }]} />
+      </View>
+    </View>
+  );
 };
 
-const preloadUpcomingGames = async () => {
-  try {
-    const now = new Date();
-    const futureDate = new Date(now);
-    futureDate.setDate(futureDate.getDate() + 30);
-    await getGames({
-      date_from: now.toISOString().split('T')[0],
-      date_to: futureDate.toISOString().split('T')[0],
-      teams: '74',
-    });
-    console.log('✅ Upcoming games preloaded successfully');
-  } catch (error) {
-    console.warn('⚠️ Failed to preload upcoming games:', error);
-  }
-};
+const progressStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    paddingHorizontal: 32,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 24,
+  },
+  message: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  progressBarContainer: {
+    height: 4,
+    width: '80%',
+    backgroundColor: colors.border,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: '100%',
+    backgroundColor: colors.primary,
+  },
+});
 
 // --- ОСНОВНОЙ КОМПОНЕНТ ---
 export default function RootLayout() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [initializationError, setInitializationError] = useState<string | null>(null);
-  const [startupConfig, setStartupConfig] = useState<StartupConfig | null>(null);
+  const [initializationMessage, setInitializationMessage] = useState('Запуск приложения...');
+  const progressAnimated = useRef(new Animated.Value(0)).current;
+
+  const setProgress = (value: number) => {
+    Animated.timing(progressAnimated, {
+      toValue: value,
+      duration: 300, // плавность: 300 мс
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: false, // обязательно false для width
+    }).start();
+  };
 
   useEffect(() => {
     initializeApp();
@@ -195,74 +190,58 @@ export default function RootLayout() {
 
   const initializeApp = async () => {
     try {
-      console.log('🚀 Fetching startup configuration...');
+      setInitializationMessage('Получение конфигурации...');
+      setProgress(5);
       const config = await fetchStartupConfig();
-      setStartupConfig(config);
-      console.log('✅ Startup config loaded:', config);
 
-      // === СОХРАНЕНИЕ ТУРНИРОВ ===
+      setInitializationMessage('Инициализация турниров...');
+      setProgress(15);
       await initializeTournaments(config);
 
-      // Получаем локальные версии
+      setInitializationMessage('Загрузка предстоящих игр...');
+      setProgress(25);
+      await getUpcomingGamesMasterData();
+
       const localTeamsVersion = parseInt(await AsyncStorage.getItem(TEAMS_VERSION_KEY) || '0');
       const localPlayersVersion = parseInt(await AsyncStorage.getItem(PLAYERS_VERSION_KEY) || '0');
       const shouldUpdateTeams = config.teams_version > localTeamsVersion;
       const shouldUpdatePlayers = config.players_version > localPlayersVersion;
 
-      // === ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: есть ли вообще логотипы? ===
-      let needTeamInit = shouldUpdateTeams;
-      if (!needTeamInit) {
-        try {
-          const teams = await loadTeamList();
-          if (!teams || teams.length === 0) {
-            needTeamInit = true;
-          } else {
-            // Проверим хотя бы один логотип
-            const firstTeamLogo = await AsyncStorage.getItem(`team_logo_${teams[0].id}`);
-            if (!firstTeamLogo) {
-              needTeamInit = true;
-            }
-          }
-        } catch (e) {
-          needTeamInit = true;
+      // Игроки — в фоне
+      if (shouldUpdatePlayers) {
+        initializePlayers();
+      }
+
+      // Команды — синхронно (обязательно!)
+      let teamsCount = 0;
+      if (shouldUpdateTeams) {
+        setInitializationMessage('Обновление команд и логотипов...');
+        setProgress(40);
+        teamsCount = await initializeTeams();
+        await AsyncStorage.setItem(TEAMS_VERSION_KEY, String(config.teams_version));
+        setInitializationMessage(`Загружено ${teamsCount} команд`);
+      } else {
+        const teams = await loadTeamList();
+        if (!teams || teams.length === 0) {
+          setInitializationMessage('Загрузка команд (первый запуск)...');
+          setProgress(40);
+          teamsCount = await initializeTeams();
+          await AsyncStorage.setItem(TEAMS_VERSION_KEY, String(config.teams_version));
+          setInitializationMessage(`Загружено ${teamsCount} команд`);
+        } else {
+          setInitializationMessage('Команды уже загружены');
+          teamsCount = teams.length;
         }
       }
-      // =========================================================
 
-      // --- ДОБАВЛЯЕМ КЭШИРОВАНИЕ ВСЕХ ПОЛУЧЕННЫХ ИГР ---
-      console.log('🔄 Preloading master upcoming games cache...');
-      // Это вызовет getUpcomingGamesMasterData, который сохранит результат в upcomingGamesMasterCache
-      await getUpcomingGamesMasterData();
-      console.log('✅ Master upcoming games cache preloaded.');
-      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
-
-      if (shouldUpdateTeams) {
-        console.log(`📥 Teams update required: server=${config.teams_version}, local=${localTeamsVersion}`);
-        await initializeTeams();
-        await AsyncStorage.setItem(TEAMS_VERSION_KEY, String(config.teams_version));
-      } else {
-        console.log(`⏭️ Team initialization skipped: server=${config.teams_version} <= local=${localTeamsVersion}`);
-      }
-
-      if (shouldUpdatePlayers) {
-        console.log(`📥 Players update required: server=${config.players_version}, local=${localPlayersVersion}`);
-        await initializePlayers();
-        await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(config.players_version));
-      } else {
-        console.log(`⏭️ Player initialization skipped: server=${config.players_version} <= local=${localPlayersVersion}`);
-      }
-
-      // Загрузка основных данных игроков
+      setInitializationMessage('Загрузка данных игроков...');
+      setProgress(80);
       await getPlayers();
-      console.log('✅ App initialization completed');
 
-
+      setInitializationMessage('Готово!');
+      setProgress(100);
 
       setIsInitializing(false);
-
-      // Предзагрузка игр в фоне
-      //preloadPastGames().catch(console.warn);
-      //preloadUpcomingGames().catch(console.warn);
     } catch (error) {
       console.error('💥 App initialization failed:', error);
       setInitializationError('Ошибка инициализации приложения');
@@ -271,7 +250,7 @@ export default function RootLayout() {
   };
 
   if (isInitializing) {
-    return <SplashScreen />;
+    return <SplashScreenWithProgress message={initializationMessage} progressAnimated={progressAnimated} />;
   }
 
   if (initializationError) {
