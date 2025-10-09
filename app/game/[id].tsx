@@ -8,16 +8,18 @@ import {
   TouchableOpacity,
   RefreshControl,
   Image,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import { Game } from '../../types';
-import { getGameById, getStaleGameById, isGameDetailsCacheFresh, loadVenues } from '../../data/gameData';
+import { getGameById, getVenueById } from '../../data/gameData';
 import { colors, commonStyles } from '../../styles/commonStyles';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
 import Icon from '../../components/Icon';
+import SegmentedControl from '@react-native-segmented-control/segmented-control';
 
 const parseVKVideoUrl = (url: string): { ownerId: string; videoId: string } | null => {
   try {
@@ -79,27 +81,27 @@ export default function GameDetailsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [tabIndex, setTabIndex] = useState(0);
+  const tabs = ['Арена', 'Статистика', 'FTF'];
 
   const loadGameData = useCallback(async (forceRefresh = false) => {
     try {
       console.log('Loading game data for ID:', id, { forceRefresh });
       setLoading(true);
       setError(null);
-
-      // Передаём forceRefresh в getGameById как useCache = !forceRefresh
       const gameData = await getGameById(id, !forceRefresh);
-        if (!gameData) {
-          setError('Игра не найдена');
-          return;
-        }
-      setGameDetails(gameData);
-      } catch (err) {
-        console.error('Error loading game ', err);
-        setError('Не удалось загрузить данные игры');
-      } finally {
-        setLoading(false);
-        if (forceRefresh) setRefreshing(false);
+      if (!gameData) {
+        setError('Игра не найдена');
+        return;
       }
+      setGameDetails(gameData);
+    } catch (err) {
+      console.error('Error loading game ', err);
+      setError('Не удалось загрузить данные игры');
+    } finally {
+      setLoading(false);
+      if (forceRefresh) setRefreshing(false);
+    }
   }, [id]);
 
   useEffect(() => {
@@ -186,28 +188,33 @@ export default function GameDetailsScreen() {
     team2_second,
     team2_third,
     league,
-    venue,
+    venueId,
     sp_video,
+    event_date,
   } = gameDetails;
 
   const homeTeamName = homeTeam?.name || 'Команда 1';
   const awayTeamName = awayTeam?.name || 'Команда 2';
   const leagueName = extractNameFromEntity(league);
-  const venueName = extractNameFromEntity(venue);
 
-  const homeFirstPeriod = team1_first;
-  const homeSecondPeriod = team1_second;
-  const homeThirdPeriod = team1_third;
-  const awayFirstPeriod = team2_first;
-  const awaySecondPeriod = team2_second;
-  const awayThirdPeriod = team2_third;
+  // === 5. Скрыть время, если 00:00 ===
+  const hideTime = formattedTime === '00:00';
+  const displayDateTime = hideTime ? formattedDate : `${formattedDate} • ${formattedTime}`;
 
-  const homeGoals = homeScore;
-  const awayGoals = awayScore;
+  // === 2. Логика счёта и периодов ===
+  const now = new Date();
+  const gameDate = new Date(event_date);
+  const isGameStarted = now >= gameDate;
+
+  const homeGoalsDisplay = homeScore ?? 0;
+  const awayGoalsDisplay = awayScore ?? 0;
+  const scoreDisplay = isGameStarted ? `${homeGoalsDisplay} : ${awayGoalsDisplay}` : 'VS';
+  const showPeriodScores = isGameStarted;
+
   const homeOutcomeText = extractOutcome(homeOutcome);
   const awayOutcomeText = extractOutcome(awayOutcome);
 
-
+  const venueData = venueId ? getVenueById(venueId) : null;
 
   return (
     <SafeAreaView style={commonStyles.container}>
@@ -221,10 +228,12 @@ export default function GameDetailsScreen() {
           <Text style={styles.headerLocation}>Санкт-Петербург</Text>
         </View>
       </View>
+
       <ScrollView
         style={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
+        {/* Video */}
         {sp_video && (
           <View style={styles.videoContainer}>
             <Text style={styles.sectionTitle}>Видео матча</Text>
@@ -250,10 +259,12 @@ export default function GameDetailsScreen() {
           </View>
         )}
 
+        {/* Main Game Info */}
         <View style={styles.gameInfo}>
           <View style={styles.gameHeader}>
-            <Text style={styles.gameDate}>{formattedDate} • {formattedTime}</Text>
+            <Text style={styles.gameDate}>{displayDateTime}</Text>
           </View>
+
           <View style={styles.teamsContainer}>
             <View style={styles.teamColumn}>
               {homeTeamLogo ? (
@@ -272,9 +283,12 @@ export default function GameDetailsScreen() {
                 </View>
               )}
             </View>
+
+            {/* === 3. Вертикальное центрирование === */}
             <View style={styles.scoreContainer}>
-              <Text style={styles.score}>{homeGoals} : {awayGoals}</Text>
+              <Text style={[styles.score, !isGameStarted && styles.vsText]}>{scoreDisplay}</Text>
             </View>
+
             <View style={styles.teamColumn}>
               {awayTeamLogo ? (
                 <Image source={{ uri: awayTeamLogo }} style={styles.teamLogo} />
@@ -293,9 +307,15 @@ export default function GameDetailsScreen() {
               )}
             </View>
           </View>
+
+          {/* === 1. Лига ПОД командами === */}
+          {leagueName && (
+            <Text style={styles.leagueText}>🏆 {leagueName}</Text>
+          )}
         </View>
 
-        {(homeFirstPeriod !== undefined || awayFirstPeriod !== undefined) && (
+        {/* === 2. Блок периодов: показываем ТОЛЬКО если игра началась === */}
+        {showPeriodScores && (
           <View style={styles.periodScores}>
             <Text style={styles.sectionTitle}>Счет по периодам</Text>
             <View style={styles.periodTable}>
@@ -308,35 +328,71 @@ export default function GameDetailsScreen() {
               </View>
               <View style={styles.periodRow}>
                 <Text style={styles.periodTeam}>{homeTeamName}</Text>
-                <Text style={styles.periodScore}>{homeFirstPeriod || 0}</Text>
-                <Text style={styles.periodScore}>{homeSecondPeriod || 0}</Text>
-                <Text style={styles.periodScore}>{homeThirdPeriod || 0}</Text>
-                <Text style={styles.periodTotal}>{homeGoals}</Text>
+                <Text style={styles.periodScore}>{team1_first || 0}</Text>
+                <Text style={styles.periodScore}>{team1_second || 0}</Text>
+                <Text style={styles.periodScore}>{team1_third || 0}</Text>
+                <Text style={styles.periodTotal}>{homeGoalsDisplay}</Text>
               </View>
               <View style={styles.periodRow}>
                 <Text style={styles.periodTeam}>{awayTeamName}</Text>
-                <Text style={styles.periodScore}>{awayFirstPeriod || 0}</Text>
-                <Text style={styles.periodScore}>{awaySecondPeriod || 0}</Text>
-                <Text style={styles.periodScore}>{awayThirdPeriod || 0}</Text>
-                <Text style={styles.periodTotal}>{awayGoals}</Text>
+                <Text style={styles.periodScore}>{team2_first || 0}</Text>
+                <Text style={styles.periodScore}>{team2_second || 0}</Text>
+                <Text style={styles.periodScore}>{team2_third || 0}</Text>
+                <Text style={styles.periodTotal}>{awayGoalsDisplay}</Text>
               </View>
             </View>
           </View>
         )}
 
-        <View style={styles.gameDetails}>
-          {leagueName && (
-            <View style={styles.detailItem}>
-              <Icon name="trophy" size={16} color={colors.textSecondary} />
-              <Text style={styles.detailText}>{leagueName}</Text>
-            </View>
-          )}
-          {venueName && (
-            <View style={styles.detailItem}>
-              <Icon name="location" size={16} color={colors.textSecondary} />
-              <Text style={styles.detailText}>Арена: {venueName}</Text>
-            </View>
-          )}
+        {/* Tabs Section */}
+        <View style={styles.tabsContainer}>
+          {/* === 4. Увеличенный отступ сверху === */}
+          <View style={styles.tabsSpacer} />
+          <SegmentedControl
+            values={tabs}
+            selectedIndex={tabIndex}
+            onChange={(event) => setTabIndex(event.nativeEvent.selectedSegmentIndex)}
+            tintColor={colors.primary}
+            fontStyle={{ fontSize: 14, fontWeight: '600', color: colors.text }}
+            activeFontStyle={{ fontWeight: '700' }}
+            backgroundColor={colors.surface}
+          />
+          <View style={styles.tabContent}>
+            {tabIndex === 0 && venueData && (
+              <View style={styles.venueInfo}>
+                <Text style={styles.venueName}>{venueData.name}</Text>
+                {venueData.address && (
+                  <Text style={styles.venueAddress}>{venueData.address}</Text>
+                )}
+                {venueData.coordinates && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      const url = `https://yandex.ru/maps/?pt=${venueData.coordinates.longitude},${venueData.coordinates.latitude}&z=17`;
+                      Linking.openURL(url).catch(() => console.warn('Не удалось открыть Яндекс.Карты'));
+                    }}
+                    style={styles.mapLinkButton}
+                  >
+                    <Text style={styles.mapLinkText}>Открыть в Яндекс.Картах</Text>
+                    {/* === 5. Иконка YandexMap.png === */}
+                    <Image
+                      source={require('../../assets/icons/YandexMap.png')}
+                      style={styles.mapIcon}
+                    />
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+            {tabIndex === 1 && (
+              <View style={styles.placeholderTab}>
+                <Text style={styles.placeholderText}>Хоккей</Text>
+              </View>
+            )}
+            {tabIndex === 2 && (
+              <View style={styles.placeholderTab}>
+                <Text style={styles.placeholderText}>Хоккей</Text>
+              </View>
+            )}
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -413,16 +469,24 @@ const styles = StyleSheet.create({
   },
   gameHeader: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 8,
   },
   gameDate: {
     fontSize: 16,
     color: colors.textSecondary,
     fontWeight: '500',
   },
+  leagueText: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: 'left', // ← прижали к левому краю
+    paddingLeft: 8, // ← небольшой отступ слева
+    marginBottom: 0, // ← уменьшили отступ снизу
+    fontStyle: 'italic',
+  },
   teamsContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'stretch',
     justifyContent: 'space-between',
     marginBottom: 24,
     paddingHorizontal: 8,
@@ -457,15 +521,16 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   scoreContainer: {
-    alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     paddingHorizontal: 16,
-    paddingTop: 76,
   },
   score: {
     fontSize: 32,
     fontWeight: '800',
     color: colors.primary,
+  },
+  vsText: {
+    color: colors.textSecondary, // ← цвет "VS" как на карточке
   },
   outcomeBadgeContainer: {
     alignItems: 'center',
@@ -545,22 +610,53 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 14,
   },
-  gameDetails: {
-    padding: 16,
-    backgroundColor: colors.surface,
-    borderRadius: 12,
+  tabsContainer: {
     marginHorizontal: 16,
     marginBottom: 16,
   },
-  detailItem: {
+  tabsSpacer: {
+    height: 16, // ← увеличенный отступ сверху
+  },
+  tabContent: {
+    marginTop: 16,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 16,
+  },
+  venueInfo: {
+    gap: 8,
+  },
+  venueName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  venueAddress: {
+    fontSize: 14,
+    color: colors.textSecondary,
+  },
+  mapLinkButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
     paddingVertical: 8,
   },
-  detailText: {
+  mapLinkText: {
     fontSize: 14,
-    color: colors.text,
-    marginLeft: 12,
-    fontWeight: '500',
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  mapIcon: {
+    width: 150,
+    height: 26,
+  },
+  placeholderTab: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  placeholderText: {
+    fontSize: 16,
+    color: colors.textSecondary,
   },
 });

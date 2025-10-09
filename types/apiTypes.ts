@@ -62,6 +62,11 @@ export interface ApiVenue {
   id: string;
   name: string;
   slug: string;
+  address?: string;           // ← добавлено
+  coordinates?: {             // ← добавлено
+    latitude: number;
+    longitude: number;
+  };
 }
 
 export interface ApiVenuesResponse {

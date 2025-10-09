@@ -3,7 +3,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Game, Team } from '../types'; // Импортируем основные типы из существующего types/index.ts
 import { apiService } from '../services/apiService';
-import { ApiEvent, ApiGameDetailsResponse } from '../types/apiTypes'; // Импортируем новые типы
+import { ApiEvent, ApiGameDetailsResponse, ApiVenue} from '../types/apiTypes'; // Импортируем новые типы
 import { loadTeamLogo } from '../services/teamStorage';
 // --- Локальное хранилище и флаги обновления ---
 
@@ -556,43 +556,72 @@ export async function getGames(params: {
 }
 
 /**
- * Получает одну игру по ID с детальной информацией и кэшированием
+ * Получает одну игру по ID с детальной информацией и кэшированием.
+ * Сначала ищет в кэше общих игр (gamesCache и upcomingGamesMasterCache),
+ * и только при отсутствии — запрашивает через event-by-id.
+ * Если useCache = false — игнорирует ВСЕ кэши и всегда идёт в API.
  */
 export const getGameById = async (id: string, useCache = true): Promise<Game | null> => {
   const now = Date.now();
   console.log(`🔍 getGameById called for ID ${id}, useCache=${useCache}`);
-  // 1. Проверяем кэш в памяти
-  if (useCache && gameDetailsCache[id]) {
-    const cached = gameDetailsCache[id];
-    if (now - cached.timestamp < GAME_DETAILS_CACHE_DURATION) {
-      console.log(`✅ Game details for ID ${id} returned from memory cache`);
-      return cached.data;
+
+  // 🔥 Если useCache = false — пропускаем ВСЕ кэши и идём сразу в API
+  if (!useCache) {
+    console.log(`🚀 Bypassing all caches for ID ${id} (force refresh)`);
+  } else {
+    // 1. Проверяем кэш деталей (gameDetailsCache)
+    if (gameDetailsCache[id]) {
+      const cached = gameDetailsCache[id];
+      if (now - cached.timestamp < GAME_DETAILS_CACHE_DURATION) {
+        console.log(`✅ Game details for ID ${id} returned from gameDetailsCache`);
+        return cached.data;
+      }
+    }
+
+    // 2. Ищем игру в ОБЩЕМ кэше игр (gamesCache)
+    for (const cacheKey in gamesCache) {
+      const entry = gamesCache[cacheKey];
+      if (entry && now - entry.timestamp < GAMES_CACHE_DURATION) {
+        const found = entry.data.find(g => g.id === id);
+        if (found) {
+          console.log(`✅ Game ID ${id} found in gamesCache (key: ${cacheKey})`);
+          gameDetailsCache[id] = { data: found, timestamp: now };
+          return found;
+        }
+      }
+    }
+
+    // 3. Ищем в мастер-кэше предстоящих игр
+    if (upcomingGamesMasterCache && now - upcomingGamesMasterCache.timestamp < UPCOMING_MASTER_CACHE_DURATION) {
+      const found = upcomingGamesMasterCache.data.find(g => g.id === id);
+      if (found) {
+        console.log(`✅ Game ID ${id} found in upcomingGamesMasterCache`);
+        gameDetailsCache[id] = { data: found, timestamp: now };
+        return found;
+      }
     }
   }
 
+  // 4. Загружаем из API (либо потому что useCache=false, либо потому что не нашли в кэшах)
   try {
-    // 2. Загружаем справочные данные (если ещё не загружены)
     await loadLeagues();
     await loadSeasons();
     await loadVenues();
     await loadTeams();
 
-    // 3. Запрашиваем детали из API
     const apiGameDetails = await apiService.fetchEventById(id);
     const game = await convertApiGameDetailsToGame(apiGameDetails);
 
-    // 4. Сохраняем в кэш
+    // Сохраняем в кэш только если useCache !== false
     if (useCache) {
-      gameDetailsCache[id] = {
-        data: game,
-        timestamp: now,
-      };
-      console.log(`💾 Game details for ID ${id} saved to memory cache`);
+      gameDetailsCache[id] = { data: game, timestamp: now };
+      console.log(`💾 Game details for ID ${id} saved to memory cache (from API)`);
+    } else {
+      console.log(`💾 Game details for ID ${id} loaded from API (not cached due to useCache=false)`);
     }
-
     return game;
   } catch (error) {
-    console.error(`❌ Failed to get game by ID ${id}:`, error);
+    console.error(`❌ Failed to get game by ID ${id} from API:`, error);
     return null;
   }
 };
@@ -622,42 +651,40 @@ function isCacheValid<T>(cache: CachedData<T> | null): boolean {
 export async function getUpcomingGamesMasterData(forceRefresh = false): Promise<Game[]> {
   const now = Date.now();
 
-  // Проверяем кэш ТОЛЬКО если не принудительное обновление
+  // ✅ ВСЕГДА проверяем, не идёт ли уже загрузка (даже при forceRefresh)
+  if (isMasterDataLoading && masterDataLoadPromise) {
+    console.log('⏳ Master data loading is already in progress, waiting... (even with forceRefresh)');
+    return await masterDataLoadPromise;
+  }
+
+  // Проверяем кэш, если не принудительное обновление
   if (!forceRefresh && isCacheValid(upcomingGamesMasterCache)) {
     console.log('✅ Returning master upcoming games data from cache');
     return upcomingGamesMasterCache!.data;
   }
 
-  // Если уже идёт загрузка — дожидаемся её (но если forceRefresh — всё равно делаем новую)
-  if (!forceRefresh && isMasterDataLoading && masterDataLoadPromise) {
-    console.log('⏳ Master data loading is already in progress, waiting...');
-    return await masterDataLoadPromise;
-  }
-
+  // Запускаем загрузку
   isMasterDataLoading = true;
-
   masterDataLoadPromise = (async () => {
     try {
       console.log(forceRefresh ? '🔄 Force-refreshing master upcoming games from API...' : '🔄 Loading master upcoming games from API...');
-
       const nowDate = new Date();
       const futureDate = new Date(nowDate);
       futureDate.setDate(futureDate.getDate() + 37);
       const todayString = nowDate.toISOString().split('T')[0];
       const futureDateString = futureDate.toISOString().split('T')[0];
 
-      // Передаём useCache: false при forceRefresh
       const games = await getGames({
         date_from: todayString,
         date_to: futureDateString,
         teams: '74',
-        useCache: !forceRefresh, // если force — не используем кэш для getGames
+        useCache: !forceRefresh,
       });
 
       const sortedGames = sortUpcomingGames(games);
       console.log(`Loaded ${sortedGames.length} master upcoming games`);
 
-      // Обновляем кэш только если не force? — НЕТ, обновляем ВСЕГДА при успешной загрузке
+      // Обновляем кэш ВСЕГДА при успешной загрузке
       upcomingGamesMasterCache = {
         data: sortedGames,
         timestamp: now,
@@ -884,4 +911,9 @@ export const isGameDetailsCacheFresh = (id: string): boolean => {
 
 export const getGameDetailsCacheKeys = (): string[] => {
   return Object.keys(gameDetailsCache);
+};
+
+// Экспортируем функцию для получения арены по ID из кэша
+export const getVenueById = (id: string): ApiVenue | null => {
+  return cachedVenues[id] || null;
 };

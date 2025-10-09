@@ -153,7 +153,7 @@ export default function HomeScreen() {
       setPlayersCount(players.length);
 
       // === ФОНОВОЕ ОБНОВЛЕНИЕ ДЕТАЛЕЙ ВСЕХ ИГР ПРИ force ===
-      if (force) {
+/*       if (force) {
         const allGameIds = [
           ...(current ? [current.id] : []),
           ...upcoming.map(g => g.id),
@@ -170,7 +170,7 @@ export default function HomeScreen() {
         if (current) {
           getGameById(current.id).catch(console.warn);
         }
-      }
+      } */
     } catch (err) {
       console.error('Error loading home screen data:', err);
       setError('Не удалось загрузить данные. Попробуйте еще раз.');
