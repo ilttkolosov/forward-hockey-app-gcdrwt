@@ -209,27 +209,32 @@ export default function RootLayout() {
       const shouldUpdateTeams = config.teams_version > localTeamsVersion;
       const shouldUpdatePlayers = config.players_version > localPlayersVersion;
 
+      // === ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: есть ли вообще логотипы? ===
+      let needTeamInit = shouldUpdateTeams;
+      if (!needTeamInit) {
+        try {
+          const teams = await loadTeamList();
+          if (!teams || teams.length === 0) {
+            needTeamInit = true;
+          } else {
+            // Проверим хотя бы один логотип
+            const firstTeamLogo = await AsyncStorage.getItem(`team_logo_${teams[0].id}`);
+            if (!firstTeamLogo) {
+              needTeamInit = true;
+            }
+          }
+        } catch (e) {
+          needTeamInit = true;
+        }
+      }
+      // =========================================================
+
       // --- ДОБАВЛЯЕМ КЭШИРОВАНИЕ ВСЕХ ПОЛУЧЕННЫХ ИГР ---
       console.log('🔄 Preloading master upcoming games cache...');
       // Это вызовет getUpcomingGamesMasterData, который сохранит результат в upcomingGamesMasterCache
       await getUpcomingGamesMasterData();
       console.log('✅ Master upcoming games cache preloaded.');
       // --- КОНЕЦ ДОБАВЛЕНИЯ ---
-
-      // --- ПРЕДЗАГРУЗКА ДЕТАЛЕЙ БЛИЖАЙШИХ ИГР (в фоне) ---
-      //console.log('🔄 Preloading details for future games...');
-      //const futureGames = await getFutureGames();
-      //const futureGameIds = futureGames.map(g => g.id);
-      //console.log(`📥 Preloading details for ${futureGameIds.length} future games:`, futureGameIds);
-
-      // 🔥 ЗАПУСКАЕМ В ФОНЕ, НЕ ЖДЁМ!
-      //futureGameIds.forEach(id => {
-      //  getGameById(id, true).catch(err => {
-      //    console.warn(`⚠️ Preload of future game ${id} details failed:`, err);
-      //  });
-      //});
-      //console.log('✅ Future games details preloading initiated (background).');
-
 
       if (shouldUpdateTeams) {
         console.log(`📥 Teams update required: server=${config.teams_version}, local=${localTeamsVersion}`);
