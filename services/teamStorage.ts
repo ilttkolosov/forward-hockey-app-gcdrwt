@@ -36,7 +36,9 @@ export const saveTeamLogo = async (teamId: string, logoUri: string): Promise<voi
 // Загрузить логотип команды
 export const loadTeamLogo = async (teamId: string): Promise<string | null> => {
   try {
-    return await AsyncStorage.getItem(`${TEAM_LOGO_PREFIX}${teamId}`);
+    const uri = await AsyncStorage.getItem(`${TEAM_LOGO_PREFIX}${teamId}`);
+    //console.log(`[DEBUG] loadTeamLogo(${teamId}) → ${uri || 'null'}`);
+    return uri;
   } catch (error) {
     console.error(`Failed to load logo for team ${teamId}`, error);
     return null;

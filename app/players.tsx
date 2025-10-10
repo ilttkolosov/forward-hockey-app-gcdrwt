@@ -8,6 +8,7 @@ import {
   TextInput,
   Modal,
   FlatList,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { commonStyles, colors } from '../styles/commonStyles';
@@ -20,6 +21,7 @@ import { getPlayers, searchPlayers, getMassiv1, getMassiv2, getMassiv3 } from '.
 import { getPositionTabName, getHandednessText } from '../utils/playerUtils';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
+import { playerDownloadService } from '../services/playerDataService'; // ← добавили
 
 const styles = StyleSheet.create({
   container: {
@@ -240,6 +242,7 @@ export default function PlayersScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [index, setIndex] = useState(0);
+  const [playersReady, setPlayersReady] = useState(false); // ← флаг готовности
 
   const positions = ['Вратарь', 'Защитник', 'Нападающий'];
 
@@ -252,22 +255,31 @@ export default function PlayersScreen() {
     }
   };
 
-  const loadData = async () => {
-    try {
-      setError(null);
+  // Проверяем, готовы ли данные
+  const checkPlayersReady = async () => {
+    const ready = await playerDownloadService.isDataLoaded();
+    setPlayersReady(ready);
+    if (ready) {
+      // Данные есть — загружаем их
+      try {
+        const playersData = await getPlayers(); // теперь getPlayers() вернёт кэш
+        setPlayers(playersData);
+        setLoading(false);
+      } catch (err) {
+        console.error('Error loading players from storage:', err);
+        setError('Не удалось загрузить данные игроков.');
+        setLoading(false);
+      }
+    } else {
+      // Данных нет — продолжаем ждать
       setLoading(true);
-      const playersData = await getPlayers();
-      setPlayers(playersData);
-    } catch (err) {
-      console.error('Error loading players:', err);
-      setError('Не удалось загрузить список игроков. Попробуйте еще раз.');
-    } finally {
-      setLoading(false);
+      // Повторная проверка через 1 секунду
+      setTimeout(checkPlayersReady, 1000);
     }
   };
 
   useEffect(() => {
-    loadData();
+    checkPlayersReady();
   }, []);
 
   const handlePlayerPress = (player: Player) => {
@@ -295,10 +307,18 @@ export default function PlayersScreen() {
     setSearchQuery('');
   };
 
-  if (loading) {
+  if (loading && !playersReady) {
     return (
       <SafeAreaView style={commonStyles.container}>
-        <LoadingSpinner />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ marginTop: 16, fontSize: 16, color: colors.textSecondary, textAlign: 'center' }}>
+            Загрузка данных игроков...
+          </Text>
+          <Text style={{ marginTop: 8, fontSize: 14, color: colors.textSecondary, textAlign: 'center' }}>
+            Это может занять до 1-2 минут при первом запуске.
+          </Text>
+        </View>
       </SafeAreaView>
     );
   }
@@ -306,7 +326,7 @@ export default function PlayersScreen() {
   if (error) {
     return (
       <SafeAreaView style={commonStyles.container}>
-        <ErrorMessage message={error} onRetry={loadData} />
+        <ErrorMessage message={error} onRetry={() => checkPlayersReady()} />
       </SafeAreaView>
     );
   }
@@ -326,7 +346,6 @@ export default function PlayersScreen() {
           <Icon name="search" size={24} color={colors.text} />
         </TouchableOpacity>
       </View>
-
       {/* Segmented Control */}
       <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
         <SegmentedControl
@@ -336,10 +355,9 @@ export default function PlayersScreen() {
           tintColor={colors.primary}
           fontStyle={{ fontSize: 14, fontWeight: '600' }}
           activeFontStyle={{ fontWeight: '700' }}
-          springEnabled={false} // ←←← отключает анимацию "прыжка"
+          springEnabled={false}
         />
       </View>
-
       {/* Players List */}
       <FlatList
         data={getPlayersForPosition(index)}
@@ -358,7 +376,6 @@ export default function PlayersScreen() {
           </View>
         }
       />
-
       {/* Search Modal */}
       <Modal
         visible={showSearchModal}
@@ -412,7 +429,6 @@ export default function PlayersScreen() {
           </View>
         </View>
       </Modal>
-
       <View style={{ height: 32 }} />
     </SafeAreaView>
   );

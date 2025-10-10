@@ -86,6 +86,23 @@ export const getMassiv3 = (): Player[] => {
  */
 export async function getPlayers(): Promise<Player[]> {
   try {
+    const players = await playerDownloadService.getPlayersFromStorage();
+    if (players.length > 0) {
+      splitPlayersIntoGroups(players);
+      return players;
+    }
+    // Если данных нет — не пытаемся загружать, просто возвращаем пустой массив
+    console.log('Data/playerData: No cached players, returning empty array');
+    return [];
+  } catch (error) {
+    console.error('Data/playerData: Error getting players:', error);
+    return [];
+  }
+}
+
+
+/* export async function getPlayers(): Promise<Player[]> {
+  try {
     console.log('Data/playerData: Attempting to get players via PlayerDownloadService...');
     // Check if data is already loaded using the service's flag
     const dataLoaded = await playerDownloadService.isDataLoaded();
@@ -133,7 +150,7 @@ export async function getPlayers(): Promise<Player[]> {
     // --- КОНЕЦ ДОБАВЛЕНИЯ ---
     return fallbackPlayers;
   }
-}
+} */
 
 /**
  * Gets a specific player by ID

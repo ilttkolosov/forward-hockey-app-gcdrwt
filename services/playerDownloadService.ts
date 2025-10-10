@@ -72,31 +72,78 @@ export class PlayerDownloadService {
     }
   }
 
-  async downloadAndCacheImage(url: string, playerId: string): Promise<string | null> {
-    try {
-      if (!url) return null;
 
-      await this.ensurePlayersDirectoryExists();
-      
-      const filename = `player_${playerId}.jpg`;
-      const fileUri = PLAYERS_DIRECTORY + filename;
-      
-      console.log(`Downloading image for player ${playerId} from ${url}`);
-      
-      const downloadResult = await downloadAsync(url, fileUri);
-      
-      if (downloadResult.status === 200) {
-        console.log(`Successfully downloaded image for player ${playerId} to ${downloadResult.uri}`);
-        return downloadResult.uri;
-      } else {
-        console.error(`Failed to download image for player ${playerId}, status: ${downloadResult.status}`);
-        return null;
-      }
+//Загрузка фото игроков в оптимальном разрешении  
+async downloadAndCacheImage(originalUrl: string, playerId: string): Promise<string | null> {
+  if (!originalUrl) return null;
+
+  const normalizedUrl = originalUrl.trim();
+  if (!normalizedUrl) return null;
+
+  // Определяем расширение файла (последнее вхождение точки)
+  const lastDotIndex = normalizedUrl.lastIndexOf('.');
+  if (lastDotIndex === -1) {
+    console.warn(`PlayerDownloadService: No file extension found in URL for player ${playerId}: ${normalizedUrl}`);
+    return null;
+  }
+
+  const base = normalizedUrl.substring(0, lastDotIndex);
+  const ext = normalizedUrl.substring(lastDotIndex); // включая точку: ".jpg"
+
+
+  console.log(`Используем  обновленную функцию downloadAndCacheImage`);
+  //https://www.hc-forward.com/wp-content/uploads/2014/02/12_petrichko-300x300.jpg
+  // Список суффиксов в порядке приоритета
+  const sizeSuffixes = ['-640x480', '-300x300', '-150x150'];
+  const candidates = [
+    ...sizeSuffixes.map(suffix => `${base}${suffix}${ext}`),
+    normalizedUrl, // fallback: оригинал
+  ];
+
+
+
+  // Проверка существования файла через HEAD-запрос
+  const checkUrlExists = async (url: string): Promise<boolean> => {
+    try {
+      const response = await fetch(url, { method: 'HEAD' });
+      return response.ok;
     } catch (error) {
-      console.error(`Error downloading image for player ${playerId}:`, error);
-      return null;
+      console.warn(`PlayerDownloadService: HEAD check failed for ${url}:`, error);
+      return false;
+    }
+  };
+
+  // Ищем первый доступный URL
+  let finalUrl = normalizedUrl;
+  for (const url of candidates) {
+    if (await checkUrlExists(url)) {
+      finalUrl = url;
+      console.log(`PlayerDownloadService: Selected image for player ${playerId}: ${url}`);
+      break;
+    } else {
+      console.log(`PlayerDownloadService: Image not found: ${url}`);
     }
   }
+
+  try {
+    await this.ensurePlayersDirectoryExists();
+    const filename = `player_${playerId}${ext}`;
+    const fileUri = `${PLAYERS_DIRECTORY}${filename}`;
+    console.log(`PlayerDownloadService: Downloading image for player ${playerId} from ${finalUrl}`);
+
+    const downloadResult = await downloadAsync(finalUrl, fileUri);
+    if (downloadResult.status === 200) {
+      console.log(`PlayerDownloadService: Successfully downloaded image for player ${playerId} to ${downloadResult.uri}`);
+      return downloadResult.uri;
+    } else {
+      console.error(`PlayerDownloadService: Failed to download image for player ${playerId}, status: ${downloadResult.status}`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`PlayerDownloadService: Error downloading image for player ${playerId}:`, error);
+    return null;
+  }
+}
 
   async fetchPlayersList(): Promise<PlayerListItem[]> {
     try {

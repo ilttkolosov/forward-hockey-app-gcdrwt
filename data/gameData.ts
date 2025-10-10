@@ -4,13 +4,17 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Game, Team } from '../types'; // Импортируем основные типы из существующего types/index.ts
 import { apiService } from '../services/apiService';
 import { ApiEvent, ApiGameDetailsResponse, ApiVenue} from '../types/apiTypes'; // Импортируем новые типы
-import { loadTeamLogo } from '../services/teamStorage';
+import { loadTeamLogo, loadTeamList, saveTeamList } from '../services/teamStorage';
 // --- Локальное хранилище и флаги обновления ---
 
 const LEAGUES_CACHE_KEY = 'leagues_cache';
 const SEASONS_CACHE_KEY = 'seasons_cache';
 const VENUES_CACHE_KEY = 'venues_cache';
-const TEAMS_CACHE_KEY = 'teams_cache'; // Для кэширования команд, полученных через старый API
+
+// УДАЛЯЕМ: TEAMS_CACHE_KEY — больше не нужен
+//const TEAMS_CACHE_KEY = 'teams_cache'; // Для кэширования команд, полученных через старый API
+
+
 
 // --- КЭШ ДЛЯ getGames ---
 let gamesCache: { [key: string]: { data: Game[]; timestamp: number } } = {};
@@ -159,40 +163,40 @@ export const loadVenues = async (): Promise<void> => {
 
 
 export const loadTeams = async (): Promise<void> => {
-  if (teamsLoaded) return; // <-- Если уже загружено, выходим
+  if (teamsLoaded) return;
 
   try {
-    // 1. Проверяем AsyncStorage
-    const cachedData = await AsyncStorage.getItem(TEAMS_CACHE_KEY);
-    if (cachedData) {
-      const parsed = JSON.parse(cachedData);
-      // 2. Заполняем кэш в памяти
-      cachedTeams = parsed.data.reduce((acc: Record<string, Team>, team: Team) => {
+    // ← Используем teamStorage.ts для загрузки
+    let teams = await loadTeamList();
+
+    if (teams && teams.length > 0) {
+      cachedTeams = teams.reduce((acc, team) => {
         acc[team.id] = team;
         return acc;
-      }, {});
-      teamsLoaded = true; // <-- Устанавливаем флаг
-      console.log('✅ Teams loaded from cache');
+      }, {} as Record<string, Team>);
+      teamsLoaded = true;
+      console.log('✅ Teams loaded from teamStorage');
       return;
     }
 
-    // 3. Если нет в кэше, загружаем с API
-    console.log('📥 Fetching team list from API...');
-    const response = await apiService.fetchTeamList(); // <-- Старый API для получения списка команд
+    // Если команд нет — загружаем из API и сохраняем через teamStorage
+    console.log('📥 Fetching team list from API (not in storage)...');
+    const response = await apiService.fetchTeamList();
     console.log(`✅ Fetched ${response.length} teams from API`);
 
-    // 4. Заполняем кэш в памяти
-    cachedTeams = response.reduce((acc: Record<string, Team>, team: Team) => {
+    // Сохраняем через teamStorage
+    await saveTeamList(response);
+
+    cachedTeams = response.reduce((acc, team) => {
       acc[team.id] = team;
       return acc;
-    }, {});
-    
-    // 5. Сохраняем в AsyncStorage
-    await AsyncStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify({ data: response, timestamp: Date.now() }));
-    teamsLoaded = true; // <-- Устанавливаем флаг
-    console.log('✅ Teams loaded and cached');
+    }, {} as Record<string, Team>);
+
+    teamsLoaded = true;
+    console.log('✅ Teams loaded from API and saved via teamStorage');
   } catch (error) {
     console.error('❌ Failed to load teams:', error);
+    teamsLoaded = true; // ← предотвращаем повторные попытки
   }
 };
 
@@ -202,7 +206,7 @@ export const loadTeams = async (): Promise<void> => {
 const getTeamFromCache = (teamId: string): Team | undefined => {
   //console.log(`Looking up team in cache by ID: ${teamId}, Cache size: ${Object.keys(cachedTeams).length}`);
   const team = cachedTeams[teamId];
-  console.log(`Found team by [getTeamFromCache]. Team ID is:`, team.id);
+  //console.log(`Found team by [getTeamFromCache]. Team ID is:`, team.id);
   return team;
 };
 

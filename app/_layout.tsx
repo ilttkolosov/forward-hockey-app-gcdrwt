@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { colors } from '../styles/commonStyles';
 import { getPlayers, clearPlayersData } from '../data/playerData';
+import { playerDownloadService } from '../services/playerDataService';
 import PlayerDataLoadingScreen from '../components/PlayerDataLoadingScreen';
 import { apiService } from '../services/apiService';
 import { loadTeamList, saveTeamList, saveTeamLogo } from '../services/teamStorage';
@@ -30,13 +31,17 @@ const CURRENT_TOURNAMENT_ID_KEY = 'current_tournament_id';
 const TEAMS_VERSION_KEY = 'teams_version';
 const PLAYERS_VERSION_KEY = 'players_version';
 
+
+
 // --- ФУНКЦИИ ИНИЦИАЛИЗАЦИИ ---
-const initializePlayers = async () => {
+const initializePlayersInBackground = async () => {
   try {
-    await clearPlayersData();
-    await getPlayers();
+    console.log('🔄 Starting background player data initialization...');
+    // PlayerDownloadService сам решит, нужно ли очищать и перезагружать
+    await playerDownloadService.refreshPlayersData();
+    console.log('✅ Player data initialized in background');
   } catch (e) {
-    console.error('Failed to initialize players:', e);
+    console.error('❌ Failed to initialize players in background:', e);
   }
 };
 
@@ -198,45 +203,62 @@ export default function RootLayout() {
       setProgress(15);
       await initializeTournaments(config);
 
-      setInitializationMessage('Загрузка предстоящих игр...');
-      setProgress(25);
-      await getUpcomingGamesMasterData();
-
       const localTeamsVersion = parseInt(await AsyncStorage.getItem(TEAMS_VERSION_KEY) || '0');
       const localPlayersVersion = parseInt(await AsyncStorage.getItem(PLAYERS_VERSION_KEY) || '0');
       const shouldUpdateTeams = config.teams_version > localTeamsVersion;
       const shouldUpdatePlayers = config.players_version > localPlayersVersion;
 
-      // Игроки — в фоне
-      if (shouldUpdatePlayers) {
-        initializePlayers();
-      }
 
       // Команды — синхронно (обязательно!)
       let teamsCount = 0;
       if (shouldUpdateTeams) {
-        setInitializationMessage('Обновление команд и логотипов...');
+        setInitializationMessage('Обновление информации о командах...');
         setProgress(40);
         teamsCount = await initializeTeams();
         await AsyncStorage.setItem(TEAMS_VERSION_KEY, String(config.teams_version));
         setInitializationMessage(`Загружено ${teamsCount} команд`);
       } else {
-        const teams = await loadTeamList();
-        if (!teams || teams.length === 0) {
-          setInitializationMessage('Загрузка команд (первый запуск)...');
+        // Проверяем: есть ли команды в хранилище?
+        const existingTeams = await loadTeamList();
+        if (existingTeams && existingTeams.length > 0) {
+          teamsCount = existingTeams.length;
+          setInitializationMessage(`Команды загружены (${teamsCount})`);
+        } else {
+          // Первый запуск: команд нет, но обновление не требуется → всё равно загружаем
+          setInitializationMessage('Первый запуск: загрузка команд...');
           setProgress(40);
           teamsCount = await initializeTeams();
           await AsyncStorage.setItem(TEAMS_VERSION_KEY, String(config.teams_version));
-          setInitializationMessage(`Загружено ${teamsCount} команд`);
-        } else {
-          setInitializationMessage('Команды уже загружены');
-          teamsCount = teams.length;
         }
       }
 
+
+      setInitializationMessage('Загрузка ближайших игр...');
+      setProgress(75);
+      await getUpcomingGamesMasterData();
+
+
+
       setInitializationMessage('Загрузка данных игроков...');
-      setProgress(80);
-      await getPlayers();
+      setProgress(90);
+      
+      //Инициализация игроков
+      if (shouldUpdatePlayers) {
+        setInitializationMessage('Обновление данных игроков...');
+        setProgress(85);
+        // Запускаем в фоне — не ждём завершения
+        initializePlayersInBackground();
+        // Сохраняем новую версию
+        await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(config.players_version));
+      } else {
+        // Проверяем, загружены ли данные
+        const dataLoaded = await playerDownloadService.isDataLoaded();
+        if (!dataLoaded) {
+          setInitializationMessage('Загрузка данных игроков (первый запуск)...');
+          setProgress(85);
+          initializePlayersInBackground();
+        }
+      }
 
       setInitializationMessage('Готово!');
       setProgress(100);
