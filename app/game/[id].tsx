@@ -1,5 +1,5 @@
 // app/game/[id].tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,13 +14,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import { Game } from '../../types';
-import { getGameById, getVenueById } from '../../data/gameData';
+import { getGameById, getVenueById, getGames, gameDetailsCache } from '../../data/gameData';
 import { colors, commonStyles } from '../../styles/commonStyles';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
 import Icon from '../../components/Icon';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
+import GameCardCompact from '../../components/GameCardCompact';
 
+// === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 const parseVKVideoUrl = (url: string): { ownerId: string; videoId: string } | null => {
   try {
     if (url.includes('video_ext.php')) return null;
@@ -74,6 +76,7 @@ const extractNameFromEntity = (entity: any): string | undefined => {
   return undefined;
 };
 
+// === ОСНОВНОЙ КОМПОНЕНТ ===
 export default function GameDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -82,8 +85,15 @@ export default function GameDetailsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [tabIndex, setTabIndex] = useState(0);
+  const [f2fGames, setF2fGames] = useState<Game[]>([]);
+  const [f2fLoading, setF2fLoading] = useState(false);
+
   const tabs = ['Арена', 'Статистика', 'F2F'];
 
+  // Защита от повторной загрузки F2F
+  const f2fLoadedRef = useRef(false);
+
+  // === ЗАГРУЗКА ДАННЫХ ИГРЫ ===
   const loadGameData = useCallback(async (forceRefresh = false) => {
     try {
       console.log('Loading game data for ID:', id, { forceRefresh });
@@ -104,11 +114,75 @@ export default function GameDetailsScreen() {
     }
   }, [id]);
 
+  // === ЗАГРУЗКА ИСТОРИИ ЛИЧНЫХ ВСТРЕЧ (F2F) ===
+  const loadF2fGames = useCallback(async (currentGame: Game) => {
+    if (f2fLoadedRef.current) return;
+    f2fLoadedRef.current = true;
+
+    const homeTeamId = currentGame.homeTeamId;
+    const awayTeamId = currentGame.awayTeamId;
+    const eventDate = new Date(currentGame.event_date);
+
+    if (!homeTeamId || !awayTeamId) {
+      console.warn('F2F: Missing team IDs');
+      return;
+    }
+
+    // Дата начала — 5 лет назад (или другое значение по необходимости)
+    const startDate = new Date(eventDate);
+    startDate.setFullYear(startDate.getFullYear() - 5);
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = eventDate.toISOString().split('T')[0]; // до даты текущей игры
+
+    setF2fLoading(true);
+    try {
+      console.log(`🔍 Loading F2F games for teams ${homeTeamId},${awayTeamId} before ${endDateStr}`);
+      const games = await getGames({
+        date_from: startDateStr,
+        date_to: endDateStr,
+        teams: `${homeTeamId},${awayTeamId}`,
+        useCache: true,
+        f2f: true, //признак что отбираем игры по принципу F2F
+      });
+
+      // Исключаем текущую игру (защита от рекурсии)
+      const filteredGames = games.filter(g => g.id !== id);
+
+      // Сортируем по убыванию даты
+      const sortedGames = filteredGames.sort((a, b) => 
+        new Date(b.event_date).getTime() - new Date(a.event_date).getTime()
+      );
+
+      // Сохраняем в общий кэш gameDetailsCache
+      const now = Date.now();
+      sortedGames.forEach(game => {
+        if (!gameDetailsCache[game.id]) {
+          gameDetailsCache[game.id] = { data: game, timestamp: now };
+        }
+      });
+
+      console.log(`✅ Loaded ${sortedGames.length} F2F games`);
+      setF2fGames(sortedGames);
+    } catch (err) {
+      console.error('❌ Failed to load F2F games:', err);
+    } finally {
+      setF2fLoading(false);
+    }
+  }, [id]);
+
+  // === ЭФФЕКТЫ ===
   useEffect(() => {
     if (id) {
       loadGameData();
     }
   }, [id, loadGameData]);
+
+  // Загружаем F2F после загрузки основной игры
+  useEffect(() => {
+    if (gameDetails && !f2fLoadedRef.current) {
+      loadF2fGames(gameDetails);
+    }
+  }, [gameDetails, loadF2fGames]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -116,6 +190,7 @@ export default function GameDetailsScreen() {
     setRefreshing(false);
   };
 
+  // === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ОТОБРАЖЕНИЯ ===
   const getOutcomeText = (outcome: string): string => {
     switch (outcome) {
       case 'win': return 'Победа';
@@ -134,6 +209,7 @@ export default function GameDetailsScreen() {
     }
   };
 
+  // === РЕНДЕР ЗАГРУЗКИ / ОШИБКИ ===
   if (loading) {
     return (
       <SafeAreaView style={commonStyles.container}>
@@ -170,6 +246,7 @@ export default function GameDetailsScreen() {
     );
   }
 
+  // === ПОДГОТОВКА ДАННЫХ ===
   const {
     date: formattedDate,
     time: formattedTime,
@@ -191,29 +268,24 @@ export default function GameDetailsScreen() {
     venueId,
     sp_video,
     event_date,
+    homeTeamId,
+    awayTeamId,
   } = gameDetails;
 
   const homeTeamName = homeTeam?.name || 'Команда 1';
   const awayTeamName = awayTeam?.name || 'Команда 2';
   const leagueName = extractNameFromEntity(league);
-
-  // === 5. Скрыть время, если 00:00 ===
   const hideTime = formattedTime === '00:00';
   const displayDateTime = hideTime ? formattedDate : `${formattedDate} • ${formattedTime}`;
-
-  // === 2. Логика счёта и периодов ===
   const now = new Date();
   const gameDate = new Date(event_date);
   const isGameStarted = now >= gameDate;
-
   const homeGoalsDisplay = homeScore ?? 0;
   const awayGoalsDisplay = awayScore ?? 0;
   const scoreDisplay = isGameStarted ? `${homeGoalsDisplay} : ${awayGoalsDisplay}` : 'VS';
   const showPeriodScores = isGameStarted;
-
   const homeOutcomeText = extractOutcome(homeOutcome);
   const awayOutcomeText = extractOutcome(awayOutcome);
-
   const venueData = venueId ? getVenueById(venueId) : null;
 
   return (
@@ -264,7 +336,6 @@ export default function GameDetailsScreen() {
           <View style={styles.gameHeader}>
             <Text style={styles.gameDate}>{displayDateTime}</Text>
           </View>
-
           <View style={styles.teamsContainer}>
             <View style={styles.teamColumn}>
               {homeTeamLogo ? (
@@ -283,12 +354,9 @@ export default function GameDetailsScreen() {
                 </View>
               )}
             </View>
-
-            {/* === 3. Вертикальное центрирование === */}
             <View style={styles.scoreContainer}>
               <Text style={[styles.score, !isGameStarted && styles.vsText]}>{scoreDisplay}</Text>
             </View>
-
             <View style={styles.teamColumn}>
               {awayTeamLogo ? (
                 <Image source={{ uri: awayTeamLogo }} style={styles.teamLogo} />
@@ -307,14 +375,12 @@ export default function GameDetailsScreen() {
               )}
             </View>
           </View>
-
-          {/* === 1. Лига ПОД командами === */}
           {leagueName && (
             <Text style={styles.leagueText}>🏆 {leagueName}</Text>
           )}
         </View>
 
-        {/* === 2. Блок периодов: показываем ТОЛЬКО если игра началась === */}
+        {/* Period Scores */}
         {showPeriodScores && (
           <View style={styles.periodScores}>
             <Text style={styles.sectionTitle}>Счет по периодам</Text>
@@ -346,7 +412,6 @@ export default function GameDetailsScreen() {
 
         {/* Tabs Section */}
         <View style={styles.tabsContainer}>
-          {/* === 4. Увеличенный отступ сверху === */}
           <View style={styles.tabsSpacer} />
           <SegmentedControl
             values={tabs}
@@ -373,7 +438,6 @@ export default function GameDetailsScreen() {
                     style={styles.mapLinkButton}
                   >
                     <Text style={styles.mapLinkText}>Открыть в </Text>
-                    {/* === 5. Иконка YandexMap.png === */}
                     <Image
                       source={require('../../assets/icons/YandexMap.png')}
                       style={styles.mapIcon}
@@ -388,8 +452,18 @@ export default function GameDetailsScreen() {
               </View>
             )}
             {tabIndex === 2 && (
-              <View style={styles.placeholderTab}>
-                <Text style={styles.placeholderText}>Хоккей</Text>
+              <View style={styles.f2fTab}>
+                {f2fLoading ? (
+                  <LoadingSpinner />
+                ) : f2fGames.length > 0 ? (
+                  f2fGames.map((game) => (
+                    <GameCardCompact key={game.id} game={game} showScore={true} />
+                  ))
+                ) : (
+                  <Text style={[commonStyles.text, { textAlign: 'center', marginTop: 24 }]}>
+                    Нет истории личных встреч
+                  </Text>
+                )}
               </View>
             )}
           </View>
@@ -399,7 +473,9 @@ export default function GameDetailsScreen() {
   );
 }
 
+// === СТИЛИ ===
 const styles = StyleSheet.create({
+  // ... (оставляем все стили из оригинального файла без изменений)
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -479,9 +555,9 @@ const styles = StyleSheet.create({
   leagueText: {
     fontSize: 14,
     color: colors.textSecondary,
-    textAlign: 'left', // ← прижали к левому краю
-    paddingLeft: 8, // ← небольшой отступ слева
-    marginBottom: 0, // ← уменьшили отступ снизу
+    textAlign: 'left',
+    paddingLeft: 8,
+    marginBottom: 0,
     fontStyle: 'italic',
   },
   teamsContainer: {
@@ -530,7 +606,7 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   vsText: {
-    color: colors.textSecondary, // ← цвет "VS" как на карточке
+    color: colors.textSecondary,
   },
   outcomeBadgeContainer: {
     alignItems: 'center',
@@ -615,7 +691,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   tabsSpacer: {
-    height: 16, // ← увеличенный отступ сверху
+    height: 16,
   },
   tabContent: {
     marginTop: 16,
@@ -658,5 +734,8 @@ const styles = StyleSheet.create({
   placeholderText: {
     fontSize: 16,
     color: colors.textSecondary,
+  },
+  f2fTab: {
+    width: '100%',
   },
 });

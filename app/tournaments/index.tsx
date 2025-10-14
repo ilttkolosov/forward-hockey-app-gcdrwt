@@ -1,4 +1,4 @@
-// app/tournaments.tsx
+// app/tournaments/index.tsx
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -9,14 +9,14 @@ import {
   RefreshControl,
 } from 'react-native';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
-import { colors, commonStyles } from '../styles/commonStyles';
-import { fetchTournamentTable, getCachedTournamentTable, TournamentTable } from '../services/tournamentsApi';
+import { colors, commonStyles } from '../../styles/commonStyles';
+import { fetchTournamentTable, getCachedTournamentTable, TournamentTable } from '../../services/tournamentsApi';
 import { useNavigation, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Icon from '../components/Icon';
+import Icon from '../../components/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image'; // <-- Импортируем Image
-import { loadTeamLogo } from '../services/teamStorage'; // <-- Импортируем функцию для получения URI логотипа
+import { loadTeamLogo } from '../../services/teamStorage'; // <-- Импортируем функцию для получения URI логотипа
 
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 const TOURNAMENTS_PAST_KEY = 'tournaments_past';
@@ -88,7 +88,7 @@ export default function TournamentsScreen() {
             console.log(`✅ [Tournaments] Логотипы добавлены к таблице турнира ${t.tournament_Name}`);
             return {
               name: t.tournament_Name,
-              id: t.tournament_ID,
+              id: String(t.tournament_ID),
               data: tableWithLogos,
             };
           })
@@ -98,6 +98,7 @@ export default function TournamentsScreen() {
       } else {
         console.log('❌ [Tournaments] Нет данных о текущих турнирах в кэше');
       }
+
       // Загружаем прошедшие турниры из кэша (в фоне)
       const cachedTournamentsPast = await AsyncStorage.getItem(TOURNAMENTS_PAST_KEY);
       console.log('🔄 [Tournaments] Загружаем past tournaments из кэша...');
@@ -195,55 +196,63 @@ export default function TournamentsScreen() {
     return tableWithLogos;
   };
 
-
-
   const handleBackPress = () => {
     router.back();
   };
 
-    const renderTable = (name: string, tournamentId: string, data: TournamentTableWithLogos[]) => {
-      if (!data || !Array.isArray(data)) {
-        console.log(`⚠️ [Tournaments] Нет данных для турнира ${name}`);
-        return null;
-      }
-      
-      // Добавляем явное указание типа для каждой строки
-      return (
-        <View key={tournamentId} style={styles.tableContainer}>
-          <Text style={styles.tableTitle}>{name}</Text>
-          <View style={styles.tableHeader}>
-            <Text style={[styles.headerCell, styles.position]}></Text>
-            <Text style={[styles.headerCell, styles.team]}></Text>
-            <Text style={[styles.headerCell, styles.games]}>И</Text>
-            <Text style={[styles.headerCell, styles.points]}>О</Text>
-          </View>
-          {data.map((row: TournamentTableRowWithLogo, index) => ( // Явно указываем тип строки
-            <View
-              key={row.team_id}
-              style={[
-                styles.tableRow,
-                index % 2 === 0 ? styles.evenRow : styles.oddRow
-              ]}
-            >
-              <Text style={[styles.cell, styles.position]}>{row.position}</Text>
-              <View style={styles.teamCellContent}>
-                {row.logo_uri ? (
-                  <Image
-                    source={{ uri: row.logo_uri }}
-                    style={styles.teamLogo}
-                  />
-                ) : (
-                  <View style={styles.teamLogoPlaceholder} />
-                )}
-                <Text style={[styles.cell, styles.teamName]}>{row.team_name}</Text>
-              </View>
-              <Text style={[styles.cell, styles.games]}>{row.games}</Text>
-              <Text style={[styles.cell, styles.points]}>{row.points_2x}</Text>
-            </View>
-          ))}
+  const handleDetailsPress = (tournamentId: string) => {
+    router.push(`/tournaments/${tournamentId}`);
+  };
+
+  const renderTable = (name: string, tournamentId: string, data: TournamentTableWithLogos[]) => {
+    if (!data || !Array.isArray(data)) {
+      console.log(`⚠️ [Tournaments] Нет данных для турнира ${name}`);
+      return null;
+    }
+    // Добавляем явное указание типа для каждой строки
+    return (
+      <View key={tournamentId} style={styles.tableContainer}>
+        <Text style={styles.tableTitle}>{name}</Text>
+        <View style={styles.tableHeader}>
+          <Text style={[styles.headerCell, styles.position]}></Text>
+          <Text style={[styles.headerCell, styles.team]}></Text>
+          <Text style={[styles.headerCell, styles.games]}>И</Text>
+          <Text style={[styles.headerCell, styles.points]}>О</Text>
         </View>
-      );
-    };
+        {data.map((row: TournamentTableRowWithLogo, index) => ( // Явно указываем тип строки
+          <View
+            key={row.team_id}
+            style={[
+              styles.tableRow,
+              index % 2 === 0 ? styles.evenRow : styles.oddRow
+            ]}
+          >
+            <Text style={[styles.cell, styles.position]}>{row.position}</Text>
+            <View style={styles.teamCellContent}>
+              {row.logo_uri ? (
+                <Image
+                  source={{ uri: row.logo_uri }}
+                  style={styles.teamLogo}
+                />
+              ) : (
+                <View style={styles.teamLogoPlaceholder} />
+              )}
+              <Text style={[styles.cell, styles.teamName]}>{row.team_name}</Text>
+            </View>
+            <Text style={[styles.cell, styles.games]}>{row.games}</Text>
+            <Text style={[styles.cell, styles.points]}>{row.points_2x}</Text>
+          </View>
+        ))}
+        {/* Кнопка "Подробнее" */}
+        <TouchableOpacity
+          style={styles.detailButton}
+          onPress={() => handleDetailsPress(String(tournamentId))} // Передаем ID турнира
+        >
+          <Text style={styles.detailButtonText}>Подробнее</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   if (loading) {
     console.log('🔄 [Tournaments] Отображаем Loading...');
@@ -394,7 +403,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: 12,
   },
-    tableHeader: {
+  tableHeader: {
     flexDirection: 'row',
     // Убираем нижнюю границу, чтобы не было линии под заголовком
     // borderBottomWidth: 1,

@@ -210,6 +210,16 @@ const getTeamFromCache = (teamId: string): Team | undefined => {
   return team;
 };
 
+
+// Служебная
+// Извлекает число из строки вида "3", "3Б", "10П" → 3, 3, 10
+export const extractNumericScore = (score: string | number | null | undefined): number => {
+  if (score == null) return 0;
+  const scoreStr = String(score).trim();
+  const match = scoreStr.match(/^\d+/);
+  return match ? parseInt(match[0], 10) : 0;
+};
+
 // --- Внутренние функции преобразования данных ---
 
 /**
@@ -217,118 +227,107 @@ const getTeamFromCache = (teamId: string): Team | undefined => {
  */
 // data/gameData.ts
 
-const convertApiEventToGame = async (apiEvent: ApiEvent): Promise<Game> => {
-  // Извлекаем ID команд, лиги, сезона, места проведения
-  // В новом API teams - массив строк, leagues, seasons, venues - массивы чисел
+const convertApiEventToGame = async (
+  apiEvent: ApiEvent | ApiGameDetailsResponse
+): Promise<Game> => {
   const teamIds: string[] = apiEvent.teams;
   const leagueId: string = apiEvent.leagues[0]?.toString() || '';
   const seasonId: string = apiEvent.seasons[0]?.toString() || '';
   const venueId: string = apiEvent.venues[0]?.toString() || '';
 
-  console.log(`Converting ApiEvent ID: ${apiEvent.id}, Teams: ${teamIds}, League ID: ${leagueId}, Season ID: ${seasonId}, Venue ID: ${venueId}`);
-
-  // Получаем информацию о командах из кэша
   const homeTeamInfo = getTeamFromCache(teamIds[0]);
   const awayTeamInfo = getTeamFromCache(teamIds[1]);
 
-  //console.log(`Team ID ${teamIds[0]} lookup result:`, homeTeamInfo);
-  //console.log(`Team ID ${teamIds[1]} lookup result:`, awayTeamInfo);
-
-  // Получаем информацию о лиге, сезоне, месте проведения из кэша
   const leagueInfo = cachedLeagues[leagueId];
   const seasonInfo = cachedSeasons[seasonId];
   const venueInfo = cachedVenues[venueId];
 
-  // --- ИСПРАВЛЕНО: Определяем статус игры ---
-  // Пока простая логика: если в поле results есть данные, считаем игру завершенной
-  // В новом API results - это объект, ключи которого - ID команд
   const hasResults = apiEvent.results && typeof apiEvent.results === 'object' && Object.keys(apiEvent.results).length > 0;
   const status = apiService.determineGameStatus(apiEvent.date, hasResults);
-  // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
-  // Извлекаем результаты, если они есть
-  let homeGoals, awayGoals, homeOutcome, awayOutcome, team1_first, team1_second, team1_third, team2_first, team2_second, team2_third;
+  // --- РЕЗУЛЬТАТЫ ---
+  let homeScoreRaw = '0';
+  let awayScoreRaw = '0';
+  let homeOutcome, awayOutcome;
+  let team1_first, team1_second, team1_third;
+  let team2_first, team2_second, team2_third;
+
   if (hasResults && homeTeamInfo && awayTeamInfo) {
-    // --- ИСПРАВЛЕНО: results - это объект, ключи которого - ID команд ---
     const homeTeamResults = (apiEvent.results as any)[homeTeamInfo.id];
     const awayTeamResults = (apiEvent.results as any)[awayTeamInfo.id];
-    // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
     if (homeTeamResults && awayTeamResults) {
-      homeGoals = safeInt(homeTeamResults.goals);
-      awayGoals = safeInt(awayTeamResults.goals);
+      homeScoreRaw = homeTeamResults.goals?.toString() || '0';
+      awayScoreRaw = awayTeamResults.goals?.toString() || '0';
+
       homeOutcome = apiService.getOutcomeFromResult(homeTeamResults.outcome);
       awayOutcome = apiService.getOutcomeFromResult(awayTeamResults.outcome);
-      team1_first = safeInt(homeTeamResults.first);
-      team1_second = safeInt(homeTeamResults.second);
-      team1_third = safeInt(homeTeamResults.third);
-      team2_first = safeInt(awayTeamResults.first);
-      team2_second = safeInt(awayTeamResults.second);
-      team2_third = safeInt(awayTeamResults.third);
+
+      team1_first = homeTeamResults.first?.toString() || '0';
+      team1_second = homeTeamResults.second?.toString() || '0';
+      team1_third = homeTeamResults.third?.toString() || '0';
+
+      team2_first = awayTeamResults.first?.toString() || '0';
+      team2_second = awayTeamResults.second?.toString() || '0';
+      team2_third = awayTeamResults.third?.toString() || '0';
     }
   }
 
-  // Форматируем дату и время
-  // !! ИСПРАВЛЕНО: Приведение к ISO для форматирования !!
+  // --- ФОРМАТИРОВАНИЕ ДАТЫ ---
   const isoDateString = apiEvent.date.replace(' ', 'T');
   const { date, time } = apiService.formatDateTime(isoDateString);
 
-  // --- ЗАГРУЖАЕМ URI ЛОГОТИПОВ ИЗ ЛОКАЛЬНОГО ХРАНИЛИЩА ---
+  // --- ЛОГОТИПЫ ---
   const homeTeamLogoUri = homeTeamInfo ? await loadTeamLogo(homeTeamInfo.id) ?? '' : '';
   const awayTeamLogoUri = awayTeamInfo ? await loadTeamLogo(awayTeamInfo.id) ?? '' : '';
 
-  // Создаем объект Game
-  const game: Game = {
+  return {
     id: apiEvent.id.toString(),
     event_date: apiEvent.date,
-    date: date,
-    time: time,
-    status: status,
+    date,
+    time,
+    status,
     // Команды
     homeTeamId: teamIds[0],
     awayTeamId: teamIds[1],
-    homeTeam: homeTeamInfo || undefined, // Убедимся, что это объект Team или undefined
-    awayTeam: awayTeamInfo || undefined, // Убедимся, что это объект Team или undefined
-    homeTeamLogo: homeTeamLogoUri, // <- Теперь URI из локального хранилища
-    awayTeamLogo: awayTeamLogoUri, // <- Теперь URI из локального хранилища
-    // Результаты (если есть)
-    homeScore: homeGoals,
-    awayScore: awayGoals,
-    homeGoals: homeGoals,
-    awayGoals: awayGoals,
-    homeOutcome: homeOutcome,
-    awayOutcome: awayOutcome,
-    // Периоды (если есть)
-    team1_first: team1_first,
-    team1_second: team1_second,
-    team1_third: team1_third,
-    team2_first: team2_first,
-    team2_second: team2_second,
-    team2_third: team2_third,
-    team1_goals: homeGoals,
-    team2_goals: awayGoals,
+    homeTeam: homeTeamInfo || undefined,
+    awayTeam: awayTeamInfo || undefined,
+    homeTeamLogo: homeTeamLogoUri,
+    awayTeamLogo: awayTeamLogoUri,
+    // Результаты — ВСЕ КАК СТРОКИ
+    homeScore: homeScoreRaw,
+    awayScore: awayScoreRaw,
+    homeGoals: extractNumericScore(homeScoreRaw),
+    awayGoals: extractNumericScore(awayScoreRaw),
+    homeOutcome,
+    awayOutcome,
+    // Периоды — КАК СТРОКИ
+    team1_first,
+    team1_second,
+    team1_third,
+    team2_first,
+    team2_second,
+    team2_third,
+    team1_goals: homeScoreRaw,   // ← строка
+    team2_goals: awayScoreRaw,   // ← строка
     team1_outcome: homeOutcome,
     team2_outcome: awayOutcome,
     // Место проведения
     venue: venueInfo?.name || '',
     venue_name: venueInfo?.name || '',
-    venueId: venueId, // Исправлено с venue_id
+    venueId,
     // Турнир и сезон
     tournament: leagueInfo?.name || 'Товарищеский матч',
     league: leagueInfo || undefined,
-    leagueId: leagueId, // Исправлено с league_id
-    league_name: leagueInfo?.name || 'Товарищеский матч', // Новое поле
+    leagueId,
+    league_name: leagueInfo?.name || 'Товарищеский матч',
     season: seasonInfo || undefined,
-    seasonId: seasonId, // Исправлено с season_id
+    seasonId,
     season_name: seasonInfo?.name || '',
-    // Видео (если есть)
-    sp_video: (apiEvent as any).sp_video || '', // Поле может быть в ApiEvent, если API его возвращает
+    // Видео
+    sp_video: (apiEvent as any).sp_video || '',
     videoUrl: (apiEvent as any).sp_video || '',
   };
-
-  //console.log(`Converted Game object:`, game);
-
-  return game;
 };
 
 /**
@@ -501,6 +500,7 @@ export async function getGames(params: {
   season?: string;
   teams?: string;
   useCache?: boolean; // <-- НОВЫЙ ПАРАМЕТР
+  f2f?: boolean; // <-- НОВЫЙ НЕОБЯЗАТЕЛЬНЫЙ ПАРАМЕТР
   }): Promise<Game[]> {
   try {
     console.log('Data/gameData: Getting games with params:', params);
@@ -526,7 +526,28 @@ export async function getGames(params: {
     await loadTeams(); // Загружаем команды для логотипов
 
     // --- ИСПОЛЬЗУЕМ НОВЫЙ API ---
-    const response = await apiService.fetchEvents(params);
+      // --- ПОДГОТОВКА ПАРАМЕТРОВ ДЛЯ API ---
+    const apiParams: Record<string, string> = {};
+
+    // Копируем все параметры, кроме 'teams'
+    for (const key in params) {
+      if (key !== 'teams' && params[key as keyof typeof params]) {
+        apiParams[key] = String(params[key as keyof typeof params]);
+      }
+    }
+
+    // Обрабатываем 'teams' с учётом f2f-режима
+    if (params.teams) {
+      let teamList = params.teams
+        .split(/[,| ]+/) // разделяем по запятой, | или пробелам
+        .filter(id => id.trim() !== '');
+      
+      // Если f2f=true — используем '|', иначе — ','
+      const separator = params.f2f ? '|' : ',';
+      apiParams.teams = teamList.join(separator);
+    }
+
+    const response = await apiService.fetchEvents(apiParams);
     // --- КОНЕЦ ИСПОЛЬЗОВАНИЯ НОВОГО API ---
 
     const apiEvents = response.data;
@@ -614,7 +635,7 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
     await loadTeams();
 
     const apiGameDetails = await apiService.fetchEventById(id);
-    const game = await convertApiGameDetailsToGame(apiGameDetails);
+    const game = await convertApiEventToGame(apiGameDetails);
 
     // Сохраняем в кэш только если useCache !== false
     if (useCache) {
@@ -674,7 +695,7 @@ export async function getUpcomingGamesMasterData(forceRefresh = false): Promise<
       console.log(forceRefresh ? '🔄 Force-refreshing master upcoming games from API...' : '🔄 Loading master upcoming games from API...');
       const nowDate = new Date();
       const futureDate = new Date(nowDate);
-      futureDate.setDate(futureDate.getDate() + 37);
+      futureDate.setDate(futureDate.getDate() + 137);
       const todayString = nowDate.toISOString().split('T')[0];
       const futureDateString = futureDate.toISOString().split('T')[0];
 
@@ -921,3 +942,5 @@ export const getGameDetailsCacheKeys = (): string[] => {
 export const getVenueById = (id: string): ApiVenue | null => {
   return cachedVenues[id] || null;
 };
+
+export { gameDetailsCache, GAME_DETAILS_CACHE_DURATION };
