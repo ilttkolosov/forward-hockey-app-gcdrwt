@@ -2,7 +2,7 @@
   "expo": {
     "name": "Forward",
     "slug": "Forward",
-    "version": "1.0.31",
+    "version": "1.0.32",
     "orientation": "portrait",
     "icon": "./assets/icons/myIcon.png",
     "userInterfaceStyle": "dark",
@@ -14,7 +14,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.Natively",
+      "bundleIdentifier": "com.kolosovaleksandr.Forward2014",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -25,7 +25,7 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.anonymous.Natively"
+      "package": "com.kolosovaleksandr.Forward2014"
     },
     "web": {
       "favicon": "./assets/images/final_quest_240x240.png",

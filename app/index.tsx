@@ -238,18 +238,15 @@ useEffect(() => {
 
         {/* Quick Navigation */}
         <View style={quickNavStyles.container}>
-          <Link href="/upcoming" asChild>
+          <Link href="/mobilegames" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
               <Icon 
-                name="calendar" 
+                name="game-controller" 
                 size={24} 
                 color={colors.primary} 
                 style={quickNavStyles.icon} 
               />
-              <Text style={quickNavStyles.title}>Предстоящие игры</Text>
-              <Text style={quickNavStyles.subtitle}>
-                {upcomingCount > 0 ? `${upcomingCount} игр` : 'Нет игр'}
-              </Text>
+              <Text style={quickNavStyles.title}>Мобильные игры</Text>
             </TouchableOpacity>
           </Link>
 

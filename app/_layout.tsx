@@ -291,6 +291,7 @@ export default function RootLayout() {
         <Stack.Screen name="game/[id]" />
         <Stack.Screen name="season/[id]" />
         <Stack.Screen name="tournaments/[id]" />
+        <Stack.Screen name="mobilegames/[id]" />
         <Stack.Screen name="coaches" />
         <Stack.Screen name="test-tabs" />
       </Stack>
