@@ -2,7 +2,7 @@
   "expo": {
     "name": "Forward",
     "slug": "Forward",
-    "version": "1.0.32",
+    "version": "1.0.33",
     "orientation": "portrait",
     "icon": "./assets/icons/myIcon.png",
     "userInterfaceStyle": "dark",
