@@ -1,5 +1,4 @@
 // app/seasons/index.tsx
-
 import React from 'react';
 import {
   View,
@@ -7,9 +6,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  RefreshControl,
-  Alert,
-  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -18,112 +14,92 @@ import { colors, commonStyles } from '../../styles/commonStyles';
 import { getPastGames } from '../../data/gameData';
 import { getGameById } from '../../data/gameData';
 
-const { width } = Dimensions.get('window');
-
-// --- Типы для сезонов ---
 interface SeasonOption {
-  id: string; // Используем string для ID
+  id: string;
   name: string;
   start: Date;
   end: Date;
 }
 
-// --- Опции сезонов ---
-const SEASON_OPTIONS: SeasonOption[] = [
-  {
+// Генерация сезонов от 2022-2023 до текущего
+const generateSeasons = (): SeasonOption[] => {
+  const today = new Date();
+  const seasons: SeasonOption[] = [];
+
+  // Фиксированный первый сезон: 2022–2023
+  const startYear = 2022;
+  const currentYear = today.getFullYear();
+
+  // Определяем, в каком сезоне мы сейчас находимся
+  // Сезон идёт с 1 июля по 30 июня следующего года
+  let currentSeasonStartYear = currentYear;
+  if (today.getMonth() < 6) {
+    // До июля — текущий сезон начался в прошлом году
+    currentSeasonStartYear = currentYear - 1;
+  }
+
+  // Генерируем все сезоны от 2022 до текущего включительно
+  for (let year = startYear; year <= currentSeasonStartYear; year++) {
+    const seasonStart = new Date(year, 6, 1); // 1 июля
+    const seasonEnd = new Date(year + 1, 5, 30); // 30 июня
+
+    const actualEnd = seasonEnd > today ? today : seasonEnd;
+
+    seasons.push({
+      id: `season_${year}_${year + 1}`,
+      name: `Сезон ${year}-${year + 1}`,
+      start: seasonStart,
+      end: actualEnd,
+    });
+  }
+
+  // Добавляем "Недавние игры" в начало
+  const recentOption: SeasonOption = {
     id: 'recent',
     name: 'Недавние игры',
-    start: new Date(new Date().setDate(new Date().getDate() - 30)), // Последние 30 дней
-    end: new Date(),
-  },
-  {
-    id: 'season_2025_2026',
-    name: 'Сезон 2025-2026',
-    start: new Date('2025-07-01'),
-    end: new Date('2026-06-30'),
-  },
-  {
-    id: 'season_2024_2025',
-    name: 'Сезон 2024-2025',
-    start: new Date('2024-07-01'),
-    end: new Date('2025-06-30'),
-  },
-  {
-    id: 'season_2023_2024',
-    name: 'Сезон 2023-2024',
-    start: new Date('2023-07-01'),
-    end: new Date('2024-06-30'),
-  },
-  {
-    id: 'season_2022_2023',
-    name: 'Сезон 2022-2023',
-    start: new Date('2022-07-01'),
-    end: new Date('2023-06-30'),
-  },
-];
-// --- Конец опций сезонов ---
+    start: new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000),
+    end: today,
+  };
 
-// --- Вспомогательная функция для форматирования периода сезона ---
-const formatSeasonPeriod = (season: SeasonOption): string => {
-  if (season.id === 'recent') {
-    return 'Последний месяц';
-  }
-  const startYear = season.start.getFullYear();
-  const endYear = season.end.getFullYear();
-  return `${startYear}-${endYear}`;
+  return [recentOption, ...seasons.reverse()]; // Самый свежий сезон — сверху
 };
 
-// --- Иконки сезонов ---
-const seasonIcons = ['🏆', '📅', '⏳', '🗓️', '📉'];
+const seasonIcons = ['🏆', '📅', '⏳', '🗓️', '📉', '📊', '⚽', '🔥'];
 
 export default function SeasonsScreen() {
   const router = useRouter();
+  const SEASON_OPTIONS = generateSeasons();
 
-// Фоновая предзагрузка деталей недавних игр
-React.useEffect(() => {
-  const preloadRecentGamesDetails = async () => {
-    try {
-      console.log('🔍 Preloading details for recent games...');
-      const recentGames = await getPastGames(); // Получаем из кэша или API
-
-      // Ограничиваем количество (например, первые 10 игр)
-      const gamesToPreload = recentGames.slice(0, 10);
-
-      // Запускаем фоновую загрузку деталей
-      gamesToPreload.forEach((game) => {
-        getGameById(game.id).catch((err) => {
-          console.warn(`⚠️ Failed to preload details for game ${game.id}:`, err);
+  React.useEffect(() => {
+    const preloadRecentGamesDetails = async () => {
+      try {
+        const recentGames = await getPastGames();
+        const gamesToPreload = recentGames.slice(0, 10);
+        gamesToPreload.forEach((game) => {
+          getGameById(game.id).catch((err) => {
+            console.warn(`⚠️ Failed to preload details for game ${game.id}:`, err);
+          });
         });
-      });
-
-      console.log(`✅ Triggered preload for ${gamesToPreload.length} recent games`);
-    } catch (error) {
-      console.error('❌ Error during recent games preload:', error);
-      // Не показываем ошибку пользователю — это фоновая задача
-    }
-  };
-
-  preloadRecentGamesDetails();
-}, []);
+      } catch (error) {
+        console.error('❌ Error during recent games preload:', error);
+      }
+    };
+    preloadRecentGamesDetails();
+  }, []);
 
   const handleSeasonPress = (season: SeasonOption) => {
-    console.log('SeasonsScreen: Season selected:', season.id);
-    
-    // --- ИСПРАВЛЕНО: Передаем даты начала и окончания сезона ---
     const startDateString = season.start.toISOString().split('T')[0];
     const endDateString = season.end.toISOString().split('T')[0];
-    
-    
 
     router.push({
-        pathname: '/archive',
-        params: { 
-        date_from: startDateString, 
+      pathname: `/season/${season.id}`,
+      params: {
+        date_from: startDateString,
         date_to: endDateString,
-        seasonName: season.name // <-- Передаем имя сезона для отображения
-        }
+        seasonName: season.name,
+      },
     });
-  }// --- КОНЕЦ ОБНОВЛЕНИЯ ---
+  };
 
   const handleBackPress = () => {
     router.back();
@@ -131,7 +107,6 @@ React.useEffect(() => {
 
   return (
     <SafeAreaView style={commonStyles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
           <Icon name="chevron-back" size={24} color={colors.text} />
@@ -142,14 +117,7 @@ React.useEffect(() => {
         </View>
       </View>
 
-      {/* Seasons List */}
-      <ScrollView
-        style={styles.seasonsContainer}
-        showsVerticalScrollIndicator={false}
-        // refreshControl={
-        //   <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        // }
-      >
+      <ScrollView style={styles.seasonsContainer} showsVerticalScrollIndicator={false}>
         {SEASON_OPTIONS.map((season, index) => (
           <TouchableOpacity
             key={season.id}
@@ -157,38 +125,36 @@ React.useEffect(() => {
             onPress={() => handleSeasonPress(season)}
             activeOpacity={0.7}
           >
-            {/* --- ИСПРАВЛЕНО: Обернул содержимое в один корневой View --- */}
-            <View style={styles.seasonTileContentWrapper}> 
-              <View style={styles.seasonTileContent}>
-                <View style={styles.seasonIcon}>
-                  <Text style={styles.seasonIconText}>
-                    {seasonIcons[index % seasonIcons.length]}
-                  </Text>
-                </View>
-                <View style={styles.seasonInfo}>
-                  <Text style={styles.seasonName}>{season.name}</Text>
-                  <Text style={styles.seasonPeriod}>{formatSeasonPeriod(season)}</Text>
-                </View>
-                <Icon
-                  name="chevron-forward"
-                  size={20}
-                  color={colors.textSecondary}
-                  style={styles.chevronIcon}
-                />
+            <View style={styles.seasonTileContent}>
+              <View style={styles.seasonIcon}>
+                <Text style={styles.seasonIconText}>
+                  {seasonIcons[index % seasonIcons.length]}
+                </Text>
               </View>
+              <View style={styles.seasonInfo}>
+                <Text style={styles.seasonName}>{season.name}</Text>
+                <Text style={styles.seasonPeriod}>
+                  {season.id === 'recent'
+                    ? 'Последний месяц'
+                    : `${season.start.getFullYear()}-${season.end.getFullYear()}`}
+                </Text>
+              </View>
+              <Icon
+                name="chevron-forward"
+                size={20}
+                color={colors.textSecondary}
+                style={styles.chevronIcon}
+              />
             </View>
-            {/* --- КОНЕЦ ИСПРАВЛЕНИЯ --- */}
           </TouchableOpacity>
         ))}
       </ScrollView>
 
-      {/* Bottom spacing */}
       <View style={{ height: 32 }} />
     </SafeAreaView>
   );
 }
 
-// --- Стили ---
 const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
@@ -219,14 +185,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 1,
     borderColor: colors.border,
-    boxShadow: `0px 2px 8px ${colors.shadow}`,
     elevation: 2,
   },
-  // --- ИСПРАВЛЕНО: Добавлен новый стиль для обёртки ---
-  seasonTileContentWrapper: {
-    // Этот стиль может быть пустым, но он нужен для корректного JSX
-  },
-  // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
   seasonTileContent: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -258,9 +218,5 @@ const styles = StyleSheet.create({
   },
   chevronIcon: {
     marginLeft: 8,
-  },
-  listContainer: {
-    padding: 16,
-    paddingBottom: 32,
   },
 });

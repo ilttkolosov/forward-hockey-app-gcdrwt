@@ -1,5 +1,5 @@
-// app/tournaments/[id].tsx - ВЕРСИЯ 7: С кэшированием + счётчиками фильтров
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+// app/tournaments/[id].tsx
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   StyleSheet,
   TouchableOpacity,
   RefreshControl,
+  TextInput,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -17,18 +19,18 @@ import ErrorMessage from '../../components/ErrorMessage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import GameCardCompact from '../../components/GameCardCompact';
-
-// === НОВЫЕ ИМПОРТЫ ДЛЯ ИГР ===
-import { getGames, gameDetailsCache, GAME_DETAILS_CACHE_DURATION } from '../../data/gameData';
+import { getGames, gameDetailsCache } from '../../data/gameData';
 import type { Game } from '../../types';
-
-// Импортируем новую функцию
 import { fetchTournamentConfig, getCachedTournamentConfig, TournamentConfig } from '../../services/tournamentsApi';
-import { apiService } from '../../services/apiService';
 
-// Ключи для AsyncStorage
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 const TOURNAMENTS_PAST_KEY = 'tournaments_past';
+
+// Русские месяцы для поиска
+const RUSSIAN_MONTHS = [
+  'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+  'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'
+];
 
 const styles = StyleSheet.create({
   container: {
@@ -50,6 +52,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     flex: 1,
+    alignItems: 'center',
   },
   title: {
     fontSize: 20,
@@ -61,6 +64,10 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
   },
+  searchButton: {
+    padding: 8,
+    marginLeft: 8,
+  },
   content: {
     flex: 1,
   },
@@ -69,19 +76,66 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   tabContent: {
-    padding: 16,
+    flex: 1,
   },
-  label: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    marginTop: 16,
+  filtersContainer: {
+    paddingHorizontal: 16,
+    marginBottom: 16,
   },
-  value: {
+  gamesListContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 32,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-start',
+  },
+  modalContent: {
+    backgroundColor: colors.background,
+    paddingTop: 50,
+    paddingHorizontal: 16,
+    paddingBottom: 20,
+  },
+  searchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingHorizontal: 16,
+  },
+  searchTitle: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '600',
     color: colors.text,
-    marginBottom: 8,
+    flex: 1,
+  },
+  closeButton: {
+    padding: 8,
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    height: 48,
+    marginHorizontal: 16,
+    marginBottom: 16,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: colors.text,
+  },
+  clearButton: {
+    padding: 4,
+    marginLeft: 8,
   },
 });
 
@@ -89,186 +143,125 @@ export default function TournamentDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
 
-  // Состояния для турнира
+  // Состояния
   const [tournamentInfo, setTournamentInfo] = useState<any | null>(null);
   const [tournamentConfig, setTournamentConfig] = useState<TournamentConfig | null>(null);
-  const [seasonDetails, setSeasonDetails] = useState<any | null>(null);
-  const [leagueDetails, setLeagueDetails] = useState<any | null>(null);
-
-  // Состояния для игр
+  const [isPastTournament, setIsPastTournament] = useState<boolean | null>(null);
   const [tournamentGames, setTournamentGames] = useState<Game[]>([]);
   const [gamesLoading, setGamesLoading] = useState(false);
-
-  // === НОВОЕ: Счётчики фильтров ===
-  const [filterCounts, setFilterCounts] = useState({
-    current: 0,
-    upcoming: 0,
-    past: 0,
-  });
-
-  // Общие состояния
+  const [filterCounts, setFilterCounts] = useState({ current: 0, upcoming: 0, past: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState(0); // 0 — Игры, 1 — Статистика
-
-  // === НОВОЕ: Фильтр игр ===
+  const [activeTab, setActiveTab] = useState(0);
   const [gameFilter, setGameFilter] = useState<'current' | 'upcoming' | 'past'>('current');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearchModal, setShowSearchModal] = useState(false);
 
-  // === ФУНКЦИЯ ПОДСЧЁТА СЧЁТЧИКОВ ===
+  // Ref для прокрутки
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  // Подсчёт фильтров
   const calculateFilterCounts = useCallback((games: Game[]) => {
     const now = new Date();
     let current = 0, upcoming = 0, past = 0;
-
     games.forEach(game => {
       const gameDate = new Date(game.event_date);
-      // Текущие: ±3 дня
       const threeDaysAgo = new Date(now);
       threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
       const threeDaysAhead = new Date(now);
       threeDaysAhead.setDate(threeDaysAhead.getDate() + 3);
-
-      if (gameDate >= threeDaysAgo && gameDate <= threeDaysAhead) {
-        current++;
-      }
-      if (gameDate >= now) {
-        upcoming++;
-      }
-      if (gameDate < now) {
-        past++;
-      }
+      if (gameDate >= threeDaysAgo && gameDate <= threeDaysAhead) current++;
+      if (gameDate >= now) upcoming++;
+      if (gameDate < now) past++;
     });
-
     setFilterCounts({ current, upcoming, past });
   }, []);
 
-  // === ФУНКЦИИ ЗАГРУЗКИ ===
+  // Загрузка данных турнира
   const loadTournamentInfo = useCallback(async () => {
-    if (!id) {
-      console.warn('⚠️ [TournamentDetail] ID турнира не указан для loadTournamentInfo');
-      return null;
-    }
-    console.log(`🔍 [TournamentDetail] Загрузка ОСНОВНОЙ ИНФОРМАЦИИ для турнира ID: "${id}"`);
+    if (!id) return null;
     try {
       const [nowJson, pastJson] = await Promise.all([
         AsyncStorage.getItem(TOURNAMENTS_NOW_KEY),
         AsyncStorage.getItem(TOURNAMENTS_PAST_KEY),
       ]);
-      let tournaments: any[] = [];
-      if (nowJson) {
-        const parsedNow = JSON.parse(nowJson);
-        tournaments = tournaments.concat(parsedNow);
-      }
-      if (pastJson) {
-        const parsedPast = JSON.parse(pastJson);
-        tournaments = tournaments.concat(parsedPast);
-      }
-      const found = tournaments.find(t => String(t.tournament_ID) === id);
-      return found || null;
+      const nowTournaments = nowJson ? JSON.parse(nowJson) : [];
+      const pastTournaments = pastJson ? JSON.parse(pastJson) : [];
+      const isPast = pastTournaments.some((t: any) => String(t.tournament_ID) === id);
+      setIsPastTournament(isPast);
+      const allTournaments = [...nowTournaments, ...pastTournaments];
+      return allTournaments.find((t: any) => String(t.tournament_ID) === id) || null;
     } catch (err) {
-      console.error('💥 [TournamentDetail] Ошибка в loadTournamentInfo:', err);
+      console.error('💥 [TournamentDetail] Ошибка загрузки info:', err);
       return null;
     }
   }, [id]);
 
   const loadTournamentConfig = useCallback(async () => {
-    if (!id) {
-      console.warn('⚠️ [TournamentDetail] ID турнира не указан для loadTournamentConfig');
-      return null;
-    }
-    console.log(`🔍 [TournamentDetail] Загрузка КОНФИГУРАЦИИ для турнира ID: "${id}"`);
+    if (!id) return null;
     try {
       let config = await getCachedTournamentConfig(id);
-      if (!config) {
-        config = await fetchTournamentConfig(id);
-      }
+      if (!config) config = await fetchTournamentConfig(id);
       return config || null;
     } catch (err) {
-      console.error('💥 [TournamentDetail] Ошибка в loadTournamentConfig:', err);
+      console.error('💥 [TournamentDetail] Ошибка загрузки config:', err);
       return null;
     }
   }, [id]);
 
-  const loadTournamentGames = useCallback(
-    async (force = false) => {
-      if (!tournamentConfig?.league_id || !tournamentConfig?.season_id) {
-        console.warn('⚠️ [TournamentDetail] Невозможно загрузить игры: отсутствуют league_id или season_id');
-        setTournamentGames([]);
-        calculateFilterCounts([]); // ← сброс счётчиков
-        return;
-      }
-
-      const leagueIdStr = String(tournamentConfig.league_id);
-      const seasonIdStr = String(tournamentConfig.season_id);
-      console.log(`🎮 [TournamentDetail] Загрузка игр для league=${leagueIdStr}, season=${seasonIdStr}, force=${force}`);
-
-      setGamesLoading(true);
-      try {
-        const games = await getGames({
-          league: leagueIdStr,
-          season: seasonIdStr,
-          useCache: !force,
-        });
-        console.log(`✅ [TournamentDetail] Загружено ${games.length} игр для турнира`);
-
-        // === 🔥 ИСПРАВЛЕНО: импорт + правильная структура кэша ===
-        const now = Date.now();
-        games.forEach((game) => {
-          gameDetailsCache[game.id] = {
-            data: game, // ← КЛЮЧЕВОЕ: "data", а не "game"
-            timestamp: now,
-          };
-        });
-        console.log(`💾 [TournamentDetail] Все ${games.length} игр сохранены в gameDetailsCache по ID`);
-
-        setTournamentGames(games);
-        calculateFilterCounts(games); // ← ОБНОВЛЯЕМ СЧЁТЧИКИ
-      } catch (err) {
-        console.error('💥 [TournamentDetail] Ошибка загрузки игр:', err);
-        setTournamentGames([]);
-        calculateFilterCounts([]); // ← сброс при ошибке
-      } finally {
-        setGamesLoading(false);
-      }
-    },
-    [tournamentConfig, calculateFilterCounts]
-  );
+  const loadTournamentGames = useCallback(async (force = false) => {
+    if (!tournamentConfig?.league_id || !tournamentConfig?.season_id) {
+      setTournamentGames([]);
+      calculateFilterCounts([]);
+      return;
+    }
+    const leagueIdStr = String(tournamentConfig.league_id);
+    const seasonIdStr = String(tournamentConfig.season_id);
+    setGamesLoading(true);
+    try {
+      const games = await getGames({
+        league: leagueIdStr,
+        season: seasonIdStr,
+        useCache: !force,
+      });
+      const now = Date.now();
+      games.forEach(game => {
+        gameDetailsCache[game.id] = { data: game, timestamp: now };
+      });
+      setTournamentGames(games);
+      calculateFilterCounts(games);
+    } catch (err) {
+      console.error('💥 [TournamentDetail] Ошибка загрузки игр:', err);
+      setTournamentGames([]);
+      calculateFilterCounts([]);
+    } finally {
+      setGamesLoading(false);
+    }
+  }, [tournamentConfig, calculateFilterCounts]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      console.log(`🔄 [TournamentDetail] Начало основной загрузки данных для турнира ID: "${id}"`);
-
       const [info, config] = await Promise.all([
         loadTournamentInfo(),
         loadTournamentConfig(),
       ]);
-
-      if (!info) throw new Error('Основная информация о турнире не найдена');
-      if (!config) throw new Error('Конфигурация турнира (league_id, season_id) не найдена');
-
+      if (!info) throw new Error('Турнир не найден');
+      if (!config) throw new Error('Конфигурация турнира не найдена');
       setTournamentInfo(info);
       setTournamentConfig(config);
-
-      const seasonDetails = apiService.getSeasonById(String(config.season_id));
-      const leagueDetails = apiService.getLeagueById(String(config.league_id));
-      setSeasonDetails(seasonDetails);
-      setLeagueDetails(leagueDetails);
-
-      console.log(`✅ [TournamentDetail] Основные данные турнира успешно загружены`);
     } catch (err: any) {
-      console.error('💥 [TournamentDetail] Ошибка основной загрузки:', err);
       setError(err.message || 'Не удалось загрузить данные турнира');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [id, loadTournamentInfo, loadTournamentConfig]);
+  }, [loadTournamentInfo, loadTournamentConfig]);
 
   useEffect(() => {
     if (activeTab === 0 && tournamentConfig && tournamentGames.length === 0 && !gamesLoading) {
-      console.log(`탭 [TournamentDetail] Активна вкладка "Игры" — запускаем загрузку игр`);
       loadTournamentGames();
     }
   }, [activeTab, tournamentConfig, tournamentGames.length, gamesLoading, loadTournamentGames]);
@@ -290,33 +283,72 @@ export default function TournamentDetailScreen() {
     }
   };
 
-  const handleBackPress = () => {
-    router.back();
+  const handleBackPress = () => router.back();
+
+  // === ПОИСК ===
+  const filteredGames = useMemo(() => {
+    let gamesToFilter = tournamentGames;
+
+    // Применяем фильтр только если не в поиске и не прошедший турнир
+    if (!searchQuery && isPastTournament === false) {
+      const now = new Date();
+      return tournamentGames.filter(game => {
+        const gameDate = new Date(game.event_date);
+        switch (gameFilter) {
+          case 'current':
+            const threeDaysAgo = new Date(now);
+            threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+            const threeDaysAhead = new Date(now);
+            threeDaysAhead.setDate(threeDaysAhead.getDate() + 3);
+            return gameDate >= threeDaysAgo && gameDate <= threeDaysAhead;
+          case 'upcoming':
+            return gameDate >= now;
+          case 'past':
+            return gameDate < now;
+          default:
+            return true;
+        }
+      });
+    }
+
+    // Поиск по всем играм
+    if (searchQuery.trim().length < 2) return gamesToFilter;
+
+    const q = searchQuery.toLowerCase().trim();
+    return gamesToFilter.filter(game => {
+      const home = (game.homeTeam?.name || '').toLowerCase();
+      const away = (game.awayTeam?.name || '').toLowerCase();
+
+      if (home.includes(q) || away.includes(q)) return true;
+
+      // Поиск по дате: число или месяц
+      const gameDate = new Date(game.event_date);
+      const day = String(gameDate.getDate());
+      const monthName = RUSSIAN_MONTHS[gameDate.getMonth()];
+
+      if (day.includes(q) || monthName.includes(q)) return true;
+
+      return false;
+    });
+  }, [tournamentGames, gameFilter, searchQuery, isPastTournament]);
+
+  // === СМЕНА ФИЛЬТРА → ПРОКРУТКА НАВЕРХ ===
+  const handleFilterChange = (index: number) => {
+    const filter = index === 0 ? 'current' : index === 1 ? 'upcoming' : 'past';
+    setGameFilter(filter);
+    setSearchQuery(''); // сброс поиска при смене фильтра
+    scrollViewRef.current?.scrollTo({ y: 0, animated: true });
   };
 
-  // === ФИЛЬТРАЦИЯ ИГР ===
-  const filteredGames = useMemo(() => {
-    const now = new Date();
-    return tournamentGames.filter((game) => {
-      const gameDate = new Date(game.event_date);
-      switch (gameFilter) {
-        case 'current':
-          const threeDaysAgo = new Date(now);
-          threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-          const threeDaysAhead = new Date(now);
-          threeDaysAhead.setDate(threeDaysAhead.getDate() + 3);
-          return gameDate >= threeDaysAgo && gameDate <= threeDaysAhead;
-        case 'upcoming':
-          return gameDate >= now;
-        case 'past':
-          return gameDate < now;
-        default:
-          return true;
-      }
-    });
-  }, [tournamentGames, gameFilter]);
+  // === ПОИСК ===
+  const handleSearchPress = () => setShowSearchModal(true);
+  const handleCloseSearch = () => {
+    setShowSearchModal(false);
+    setSearchQuery('');
+  };
+  const handleClearSearch = () => setSearchQuery('');
 
-  // === РЕНДЕР ЗАГРУЗКИ / ОШИБКИ ===
+  // --- Рендер ---
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -333,9 +365,8 @@ export default function TournamentDetailScreen() {
     );
   }
 
-  // === ПОДГОТОВКА ДАННЫХ ДЛЯ ОТОБРАЖЕНИЯ ===
-  const tournamentName = tournamentInfo?.tournament_Name ? String(tournamentInfo.tournament_Name) : 'Турнир не найден';
-  const leagueName = tournamentInfo?.league_name ? String(tournamentInfo.league_name) : 'Все игры и статистика';
+  const tournamentName = tournamentInfo?.tournament_Name || 'Турнир не найден';
+  const leagueName = tournamentInfo?.league_name || 'Все игры и статистика';
 
   return (
     <SafeAreaView style={styles.container}>
@@ -352,6 +383,9 @@ export default function TournamentDetailScreen() {
             {leagueName}
           </Text>
         </View>
+        <TouchableOpacity onPress={handleSearchPress} style={styles.searchButton}>
+          <Icon name="search" size={24} color={colors.text} />
+        </TouchableOpacity>
       </View>
 
       {/* Основные вкладки */}
@@ -359,7 +393,7 @@ export default function TournamentDetailScreen() {
         <SegmentedControl
           values={['Игры', 'Статистика']}
           selectedIndex={activeTab}
-          onChange={(event) => setActiveTab(event.nativeEvent.selectedSegmentIndex)}
+          onChange={(e) => setActiveTab(e.nativeEvent.selectedSegmentIndex)}
           tintColor={colors.primary}
           fontStyle={{ fontSize: 14, fontWeight: '600' }}
           activeFontStyle={{ fontWeight: '700' }}
@@ -367,16 +401,12 @@ export default function TournamentDetailScreen() {
         />
       </View>
 
-      <ScrollView
-        style={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Вкладка "Игры" */}
-        {activeTab === 0 && (
-          <View style={styles.tabContent}>
-            {/* Фильтр игр с счётчиками */}
-            <View style={{ marginBottom: 16 }}>
+      {/* Содержимое вкладок */}
+      {activeTab === 0 ? (
+        <View style={styles.tabContent}>
+          {/* Фильтры — только для текущих турниров */}
+          {isPastTournament === false && (
+            <View style={styles.filtersContainer}>
               <SegmentedControl
                 values={[
                   `Текущие (${filterCounts.current})`,
@@ -387,44 +417,114 @@ export default function TournamentDetailScreen() {
                   gameFilter === 'current' ? 0 :
                   gameFilter === 'upcoming' ? 1 : 2
                 }
-                onChange={(event) => {
-                  const index = event.nativeEvent.selectedSegmentIndex;
-                  setGameFilter(index === 0 ? 'current' : index === 1 ? 'upcoming' : 'past');
-                }}
+                onChange={(e) => handleFilterChange(e.nativeEvent.selectedSegmentIndex)}
                 tintColor={colors.primary}
                 fontStyle={{ fontSize: 13, fontWeight: '500' }}
                 activeFontStyle={{ fontWeight: '700' }}
                 springEnabled={false}
               />
             </View>
+          )}
 
-            {/* Список игр */}
-            {gamesLoading ? (
-              <LoadingSpinner />
-            ) : filteredGames.length > 0 ? (
-              filteredGames.map((game) => (
-                <GameCardCompact key={game.id} game={game} showScore={true} />
-              ))
-            ) : (
-              <Text style={[commonStyles.text, { textAlign: 'center', marginTop: 24 }]}>
-                {gameFilter === 'current' && 'Нет игр за последние 3 дня и ближайшие 3 дня'}
-                {gameFilter === 'upcoming' && 'Нет предстоящих игр'}
-                {gameFilter === 'past' && 'Нет прошедших игр'}
-              </Text>
-            )}
-          </View>
-        )}
-
-        {/* Вкладка "Статистика" */}
-        {activeTab === 1 && (
-          <View style={styles.tabContent}>
+          {/* Список игр */}
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.content}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.gamesListContainer}>
+              {gamesLoading ? (
+                <LoadingSpinner />
+              ) : filteredGames.length > 0 ? (
+                filteredGames.map(game => (
+                  <GameCardCompact key={game.id} game={game} showScore={true} />
+                ))
+              ) : (
+                <Text style={[commonStyles.text, { textAlign: 'center', marginTop: 24 }]}>
+                  {searchQuery
+                    ? 'Игры не найдены'
+                    : isPastTournament
+                      ? 'Нет игр в этом турнире'
+                      : gameFilter === 'current' ? 'Нет игр за последние 3 дня и ближайшие 3 дня'
+                      : gameFilter === 'upcoming' ? 'Нет предстоящих игр'
+                      : 'Нет прошедших игр'}
+                </Text>
+              )}
+            </View>
+          </ScrollView>
+        </View>
+      ) : (
+        <ScrollView
+          style={styles.content}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={{ padding: 16 }}>
             <Text style={commonStyles.text}>📊 Вкладка "Статистика" (в разработке)</Text>
           </View>
-        )}
+        </ScrollView>
+      )}
 
-        {/* Отступ внизу */}
-        <View style={{ height: 32 }} />
-      </ScrollView>
+      {/* Модальное окно поиска */}
+      <Modal
+        visible={showSearchModal}
+        animationType="slide"
+        transparent
+        onRequestClose={handleCloseSearch}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.searchHeader}>
+              <Text style={styles.searchTitle}>Поиск игр</Text>
+              <TouchableOpacity onPress={handleCloseSearch} style={styles.closeButton}>
+                <Icon name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.searchInputContainer}>
+              <Icon name="search" size={20} color={colors.textSecondary} style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Поиск по командам или дате (от 2 символов)..."
+                placeholderTextColor={colors.textSecondary}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoFocus
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={handleClearSearch} style={styles.clearButton}>
+                  <Icon name="close" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+            <ScrollView>
+              {searchQuery.length >= 2 ? (
+                filteredGames.length > 0 ? (
+                  filteredGames.map(game => (
+                    <GameCardCompact
+                      key={game.id}
+                      game={game}
+                      showScore={true}
+                      onPress={() => {
+                        router.push(`/game/${game.id}`);
+                        setShowSearchModal(false);
+                      }}
+                    />
+                  ))
+                ) : (
+                  <View style={{ padding: 16 }}>
+                    <Text style={[commonStyles.text, { textAlign: 'center' }]}>
+                      Игры не найдены
+                    </Text>
+                  </View>
+                )
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

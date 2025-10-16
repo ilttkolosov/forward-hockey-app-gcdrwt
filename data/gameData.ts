@@ -482,7 +482,8 @@ const getFallbackUpcomingGames = (): Game[] => {
 
 // --- КОНЕЦ ВСПОМОГАТЕЛЬНЫХ ФУНКЦИЙ ---
 
-
+// Глобальный Map для дедупликации запросов
+const ongoingRequests = new Map<string, Promise<Game[]>>();
 // --- Экспортируемые функции ---
 
 /**
@@ -499,85 +500,88 @@ export async function getGames(params: {
   league?: string;
   season?: string;
   teams?: string;
-  useCache?: boolean; // <-- НОВЫЙ ПАРАМЕТР
-  f2f?: boolean; // <-- НОВЫЙ НЕОБЯЗАТЕЛЬНЫЙ ПАРАМЕТР
-  }): Promise<Game[]> {
-  try {
-    console.log('Data/gameData: Getting games with params:', params);
+  useCache?: boolean;
+  f2f?: boolean;
+}): Promise<Game[]> {
+  const cacheKey = JSON.stringify(params);
+  const now = Date.now();
 
-    // --- ДОБАВЛЕНО: Генерация ключа кэша ---
-    const cacheKey = JSON.stringify(params);
-    const now = Date.now();
-
-    // Проверяем кэш, если useCache !== false
-    if (params.useCache !== false) {
-      const cachedEntry = gamesCache[cacheKey];
-      if (cachedEntry && (now - cachedEntry.timestamp) < GAMES_CACHE_DURATION) {
-        console.log('✅ Returning games from memory cache for key:', cacheKey);
-        return cachedEntry.data;
-      }
+  // 1. Проверяем кэш, если useCache !== false
+  if (params.useCache !== false) {
+    const cachedEntry = gamesCache[cacheKey];
+    if (cachedEntry && now - cachedEntry.timestamp < GAMES_CACHE_DURATION) {
+      console.log('✅ Returning games from memory cache for key:', cacheKey);
+      return cachedEntry.data;
     }
-    // --- КОНЕЦ ДОБАВЛЕНИЯ ---
-
-    // Проверяем, загружены ли справочные данные
-    await loadLeagues();
-    await loadSeasons();
-    await loadVenues();
-    await loadTeams(); // Загружаем команды для логотипов
-
-    // --- ИСПОЛЬЗУЕМ НОВЫЙ API ---
-      // --- ПОДГОТОВКА ПАРАМЕТРОВ ДЛЯ API ---
-    const apiParams: Record<string, string> = {};
-
-    // Копируем все параметры, кроме 'teams'
-    for (const key in params) {
-      if (key !== 'teams' && params[key as keyof typeof params]) {
-        apiParams[key] = String(params[key as keyof typeof params]);
-      }
-    }
-
-    // Обрабатываем 'teams' с учётом f2f-режима
-    if (params.teams) {
-      let teamList = params.teams
-        .split(/[,| ]+/) // разделяем по запятой, | или пробелам
-        .filter(id => id.trim() !== '');
-      
-      // Если f2f=true — используем '|', иначе — ','
-      const separator = params.f2f ? '|' : ',';
-      apiParams.teams = teamList.join(separator);
-    }
-
-    const response = await apiService.fetchEvents(apiParams);
-    // --- КОНЕЦ ИСПОЛЬЗОВАНИЯ НОВОГО API ---
-
-    const apiEvents = response.data;
-
-    const games: Game[] = [];
-    for (const apiEvent of apiEvents) {
-      const game = await convertApiEventToGame(apiEvent);
-      games.push(game);
-    }
-
-    // Сортируем игры по приоритету: live -> сегодня -> скоро -> по дате
-    const sortedGames = sortUpcomingGames(games);
-    console.log(`Data/gameData: Loaded ${sortedGames.length} games with params:`, params);
-
-    // --- ДОБАВЛЕНО: Сохраняем в кэш, если useCache !== false ---
-    if (params.useCache !== false) {
-      gamesCache[cacheKey] = {
-        data: sortedGames,
-        timestamp: now,
-      };
-      console.log('💾 Games saved to memory cache for key:', cacheKey);
-    }
-    // --- КОНЕЦ ДОБАВЛЕНИЯ ---
-
-    return sortedGames;
-  } catch (error) {
-    console.error('Data/gameData: Error getting games:', error);
-    // Возврат фолбэка в случае ошибки
-    return getFallbackUpcomingGames();
   }
+
+  // 2. Проверяем, не идёт ли уже такой запрос
+  if (ongoingRequests.has(cacheKey)) {
+    console.log('⏳ Waiting for ongoing request for key:', cacheKey);
+    return await ongoingRequests.get(cacheKey)!;
+  }
+
+  // 3. Создаём новый запрос
+  const requestPromise = (async (): Promise<Game[]> => {
+    try {
+      // Загружаем справочники
+      await loadLeagues();
+      await loadSeasons();
+      await loadVenues();
+      await loadTeams();
+
+      // Формируем параметры для API
+      const apiParams: Record<string, string> = {};
+      for (const key in params) {
+        if (key !== 'teams' && params[key as keyof typeof params]) {
+          apiParams[key] = String(params[key as keyof typeof params]);
+        }
+      }
+      if (params.teams) {
+        const teamList = params.teams
+          .split(/[,| ]+/)
+          .filter(id => id.trim() !== '');
+        const separator = params.f2f ? '|' : ',';
+        apiParams.teams = teamList.join(separator);
+      }
+
+      // Запрос к API
+      const response = await apiService.fetchEvents(apiParams);
+      const apiEvents = response.data;
+
+      // Преобразуем в Game[]
+      const games: Game[] = [];
+      for (const apiEvent of apiEvents) {
+        const game = await convertApiEventToGame(apiEvent);
+        games.push(game);
+      }
+
+      const sortedGames = sortUpcomingGames(games);
+      console.log(`✅ Loaded ${sortedGames.length} games with params:`, params);
+
+      // Сохраняем в кэш, если разрешено
+      if (params.useCache !== false) {
+        gamesCache[cacheKey] = {
+          data: sortedGames,
+          timestamp: now,
+        };
+        console.log('💾 Saved to memory cache for key:', cacheKey);
+      }
+
+      return sortedGames;
+    } catch (error) {
+      console.error('❌ Error in getGames:', error);
+      return getFallbackUpcomingGames();
+    } finally {
+      // Удаляем промис из ongoingRequests
+      ongoingRequests.delete(cacheKey);
+    }
+  })();
+
+  // Сохраняем промис в ongoingRequests
+  ongoingRequests.set(cacheKey, requestPromise);
+
+  return await requestPromise;
 }
 
 /**

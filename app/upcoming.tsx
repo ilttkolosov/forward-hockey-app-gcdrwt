@@ -86,9 +86,9 @@ export default function UpcomingGamesScreen() {
             </View>
           </TouchableOpacity>
           <View>
-            <Text style={commonStyles.title}>Предстоящие игры ({gamesCount})</Text>
+            <Text style={commonStyles.title}>Предстоящие игры</Text>
             <Text style={commonStyles.textSecondary}>
-              {gamesCount > 0 ? `${gamesCount} игр запланировано` : 'Нет запланированных игр'}
+              {gamesCount > 0 ? `Всего ${gamesCount} игр запланировано` : 'Нет запланированных игр'}
             </Text>
           </View>
         </View>

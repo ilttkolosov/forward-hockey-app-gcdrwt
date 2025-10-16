@@ -1,6 +1,12 @@
 // app/mobilegames/index.tsx
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors, commonStyles } from '../../styles/commonStyles';
@@ -14,10 +20,22 @@ const games = [
 export default function MobileGamesScreen() {
   const router = useRouter();
 
+  const handleBackPress = () => {
+    router.back();
+  };
+
   return (
     <SafeAreaView style={commonStyles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
+          <Icon name="chevron-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={commonStyles.title}>🎮 Мини-игры</Text>
+      </View>
+
+      {/* Content */}
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>🎮 Мини-игры</Text>
         {games.map((game) => (
           <TouchableOpacity
             key={game.id}
@@ -41,15 +59,22 @@ export default function MobileGamesScreen() {
 }
 
 const styles = StyleSheet.create({
-  content: {
-    padding: 16,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    marginBottom: 16,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.text,
-    marginBottom: 24,
-    textAlign: 'center',
+  backButton: {
+    marginRight: 16,
+    padding: 4,
+  },
+  content: {
+    paddingHorizontal: 16,
   },
   gameCard: {
     flexDirection: 'row',

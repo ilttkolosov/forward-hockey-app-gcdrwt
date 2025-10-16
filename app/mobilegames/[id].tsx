@@ -25,11 +25,12 @@ const { width } = Dimensions.get('window');
 
 // Конфигурация уровней: [столбцы, строки]
 const LEVEL_CONFIG = [
-  [3, 4], // Уровень 1 → 4 столбца, 3 строки = 12 карточек
-  [3, 7], // Уровень 2 → 7×3 = 21
-  [4, 6], // Уровень 3 → 6×4 = 24
-  [4, 8], // Уровень 4 → 8×4 = 32
-  [5, 8], // Уровень 5 → 8×5 = 40
+  [3, 4], // Уровень 1 → 3 столбца, 4 строки = 12 карточек
+  [3, 6], // Уровень 2 → 3×6 = 18
+  [4, 7], // Уровень 3 → 4×7 = 28
+  [4, 8], // Уровень 4 → 4×8 = 32
+  [5, 8], // Уровень 5 → 5×8 = 40
+  [6, 10], // Уровень 6 → 6×10 = 60
 ];
 
 const RECORDS_KEY = 'memory_game_records';
@@ -40,7 +41,14 @@ export default function MemoryGameScreen() {
   const insets = useSafeAreaInsets();
 
   const [players, setPlayers] = useState<Player[]>([]);
-  const [cards, setCards] = useState<{ id: string; playerId: string; isFlipped: boolean; isMatched: boolean }[]>([]);
+  const [cards, setCards] = useState<{
+    id: string;
+    playerId: string;
+    isFlipped: boolean;
+    isMatched: boolean;
+    showInfo?: boolean;
+    infoText?: string;
+  }[]>([]);
   const [flippedCards, setFlippedCards] = useState<string[]>([]);
   const [moves, setMoves] = useState(0);
   const [gameCompleted, setGameCompleted] = useState(false);
@@ -48,44 +56,80 @@ export default function MemoryGameScreen() {
   const [currentLevel, setCurrentLevel] = useState(0);
   const [timer, setTimer] = useState(0);
   const [pairsFound, setPairsFound] = useState(0);
-  const [records, setRecords] = useState<Record<string, number>>({});
+  const [records, setRecords] = useState<Record<string, { moves: number; time: number }>>({});
   const [showRecordsModal, setShowRecordsModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const shakeAnimationsRef = useRef<Animated.Value[]>([]);
+  const blinkAnimationsRef = useRef<Animated.Value[]>([]);
 
-  // === Инициализация анимаций ПОСЛЕ загрузки cards ===
   useEffect(() => {
-    // Создаём новый массив анимаций, соответствующий текущему количеству карточек
-    shakeAnimationsRef.current = cards.map(() => new Animated.Value(0));
+    blinkAnimationsRef.current = cards.map(() => new Animated.Value(1));
   }, [cards]);
 
-  // Загрузка рекордов
   const loadRecords = useCallback(async () => {
     try {
       const data = await AsyncStorage.getItem(RECORDS_KEY);
-      if (data) {
-        setRecords(JSON.parse(data));
-      }
+      if (data) setRecords(JSON.parse(data));
     } catch (err) {
       console.error('Не удалось загрузить рекорды:', err);
     }
   }, []);
 
-  // Сохранение рекорда
-  const saveRecord = useCallback(async (level: number, time: number) => {
+  const saveRecord = useCallback(async (level: number, moves: number, time: number) => {
     const levelKey = `level_${level + 1}`;
-    const newRecords = { ...records, [levelKey]: time };
-    setRecords(newRecords);
-    try {
+    const currentRecord = records[levelKey];
+    const isNewRecord = !currentRecord || 
+      (moves < currentRecord.moves) || 
+      (moves === currentRecord.moves && time < currentRecord.time);
+    
+    if (isNewRecord) {
+      const newRecords = { ...records, [levelKey]: { moves, time } };
+      setRecords(newRecords);
       await AsyncStorage.setItem(RECORDS_KEY, JSON.stringify(newRecords));
-    } catch (err) {
-      console.error('Не удалось сохранить рекорд:', err);
     }
   }, [records]);
 
-  // Инициализация уровня
+  const clearRecords = useCallback(async () => {
+    Alert.alert(
+      'Сброс рекордов',
+      'Вы уверены, что хотите сбросить свои рекорды?',
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Сбросить',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await AsyncStorage.removeItem(RECORDS_KEY);
+              setRecords({});
+              setShowRecordsModal(false);
+              Alert.alert('Рекорды сброшены', 'Все рекорды удалены.');
+            } catch (err) {
+              console.error('Ошибка сброса рекордов:', err);
+            }
+          },
+        },
+      ]
+    );
+  }, []);
+
+  const formatNameForInfo = (fullName: string | undefined): string => {
+    if (!fullName) return 'Игрок';
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      const lastName = parts[0];
+      const firstName = parts[1];
+      return `${firstName} ${lastName}`;
+    }
+    return parts[0] || 'Игрок';
+  };
+
+  const selectRandomPlayers = (allPlayers: Player[], count: number): Player[] => {
+    const shuffled = [...allPlayers].sort(() => 0.5 - Math.random());
+    return shuffled.slice(0, count);
+  };
+
   const initLevel = useCallback(async (levelIndex: number) => {
     if (timerRef.current) clearInterval(timerRef.current);
     setTimer(0);
@@ -109,7 +153,7 @@ export default function MemoryGameScreen() {
         return;
       }
 
-      const selectedPlayers = playersWithPhoto.slice(0, neededPlayers);
+      const selectedPlayers = selectRandomPlayers(playersWithPhoto, neededPlayers);
       const pairs = selectedPlayers.flatMap(p => [p.id, p.id]);
       const shuffled = [...pairs].sort(() => Math.random() - 0.5).slice(0, totalCards);
       const initialCards = shuffled.map((playerId, index) => ({
@@ -117,6 +161,7 @@ export default function MemoryGameScreen() {
         playerId,
         isFlipped: false,
         isMatched: false,
+        showInfo: false,
       }));
 
       setCards(initialCards);
@@ -133,18 +178,11 @@ export default function MemoryGameScreen() {
   const completeLevel = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     setGameCompleted(true);
-
-    const levelKey = `level_${currentLevel + 1}`;
-    const isNewRecord = !records[levelKey] || timer < records[levelKey];
-    if (isNewRecord) {
-      const newRecords = { ...records, [levelKey]: timer };
-      setRecords(newRecords);
-      AsyncStorage.setItem(RECORDS_KEY, JSON.stringify(newRecords));
-    }
+    saveRecord(currentLevel, moves, timer);
 
     Alert.alert(
       'Победа!',
-      `Уровень ${currentLevel + 1} завершён!\nВремя: ${timer} сек\nХоды: ${moves}\n${isNewRecord ? '🏆 Новый рекорд!' : ''}`,
+      `Уровень ${currentLevel + 1} завершён!\nВремя: ${timer} сек\nХоды: ${moves}`,
       [
         { text: 'Следующий уровень', onPress: () => {
           if (currentLevel < LEVEL_CONFIG.length - 1) {
@@ -156,7 +194,7 @@ export default function MemoryGameScreen() {
         { text: 'Новая игра', onPress: () => initLevel(0) },
       ]
     );
-  }, [currentLevel, timer, moves, records, initLevel]);
+  }, [currentLevel, timer, moves, saveRecord, initLevel]);
 
   const handleCardPress = (cardId: string) => {
     if (gameCompleted || isProcessing) return;
@@ -176,38 +214,65 @@ export default function MemoryGameScreen() {
       const secondCard = newCards.find(c => c.id === secondId)!;
 
       if (firstCard.playerId === secondCard.playerId) {
-        // === АНИМАЦИЯ ПОДРАГИВАНИЯ ===
-        const firstAnim = shakeAnimationsRef.current.find((_, idx) => cards[idx].id === firstId) || new Animated.Value(0);
-        const secondAnim = shakeAnimationsRef.current.find((_, idx) => cards[idx].id === secondId) || new Animated.Value(0);
+        // === ОСТАНОВКА ТАЙМЕРА ===
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
 
-        const shake1 = Animated.sequence([
-          Animated.timing(firstAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
-          Animated.timing(firstAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
-          Animated.timing(firstAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
-          Animated.timing(firstAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
-          Animated.timing(firstAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
-        ]);
-        const shake2 = Animated.sequence([
-          Animated.timing(secondAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
-          Animated.timing(secondAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
-          Animated.timing(secondAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
-          Animated.timing(secondAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
-          Animated.timing(secondAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
+        // === МИГАНИЕ ФОТО ===
+        const firstBlink = blinkAnimationsRef.current.find((_, idx) => cards[idx].id === firstId) || new Animated.Value(1);
+        const secondBlink = blinkAnimationsRef.current.find((_, idx) => cards[idx].id === secondId) || new Animated.Value(1);
+
+        const blink = (anim: Animated.Value) => Animated.sequence([
+          Animated.timing(anim, { toValue: 0, duration: 150, useNativeDriver: true }),
+          Animated.timing(anim, { toValue: 1, duration: 150, useNativeDriver: true }),
+          Animated.timing(anim, { toValue: 0, duration: 150, useNativeDriver: true }),
+          Animated.timing(anim, { toValue: 1, duration: 150, useNativeDriver: true }),
         ]);
 
-        Animated.parallel([shake1, shake2]).start(() => {
-          const updatedCards = newCards.map(c =>
-            c.id === firstId || c.id === secondId ? { ...c, isMatched: true } : c
-          );
-          setCards(updatedCards);
-          setFlippedCards([]);
-          setPairsFound(p => p + 1);
-          setIsProcessing(false);
+        Animated.parallel([blink(firstBlink), blink(secondBlink)]).start(() => {
+          // === ПОДГОТОВКА ТЕКСТА ===
+          const player1 = players.find(p => p.id === firstCard.playerId);
+          const player2 = players.find(p => p.id === secondCard.playerId);
+          const name1 = formatNameForInfo(player1?.name);
+          const name2 = formatNameForInfo(player2?.name);
+          const number1 = player1?.number ?? 0;
+          const number2 = player2?.number ?? 0;
 
-          const unmatched = updatedCards.filter(c => !c.isMatched);
-          if (unmatched.length === 0) completeLevel();
+          // === ПОКАЗЫВАЕМ ТЕКСТ 2 СЕКУНДЫ ===
+          const infoCards = newCards.map(c => {
+            if (c.id === firstId) {
+              return { ...c, showInfo: true, infoText: `${name1}, #${number1}` };
+            }
+            if (c.id === secondId) {
+              return { ...c, showInfo: true, infoText: `${name2}, #${number2}` };
+            }
+            return c;
+          });
+          setCards(infoCards);
+
+          setTimeout(() => {
+            // === ПОЛНОЕ УДАЛЕНИЕ КАРТОЧЕК БЕЗ ВОЗВРАТА К ФОТО ===
+            const finalCards = infoCards.map(c =>
+              c.id === firstId || c.id === secondId ? { ...c, isMatched: true, showInfo: false, isFlipped: false } : c
+            );
+            setCards(finalCards);
+            setFlippedCards([]);
+            setPairsFound(p => p + 1);
+            setIsProcessing(false);
+
+            const unmatched = finalCards.filter(c => !c.isMatched);
+            if (unmatched.length === 0) {
+              completeLevel();
+            } else {
+              // === ВОЗОБНОВЛЕНИЕ ТАЙМЕРА ===
+              timerRef.current = setInterval(() => setTimer(prev => prev + 1), 1000);
+            }
+          }, 650);
         });
       } else {
+        // === НЕТ ДРОЖАНИЯ — ЖДЁМ 1.5 СЕК ===
         setTimeout(() => {
           const resetCards = newCards.map(c =>
             c.id === firstId || c.id === secondId ? { ...c, isFlipped: false } : c
@@ -215,7 +280,7 @@ export default function MemoryGameScreen() {
           setCards(resetCards);
           setFlippedCards([]);
           setIsProcessing(false);
-        }, 1500);
+        }, 900);
       }
     } else {
       setFlippedCards(newFlipped);
@@ -231,9 +296,7 @@ export default function MemoryGameScreen() {
 
   useEffect(() => {
     if (id === '1') {
-      AsyncStorage.getItem(RECORDS_KEY).then(data => {
-        if (data) setRecords(JSON.parse(data));
-      });
+      loadRecords();
       initLevel(0);
     } else {
       Alert.alert('Игра не найдена');
@@ -242,9 +305,9 @@ export default function MemoryGameScreen() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [id, initLevel, router]);
+  }, [id, initLevel, loadRecords, router]);
 
-  // === РАСЧЁТ РАЗМЕРА ===
+  // Расчёт размера карточки
   const calculateCardSize = () => {
     const { height } = Dimensions.get('window');
     const headerHeight = 60;
@@ -252,16 +315,17 @@ export default function MemoryGameScreen() {
     const safeAreaPadding = insets.top + insets.bottom;
     const padding = 32;
     const availableHeight = height - headerHeight - footerHeight - safeAreaPadding - padding;
+
     const [cols, rows] = LEVEL_CONFIG[currentLevel];
     const gapX = 8;
     const cardSizeByWidth = (width - 32 - (cols - 1) * gapX) / cols;
     const gapY = 8;
     const cardSizeByHeight = (availableHeight - (rows - 1) * gapY) / rows;
+
     return Math.min(cardSizeByWidth, cardSizeByHeight, 120);
   };
 
   const cardSize = calculateCardSize();
-  const [cols, rows] = LEVEL_CONFIG[currentLevel];
 
   return (
     <SafeAreaView style={commonStyles.container}>
@@ -277,33 +341,33 @@ export default function MemoryGameScreen() {
         </View>
       </View>
 
-      {/* Игровое поле */}
+      {/* Игровое поле — ВСЕ КАРТОЧКИ, включая isMatched */}
       <ScrollView contentContainerStyle={styles.board} showsVerticalScrollIndicator={false}>
         {cards.map((card, index) => {
           const player = getPlayerById(card.playerId);
-          const translateX = shakeAnimationsRef.current[index] || new Animated.Value(0);
+          const opacity = blinkAnimationsRef.current[index] || new Animated.Value(1);
           return (
             <Animated.View
               key={card.id}
               style={[
                 styles.cardWrapper,
                 { width: cardSize, height: cardSize },
-                { transform: [{ translateX }] },
+                { opacity: card.isMatched ? 0 : 1 },
               ]}
             >
               <TouchableOpacity
-                style={[styles.card, { opacity: card.isMatched ? 0 : 1 }]}
+                style={styles.card}
                 onPress={() => handleCardPress(card.id)}
                 disabled={card.isFlipped || card.isMatched || isProcessing}
                 activeOpacity={0.7}
               >
-                {card.isFlipped ? (
+                {card.showInfo ? (
+                  <View style={styles.infoOverlay}>
+                    <Text style={styles.infoText}>{card.infoText}</Text>
+                  </View>
+                ) : card.isFlipped ? (
                   player?.photoPath ? (
-                    <Image
-                      source={{ uri: player.photoPath }}
-                      style={styles.cardImage}
-                      contentFit="cover" // ← исправлено
-                    />
+                    <Image source={{ uri: player.photoPath }} style={styles.cardImage} contentFit="cover" />
                   ) : (
                     <View style={styles.placeholder}>
                       <Text style={styles.placeholderText}>
@@ -313,7 +377,7 @@ export default function MemoryGameScreen() {
                   )
                 ) : (
                   <View style={styles.cardBack}>
-                    <Icon name="hockey-sticks" type='material-community' size={32} color={colors.card} />
+                    <Icon name="hockey-sticks" type="material-community" size={32} color={colors.card} />
                   </View>
                 )}
               </TouchableOpacity>
@@ -350,16 +414,24 @@ export default function MemoryGameScreen() {
             <ScrollView>
               {LEVEL_CONFIG.map((_, idx) => {
                 const key = `level_${idx + 1}`;
+                const record = records[key];
                 return (
                   <View key={key} style={styles.recordRow}>
                     <Text style={styles.recordLabel}>Уровень {idx + 1}</Text>
-                    <Text style={styles.recordValue}>
-                      {records[key] ? `${records[key]} сек` : '—'}
-                    </Text>
+                    <View style={styles.recordValues}>
+                      <Text style={styles.recordValue}>{record ? `${record.moves} ходов` : '—'}</Text>
+                      <Text style={styles.recordValue}>{record ? `${record.time} сек` : ''}</Text>
+                    </View>
                   </View>
                 );
               })}
             </ScrollView>
+            <TouchableOpacity
+              style={[styles.closeModalButton, { backgroundColor: colors.error }]}
+              onPress={clearRecords}
+            >
+              <Text style={[styles.closeModalText, { color: colors.background }]}>Сбросить рекорды</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={styles.closeModalButton}
               onPress={() => setShowRecordsModal(false)}
@@ -372,7 +444,6 @@ export default function MemoryGameScreen() {
     </SafeAreaView>
   );
 }
-
 
 const styles = StyleSheet.create({
   header: {
@@ -419,10 +490,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
   },
-  cardImage: {
-    width: '100%',
-    height: '100%',
-  },
+  cardImage: { width: '100%', height: '100%' },
   placeholder: {
     width: '100%',
     height: '100%',
@@ -441,6 +509,19 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  infoOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    padding: 8,
+  },
+  infoText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+    textAlign: 'center',
   },
   footer: {
     padding: 16,
@@ -491,9 +572,10 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   recordLabel: { fontSize: 16, color: colors.text },
-  recordValue: { fontSize: 16, color: colors.primary, fontWeight: '600' },
+  recordValues: { alignItems: 'flex-end' },
+  recordValue: { fontSize: 14, color: colors.primary, fontWeight: '600' },
   closeModalButton: {
-    marginTop: 16,
+    marginTop: 12,
     backgroundColor: colors.surface,
     paddingVertical: 12,
     borderRadius: 12,

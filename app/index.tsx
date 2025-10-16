@@ -1,4 +1,4 @@
-
+// app/index.tsx
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -7,8 +7,6 @@ import {
   TouchableOpacity,
   ScrollView,
   RefreshControl,
-  Alert,
-  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
@@ -20,6 +18,10 @@ import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import Icon from '../components/Icon';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getDeclension } from './tournaments/index'; // ← импортируем склонение
+
+const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 
 const quickNavStyles = {
   container: {
@@ -80,70 +82,36 @@ const headerStyles = StyleSheet.create({
   },
 });
 
-// Helper function to determine game status with new badge logic
-const getGameStatus = (game: Game) => {
-  const now = new Date();
-  const gameDate = new Date(game.event_date);
-  
-  // Check if game is today
-  const isToday = gameDate.toDateString() === now.toDateString();
-  
-  // Check if game is within next 3 days
-  const daysDiff = Math.ceil((gameDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-  const isWithin3Days = daysDiff >= 0 && daysDiff <= 3;
-  
-  // Check if game is live (5 minutes before to 90 minutes after)
-  const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000);   // –5 мин
-  const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000);   // +90 мин
-  const isLive = now >= liveStart && now <= liveEnd;
-  
-  return { isToday, isWithin3Days, isLive };
-};
-
-// Helper function to sort upcoming games with new priority logic
-const sortUpcomingGames = (games: Game[]): Game[] => {
-  return [...games].sort((a, b) => {
-    const statusA = getGameStatus(a);
-    const statusB = getGameStatus(b);
-    
-    // LIVE games first
-    if (statusA.isLive && !statusB.isLive) return -1;
-    if (!statusA.isLive && statusB.isLive) return 1;
-    
-    // Today games second (but not LIVE)
-    if (statusA.isToday && !statusA.isLive && !statusB.isToday) return -1;
-    if (!statusA.isToday && statusB.isToday && !statusB.isLive) return 1;
-    
-    // Within 3 days games third
-    if (statusA.isWithin3Days && !statusB.isWithin3Days) return -1;
-    if (!statusA.isWithin3Days && statusB.isWithin3Days) return 1;
-    
-    // Rest by date
-    return new Date(a.event_date).getTime() - new Date(b.event_date).getTime();
-  });
-};
-
 export default function HomeScreen() {
   const [currentGame, setCurrentGame] = useState<Game | null>(null);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
   const [upcomingCount, setUpcomingCount] = useState<number>(0);
   const [playersCount, setPlayersCount] = useState<number>(0);
+  const [tournamentsCount, setTournamentsCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  const loadTournamentsCount = useCallback(async () => {
+    try {
+      const json = await AsyncStorage.getItem(TOURNAMENTS_NOW_KEY);
+      const list = json ? JSON.parse(json) : [];
+      setTournamentsCount(list.length);
+    } catch (err) {
+      console.warn('Failed to load tournaments count');
+      setTournamentsCount(0);
+    }
+  }, []);
 
   const loadData = useCallback(async (force = false) => {
     try {
       setError(null);
-      setLoading(true);
-
-      console.log('Loading home screen data...', { force });
+      if (!force) setLoading(true);
 
       const [current, upcoming, upcomingCount, players] = await Promise.all([
         getCurrentGame(force),
         getFutureGames(force),
-        getUpcomingGamesCount(), // она использует мастер-кэш → будет свежей
+        getUpcomingGamesCount(),
         getPlayers(),
       ]);
 
@@ -151,51 +119,29 @@ export default function HomeScreen() {
       setUpcomingGames(upcoming);
       setUpcomingCount(upcomingCount);
       setPlayersCount(players.length);
-
-      // === ФОНОВОЕ ОБНОВЛЕНИЕ ДЕТАЛЕЙ ВСЕХ ИГР ПРИ force ===
-/*       if (force) {
-        const allGameIds = [
-          ...(current ? [current.id] : []),
-          ...upcoming.map(g => g.id),
-        ];
-        console.log('Force-refresh: Preloading details for games:', allGameIds);
-        allGameIds.forEach(id => {
-          // useCache = false → игнорировать кэш, запросить с API
-          getGameById(id, false).catch(err => {
-            console.warn(`Background update of game ${id} details failed:`, err);
-          });
-        });
-      } else {
-        // Только для текущей игры — как раньше
-        if (current) {
-          getGameById(current.id).catch(console.warn);
-        }
-      } */
     } catch (err) {
       console.error('Error loading home screen data:', err);
       setError('Не удалось загрузить данные. Попробуйте еще раз.');
     } finally {
-      setLoading(false);
+      if (!force) setLoading(false);
       setRefreshing(false);
     }
   }, []);
-  // --- КОНЕЦ ОБНОВЛЕНИЯ ---
 
-useEffect(() => {
-  // Загружаем только если ещё не загружено
-  if (currentGame === null && upcomingGames.length === 0) {
+  useEffect(() => {
     loadData();
-  }
-}, [loadData, currentGame, upcomingGames.length]);
+    loadTournamentsCount();
+  }, [loadData, loadTournamentsCount]);
 
   const onRefresh = () => {
     setRefreshing(true);
-    loadData(true); // <-- принудительная перезагрузка
+    loadData(true);
+    loadTournamentsCount();
   };
 
   if (loading) {
     return (
-      <SafeAreaView style={commonStyles.container}>
+      <SafeAreaView edges={['top']} style={commonStyles.container}>
         <LoadingSpinner />
       </SafeAreaView>
     );
@@ -203,19 +149,18 @@ useEffect(() => {
 
   if (error) {
     return (
-      <SafeAreaView style={commonStyles.container}>
+      <SafeAreaView edges={['top']} style={commonStyles.container}>
         <ErrorMessage message={error} onRetry={loadData} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={commonStyles.container}>
+    <SafeAreaView edges={['top']} style={commonStyles.container}>
       <ScrollView
         style={commonStyles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
+        contentContainerStyle={{ paddingBottom: 32 }} // ← отступ снизу внутри ScrollView
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
@@ -236,54 +181,40 @@ useEffect(() => {
           </View>
         )}
 
-        {/* Quick Navigation */}
+        {/* Quick Navigation — НОВЫЙ ПОРЯДОК */}
         <View style={quickNavStyles.container}>
-          <Link href="/mobilegames" asChild>
+          {/* Турниры */}
+          <Link href="tournaments" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
-              <Icon 
-                name="game-controller" 
-                size={24} 
-                color={colors.primary} 
-                style={quickNavStyles.icon} 
-              />
-              <Text style={quickNavStyles.title}>Мобильные игры</Text>
+              <Icon name="trophy" size={24} color={colors.primary} style={quickNavStyles.icon} />
+              <Text style={quickNavStyles.title}>Турниры</Text>
+              <Text style={quickNavStyles.subtitle}>
+                {getDeclension(tournamentsCount, ['текущий', 'текущих', 'текущих'])}
+              </Text>
             </TouchableOpacity>
           </Link>
 
+          {/* Архив игр */}
           <Link href="season" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
-              <Icon 
-                name="archive" 
-                size={24} 
-                color={colors.primary} 
-                style={quickNavStyles.icon} 
-              />
+              <Icon name="archive" size={24} color={colors.primary} style={quickNavStyles.icon} />
               <Text style={quickNavStyles.title}>Архив игр</Text>
               <Text style={quickNavStyles.subtitle}>История матчей</Text>
             </TouchableOpacity>
           </Link>
 
-          <Link href="tournaments" asChild>
+          {/* Мобильные игры */}
+          <Link href="/mobilegames" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
-              <Icon 
-                name="trophy" 
-                size={24} 
-                color={colors.primary} 
-                style={quickNavStyles.icon} 
-              />
-              <Text style={quickNavStyles.title}>Турниры</Text>
-              <Text style={quickNavStyles.subtitle}>Соревнования</Text>
+              <Icon name="game-controller" size={24} color={colors.primary} style={quickNavStyles.icon} />
+              <Text style={quickNavStyles.title}>Мобильные игры</Text>
             </TouchableOpacity>
           </Link>
 
+          {/* Игроки */}
           <Link href="/players" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
-              <Icon 
-                name="people" 
-                size={24} 
-                color={colors.primary} 
-                style={quickNavStyles.icon} 
-              />
+              <Icon name="people" size={24} color={colors.primary} style={quickNavStyles.icon} />
               <Text style={quickNavStyles.title}>Игроки</Text>
               <Text style={quickNavStyles.subtitle}>
                 {playersCount > 0 ? `${playersCount} игроков` : 'Состав команды'}
@@ -295,31 +226,19 @@ useEffect(() => {
         {/* Upcoming Games */}
         {upcomingGames.length > 0 && (
           <View style={{ marginBottom: 24 }}>
-            <View style={{ 
-              flexDirection: 'row', 
-              justifyContent: 'space-between', 
-              alignItems: 'center',
-              marginBottom: 12 
-            }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <Text style={commonStyles.subtitle}>Ближайшие игры</Text>
               <Link href="/upcoming" asChild>
                 <TouchableOpacity>
-                  <Text style={[commonStyles.textSecondary, { fontSize: 14 }]}>
-                    Все игры
-                  </Text>
+                  <Text style={[commonStyles.textSecondary, { fontSize: 14 }]}>Все игры</Text>
                 </TouchableOpacity>
               </Link>
             </View>
-            
             {upcomingGames.slice(0, 3).map((game) => (
               <GameCard key={game.id} game={game} showScore={false} />
             ))}
           </View>
         )}
-
-
-        {/* Bottom spacing */}
-        <View style={{ height: 32 }} />
       </ScrollView>
     </SafeAreaView>
   );
