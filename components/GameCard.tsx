@@ -10,6 +10,7 @@ import {
 import { Game } from '../types';
 import { colors, commonStyles } from '../styles/commonStyles';
 import { useRouter } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons'; // ← ДОБАВЛЕНО
 
 interface GameCardProps {
   game: Game;
@@ -60,7 +61,7 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
     tournament,
     homeScore,
     awayScore,
-    sp_video,
+    sp_video, // ← поле видео
     homeOutcome,
     awayOutcome,
     event_date,
@@ -188,9 +189,15 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
             )}
           </View>
 
-          {/* VS */}
+          {/* VS + Иконка видео */}
           <View style={styles.vsSection}>
             <Text style={styles.vsText}>VS</Text>
+            {/* Иконка видео — по центру по горизонтали, внизу под "VS" */}
+            {sp_video && sp_video.trim() !== '' && (
+              <View style={styles.videoIconContainer}>
+                <Ionicons name="videocam" size={24} color={colors.primary} />
+              </View>
+            )}
           </View>
 
           {/* Away Team */}
@@ -311,13 +318,18 @@ const styles = StyleSheet.create({
   },
   vsSection: {
     paddingHorizontal: 16,
-    justifyContent: 'center',
-    paddingTop: 25,
+    justifyContent: 'flex-start',
+    paddingTop: 20, // отступ сверху, чтобы "VS" был выше
+    alignItems: 'center', // ← центрируем по горизонтали
   },
   vsText: {
     fontSize: 18,
     fontWeight: '600',
     color: colors.textSecondary,
+    marginBottom: 8, // отступ под "VS"
+  },
+  videoIconContainer: {
+    // Иконка уже в центре благодаря alignItems: 'center' у vsSection
   },
   footer: {},
   gameInfo: {
