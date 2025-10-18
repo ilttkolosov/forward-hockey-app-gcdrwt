@@ -286,13 +286,19 @@ export default function TournamentDetailScreen() {
   const handleBackPress = () => router.back();
 
   // === ПОИСК ===
+  // === ФИЛЬТРАЦИЯ И СОРТИРОВКА ИГР ===
   const filteredGames = useMemo(() => {
-    let gamesToFilter = tournamentGames;
+    let result: Game[] = [];
 
-    // Применяем фильтр только если не в поиске и не прошедший турнир
-    if (!searchQuery && isPastTournament === false) {
+    if (isPastTournament) {
+      // Для прошедших турниров — все игры, сортировка по убыванию даты
+      result = [...tournamentGames].sort((a, b) => 
+        new Date(b.event_date).getTime() - new Date(a.event_date).getTime()
+      );
+    } else {
       const now = new Date();
-      return tournamentGames.filter(game => {
+      // Фильтрация по текущему фильтру
+      result = tournamentGames.filter(game => {
         const gameDate = new Date(game.event_date);
         switch (gameFilter) {
           case 'current':
@@ -309,27 +315,31 @@ export default function TournamentDetailScreen() {
             return true;
         }
       });
+
+      // Дополнительная сортировка: только для "Прошедшие" — по убыванию
+      if (gameFilter === 'past') {
+        result = result.sort((a, b) => 
+          new Date(b.event_date).getTime() - new Date(a.event_date).getTime()
+        );
+      }
+      // Для "Текущие" и "Будущие" — оставляем исходный порядок (уже от API + сортировка в getGames)
     }
 
-    // Поиск по всем играм
-    if (searchQuery.trim().length < 2) return gamesToFilter;
+    // Применяем поиск, если есть запрос
+    if (searchQuery.trim().length >= 2) {
+      const q = searchQuery.toLowerCase().trim();
+      result = result.filter(game => {
+        const home = (game.homeTeam?.name || '').toLowerCase();
+        const away = (game.awayTeam?.name || '').toLowerCase();
+        if (home.includes(q) || away.includes(q)) return true;
+        const gameDate = new Date(game.event_date);
+        const day = String(gameDate.getDate());
+        const monthName = RUSSIAN_MONTHS[gameDate.getMonth()];
+        return day.includes(q) || monthName.includes(q);
+      });
+    }
 
-    const q = searchQuery.toLowerCase().trim();
-    return gamesToFilter.filter(game => {
-      const home = (game.homeTeam?.name || '').toLowerCase();
-      const away = (game.awayTeam?.name || '').toLowerCase();
-
-      if (home.includes(q) || away.includes(q)) return true;
-
-      // Поиск по дате: число или месяц
-      const gameDate = new Date(game.event_date);
-      const day = String(gameDate.getDate());
-      const monthName = RUSSIAN_MONTHS[gameDate.getMonth()];
-
-      if (day.includes(q) || monthName.includes(q)) return true;
-
-      return false;
-    });
+    return result;
   }, [tournamentGames, gameFilter, searchQuery, isPastTournament]);
 
   // === СМЕНА ФИЛЬТРА → ПРОКРУТКА НАВЕРХ ===

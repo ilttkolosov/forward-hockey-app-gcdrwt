@@ -18,40 +18,24 @@ interface GameCardCompactProps {
   onPress?: () => void;
 }
 
-// === ДОБАВЛЕНА ЛОГИКА СТАТУСА ===
+// Форматирование даты с днём недели (как в GameCard)
+const formatDateWithWeekday = (dateString: string, timeString?: string): string => {
+  try {
+    const date = new Date(dateString);
+    const day = date.getDate();
+    const month = date.toLocaleDateString('ru-RU', { month: 'short' }).replace('.', '');
+    const weekday = date.toLocaleDateString('ru-RU', { weekday: 'short' });
+    const time = timeString && timeString !== '00:00' ? ` • ${timeString}` : '';
+    return `${day} ${month} • ${weekday}${time}`;
+  } catch (error) {
+    console.warn('Failed to format date with weekday:', dateString);
+    return dateString + (timeString ? ` • ${timeString}` : '');
+  }
+};
+
 const hasValidOutcome = (outcome: string | undefined): boolean => {
   return outcome != null && outcome !== '' && outcome !== 'unknown';
 };
-
-const getDynamicGameStatus = (gameDateStr: string, homeOutcome?: string, awayOutcome?: string) => {
-  if (hasValidOutcome(homeOutcome) || hasValidOutcome(awayOutcome)) {
-    return { isToday: false, isWithin3Days: false, isLive: false, isFinished: true };
-  }
-  const now = new Date();
-  const gameDate = new Date(gameDateStr);
-  const isToday = gameDate.toDateString() === now.toDateString();
-  const daysDiff = Math.ceil((gameDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-  const isWithin3Days = daysDiff >= 0 && daysDiff <= 3;
-  const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000);
-  const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000);
-  const isLive = now >= liveStart && now <= liveEnd;
-  return { isToday, isWithin3Days, isLive, isFinished: false };
-};
-
-const getStatusText = (isToday: boolean, isWithin3Days: boolean, isLive: boolean, isFinished: boolean): string => {
-  if (isLive) return 'LIVE';
-  if (isFinished) return '';
-  if (isToday) return 'СЕГОДНЯ';
-  if (isWithin3Days) return 'СКОРО';
-  return 'ПРЕДСТОЯЩАЯ';
-};
-
-const getStatusColor = (isLive: boolean, isFinished: boolean): string => {
-  if (isLive) return colors.success;
-  if (isFinished) return colors.textSecondary;
-  return colors.warning;
-};
-// === КОНЕЦ ЛОГИКИ СТАТУСА ===
 
 export default function GameCardCompact({ game, showScore = true, onPress }: GameCardCompactProps) {
   const router = useRouter();
@@ -85,18 +69,44 @@ export default function GameCardCompact({ game, showScore = true, onPress }: Gam
   const homeTeamName = homeTeam?.name || '—';
   const awayTeamName = awayTeam?.name || '—';
 
-  // === ОПРЕДЕЛЕНИЕ СТАТУСА ===
+  // --- СТАТУС ИГРЫ ---
+  const getDynamicGameStatus = (gameDateStr: string, homeOutcome?: string, awayOutcome?: string) => {
+    if (hasValidOutcome(homeOutcome) || hasValidOutcome(awayOutcome)) {
+      return { isToday: false, isWithin3Days: false, isLive: false, isFinished: true };
+    }
+    const now = new Date();
+    const gameDate = new Date(gameDateStr);
+    const isToday = gameDate.toDateString() === now.toDateString();
+    const daysDiff = Math.ceil((gameDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    const isWithin3Days = daysDiff >= 0 && daysDiff <= 3;
+    const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000);
+    const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000);
+    const isLive = now >= liveStart && now <= liveEnd;
+    const isFinished = now > liveEnd;
+    return { isToday, isWithin3Days, isLive, isFinished };
+  };
+
+  const getStatusColor = (isLive: boolean, isFinished: boolean, isWithin3Days: boolean) => {
+    if (isLive) return colors.success;
+    if (isFinished) return colors.textSecondary;
+    if (isWithin3Days) return colors.warning;
+    return colors.primary;
+  };
+
+  const getStatusText = (isToday: boolean, isWithin3Days: boolean, isLive: boolean, isFinished: boolean) => {
+    if (isLive) return 'LIVE';
+    if (isFinished) return 'ЗАВЕРШЕНА';
+    if (isToday) return 'СЕГОДНЯ';
+    if (isWithin3Days) return 'СКОРО';
+    return 'ПРЕДСТОЯЩАЯ';
+  };
+
   const { isToday, isWithin3Days, isLive, isFinished } = getDynamicGameStatus(event_date, homeOutcome, awayOutcome);
   const statusText = getStatusText(isToday, isWithin3Days, isLive, isFinished);
+  const displayDate = formatDateWithWeekday(event_date, time);
 
-  const getOutcomeText = (outcome: string | undefined): string => {
-    switch (outcome) {
-      case 'win': return 'Победа';
-      case 'loss': return 'Поражение';
-      case 'draw': return 'Ничья';
-      default: return outcome || '';
-    }
-  };
+  // --- ОПРЕДЕЛЕНИЕ, ПОКАЗЫВАТЬ ЛИ СЧЁТ ВМЕСТО VS ---
+  const shouldShowScoreInsteadOfVS = isFinished && showScore && homeScore != null && awayScore != null;
 
   const getLeagueDisplayName = (leagueName: string | undefined): string => {
     if (!leagueName || leagueName.trim() === '') {
@@ -115,13 +125,12 @@ export default function GameCardCompact({ game, showScore = true, onPress }: Gam
         {/* Header */}
         <View style={styles.header}>
           {statusText ? (
-            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(isLive, isFinished) }]}>
+            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(isLive, isFinished, isWithin3Days) }]}>
               <Text style={styles.statusText}>{statusText}</Text>
             </View>
           ) : null}
           <Text style={commonStyles.textSecondary}>
-            {date}
-            {time && time !== '00:00' && ` • ${time}`}
+            {displayDate}
           </Text>
         </View>
 
@@ -139,30 +148,31 @@ export default function GameCardCompact({ game, showScore = true, onPress }: Gam
             <Text style={styles.teamName} numberOfLines={2}>
               {homeTeamName}
             </Text>
-            {showScore && (isLive || isFinished) && (
-              <Text style={styles.score}>{homeScore ?? 0}</Text>
-            )}
-            {isFinished && homeOutcome && (
-              <View style={styles.outcomeBadgeContainer}>
-                <Text style={[styles.outcomeText, {
-                  color: homeOutcome === 'win' ? colors.success :
-                         homeOutcome === 'loss' ? colors.error : colors.warning
-                }]}>
-                  {getOutcomeText(homeOutcome)}
-                </Text>
-              </View>
-            )}
+            {/* Исход НЕ отображаем — убрано */}
           </View>
 
-          {/* VS Section */}
-          <View style={styles.vsSection}>
-            <Text style={styles.vsText}>VS</Text>
-            {sp_video && sp_video.trim() !== '' && (
-              <View style={styles.videoIconContainer}>
-                <Ionicons name="videocam" size={24} color={colors.primary} />
-              </View>
-            )}
-          </View>
+          {/* Счёт или VS */}
+          {shouldShowScoreInsteadOfVS ? (
+            <View style={styles.scoreSection}>
+              <Text style={styles.finalScore}>
+                {homeScore}  :  {awayScore}
+              </Text>
+              {sp_video?.trim() && (
+                <View style={styles.videoIconContainer}>
+                  <Ionicons name="videocam" size={20} color={colors.primary} />
+                </View>
+              )}
+            </View>
+          ) : (
+            <View style={styles.vsSection}>
+              <Text style={styles.vsText}>VS</Text>
+              {sp_video?.trim() && (
+                <View style={styles.videoIconContainer}>
+                  <Ionicons name="videocam" size={20} color={colors.primary} />
+                </View>
+              )}
+            </View>
+          )}
 
           {/* Away Team */}
           <View style={styles.teamContainer}>
@@ -176,30 +186,13 @@ export default function GameCardCompact({ game, showScore = true, onPress }: Gam
             <Text style={styles.teamName} numberOfLines={2}>
               {awayTeamName}
             </Text>
-            {showScore && (isLive || isFinished) && (
-              <Text style={styles.score}>{awayScore ?? 0}</Text>
-            )}
-            {isFinished && awayOutcome && (
-              <View style={styles.outcomeBadgeContainer}>
-                <Text style={[styles.outcomeText, {
-                  color: awayOutcome === 'win' ? colors.success :
-                         awayOutcome === 'loss' ? colors.error : colors.warning
-                }]}>
-                  {getOutcomeText(awayOutcome)}
-                </Text>
-              </View>
-            )}
+            {/* Исход НЕ отображаем — убрано */}
           </View>
         </View>
 
         {/* Footer */}
         <View style={styles.footer}>
           <View style={styles.gameInfo}>
-            {venue && (
-              <Text style={commonStyles.textSecondary} numberOfLines={1}>
-                📍 {typeof venue === 'string' ? venue : venue.name}
-              </Text>
-            )}
             <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
               {(!tournament || tournament.trim() === '') ? '🤝 ' : '🏆 '}
               {getLeagueDisplayName(tournament)}
@@ -240,7 +233,7 @@ const styles = StyleSheet.create({
   teamContainer: {
     flex: 1,
     alignItems: 'center',
-    paddingHorizontal: 8,
+    paddingHorizontal: 1,
   },
   teamLogo: {
     width: 40,
@@ -267,23 +260,22 @@ const styles = StyleSheet.create({
     color: colors.text,
     textAlign: 'center',
     lineHeight: 16,
-    minHeight: 32, // ← 2 строки
-    numberOfLines: 2,
+    minHeight: 32,
   },
-  score: {
-    fontSize: 20,
+  // Секция счёта вместо VS
+  scoreSection: {
+    paddingHorizontal: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 5,
+  },
+  finalScore: {
+    fontSize: 28,
     fontWeight: '800',
     color: colors.primary,
     marginBottom: 4,
   },
-  outcomeBadgeContainer: {
-    alignItems: 'center',
-  },
-  outcomeText: {
-    fontSize: 11,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
+  // Секция VS (для незавершённых игр)
   vsSection: {
     paddingHorizontal: 12,
     justifyContent: 'flex-start',
@@ -291,13 +283,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   vsText: {
-    fontSize: 16,
+    fontSize: 28,
     fontWeight: '600',
     color: colors.textSecondary,
     marginBottom: 8,
   },
   videoIconContainer: {
-    // Иконка уже по центру благодаря alignItems: 'center'
+    // Иконка по центру благодаря alignItems: 'center'
   },
   footer: {
     marginTop: 4,

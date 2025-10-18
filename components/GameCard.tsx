@@ -10,18 +10,19 @@ import {
 import { Game } from '../types';
 import { colors, commonStyles } from '../styles/commonStyles';
 import { useRouter } from 'expo-router';
-import Ionicons from '@expo/vector-icons/Ionicons'; // ← ДОБАВЛЕНО
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 interface GameCardProps {
   game: Game;
   showScore?: boolean;
 }
 
+// Проверка валидности исхода
 const hasValidOutcome = (outcome: string | undefined): boolean => {
   return outcome != null && outcome !== '' && outcome !== 'unknown';
 };
 
-// Вспомогательная функция для форматирования даты с днём недели
+// Форматирование даты
 const formatDateWithWeekday = (dateString: string, timeString?: string): string => {
   try {
     const date = new Date(dateString);
@@ -39,7 +40,6 @@ const formatDateWithWeekday = (dateString: string, timeString?: string): string 
 export default function GameCard({ game, showScore = true }: GameCardProps) {
   const router = useRouter();
   const handlePress = () => {
-    console.log('GameCard pressed, navigating to game:', game.id);
     router.push(`/game/${game.id}`);
   };
 
@@ -49,7 +49,6 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
   }
 
   const {
-    id,
     homeTeam,
     awayTeam,
     homeTeamLogo,
@@ -57,34 +56,22 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
     date,
     time,
     venue,
-    status,
     tournament,
     homeScore,
     awayScore,
-    sp_video, // ← поле видео
+    sp_video,
     homeOutcome,
     awayOutcome,
     event_date,
-    team1_first,
-    team1_second,
-    team1_third,
-    team2_first,
-    team2_second,
-    team2_third,
   } = game;
 
   const homeTeamName = homeTeam?.name || '—';
   const awayTeamName = awayTeam?.name || '—';
 
-  // --- ДИНАМИЧЕСКАЯ ЛОГИКА СТАТУСА И БЕЙДЖЕЙ ---
+  // --- СТАТУС ИГРЫ ---
   const getDynamicGameStatus = (gameDateStr: string, homeOutcome?: string, awayOutcome?: string) => {
     if (hasValidOutcome(homeOutcome) || hasValidOutcome(awayOutcome)) {
-      return {
-        isToday: false,
-        isWithin3Days: false,
-        isLive: false,
-        isFinished: true,
-      };
+      return { isToday: false, isWithin3Days: false, isLive: false, isFinished: true };
     }
     const now = new Date();
     const gameDate = new Date(gameDateStr);
@@ -98,15 +85,16 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
     return { isToday, isWithin3Days, isLive, isFinished };
   };
 
-  const getStatusColor = (isLive: boolean, isFinished: boolean) => {
+  const getStatusColor = (isLive: boolean, isFinished: boolean, isWithin3Days: boolean) => {
     if (isLive) return colors.success;
     if (isFinished) return colors.textSecondary;
-    return colors.warning;
+    if (isWithin3Days) return colors.warning; // СКОРО — контрастный цвет
+    return colors.primary;
   };
 
   const getStatusText = (isToday: boolean, isWithin3Days: boolean, isLive: boolean, isFinished: boolean) => {
     if (isLive) return 'LIVE';
-    if (isFinished) return '';
+    if (isFinished) return 'ЗАВЕРШЕНА';
     if (isToday) return 'СЕГОДНЯ';
     if (isWithin3Days) return 'СКОРО';
     return 'ПРЕДСТОЯЩАЯ';
@@ -114,25 +102,27 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
 
   const { isToday, isWithin3Days, isLive, isFinished } = getDynamicGameStatus(event_date, homeOutcome, awayOutcome);
   const statusText = getStatusText(isToday, isWithin3Days, isLive, isFinished);
-
-  // --- Форматируем дату с днём недели ---
   const displayDate = formatDateWithWeekday(event_date, time);
 
-  // --- Функции для работы с исходом игры ---
+  // --- ОБРАБОТКА ИСХОДА С ЛОГИРОВАНИЕМ ---
   const getOutcomeText = (outcome: string | undefined): string => {
-    switch (outcome) {
+    //console.log(`[GameCard] getOutcomeText called with:`, outcome, typeof outcome);
+    if (!outcome) return '';
+    const lower = outcome.toLowerCase().trim();
+    switch (lower) {
       case 'win': return 'Победа';
       case 'loss': return 'Поражение';
       case 'draw': return 'Ничья';
-      default: return outcome || '';
+      case 'bullitwin': return 'Победа ПБ';
+      case 'bullitlose': return 'Поражение ПБ';
+      default:
+        //console.warn(`[GameCard] Unknown outcome: "${outcome}"`);
+        return outcome;
     }
   };
 
-  // --- Функции для работы с названием лиги ---
   const getLeagueDisplayName = (leagueName: string | undefined): string => {
-    if (!leagueName || leagueName.trim() === '') {
-      return 'Товарищеский матч';
-    }
+    if (!leagueName || leagueName.trim() === '') return 'Товарищеский матч';
     const parts = leagueName.split(':');
     if (parts.length > 1) {
       const namePart = parts[1].trim();
@@ -149,13 +139,11 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
         {/* Header */}
         <View style={styles.header}>
           {statusText && (
-            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(isLive, isFinished) }]}>
+            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(isLive, isFinished, isWithin3Days) }]}>
               <Text style={styles.statusText}>{statusText}</Text>
             </View>
           )}
-          <Text style={commonStyles.textSecondary}>
-            {displayDate}
-          </Text>
+          <Text style={commonStyles.textSecondary}>{displayDate}</Text>
         </View>
 
         {/* Teams */}
@@ -166,22 +154,16 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
               <Image source={{ uri: homeTeamLogo }} style={styles.teamLogo} resizeMode="contain" />
             ) : (
               <View style={styles.placeholderLogo}>
-                <Text style={styles.placeholderText}>
-                  {homeTeamName.charAt(0)}
-                </Text>
+                <Text style={styles.placeholderText}>{homeTeamName.charAt(0)}</Text>
               </View>
             )}
-            <Text style={styles.teamName} numberOfLines={2}>
-              {homeTeamName}
-            </Text>
-            {showScore && (isLive || isFinished) && (
-              <Text style={styles.score}>{homeScore ?? 0}</Text>
-            )}
+            <Text style={styles.teamName} numberOfLines={2}>{homeTeamName}</Text>
+            {showScore && (isLive || isFinished) && <Text style={styles.score}>{homeScore ?? 0}</Text>}
             {isFinished && homeOutcome && (
               <View style={styles.outcomeBadgeContainer}>
-                <Text style={[styles.outcomeText, { 
-                  color: homeOutcome === 'win' ? colors.success : 
-                         homeOutcome === 'loss' ? colors.error : colors.warning
+                <Text style={[styles.outcomeText, {
+                  color: ['win', 'bullitwin'].includes(homeOutcome) ? colors.success :
+                         ['loss', 'bullitlose'].includes(homeOutcome) ? colors.error : colors.warning
                 }]}>
                   {getOutcomeText(homeOutcome)}
                 </Text>
@@ -189,13 +171,12 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
             )}
           </View>
 
-          {/* VS + Иконка видео */}
+          {/* VS + Видео */}
           <View style={styles.vsSection}>
             <Text style={styles.vsText}>VS</Text>
-            {/* Иконка видео — по центру по горизонтали, внизу под "VS" */}
-            {sp_video && sp_video.trim() !== '' && (
+            {sp_video?.trim() && (
               <View style={styles.videoIconContainer}>
-                <Ionicons name="videocam" size={24} color={colors.primary} />
+                <Ionicons name="videocam" size={20} color={colors.primary} />
               </View>
             )}
           </View>
@@ -206,22 +187,16 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
               <Image source={{ uri: awayTeamLogo }} style={styles.teamLogo} resizeMode="contain" />
             ) : (
               <View style={styles.placeholderLogo}>
-                <Text style={styles.placeholderText}>
-                  {awayTeamName.charAt(0)}
-                </Text>
+                <Text style={styles.placeholderText}>{awayTeamName.charAt(0)}</Text>
               </View>
             )}
-            <Text style={styles.teamName} numberOfLines={2}>
-              {awayTeamName}
-            </Text>
-            {showScore && (isLive || isFinished) && (
-              <Text style={styles.score}>{awayScore ?? 0}</Text>
-            )}
+            <Text style={styles.teamName} numberOfLines={2}>{awayTeamName}</Text>
+            {showScore && (isLive || isFinished) && <Text style={styles.score}>{awayScore ?? 0}</Text>}
             {isFinished && awayOutcome && (
               <View style={styles.outcomeBadgeContainer}>
-                <Text style={[styles.outcomeText, { 
-                  color: awayOutcome === 'win' ? colors.success : 
-                         awayOutcome === 'loss' ? colors.error : colors.warning 
+                <Text style={[styles.outcomeText, {
+                  color: ['win', 'bullitwin'].includes(awayOutcome) ? colors.success :
+                         ['loss', 'bullitlose'].includes(awayOutcome) ? colors.error : colors.warning
                 }]}>
                   {getOutcomeText(awayOutcome)}
                 </Text>
@@ -233,11 +208,7 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
         {/* Footer */}
         <View style={styles.footer}>
           <View style={styles.gameInfo}>
-            {venue && (
-              <Text style={commonStyles.textSecondary} numberOfLines={1}>
-                📍 {typeof venue === 'string' ? venue : venue.name}
-              </Text>
-            )}
+            {venue && <Text style={commonStyles.textSecondary} numberOfLines={1}>📍 {typeof venue === 'string' ? venue : venue.name}</Text>}
             <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
               {(!tournament || tournament.trim() === '') ? '🤝 ' : '🏆 '}{getLeagueDisplayName(tournament)}
             </Text>
@@ -274,7 +245,7 @@ const styles = StyleSheet.create({
   teamContainer: {
     flex: 1,
     alignItems: 'center',
-    paddingHorizontal: 8,
+    paddingHorizontal: 1,
   },
   teamLogo: {
     width: 48,
@@ -319,18 +290,16 @@ const styles = StyleSheet.create({
   vsSection: {
     paddingHorizontal: 16,
     justifyContent: 'flex-start',
-    paddingTop: 20, // отступ сверху, чтобы "VS" был выше
-    alignItems: 'center', // ← центрируем по горизонтали
+    paddingTop: 20,
+    alignItems: 'center',
   },
   vsText: {
     fontSize: 18,
     fontWeight: '600',
     color: colors.textSecondary,
-    marginBottom: 8, // отступ под "VS"
+    marginBottom: 8,
   },
-  videoIconContainer: {
-    // Иконка уже в центре благодаря alignItems: 'center' у vsSection
-  },
+  videoIconContainer: {},
   footer: {},
   gameInfo: {
     gap: 4,

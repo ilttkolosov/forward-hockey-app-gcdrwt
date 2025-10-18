@@ -697,7 +697,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     backgroundColor: colors.surface,
     borderRadius: 12,
-    padding: 16,
+    //padding: 16,
   },
   venueInfo: {
     gap: 8,
