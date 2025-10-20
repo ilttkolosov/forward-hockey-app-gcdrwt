@@ -23,6 +23,7 @@ import { getGames, getUpcomingGamesMasterData, getFutureGames, getGameById } fro
 import SplashScreen from '../components/SplashScreen';
 import { fetchStartupConfig, StartupConfig } from '../services/startupApi';
 import { fetchTournamentTable } from '../services/tournamentsApi';
+import Constants from 'expo-constants'; // ← ДОБАВЛЕНО
 
 // === КОНСТАНТЫ ===
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
@@ -30,14 +31,12 @@ const TOURNAMENTS_PAST_KEY = 'tournaments_past';
 const CURRENT_TOURNAMENT_ID_KEY = 'current_tournament_id';
 const TEAMS_VERSION_KEY = 'teams_version';
 const PLAYERS_VERSION_KEY = 'players_version';
-
-
+const APP_VERSION_KEY = 'app_version'; // ← ДОБАВЛЕНО
 
 // --- ФУНКЦИИ ИНИЦИАЛИЗАЦИИ ---
 const initializePlayersInBackground = async () => {
   try {
     console.log('🔄 Starting background player data initialization...');
-    // PlayerDownloadService сам решит, нужно ли очищать и перезагружать
     await playerDownloadService.refreshPlayersData();
     console.log('✅ Player data initialized in background');
   } catch (e) {
@@ -49,14 +48,12 @@ const initializeTeams = async (): Promise<number> => {
   try {
     const teams = await apiService.fetchTeamList();
     await saveTeamList(teams);
-
     let documentDir = FileSystem.documentDirectory;
     if (!documentDir) {
       await new Promise(resolve => setTimeout(resolve, 150));
       documentDir = FileSystem.documentDirectory;
     }
     if (!documentDir) return 0;
-
     const logoDirPath = `${documentDir}team_logos`;
     const dirInfo = await FileSystem.getInfoAsync(logoDirPath);
     if (!dirInfo.exists) {
@@ -67,10 +64,8 @@ const initializeTeams = async (): Promise<number> => {
         files.map(file => FileSystem.deleteAsync(`${logoDirPath}/${file}`, { idempotent: true }))
       );
     }
-
     const logoKeys = teams.map(team => `team_logo_${team.id}`);
     await AsyncStorage.multiRemove(logoKeys);
-
     const downloadPromises = teams.map(async (team) => {
       if (team.logo_url) {
         const fileName = `team_${team.id}.jpg`;
@@ -87,7 +82,6 @@ const initializeTeams = async (): Promise<number> => {
       }
       return false;
     });
-
     const results = await Promise.all(downloadPromises);
     const successCount = results.filter(Boolean).length;
     return teams.length;
@@ -101,7 +95,6 @@ const initializeTournaments = async (config: StartupConfig) => {
   try {
     await AsyncStorage.setItem(TOURNAMENTS_NOW_KEY, JSON.stringify(config.tournamentsNow || []));
     await AsyncStorage.setItem(TOURNAMENTS_PAST_KEY, JSON.stringify(config.tournamentsPast || []));
-
     const allTournaments = [...(config.tournamentsNow || []), ...(config.tournamentsPast || [])];
     if (allTournaments.length > 0) {
       await Promise.all(
@@ -110,7 +103,6 @@ const initializeTournaments = async (config: StartupConfig) => {
         })
       );
     }
-
     const currentTournament = config.tournamentsNow?.[0];
     if (currentTournament) {
       await AsyncStorage.setItem(CURRENT_TOURNAMENT_ID_KEY, currentTournament.tournament_ID);
@@ -128,7 +120,6 @@ const SplashScreenWithProgress = ({ message, progressAnimated }: { message: stri
     inputRange: [0, 100],
     outputRange: ['0%', '100%'],
   });
-
   return (
     <View style={progressStyles.container}>
       <Text style={progressStyles.title}>ХК Динамо Форвард 2014</Text>
@@ -183,9 +174,9 @@ export default function RootLayout() {
   const setProgress = (value: number) => {
     Animated.timing(progressAnimated, {
       toValue: value,
-      duration: 300, // плавность: 300 мс
+      duration: 300,
       easing: Easing.out(Easing.ease),
-      useNativeDriver: false, // обязательно false для width
+      useNativeDriver: false,
     }).start();
   };
 
@@ -199,15 +190,23 @@ export default function RootLayout() {
       setProgress(5);
       const config = await fetchStartupConfig();
 
+      // ←←← НАЧАЛО: Проверка версии приложения ←←←
+      const currentAppVersion = Constants.expoConfig?.version || Constants.manifest?.version || '1.0.0';
+      const lastAppVersion = await AsyncStorage.getItem(APP_VERSION_KEY);
+      const appWasUpdated = currentAppVersion !== lastAppVersion;
+      if (appWasUpdated) {
+        console.log(`🆕 App updated from ${lastAppVersion} to ${currentAppVersion}`);
+      }
+      // →→→ КОНЕЦ проверки версии →→→
+
       setInitializationMessage('Инициализация турниров...');
       setProgress(15);
       await initializeTournaments(config);
 
       const localTeamsVersion = parseInt(await AsyncStorage.getItem(TEAMS_VERSION_KEY) || '0');
       const localPlayersVersion = parseInt(await AsyncStorage.getItem(PLAYERS_VERSION_KEY) || '0');
-      const shouldUpdateTeams = config.teams_version > localTeamsVersion;
+      const shouldUpdateTeams = config.teams_version > localTeamsVersion || appWasUpdated; // ← ВАЖНО: добавлено || appWasUpdated
       const shouldUpdatePlayers = config.players_version > localPlayersVersion;
-
 
       // Команды — синхронно (обязательно!)
       let teamsCount = 0;
@@ -216,42 +215,36 @@ export default function RootLayout() {
         setProgress(40);
         teamsCount = await initializeTeams();
         await AsyncStorage.setItem(TEAMS_VERSION_KEY, String(config.teams_version));
+        await AsyncStorage.setItem(APP_VERSION_KEY, currentAppVersion); // ← сохраняем новую версию
         setInitializationMessage(`Загружено ${teamsCount} команд`);
       } else {
-        // Проверяем: есть ли команды в хранилище?
         const existingTeams = await loadTeamList();
         if (existingTeams && existingTeams.length > 0) {
           teamsCount = existingTeams.length;
           setInitializationMessage(`Команды загружены (${teamsCount})`);
         } else {
-          // Первый запуск: команд нет, но обновление не требуется → всё равно загружаем
+          // Первый запуск
           setInitializationMessage('Первый запуск: загрузка команд...');
           setProgress(40);
           teamsCount = await initializeTeams();
           await AsyncStorage.setItem(TEAMS_VERSION_KEY, String(config.teams_version));
+          await AsyncStorage.setItem(APP_VERSION_KEY, currentAppVersion);
         }
       }
-
 
       setInitializationMessage('Загрузка ближайших игр...');
       setProgress(75);
       await getUpcomingGamesMasterData();
 
-
-
       setInitializationMessage('Загрузка данных игроков...');
       setProgress(90);
-      
-      //Инициализация игроков
+
       if (shouldUpdatePlayers) {
         setInitializationMessage('Обновление данных игроков...');
         setProgress(85);
-        // Запускаем в фоне — не ждём завершения
         initializePlayersInBackground();
-        // Сохраняем новую версию
         await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(config.players_version));
       } else {
-        // Проверяем, загружены ли данные
         const dataLoaded = await playerDownloadService.isDataLoaded();
         if (!dataLoaded) {
           setInitializationMessage('Загрузка данных игроков (первый запуск)...');
@@ -262,7 +255,6 @@ export default function RootLayout() {
 
       setInitializationMessage('Готово!');
       setProgress(100);
-
       setIsInitializing(false);
     } catch (error) {
       console.error('💥 App initialization failed:', error);
@@ -274,11 +266,9 @@ export default function RootLayout() {
   if (isInitializing) {
     return <SplashScreenWithProgress message={initializationMessage} progressAnimated={progressAnimated} />;
   }
-
   if (initializationError) {
     return <PlayerDataLoadingScreen error={initializationError} onRetry={initializeApp} />;
   }
-
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="dark" backgroundColor={colors.background} />
@@ -287,13 +277,10 @@ export default function RootLayout() {
         <Stack.Screen name="players" />
         <Stack.Screen name="player/[id]" />
         <Stack.Screen name="upcoming" />
-        <Stack.Screen name="archive" />
         <Stack.Screen name="game/[id]" />
         <Stack.Screen name="season/[id]" />
         <Stack.Screen name="tournaments/[id]" />
         <Stack.Screen name="mobilegames/[id]" />
-        <Stack.Screen name="coaches" />
-        <Stack.Screen name="test-tabs" />
       </Stack>
     </GestureHandlerRootView>
   );
