@@ -118,7 +118,7 @@ const styles = StyleSheet.create({
   },
   playerCard: {
     backgroundColor: colors.card,
-    marginHorizontal: 16,
+    //marginHorizontal: 16,
     marginVertical: 6,
     borderRadius: 12,
     padding: 16,

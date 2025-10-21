@@ -76,36 +76,32 @@ export class PlayerDownloadService {
 //Загрузка фото игроков в оптимальном разрешении  
 async downloadAndCacheImage(originalUrl: string, playerId: string): Promise<string | null> {
   if (!originalUrl) return null;
-
   const normalizedUrl = originalUrl.trim();
   if (!normalizedUrl) return null;
 
-  // Определяем расширение файла (последнее вхождение точки)
-  const lastDotIndex = normalizedUrl.lastIndexOf('.');
+  // Разделяем URL на базовую часть и расширение
+  const urlObj = new URL(normalizedUrl);
+  const pathname = urlObj.pathname;
+  const lastDotIndex = pathname.lastIndexOf('.');
   if (lastDotIndex === -1) {
     console.warn(`PlayerDownloadService: No file extension found in URL for player ${playerId}: ${normalizedUrl}`);
     return null;
   }
 
-  const base = normalizedUrl.substring(0, lastDotIndex);
-  const ext = normalizedUrl.substring(lastDotIndex); // включая точку: ".jpg"
+  const ext = pathname.substring(lastDotIndex); // включая точку: ".jpg", ".png"
+  const baseUrl = normalizedUrl.substring(0, normalizedUrl.length - ext.length);
 
-
-  console.log(`Используем  обновленную функцию downloadAndCacheImage`);
-  //https://www.hc-forward.com/wp-content/uploads/2014/02/12_petrichko-300x300.jpg
-  // Список суффиксов в порядке приоритета
+  // Список суффиксов в порядке приоритета (от большего к меньшему)
   const sizeSuffixes = ['-640x480', '-300x300', '-150x150'];
   const candidates = [
-    ...sizeSuffixes.map(suffix => `${base}${suffix}${ext}`),
+    ...sizeSuffixes.map(suffix => `${baseUrl}${suffix}${ext}`),
     normalizedUrl, // fallback: оригинал
   ];
-
-
 
   // Проверка существования файла через HEAD-запрос
   const checkUrlExists = async (url: string): Promise<boolean> => {
     try {
-      const response = await fetch(url, { method: 'HEAD' });
+      const response = await fetch(url, { method: 'HEAD', cache: 'no-store' });
       return response.ok;
     } catch (error) {
       console.warn(`PlayerDownloadService: HEAD check failed for ${url}:`, error);
@@ -130,7 +126,6 @@ async downloadAndCacheImage(originalUrl: string, playerId: string): Promise<stri
     const filename = `player_${playerId}${ext}`;
     const fileUri = `${PLAYERS_DIRECTORY}${filename}`;
     console.log(`PlayerDownloadService: Downloading image for player ${playerId} from ${finalUrl}`);
-
     const downloadResult = await downloadAsync(finalUrl, fileUri);
     if (downloadResult.status === 200) {
       console.log(`PlayerDownloadService: Successfully downloaded image for player ${playerId} to ${downloadResult.uri}`);
