@@ -235,6 +235,7 @@ const convertApiEventToGame = async (
   const seasonId: string = apiEvent.seasons[0]?.toString() || '';
   const venueId: string = apiEvent.venues[0]?.toString() || '';
 
+
   const homeTeamInfo = getTeamFromCache(teamIds[0]);
   const awayTeamInfo = getTeamFromCache(teamIds[1]);
 
@@ -327,12 +328,16 @@ const convertApiEventToGame = async (
     // Видео
     sp_video: (apiEvent as any).sp_video || '',
     videoUrl: (apiEvent as any).sp_video || '',
+    protocol: (apiEvent as any).protocol || null,
+    player_stats: (apiEvent as any).player_stats || null,
   };
 };
 
 /**
+ * !!!НЕ ИСПОЛЬЗУЕТСЯ!!!
  * Преобразует ApiGameDetailsResponse (из fetchEventById) в Game, заполняя информацию из кэшей
  * Эта функция используется для получения одной детальной игры.
+ * !!!НЕ ИСПОЛЬЗУЕТСЯ!!!
  */
 const convertApiGameDetailsToGame = async (apiGameDetails: ApiGameDetailsResponse): Promise<Game> => {
   // Извлекаем ID команд, лиги, сезона, места проведения

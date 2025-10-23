@@ -48,6 +48,8 @@ export interface Game {
   team2_outcome?: string;
   // Новое поле для названия лиги (league_name)
   league_name?: string; // ← Добавлено
+  protocol?: any;
+  player_stats?: any;
 }
 
 

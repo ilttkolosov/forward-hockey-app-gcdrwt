@@ -108,23 +108,25 @@ async fetchEvents(params: {
 }
 
   /**
-   * Получает детальную информацию об одной игре по ID
+   * Получает детальную информацию об одной игре по ID через общий эндпоинт
    */
-  async fetchEventById(id: string): Promise<ApiGameDetailsResponse> {
-    const url = `${this.baseUrl}/event-by-id/${id}`;
-    console.log('API Service: Fetching event by ID:', url);
-
+  async fetchEventById(id: string): Promise<ApiEvent | null> {
+    console.log('API Service: Fetching event by ID via /get-events?event_id=', id);
     try {
-      const response = await fetch(url);
+      const response = await fetch(`${this.baseUrl}/get-events?event_id=${id}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      const result: ApiGameDetailsResponse = await response.json();
-      console.log('API Service: Event details response:', result);
-      return result;
+      const result: ApiEventsResponse = await response.json();
+      const gameData = result.data?.[0];
+      if (!gameData) {
+        console.warn(`Game with ID ${id} not found in API response`);
+        return null;
+      }
+      return gameData; // ← возвращаем ApiEvent (один объект из data)
     } catch (error) {
       console.error('API Service: Error fetching event by ID:', error);
-      throw error;
+      return null;
     }
   }
 

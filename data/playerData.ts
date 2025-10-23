@@ -51,7 +51,7 @@ export const splitPlayersIntoGroups = (players: Player[]) => {
   massiv2.sort((a, b) => a.number - b.number);
   massiv3.sort((a, b) => a.number - b.number);
 
-  console.log(`Data/playerData: Players split into groups: Вратари: ${massiv1.length}, Защитники: ${massiv2.length}, Нападающие: ${massiv3.length}`);
+  //console.log(`Data/playerData: Players split into groups: Вратари: ${massiv1.length}, Защитники: ${massiv2.length}, Нападающие: ${massiv3.length}`);
 };
 // --- КОНЕЦ ФУНКЦИИ ДЛЯ ГРУППИРОВКИ ---
 

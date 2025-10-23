@@ -16,11 +16,13 @@ export interface ApiEvent {
   venues: number[];
   teams: string[];
   results: any[] | { [teamId: string]: any };
+  protocol?: any;    
+  player_stats?: any;
 }
 
-// Тип для детальной информации об игре (ответ от /wp-json/app/v1/event-by-id/{id})
+// Тип для детальной информации об игре (ответ от /wp-json/app/v1/get-events?event_id=${id})
 export interface ApiGameDetailsResponse {
-  id: number;
+  id: string;
   title: string;
   date: string;
   results: { [teamId: string]: { first: string; second: string; third: string; ot: string; ppg: string; ppo: string; goals: string; outcome: string[] } };
@@ -29,6 +31,8 @@ export interface ApiGameDetailsResponse {
   seasons: number[];
   venues: number[];
   sp_video?: string;
+  protocol?: any;    
+  player_stats?: any;  
 }
 
 // Тип для списка лиг (ответ от /wp-json/app/v1/get-league)
