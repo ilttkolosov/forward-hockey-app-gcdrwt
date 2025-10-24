@@ -21,6 +21,7 @@ import ErrorMessage from '../../components/ErrorMessage';
 import Icon from '../../components/Icon';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import GameCardCompact from '../../components/GameCardCompact';
+import ProtocolEventCard from '../../components/ProtocolEventCard';
 import { getPlayerById } from '../../data/playerData';
 
 // === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
@@ -48,7 +49,7 @@ const getVKEmbedUrl = (videoUrl: string, autoplay: boolean = true): string => {
       const url = new URL(videoUrl);
       if (!url.searchParams.has('hd')) url.searchParams.set('hd', '4');
       url.searchParams.set('autoplay', autoplay ? '1' : '0');
-      url.searchParams.set('muted', '0'); // ← явно включаем звук
+      url.searchParams.set('muted', '0');
       if (!url.searchParams.has('js_api')) url.searchParams.set('js_api', '1');
       return url.toString();
     }
@@ -61,6 +62,13 @@ const getVKEmbedUrl = (videoUrl: string, autoplay: boolean = true): string => {
   }
 };
 
+const formatPlayerName = (fullName: string): string => {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length < 2) return fullName;
+  const [lastName, firstName] = parts;
+  const shortFirstName = firstName ? `${firstName.charAt(0)}.` : '';
+  return `${shortFirstName} ${lastName}`.trim();
+};
 
 const extractOutcome = (outcomeArray: any): string => {
   if (Array.isArray(outcomeArray) && outcomeArray.length > 0) {
@@ -79,63 +87,45 @@ const extractNameFromEntity = (entity: any): string | undefined => {
   return undefined;
 };
 
-const getEventTypeLabel = (type: string): string => {
-  switch (type) {
-    case 'gk': return 'Вратарь';
-    case 'g': return 'Гол';
-    case 'p': return 'Штраф';
-    case 'o': return 'Другое';
-    default: return type;
-  }
-};
-
-const getEventTypeColor = (type: string): string => {
-  switch (type) {
-    case 'g': return colors.success;
-    case 'p': return colors.error;
-    case 'gk': return colors.warning;
-    case 'o': return colors.textSecondary;
-    default: return colors.text;
-  }
-};
-
 const isGameFinished = (game: Game): boolean => {
   const now = new Date();
   const gameDate = new Date(game.event_date);
-  // Если игра началась и прошло более 3 часов — считаем завершённой
   return now.getTime() - gameDate.getTime() > 3 * 60 * 60 * 1000;
 };
 
-// 🔥 ИСПРАВЛЕНА ЛОГИКА ПЕРИОДОВ
+const formatTimeSeconds = (secondsStr: string): string => {
+  const seconds = parseInt(secondsStr, 10);
+  if (isNaN(seconds) || seconds <= 0) return '0:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
+
+// 🔥 ЛОГИКА ПЕРИОДОВ
 const getPeriodLabel = (timeStr: string, protocol: any): string => {
   if (!timeStr || !/^\d{2}:\d{2}$/.test(timeStr)) return 'other';
   const [minutesStr, secondsStr] = timeStr.split(':');
   const minutes = parseInt(minutesStr, 10);
   const seconds = parseInt(secondsStr, 10);
   if (isNaN(minutes) || isNaN(seconds)) return 'other';
-
   const maintime = parseInt(protocol.maintime || '60', 10);
-
-  // Основное время: строго МЕНЬШЕ maintime → периоды
   if (minutes < maintime) {
     const periodLength = maintime / 3;
     if (minutes < periodLength) return 'period1';
     if (minutes < periodLength * 2) return 'period2';
     return 'period3';
   }
-
-  // После основного времени
   if (protocol.overtime) {
     const otMinutes = parseInt(protocol.overtime, 10) || 0;
     if (minutes <= maintime + otMinutes) return 'overtime';
   }
-
-  // Буллиты (если pms: true)
   if (protocol.pms) return 'shootout';
-
   return 'other';
 };
 
+
+
+// === РЕНДЕР ПРОТОКОЛА ===
 const renderProtocolByPeriods = (
   protocol: any,
   gameDetails: Game,
@@ -143,7 +133,7 @@ const renderProtocolByPeriods = (
   onVideoPress: (url: string) => void
 ) => {
   const { homeTeamLogo, awayTeamLogo } = gameDetails;
-
+  // Группируем события по периодам
   const periods: { [key: string]: any[] } = {
     period1: [],
     period2: [],
@@ -151,7 +141,6 @@ const renderProtocolByPeriods = (
     overtime: [],
     shootout: [],
   };
-
   protocol.events?.forEach((event: any) => {
     const periodKey = getPeriodLabel(event.time, protocol);
     if (periods[periodKey]) {
@@ -159,85 +148,264 @@ const renderProtocolByPeriods = (
     }
   });
 
+  // Заголовки периодов
   const periodLabels: { [key: string]: string } = {
-    period1: 'Период 1',
-    period2: 'Период 2',
-    period3: 'Период 3',
+    period1: '1 период',
+    period2: '2 период',
+    period3: '3 период',
     overtime: 'Овертайм',
     shootout: 'Буллиты',
   };
 
-  return Object.entries(periods).map(([key, events]) => {
-    if (events.length === 0) return null;
-    return (
-      <View key={key} style={styles.protocolPeriodSection}>
-        <Text style={styles.protocolPeriodTitle}>{periodLabels[key]}</Text>
-        {events.map((event: any, idx: number) => {
+  // Начальный счет
+  let currentScore = { home: 0, away: 0 };
+
+  // Создаем массив для всех событий, включая заголовки периодов
+  const allEvents: any[] = [];
+  Object.entries(periods).forEach(([key, events]) => {
+    if (events.length === 0) return;
+
+    // Добавляем заголовок периода как отдельное событие
+    const periodTitle = `${periodLabels[key]} ${currentScore.home}–${currentScore.away}`;
+    allEvents.push({
+      type: 'periodHeader',
+      title: periodTitle,
+      icon: 'whistle-outline',
+      key: `period-${key}`,
+    });
+
+    // Добавляем события периода
+    events.forEach((event: any) => {
+      // Определяем, какая команда
+      const isHomeTeam = event.team === 0;
+      const teamLogo = isHomeTeam ? homeTeamLogo : awayTeamLogo;
+
+      // Создаем копию текущего счета
+      let tempScore = { ...currentScore };
+
+      // Обновляем счет, если это гол
+      if (event.type === 'g') {
+        if (isHomeTeam) {
+          tempScore.home++;
+        } else {
+          tempScore.away++;
+        }
+        // Обновляем глобальный счет для следующих событий
+        currentScore = tempScore;
+      }
+
+      allEvents.push({
+        ...event,
+        teamLogo,
+        score: tempScore,
+        isHomeTeam,
+      });
+    });
+  });
+
+  // Добавляем финальный элемент "Матч окончен"
+  const finalEvent = {
+    type: 'final',
+    title: `Матч окончен. Счет ${gameDetails.homeScore} : ${gameDetails.awayScore}.`,
+    icon: 'whistle-outline',
+    key: 'final-event',
+  };
+  allEvents.push(finalEvent);
+
+  // Рендерим все события в виде таблицы
+  return (
+    <View style={styles.protocolTable}>
+      {allEvents.map((item: any, idx: number) => {
+        const isLastEvent = idx === allEvents.length - 1;
+        if (item.type === 'periodHeader') {
           return (
-            <View
-              key={idx}
-              style={[
-                styles.protocolRow,
-                idx % 2 === 0 ? styles.protocolRowEven : styles.protocolRowOdd,
-              ]}
-            >
-              <Text style={styles.protocolTime}>{event.time}</Text>
-              <View style={styles.protocolTypeBadge}>
-                <Text style={[styles.protocolTypeText, { color: getEventTypeColor(event.type) }]}>
-                  {getEventTypeLabel(event.type)}
-                </Text>
+            <View key={item.key} style={styles.protocolTableRow}>
+              {/* Столбец 1: Отступ */}
+              <View style={styles.protocolTableCellSpacer} />
+              {/* Столбцы 2-3: Логотип/иконка */}
+              <View style={[styles.protocolTableCellLogo, styles.protocolTableCellIcon]}>
+                <View style={styles.protocolIconCircle}>
+                  <Icon name={item.icon} type="material-community" size={20} color={colors.text} />
+                </View>
               </View>
-              <View style={styles.protocolTeamLogo}>
-                <Image
-                  source={{ uri: event.team === 0 ? homeTeamLogo : awayTeamLogo }}
-                  style={styles.protocolTeamLogoImage}
-                />
+              {/* Столбец 4: Отступ */}
+              <View style={styles.protocolTableCellSpacer} />
+              {/* Столбец 5: Заголовок периода */}
+              <View style={styles.protocolTableCellContent}>
+                <Text style={styles.protocolPeriodTitleText}>{item.title}</Text>
               </View>
-              {/* Игроки + Комментарий в одном блоке */}
-              <View style={styles.protocolEventDetails}>
-                {(() => {
-                  const elements = [];
-                  if (event.players && event.players.length > 0) {
-                    event.players.forEach((playerId: string, pIdx: number) => {
-                      const player = protocolPlayers[playerId] || null;
-                      elements.push(
-                        <View key={`player-${pIdx}`} style={styles.protocolPlayerCard}>
-                          {player?.photoPath ? (
-                            <Image source={{ uri: player.photoPath }} style={styles.protocolPlayerPhoto} />
-                          ) : (
-                            <View style={styles.protocolPlayerPhotoPlaceholder} />
-                          )}
-                          <View style={styles.protocolPlayerInfo}>
-                            <Text style={styles.protocolPlayerNumber}>#{player?.number || '?'}</Text>
-                            <Text style={styles.protocolPlayerName}>
-                              {player ? player.name : `ID: ${playerId}`}
-                            </Text>
-                          </View>
-                        </View>
-                      );
-                    });
-                  }
-                  if (event.comment) {
-                    elements.push(
-                      <Text key="comment" style={styles.protocolCommentInline}>
-                        {event.comment.replace(/<br\s*\/?>/gi, '\n')}
-                      </Text>
-                    );
-                  }
-                  return elements;
-                })()}
-              </View>
-              {event.url?.trim() && (
-                <TouchableOpacity onPress={() => onVideoPress(event.url.trim())} style={styles.videoButton}>
-                  <Icon name="play-circle" size={20} color={colors.primary} />
-                </TouchableOpacity>
-              )}
             </View>
           );
-        })}
+        } else if (item.type === 'final') {
+          // Финальный элемент "Матч окончен"
+          return (
+            <View key={item.key} style={styles.protocolTableRow}>
+              {/* Столбец 1: Отступ */}
+              <View style={styles.protocolTableCellSpacer} />
+              {/* Столбцы 2-3: Логотип/иконка */}
+              <View style={[styles.protocolTableCellLogo, styles.protocolTableCellIcon]}>
+                <View style={styles.protocolIconCircle}>
+                  <Icon name={item.icon} type="material-community" size={20} color={colors.text} />
+                </View>
+              </View>
+              {/* Столбец 4: Отступ */}
+              <View style={styles.protocolTableCellSpacer} />
+              {/* Столбец 5: Текст "Матч окончен" */}
+              <View style={styles.protocolTableCellContent}>
+                <Text style={styles.protocolFinalText}>{item.title}</Text>
+              </View>
+            </View>
+          );
+        } else {
+          // Это обычное событие
+          return (
+            <View key={idx} style={styles.protocolTableRow}>
+              {/* Столбец 1: Отступ */}
+              <View style={styles.protocolTableCellSpacer} />
+              {/* Столбцы 2-3: Логотип команды */}
+              <View style={isLastEvent ? styles.protocolTableCellLogoLast : styles.protocolTableCellLogo}>
+                <View style={styles.protocolLogoCircle}>
+                  <Image source={{ uri: item.teamLogo }} style={styles.protocolEventTeamLogo} />
+                </View>
+              </View>
+              {/* Столбец 4: Отступ */}
+              <View style={styles.protocolTableCellSpacer} />
+              {/* Столбец 5: Карточка события */}
+              <View style={styles.protocolTableCellContent}>
+                <ProtocolEventCard
+                  event={item}
+                  teamLogo={item.teamLogo}
+                  homeTeamLogo={homeTeamLogo}
+                  awayTeamLogo={awayTeamLogo}
+                  onVideoPress={onVideoPress}
+                  playerStats={protocolPlayers}
+                  score={item.score}
+                  isHomeTeam={item.isHomeTeam}
+                />
+              </View>
+            </View>
+          );
+        }
+      })}
+    </View>
+  );
+};
+
+
+// === РЕНДЕР СТАТИСТИКИ ===
+const renderPlayerStatsTable = (
+  teamId: string,
+  statsArray: any[],
+  statsPlayers: Record<string, any>
+) => {
+  if (!Array.isArray(statsArray) || statsArray.length === 0) {
+    return null;
+  }
+  const goalies: any[] = [];
+  const fieldPlayers: any[] = [];
+  statsArray.forEach(({ player_id, stats }) => {
+    if (!player_id || !stats || typeof stats !== 'object') return;
+    const player = statsPlayers[player_id] || null;
+    const resolvedPlayer = player || { name: `ID: ${player_id}`, number: '?' };
+    const position = stats.position;
+    const isGoalie = position === '7';
+    const row = { playerId: player_id, player: resolvedPlayer, ...stats };
+    if (isGoalie) {
+      goalies.push(row);
+    } else {
+      fieldPlayers.push(row);
+    }
+  });
+  if (goalies.length === 0 && fieldPlayers.length === 0) return null;
+
+  const renderRow = (row: any, isGoalie: boolean) => {
+    const { player, playerId, g, a, pim, pn, timeg, ga, sv } = row;
+    const number = player?.number || '?';
+    const fullName = player?.name || `ID: ${playerId}`;
+    const displayName = formatPlayerName(fullName);
+    const photoPath = player?.photoPath;
+    return (
+      <View key={playerId} style={styles.statsRow}>
+        <View style={styles.statsCellNumber}>
+          <Text style={styles.statsText}>{number}</Text>
+        </View>
+        <View style={styles.statsCellPhoto}>
+          {photoPath ? (
+            <Image source={{ uri: photoPath }} style={styles.statsPlayerPhoto} />
+          ) : (
+            <View style={styles.statsPlayerPhotoPlaceholder} />
+          )}
+        </View>
+        <View style={styles.statsCellName}>
+          <Text style={styles.statsText}>{displayName}</Text>
+        </View>
+        {isGoalie ? (
+          <>
+            <View style={styles.statsCell}><Text style={styles.statsText}>{formatTimeSeconds(timeg)}</Text></View>
+            <View style={styles.statsCell}><Text style={styles.statsText}>{ga || '0'}</Text></View>
+            <View style={styles.statsCell}><Text style={styles.statsText}>{sv || '0'}</Text></View>
+            <View style={styles.statsCell}>
+              <Text style={styles.statsText}>
+                {sv || ga ? ((parseInt(sv, 10) || 0) / ((parseInt(sv, 10) || 0) + (parseInt(ga, 10) || 0)) * 100).toFixed(2) : '0.00'}%
+              </Text>
+            </View>
+            <View style={styles.statsCell}><Text style={styles.statsText}>{pim || '0'}</Text></View>
+          </>
+        ) : (
+          <>
+            <View style={styles.statsCell}>
+              <Text style={styles.statsText}>
+                {row.position === '8' ? 'Н' : row.position === '9' ? 'З' : '?'}
+              </Text>
+            </View>
+            <View style={styles.statsCell}><Text style={styles.statsText}>{g || '0'}</Text></View>
+            <View style={styles.statsCell}><Text style={styles.statsText}>{a || '0'}</Text></View>
+            <View style={styles.statsCell}><Text style={styles.statsText}>{(parseInt(g, 10) || 0) + (parseInt(a, 10) || 0)}</Text></View>
+            <View style={styles.statsCell}><Text style={styles.statsText}>{pim || '0'}</Text></View>
+            <View style={styles.statsCell}><Text style={styles.statsText}>{pn || '0'}</Text></View>
+          </>
+        )}
       </View>
     );
-  });
+  };
+
+  return (
+    <View style={styles.statsTableContainer}>
+      {goalies.length > 0 && (
+        <>
+          <Text style={styles.statsTableTitle}>Вратари</Text>
+          <View style={styles.statsTableHeader}>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>#</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>Фото</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 2 }]}><Text style={styles.statsHeaderText}>Имя</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 1 }]}><Text style={styles.statsHeaderText}>ВНП</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>П6</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>Бр</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 1 }]}><Text style={styles.statsHeaderText}>ОБ%</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>ШМ</Text></View>
+          </View>
+          {goalies.map(row => renderRow(row, true))}
+        </>
+      )}
+      {fieldPlayers.length > 0 && (
+        <>
+          <Text style={styles.statsTableTitle}>Полевые игроки</Text>
+          <View style={styles.statsTableHeader}>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>#</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>Фото</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 2 }]}><Text style={styles.statsHeaderText}>Имя</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>П</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>Г</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>П</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>О</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>ШМ</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>КШ</Text></View>
+          </View>
+          {fieldPlayers.map(row => renderRow(row, false))}
+        </>
+      )}
+    </View>
+  );
 };
 
 // === ОСНОВНОЙ КОМПОНЕНТ ===
@@ -246,6 +414,7 @@ export default function GameDetailsScreen() {
   const router = useRouter();
   const [gameDetails, setGameDetails] = useState<Game | null>(null);
   const [protocolPlayers, setProtocolPlayers] = useState<Record<string, any>>({});
+  const [statsPlayers, setStatsPlayers] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -255,7 +424,6 @@ export default function GameDetailsScreen() {
   const tabs = ['Арена', 'Протокол', 'Статистика', 'F2F'];
   const f2fLoadedRef = useRef(false);
   const [videoModalUrl, setVideoModalUrl] = useState<string | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // === ЗАГРУЗКА ДАННЫХ ИГРЫ ===
   const loadGameData = useCallback(async (forceRefresh = false) => {
@@ -269,7 +437,7 @@ export default function GameDetailsScreen() {
         return;
       }
 
-      // 🔥 Загружаем игроков из протокола
+      // Игроки для протокола
       const newProtocolPlayers: Record<string, any> = {};
       if (gameData.protocol?.events) {
         const playerIds = new Set<string>();
@@ -290,6 +458,32 @@ export default function GameDetailsScreen() {
         setProtocolPlayers(newProtocolPlayers);
       }
 
+      // Игроки для статистики
+      const newStatsPlayers: Record<string, any> = {};
+      if (gameData.player_stats) {
+        const statsPlayerIds = new Set<string>();
+        Object.values(gameData.player_stats).forEach(teamStats => {
+          if (Array.isArray(teamStats)) {
+            teamStats.forEach(({ player_id }) => {
+              if (player_id) {
+                statsPlayerIds.add(player_id);
+              }
+            });
+          }
+        });
+        if (statsPlayerIds.size > 0) {
+          const statsPlayersArray = await Promise.all(
+            Array.from(statsPlayerIds).map(async (playerId) => {
+              const player = await getPlayerById(playerId);
+              return { id: playerId, player };
+            })
+          );
+          statsPlayersArray.forEach(({ id, player }) => {
+            newStatsPlayers[id] = player;
+          });
+        }
+      }
+      setStatsPlayers(newStatsPlayers);
       setGameDetails(gameData);
     } catch (err) {
       console.error('Error loading game ', err);
@@ -332,7 +526,7 @@ export default function GameDetailsScreen() {
       const now = Date.now();
       sortedGames.forEach(game => {
         if (!gameDetailsCache[game.id]) {
-          gameDetailsCache[game.id] = {  game, timestamp: now };
+          gameDetailsCache[game.id] = { game, timestamp: now };
         }
       });
       console.log(`✅ Loaded ${sortedGames.length} F2F games`);
@@ -443,6 +637,7 @@ export default function GameDetailsScreen() {
     homeTeamId,
     awayTeamId,
     protocol,
+    player_stats,
   } = gameDetails;
 
   const homeTeamName = homeTeam?.name || 'Команда 1';
@@ -473,6 +668,7 @@ export default function GameDetailsScreen() {
           <Text style={styles.headerLocation}>Санкт-Петербург</Text>
         </View>
       </View>
+
       <ScrollView
         style={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -521,10 +717,9 @@ export default function GameDetailsScreen() {
               )}
             </View>
           </View>
-          {leagueName && (
-            <Text style={styles.leagueText}>🏆 {leagueName}</Text>
-          )}
+          {leagueName && <Text style={styles.leagueText}>🏆 {leagueName}</Text>}
         </View>
+
         {/* Video */}
         {sp_video && (
           <View style={styles.videoContainer}>
@@ -549,6 +744,7 @@ export default function GameDetailsScreen() {
             </View>
           </View>
         )}
+
         {/* Period Scores */}
         {showPeriodScores && (
           <View style={styles.periodScores}>
@@ -594,9 +790,7 @@ export default function GameDetailsScreen() {
             {tabIndex === 0 && venueData && (
               <View style={styles.venueInfo}>
                 <Text style={styles.venueName}>{venueData.name}</Text>
-                {venueData.address && (
-                  <Text style={styles.venueAddress}>{venueData.address}</Text>
-                )}
+                {venueData.address && <Text style={styles.venueAddress}>{venueData.address}</Text>}
                 {venueData.coordinates && (
                   <TouchableOpacity
                     onPress={() => {
@@ -606,62 +800,43 @@ export default function GameDetailsScreen() {
                     style={styles.mapLinkButton}
                   >
                     <Text style={styles.mapLinkText}>Открыть в </Text>
-                    <Image
-                      source={require('../../assets/icons/YandexMap.png')}
-                      style={styles.mapIcon}
-                    />
+                    <Image source={require('../../assets/icons/YandexMap.png')} style={styles.mapIcon} />
                   </TouchableOpacity>
                 )}
               </View>
             )}
 
-            {/* === ВКЛАДКА ПРОТОКОЛА === */}
             {tabIndex === 1 && gameDetails?.protocol && (
               <View style={styles.protocolTab}>
-{/*                 <View style={styles.protocolHeader}>
-                  <Text style={styles.protocolHeaderText}>
-                    Основное: {gameDetails.protocol.maintime || '60'} мин
-                  </Text>
-                  {gameDetails.protocol.overtime && (
-                    <Text style={styles.protocolHeaderText}>
-                      ОТ: {gameDetails.protocol.overtime} мин
-                    </Text>
-                  )}
-                  {gameDetails.protocol.pms && (
-                    <Text style={styles.protocolHeaderText}>Буллиты</Text>
-                  )}
-                  {gameDetails.protocol['penalty-time'] && (
-                    <Text style={styles.protocolHeaderText}>
-                      Удаление: {gameDetails.protocol['penalty-time']}
-                    </Text>
-                  )}
-                </View> */}
                 {renderProtocolByPeriods(
                   gameDetails.protocol,
                   gameDetails,
                   protocolPlayers,
                   (url) => {
-                  // Извлекаем базовую ссылку без параметров времени
-                  const cleanUrl = url.split('?')[0];
-                  // Преобразуем в embed-формат без autoplay
-                  const embedUrl = getVKEmbedUrl(cleanUrl, true);
-                  // Добавляем время из оригинальной ссылки
-                  const timeParamMatch = url.match(/\?t=([^&]+)/);
-                  let finalUrl = embedUrl;
-                  if (timeParamMatch) {
-                    // embedUrl уже содержит ?oid=..., поэтому добавляем &t=...
-                    finalUrl += (embedUrl.includes('?') ? '&' : '?') + `t=${timeParamMatch[1]}`;
+                    const cleanUrl = url.split('?')[0];
+                    const embedUrl = getVKEmbedUrl(cleanUrl, true);
+                    const timeParamMatch = url.match(/\?t=([^&]+)/);
+                    let finalUrl = embedUrl;
+                    if (timeParamMatch) {
+                      finalUrl += (embedUrl.includes('?') ? '&' : '?') + `t=${timeParamMatch[1]}`;
+                    }
+                    setVideoModalUrl(finalUrl);
                   }
-                  setVideoModalUrl(finalUrl);
-                }
                 )}
               </View>
             )}
 
-            {tabIndex === 2 && (
-              <View style={styles.placeholderTab}>
-                <Text style={styles.placeholderText}>Хоккей</Text>
-              </View>
+            {tabIndex === 2 && gameDetails?.player_stats && (
+              <ScrollView style={styles.statsTab}>
+                {Object.entries(gameDetails.player_stats).map(([teamId, statsArray]) => {
+                  if (!Array.isArray(statsArray)) return null;
+                  return (
+                    <View key={teamId} style={styles.teamStatsSection}>
+                      {renderPlayerStatsTable(teamId, statsArray, statsPlayers)}
+                    </View>
+                  );
+                })}
+              </ScrollView>
             )}
 
             {tabIndex === 3 && (
@@ -669,9 +844,7 @@ export default function GameDetailsScreen() {
                 {f2fLoading ? (
                   <LoadingSpinner />
                 ) : f2fGames.length > 0 ? (
-                  f2fGames.map((game) => (
-                    <GameCardCompact key={game.id} game={game} showScore={true} />
-                  ))
+                  f2fGames.map((game) => <GameCardCompact key={game.id} game={game} showScore={true} />)
                 ) : (
                   <Text style={[commonStyles.text, { textAlign: 'center', marginTop: 24 }]}>
                     Нет истории личных встреч
@@ -682,26 +855,21 @@ export default function GameDetailsScreen() {
           </View>
         </View>
       </ScrollView>
+
       {/* Video Modal */}
       {videoModalUrl && (
         <View style={styles.videoModalOverlay}>
-          {/* Кнопка закрытия — теперь в правом верхнем углу всего модального окна */}
-          <TouchableOpacity
-            style={styles.videoModalCloseButton}
-            onPress={() => setVideoModalUrl(null)}
-          >
+          <TouchableOpacity style={styles.videoModalCloseButton} onPress={() => setVideoModalUrl(null)}>
             <Icon name="close" size={32} color="#FFFFFF" />
           </TouchableOpacity>
-
-          {/* Видео-контейнер */}
           <View style={styles.videoModalContent}>
             <WebView
               source={{ uri: videoModalUrl }}
               style={styles.videoModalWebView}
               javaScriptEnabled={true}
               domStorageEnabled={true}
-              startInLoadingState={true}               // ← добавьте
-              scalesPageToFit={false}                  // ← добавьте
+              startInLoadingState={true}
+              scalesPageToFit={false}
               allowsInlineMediaPlayback={true}
               mediaPlaybackRequiresUserAction={false}
               mixedContentMode="compatibility"
@@ -711,12 +879,8 @@ export default function GameDetailsScreen() {
               showsHorizontalScrollIndicator={false}
               showsVerticalScrollIndicator={false}
               userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"
-              onShouldStartLoadWithRequest={(request) => {
-                return request.url.startsWith('https://vk.com/video_ext.php');
-              }}
-              onFullscreenVideoWillDismiss={() => {
-                setVideoModalUrl(null);
-              }}
+              onShouldStartLoadWithRequest={(request) => request.url.startsWith('https://vk.com/video_ext.php')}
+              onFullscreenVideoWillDismiss={() => setVideoModalUrl(null)}
             />
           </View>
         </View>
@@ -736,44 +900,17 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     backgroundColor: colors.background,
   },
-  backButton: {
-    marginRight: 16,
-    padding: 4,
-  },
-  headerTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  headerSubtitle: {
-    fontSize: 16,
-    fontWeight: '400',
-    color: colors.textSecondary,
-  },
-  headerLocation: {
-    fontSize: 14,
-    fontWeight: '400',
-    color: colors.textSecondary,
-  },
-  content: {
-    flex: 1,
-  },
+  backButton: { marginRight: 16, padding: 4 },
+  headerTitleContainer: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  headerTitle: { fontSize: 16, fontWeight: '600', color: colors.text },
+  headerSubtitle: { fontSize: 16, fontWeight: '400', color: colors.textSecondary },
+  headerLocation: { fontSize: 14, fontWeight: '400', color: colors.textSecondary },
+  content: { flex: 1 },
   videoContainer: {
     padding: 16,
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 16,
   },
   videoFrame: {
     width: '100%',
@@ -783,53 +920,19 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     elevation: 4,
   },
-  webview: {
-    flex: 1,
-    backgroundColor: '#000',
-    borderRadius: 12,
-  },
+  webview: { flex: 1, backgroundColor: '#000', borderRadius: 12 },
   gameInfo: {
     padding: 10,
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  gameHeader: {
-    alignItems: 'center',
-    //marginBottom: 8,
-  },
-  gameDate: {
-    fontSize: 16,
-    color: colors.textSecondary,
-    fontWeight: '500',
-  },
-  leagueText: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    textAlign: 'left',
-    paddingLeft: 8,
-    marginBottom: 0,
-    fontStyle: 'italic',
-  },
-  teamsContainer: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-    //paddingHorizontal: 8,
-  },
-  teamColumn: {
-    flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: 8,
-  },
-  teamLogo: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: colors.surface,
-    marginBottom: 12,
-  },
+  gameHeader: { alignItems: 'center' },
+  gameDate: { fontSize: 16, color: colors.textSecondary, fontWeight: '500' },
+  leagueText: { fontSize: 14, color: colors.textSecondary, textAlign: 'left', paddingLeft: 8, fontStyle: 'italic' },
+  teamsContainer: { flexDirection: 'row', alignItems: 'stretch', justifyContent: 'space-between', marginBottom: 24 },
+  teamColumn: { flex: 1, alignItems: 'center', paddingHorizontal: 8 },
+  teamLogo: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.surface, marginBottom: 12 },
   teamLogoPlaceholder: {
     width: 64,
     height: 64,
@@ -837,31 +940,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 12,
   },
-  teamName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-    textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 4,
-  },
-  scoreContainer: {
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-  },
-  score: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: colors.primary,
-  },
-  vsText: {
-    color: colors.textSecondary,
-  },
-  outcomeBadgeContainer: {
-    alignItems: 'center',
-  },
+  teamName: { fontSize: 14, fontWeight: '600', color: colors.text, textAlign: 'center', lineHeight: 18, marginBottom: 4 },
+  scoreContainer: { justifyContent: 'center', paddingHorizontal: 16 },
+  score: { fontSize: 32, fontWeight: '800', color: colors.primary },
+  vsText: { color: colors.textSecondary },
+  outcomeBadgeContainer: { alignItems: 'center' },
   outcomeBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -882,256 +967,173 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  periodTable: {
-    backgroundColor: colors.surface,
+  periodTable: { backgroundColor: colors.surface, borderRadius: 12, overflow: 'hidden' },
+  periodHeaderNumber: { flex: 1, color: colors.background, fontWeight: '600', textAlign: 'center', fontSize: 14 },
+  periodRow: { flexDirection: 'row', paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
+  periodTeam: { flex: 4, color: colors.text, fontWeight: '500', fontSize: 14, textAlign: 'left', paddingLeft: 8 },
+  periodScore: { flex: 1, color: colors.text, textAlign: 'center', fontSize: 14, fontWeight: '500' },
+  periodTotal: { flex: 1, color: colors.primary, textAlign: 'center', fontWeight: '700', fontSize: 14 },
+  tabsContainer: { marginHorizontal: 16, marginBottom: 16 },
+  tabsSpacer: { height: 16 },
+  tabContent: { marginHorizontal: 0, marginTop: 16, backgroundColor: colors.surface, borderRadius: 12 },
+  venueInfo: { gap: 8, padding: 16 },
+  venueName: { fontSize: 16, fontWeight: '600', color: colors.text },
+  venueAddress: { fontSize: 14, color: colors.textSecondary },
+  mapLinkButton: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8 },
+  mapLinkText: { fontSize: 14, color: colors.primary, fontWeight: '600' },
+  mapIcon: { width: 150, height: 26 },
+  f2fTab: { width: '100%' },
+  protocolTab: { padding: 0 },
+  protocolEventTimeText: { fontSize: 12, fontWeight: '600', color: colors.text },
+  protocolEventTextContainer: { flex: 1 },
+  protocolEventLabel: { fontSize: 14, fontWeight: '600', color: colors.text },
+  protocolEventPlayers: { flexDirection: 'column', gap: 6 },
+  protocolEventPlayerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  protocolEventPlayerPhoto: { width: 28, height: 28, borderRadius: 14 },
+  protocolEventPlayerPhotoPlaceholder: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.border },
+  protocolEventPlayerInfo: { justifyContent: 'center' },
+  protocolEventPlayerNumber: { fontSize: 12, fontWeight: '600', color: colors.text },
+  protocolEventPlayerName: { fontSize: 12, color: colors.textSecondary },
+  protocolEventComment: { fontSize: 13, color: colors.text, fontStyle: 'italic', lineHeight: 16 },
+  protocolEventScoreRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  protocolEventScoreLogo: { width: 20, height: 20, borderRadius: 10 },
+  protocolScore: { fontSize: 16, fontWeight: '500', color: colors.text },
+  protocolScoreBold: { fontSize: 16, fontWeight: '800', color: colors.primary },
+  protocolEventScoreSeparator: { fontSize: 16, color: colors.text },
+  protocolEventVideoButton: { marginLeft: 'auto', padding: 4 },
+ 
+  // Статистика
+  statsTab: { maxHeight: 500 },
+  teamStatsSection: { marginBottom: 24 },
+  statsTableContainer: { marginVertical: 16, marginHorizontal: 16 },
+  statsTableTitle: { fontSize: 18, fontWeight: '600', color: colors.text, marginBottom: 8 },
+  statsTableHeader: { flexDirection: 'row', backgroundColor: colors.primary, paddingVertical: 8, paddingHorizontal: 8 },
+  statsHeaderCell: { justifyContent: 'center', alignItems: 'center' },
+  statsHeaderText: { color: colors.background, fontWeight: '600', fontSize: 12, textAlign: 'center' },
+  statsRow: { flexDirection: 'row', paddingVertical: 8, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+  statsCell: { justifyContent: 'center', alignItems: 'center', padding: 4 },
+  statsCellNumber: { flex: 0.5, justifyContent: 'center', alignItems: 'center' },
+  statsCellPhoto: { flex: 0.5, justifyContent: 'center', alignItems: 'center' },
+  statsCellName: { flex: 2, justifyContent: 'center', alignItems: 'flex-start', paddingLeft: 8 },
+  statsText: { fontSize: 12, color: colors.text, textAlign: 'center' },
+  statsPlayerPhoto: { width: 24, height: 24, borderRadius: 12 },
+  statsPlayerPhotoPlaceholder: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.border },
+  // Модальное окно видео
+  videoModalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  videoModalContent: {
+    width: '90%',
+    aspectRatio: 16 / 9,
+    backgroundColor: '#000',
     borderRadius: 12,
     overflow: 'hidden',
+    position: 'relative',
   },
-  periodHeader: {
-    flexDirection: 'row',
-    backgroundColor: colors.primary,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-  },
-  periodHeaderNumber: {
-    flex: 1,
-    color: colors.background,
-    fontWeight: '600',
-    textAlign: 'center',
-    fontSize: 14,
-  },
-  periodHeaderText: {
-    flex: 4,
-    color: colors.background,
-    fontWeight: '600',
-    textAlign: 'left',
-    fontSize: 14,
-    paddingLeft: 8,
-  },
-  periodRow: {
-    flexDirection: 'row',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  periodTeam: {
-    flex: 4,
-    color: colors.text,
-    fontWeight: '500',
-    fontSize: 14,
-    textAlign: 'left',
-    paddingLeft: 8,
-  },
-  periodScore: {
-    flex: 1,
-    color: colors.text,
-    textAlign: 'center',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  periodTotal: {
-    flex: 1,
-    color: colors.primary,
-    textAlign: 'center',
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  tabsContainer: {
-    marginHorizontal: 16,
-    marginBottom: 16,
-  },
-  tabsSpacer: {
-    height: 16,
-  },
-  tabContent: {
-    marginTop: 16,
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-  },
-  venueInfo: {
-    gap: 8,
-  },
-  venueName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  venueAddress: {
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  mapLinkButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 8,
-  },
-  mapLinkText: {
-    fontSize: 14,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  mapIcon: {
-    width: 150,
-    height: 26,
-  },
-  placeholderTab: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 40,
-  },
-  placeholderText: {
-    fontSize: 16,
-    color: colors.textSecondary,
-  },
-  f2fTab: {
-    width: '100%',
-  },
-  protocolTab: {
-    //padding: 16,
-  },
-  protocolHeader: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 16,
+  videoModalCloseButton: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    zIndex: 1001,
     padding: 12,
-    backgroundColor: colors.surface,
-    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 24,
   },
-  protocolHeaderText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: colors.background,
-    borderRadius: 6,
+  videoModalWebView: { 
+    flex: 1, 
+    backgroundColor: '#000'   
   },
   protocolPeriodSection: {
     marginBottom: 24,
   },
-  protocolPeriodTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
+  periodHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginBottom: 12,
   },
-  protocolRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-  },
-  protocolRowEven: {
-    backgroundColor: colors.background,
-  },
-  protocolRowOdd: {
-    backgroundColor: colors.surface,
-  },
-  protocolTime: {
-    width: 50,
-    fontSize: 14,
+  periodHeaderText: {
+    fontSize: 16,
     fontWeight: '600',
     color: colors.text,
+    padding: 16,
   },
-  protocolTypeBadge: {
-    width: 80,
+    // Стили для протокола (таблица)
+  protocolTable: {
+    width: '100%',
   },
-  protocolTypeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  protocolTeamLogo: {
-    width: 40,
-    alignItems: 'center',
-  },
-  protocolTeamLogoImage: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-  },
-  protocolEventDetails: {
-    flex: 1,
-    flexDirection: 'column',
-    gap: 4,
-    marginRight: 8,
-  },
-  protocolPlayerCard: {
+  protocolTableRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    borderRadius: 8,
-    padding: 6,
-    minWidth: 80,
+    alignItems: 'stretch', // Важно! Это позволяет контейнерам растягиваться по высоте
+    //marginBottom: 16,
   },
-  protocolPlayerPhoto: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    marginRight: 6,
+  protocolTableCellSpacer: {
+    width: 20, // Ширина столбца для отступа
   },
-  protocolPlayerPhotoPlaceholder: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: colors.border,
-    marginRight: 6,
-  },
-  protocolPlayerInfo: {
+  protocolTableCellLogo: {
+    width: 0.001, // Ширина объединенных столбцов 2-3
     justifyContent: 'center',
+    alignItems: 'center',
+    borderRightWidth: 3, // Видимая граница между столбцами
+    borderRightColor: colors.primary,
   },
-  protocolPlayerNumber: {
-    fontSize: 12,
-    fontWeight: '600',
+  protocolTableCellLogoLast: {
+    width: 0.001, // Ширина объединенных столбцов 2-3
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRightWidth: 3, // Видимая граница между столбцами
+    borderRightColor: colors.primary,
+    borderBottomWidth: 0, // Убираем нижнюю границу для последнего элемента
+  },
+  protocolTableCellIcon: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  protocolIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F5F5F5', // Серая заливка
+    borderWidth: 1, // Тонкая рамка
+    borderColor: colors.primary, // Цвет рамки
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  protocolLogoCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F5F5F5', // Серая заливка
+    borderWidth: 1, // Тонкая рамка
+    borderColor: colors.primary, // Цвет рамки
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  protocolEventTeamLogo: {
+    width: '80%',
+    height: '80%',
+    resizeMode: 'contain',
+  },
+  protocolTableCellContent: {
+    flex: 1,
+    paddingLeft: 12,
+  },
+  protocolPeriodTitleText: {
+    fontSize: 18,
+    fontWeight: '700',
     color: colors.text,
   },
-  protocolPlayerName: {
-    fontSize: 12,
-    color: colors.textSecondary,
-  },
-  protocolCommentInline: {
-    fontSize: 13,
+  protocolFinalText: {
+    fontSize: 18,
+    fontWeight: '700',
     color: colors.text,
-    fontStyle: 'italic',
-    lineHeight: 16,
   },
-  videoButton: {
-    padding: 4,
-  },
-  videoModalOverlay: {
-  position: 'absolute',
-  top: 0,
-  left: 0,
-  right: 0,
-  bottom: 0,
-  backgroundColor: 'rgba(0,0,0,0.9)', // чуть темнее для контраста
-  justifyContent: 'center',
-  alignItems: 'center',
-  zIndex: 1000,
-},
-videoModalContent: {
-  width: '90%',
-  aspectRatio: 16 / 9,
-  backgroundColor: '#000',
-  borderRadius: 12,
-  overflow: 'hidden',
-  position: 'relative',
-},
-videoModalCloseButton: {
-  position: 'absolute',
-  top: 40, // отступ от верха экрана
-  right: 20, // отступ от правого края
-  zIndex: 1001,
-  padding: 12,
-  backgroundColor: 'rgba(0,0,0,0.7)',
-  borderRadius: 24,
-},
-videoModalWebView: {
-  flex: 1,
-  backgroundColor: '#000',
-},
 });
