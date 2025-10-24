@@ -9,6 +9,7 @@ import {
   RefreshControl,
   Image,
   Linking,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -123,8 +124,6 @@ const getPeriodLabel = (timeStr: string, protocol: any): string => {
   return 'other';
 };
 
-
-
 // === РЕНДЕР ПРОТОКОЛА ===
 const renderProtocolByPeriods = (
   protocol: any,
@@ -147,42 +146,35 @@ const renderProtocolByPeriods = (
       periods[periodKey].push(event);
     }
   });
-
   // Заголовки периодов
   const periodLabels: { [key: string]: string } = {
     period1: '1 период',
-    period2: '2 период',
-    period3: '3 период',
-    overtime: 'Овертайм',
-    shootout: 'Буллиты',
+    period2: '2 период, начинаем с ',
+    period3: '3 период, начинаем с ',
+    overtime: 'Овертайм, начинаем с ',
+    shootout: 'Буллиты, начинаем с ',
   };
-
   // Начальный счет
   let currentScore = { home: 0, away: 0 };
-
   // Создаем массив для всех событий, включая заголовки периодов
   const allEvents: any[] = [];
   Object.entries(periods).forEach(([key, events]) => {
     if (events.length === 0) return;
-
     // Добавляем заголовок периода как отдельное событие
-    const periodTitle = `${periodLabels[key]} ${currentScore.home}–${currentScore.away}`;
+    const periodTitle = `${periodLabels[key]} ${currentScore.home} – ${currentScore.away}`;
     allEvents.push({
       type: 'periodHeader',
       title: periodTitle,
       icon: 'whistle-outline',
       key: `period-${key}`,
     });
-
     // Добавляем события периода
     events.forEach((event: any) => {
       // Определяем, какая команда
       const isHomeTeam = event.team === 0;
       const teamLogo = isHomeTeam ? homeTeamLogo : awayTeamLogo;
-
       // Создаем копию текущего счета
       let tempScore = { ...currentScore };
-
       // Обновляем счет, если это гол
       if (event.type === 'g') {
         if (isHomeTeam) {
@@ -193,7 +185,6 @@ const renderProtocolByPeriods = (
         // Обновляем глобальный счет для следующих событий
         currentScore = tempScore;
       }
-
       allEvents.push({
         ...event,
         teamLogo,
@@ -202,7 +193,6 @@ const renderProtocolByPeriods = (
       });
     });
   });
-
   // Добавляем финальный элемент "Матч окончен"
   const finalEvent = {
     type: 'final',
@@ -211,7 +201,6 @@ const renderProtocolByPeriods = (
     key: 'final-event',
   };
   allEvents.push(finalEvent);
-
   // Рендерим все события в виде таблицы
   return (
     <View style={styles.protocolTable}>
@@ -291,7 +280,6 @@ const renderProtocolByPeriods = (
   );
 };
 
-
 // === РЕНДЕР СТАТИСТИКИ ===
 const renderPlayerStatsTable = (
   teamId: string,
@@ -317,7 +305,6 @@ const renderPlayerStatsTable = (
     }
   });
   if (goalies.length === 0 && fieldPlayers.length === 0) return null;
-
   const renderRow = (row: any, isGoalie: boolean) => {
     const { player, playerId, g, a, pim, pn, timeg, ga, sv } = row;
     const number = player?.number || '?';
@@ -368,7 +355,6 @@ const renderPlayerStatsTable = (
       </View>
     );
   };
-
   return (
     <View style={styles.statsTableContainer}>
       {goalies.length > 0 && (
@@ -425,6 +411,16 @@ export default function GameDetailsScreen() {
   const f2fLoadedRef = useRef(false);
   const [videoModalUrl, setVideoModalUrl] = useState<string | null>(null);
 
+  // === АНИМАЦИЯ ПРОКРУТКИ ===
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const gameInfoHeight = useRef(0); // Для хранения динамической высоты
+
+  // Функция для получения высоты блока gameInfo
+  const handleGameInfoLayout = useCallback((event) => {
+    const { height } = event.nativeEvent.layout;
+    gameInfoHeight.current = height;
+  }, []);
+
   // === ЗАГРУЗКА ДАННЫХ ИГРЫ ===
   const loadGameData = useCallback(async (forceRefresh = false) => {
     try {
@@ -436,7 +432,6 @@ export default function GameDetailsScreen() {
         setError('Игра не найдена');
         return;
       }
-
       // Игроки для протокола
       const newProtocolPlayers: Record<string, any> = {};
       if (gameData.protocol?.events) {
@@ -457,7 +452,6 @@ export default function GameDetailsScreen() {
         });
         setProtocolPlayers(newProtocolPlayers);
       }
-
       // Игроки для статистики
       const newStatsPlayers: Record<string, any> = {};
       if (gameData.player_stats) {
@@ -656,25 +650,59 @@ export default function GameDetailsScreen() {
   const awayOutcomeText = extractOutcome(awayOutcome);
   const venueData = venueId ? getVenueById(venueId) : null;
 
+  // Анимированные стили для прозрачности и отображения компактного счёта
+  const gameInfoOpacity = scrollY.interpolate({
+    inputRange: [0, gameInfoHeight.current],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+
+  const compactScoreOpacity = scrollY.interpolate({
+    inputRange: [gameInfoHeight.current - 50, gameInfoHeight.current],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+
   return (
     <SafeAreaView style={commonStyles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitle}>ХК Динамо Форвард 2014</Text>
-          <Text style={styles.headerSubtitle}> • </Text>
-          <Text style={styles.headerLocation}>Санкт-Петербург</Text>
-        </View>
+
+        {/* Абсолютно центрированный компактный счёт */}
+        <Animated.View style={[styles.headerCompactScoreContainer, { opacity: compactScoreOpacity }]}>
+          {homeTeamLogo ? (
+            <Image source={{ uri: homeTeamLogo }} style={styles.headerLogo} />
+          ) : (
+            <View style={[styles.headerLogo, { backgroundColor: colors.border }]} />
+          )}
+          <Text style={[styles.headerScore, !isGameStarted && styles.vsText]}>{scoreDisplay}</Text>
+          {awayTeamLogo ? (
+            <Image source={{ uri: awayTeamLogo }} style={styles.headerLogo} />
+          ) : (
+            <View style={[styles.headerLogo, { backgroundColor: colors.border }]} />
+          )}
+        </Animated.View>
       </View>
 
-      <ScrollView
+      <Animated.ScrollView
         style={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: false } // Для анимации opacity можно использовать false
+        )}
+        scrollEventThrottle={16}
       >
-        {/* Main Game Info */}
-        <View style={styles.gameInfo}>
+        {/* Main Game Info (анимированный) */}
+        <Animated.View
+          style={[
+            styles.gameInfo,
+            { opacity: gameInfoOpacity },
+          ]}
+          onLayout={handleGameInfoLayout} // Измеряем высоту
+        >
           <View style={styles.gameHeader}>
             <Text style={styles.gameDate}>{displayDateTime}</Text>
           </View>
@@ -718,7 +746,7 @@ export default function GameDetailsScreen() {
             </View>
           </View>
           {leagueName && <Text style={styles.leagueText}>🏆 {leagueName}</Text>}
-        </View>
+        </Animated.View>
 
         {/* Video */}
         {sp_video && (
@@ -805,7 +833,6 @@ export default function GameDetailsScreen() {
                 )}
               </View>
             )}
-
             {tabIndex === 1 && gameDetails?.protocol && (
               <View style={styles.protocolTab}>
                 {renderProtocolByPeriods(
@@ -825,7 +852,6 @@ export default function GameDetailsScreen() {
                 )}
               </View>
             )}
-
             {tabIndex === 2 && gameDetails?.player_stats && (
               <ScrollView style={styles.statsTab}>
                 {Object.entries(gameDetails.player_stats).map(([teamId, statsArray]) => {
@@ -838,7 +864,6 @@ export default function GameDetailsScreen() {
                 })}
               </ScrollView>
             )}
-
             {tabIndex === 3 && (
               <View style={styles.f2fTab}>
                 {f2fLoading ? (
@@ -854,7 +879,7 @@ export default function GameDetailsScreen() {
             )}
           </View>
         </View>
-      </ScrollView>
+      </Animated.ScrollView>
 
       {/* Video Modal */}
       {videoModalUrl && (
@@ -1001,7 +1026,6 @@ const styles = StyleSheet.create({
   protocolScoreBold: { fontSize: 16, fontWeight: '800', color: colors.primary },
   protocolEventScoreSeparator: { fontSize: 16, color: colors.text },
   protocolEventVideoButton: { marginLeft: 'auto', padding: 4 },
- 
   // Статистика
   statsTab: { maxHeight: 500 },
   teamStatsSection: { marginBottom: 24 },
@@ -1066,41 +1090,36 @@ const styles = StyleSheet.create({
     color: colors.text,
     padding: 16,
   },
-    // Стили для протокола (таблица)
+      // Стили для протокола (таблица)
   protocolTable: {
     width: '100%',
   },
   protocolTableRow: {
     flexDirection: 'row',
-    alignItems: 'stretch', // Важно! Это позволяет контейнерам растягиваться по высоте
-    //marginBottom: 16,
+    alignItems: 'stretch', // Оставляем, чтобы логотипы были по центру
+    // Убираем marginBottom, если он был
+    // marginBottom: 16,
   },
   protocolTableCellSpacer: {
     width: 20, // Ширина столбца для отступа
   },
   protocolTableCellLogo: {
-    width: 0.001, // Ширина объединенных столбцов 2-3
+    width: 1, // Ширина объединенных столбцов 2-3
     justifyContent: 'center',
     alignItems: 'center',
-    borderRightWidth: 3, // Видимая граница между столбцами
+    borderLeftWidth: 2, // Видимая граница между столбцами
+    borderLeftColor: colors.primary,
+    borderRightWidth: 2, // Видимая граница между столбцами
     borderRightColor: colors.primary,
-  },
-  protocolTableCellLogoLast: {
-    width: 0.001, // Ширина объединенных столбцов 2-3
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRightWidth: 3, // Видимая граница между столбцами
-    borderRightColor: colors.primary,
-    borderBottomWidth: 0, // Убираем нижнюю границу для последнего элемента
   },
   protocolTableCellIcon: {
     justifyContent: 'center',
     alignItems: 'center',
   },
   protocolIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: '#F5F5F5', // Серая заливка
     borderWidth: 1, // Тонкая рамка
     borderColor: colors.primary, // Цвет рамки
@@ -1108,9 +1127,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   protocolLogoCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: '#F5F5F5', // Серая заливка
     borderWidth: 1, // Тонкая рамка
     borderColor: colors.primary, // Цвет рамки
@@ -1125,15 +1144,43 @@ const styles = StyleSheet.create({
   protocolTableCellContent: {
     flex: 1,
     paddingLeft: 12,
+    // Добавляем вертикальный отступ (padding) для создания пространства между элементами
+    paddingTop: 8,
+    paddingBottom: 8,
+    justifyContent: 'center', // Добавляем это свойство
   },
   protocolPeriodTitleText: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '600',
     color: colors.text,
   },
   protocolFinalText: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '600',
     color: colors.text,
   },
+// Стили для компактного счёта в шапке
+headerCompactScoreContainer: {
+  position: 'absolute',
+  left: 26, // ← Начинаем справа от кнопки "Назад" (ширина кнопки ~24 + отступы ~16 + запас)
+  right: 26, // ← Отступ справа
+  top: 0,
+  bottom: 0,
+  justifyContent: 'center',
+  alignItems: 'center',
+  flexDirection: 'row',
+  gap: 8,
+  // Добавляем, чтобы не перехватывать касания вне контента
+  pointerEvents: 'box-none', // ← Ключевое исправление
+},
+headerLogo: {
+  width: 24,
+  height: 24,
+  borderRadius: 12,
+},
+headerScore: {
+  fontSize: 24,
+  fontWeight: '800',
+  color: colors.primary,
+},
 });

@@ -210,7 +210,7 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
           <View style={styles.gameInfo}>
             {venue && <Text style={commonStyles.textSecondary} numberOfLines={1}>📍 {typeof venue === 'string' ? venue : venue.name}</Text>}
             <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
-              {(!tournament || tournament.trim() === '') ? '🤝 ' : '🏆 '}{getLeagueDisplayName(tournament)}
+              {(!tournament || tournament.trim() === 'Товарищеский матч') ? '🤝 ' : '🏆 '}{getLeagueDisplayName(tournament)}
             </Text>
           </View>
         </View>

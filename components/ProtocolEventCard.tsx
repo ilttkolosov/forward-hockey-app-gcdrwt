@@ -92,11 +92,18 @@ const ProtocolEventCard: React.FC<ProtocolEventCardProps> = ({
     const awayScore = score.away;
     return (
       <View style={styles.scoreContainer}>
-        <Image source={{ uri: homeTeamLogo }} style={styles.scoreLogo} />
+        {/* <Image source={{ uri: homeTeamLogo }} style={styles.scoreLogo} /> */}
         <Text style={[styles.scoreText, isHomeTeam && styles.scoreTextBold]}>{homeScore}</Text>
         <Text style={styles.scoreSeparator}>:</Text>
         <Text style={[styles.scoreText, !isHomeTeam && styles.scoreTextBold]}>{awayScore}</Text>
-        <Image source={{ uri: awayTeamLogo }} style={styles.scoreLogo} />
+        {/* <Image source={{ uri: awayTeamLogo }} style={styles.scoreLogo} /> */}
+
+        {event.url?.trim() && (
+            <TouchableOpacity onPress={() => onVideoPress(event.url.trim())} style={styles.videoButton}>
+                <Icon name="videocam" size={30} color={colors.primary} />
+            </TouchableOpacity>
+        )}
+
       </View>
     );
   };
@@ -158,6 +165,7 @@ const ProtocolEventCard: React.FC<ProtocolEventCardProps> = ({
         {event.comment && renderComment(event.comment)}
         {/* Счет (только для голов) */}
         {event.type === 'g' && renderScore()}
+
       </View>
       {/* Контейнер для фото игрока */}
       <View style={styles.photoContainer}>
@@ -184,7 +192,7 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: 16,
+    padding: 12,
     gap: 8,
   },
   eventHeader: {
@@ -195,7 +203,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   time: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
     color: colors.text,
   },
@@ -221,18 +229,18 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   playerText: {
-    fontSize: 14,
+    fontSize: 12,
     color: colors.text,
   },
   primaryPlayer: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   commentText: {
-    fontSize: 13,
+    fontSize: 16,
     color: colors.text,
     fontStyle: 'normal',
-    fontWeight: '700',
+    fontWeight: '600',
   },
   specialComment: {
     marginTop: 2,
@@ -266,17 +274,20 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   photoContainer: {
-    width: 60, // Ширина контейнера для фото
+    width: 80, // Ширина контейнера для фото
     justifyContent: 'center',
     alignItems: 'center',
     borderLeftWidth: 0, // Убираем видимую линию
     paddingVertical: 16,
   },
   playerPhoto: {
-    width: 60,
-    height: 60,
-    borderRadius: 27,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     paddingRight: 6
+  },
+    videoButton: {
+    padding: 4,
   },
 });
 

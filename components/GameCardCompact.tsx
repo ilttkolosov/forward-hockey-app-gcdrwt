@@ -194,7 +194,7 @@ export default function GameCardCompact({ game, showScore = true, onPress }: Gam
         <View style={styles.footer}>
           <View style={styles.gameInfo}>
             <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
-              {(!tournament || tournament.trim() === '') ? '🤝 ' : '🏆 '}
+              {(!tournament || tournament.trim() === 'Товарищеский матч') ? '🤝 ' : '🏆 '}
               {getLeagueDisplayName(tournament)}
             </Text>
           </View>
