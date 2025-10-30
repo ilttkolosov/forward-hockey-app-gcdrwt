@@ -63,12 +63,33 @@ const getVKEmbedUrl = (videoUrl: string, autoplay: boolean = true): string => {
   }
 };
 
+// Проверяет, заполнен ли протокол игры
+const isProtocolFilled = (protocol: any): boolean => {
+  if (!protocol) return false;
+  const maintime = protocol.maintime;
+  // Считаем протокол незаполненным, если maintime пустой, null, undefined, "00:00" или "0"
+  return maintime !== null &&
+         maintime !== undefined &&
+         maintime !== '' &&
+         maintime !== '00:00' &&
+         maintime !== '0';
+};
+
+  // Проверяет, есть ли непустая статистика для хотя бы одной команды
+  const hasPlayerStats = (player_stats: any): boolean => {
+    if (!player_stats || typeof player_stats !== 'object') return false;
+    return Object.values(player_stats).some(
+      (statsArray: any) => Array.isArray(statsArray) && statsArray.length > 0
+    );
+  };
+
 const formatPlayerName = (fullName: string): string => {
   const parts = fullName.trim().split(/\s+/);
   if (parts.length < 2) return fullName;
   const [lastName, firstName] = parts;
   const shortFirstName = firstName ? `${firstName.charAt(0)}.` : '';
-  return `${shortFirstName} ${lastName}`.trim();
+  //return `${shortFirstName} ${lastName}`.trim();
+  return `${firstName} ${lastName}`;
 };
 
 const extractOutcome = (outcomeArray: any): string => {
@@ -314,7 +335,7 @@ const renderPlayerStatsTable = (
     return (
       <View key={playerId} style={styles.statsRow}>
         <View style={styles.statsCellNumber}>
-          <Text style={styles.statsText}>{number}</Text>
+          <Text style={styles.statsCellNumber}>#{number}</Text>
         </View>
         <View style={styles.statsCellPhoto}>
           {photoPath ? (
@@ -361,9 +382,9 @@ const renderPlayerStatsTable = (
         <>
           <Text style={styles.statsTableTitle}>Вратари</Text>
           <View style={styles.statsTableHeader}>
-            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>#</Text></View>
-            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>Фото</Text></View>
-            <View style={[styles.statsHeaderCell, { flex: 2 }]}><Text style={styles.statsHeaderText}>Имя</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}></Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}></Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 2 }]}><Text style={styles.statsHeaderText}></Text></View>
             <View style={[styles.statsHeaderCell, { flex: 1 }]}><Text style={styles.statsHeaderText}>ВНП</Text></View>
             <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>П6</Text></View>
             <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>Бр</Text></View>
@@ -377,9 +398,9 @@ const renderPlayerStatsTable = (
         <>
           <Text style={styles.statsTableTitle}>Полевые игроки</Text>
           <View style={styles.statsTableHeader}>
-            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>#</Text></View>
-            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>Фото</Text></View>
-            <View style={[styles.statsHeaderCell, { flex: 2 }]}><Text style={styles.statsHeaderText}>Имя</Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}></Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}></Text></View>
+            <View style={[styles.statsHeaderCell, { flex: 2 }]}><Text style={styles.statsHeaderText}></Text></View>
             <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>П</Text></View>
             <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>Г</Text></View>
             <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>П</Text></View>
@@ -407,7 +428,33 @@ export default function GameDetailsScreen() {
   const [tabIndex, setTabIndex] = useState(0);
   const [f2fGames, setF2fGames] = useState<Game[]>([]);
   const [f2fLoading, setF2fLoading] = useState(false);
-  const tabs = ['Арена', 'Протокол', 'Статистика', 'F2F'];
+  // Динамически формируем список вкладок
+  // const baseTabs = ['Арена', 'Статистика', 'F2F'];
+  // Динамически формируем список вкладок в нужном порядке
+  const visibleTabs = [];
+  if (gameDetails && isProtocolFilled(gameDetails.protocol)) {
+    visibleTabs.push('Протокол');
+  }
+  if (gameDetails && hasPlayerStats(gameDetails.player_stats)) {
+    visibleTabs.push('Статистика');
+  }
+  visibleTabs.push('Арена');
+  visibleTabs.push('F2F');
+
+  const tabs = visibleTabs;
+  //////////
+
+  const [liveScore, setLiveScore] = useState({ home: '0', away: '0' });
+  const [periodScores, setPeriodScores] = useState({
+    team1_first: '0',
+    team1_second: '0',
+    team1_third: '0',
+    team2_first: '0',
+    team2_second: '0',
+    team2_third: '0',
+  });
+  const [isGameStarted, setIsGameStarted] = useState(false);
+
   const f2fLoadedRef = useRef(false);
   const [videoModalUrl, setVideoModalUrl] = useState<string | null>(null);
 
@@ -538,6 +585,76 @@ export default function GameDetailsScreen() {
     }
   }, [id, loadGameData]);
 
+  // === ОТСЛЕЖИВАНИЕ СТАРТА ИГРЫ ===
+  useEffect(() => {
+    if (!gameDetails || isGameStarted) return;
+
+    const gameStart = new Date(gameDetails.event_date);
+    const now = new Date();
+
+    // Если игра уже началась, ничего не делаем (всё уже обработано)
+    if (now >= gameStart) {
+      setIsGameStarted(true);
+      return;
+    }
+
+    // Запускаем таймер, который проверяет каждые 5 секунд, началась ли игра
+    const checkGameStartInterval = setInterval(() => {
+      const now = new Date();
+      if (now >= gameStart) {
+        console.log('🎮 Game has started! Initializing live score.');
+        setIsGameStarted(true);
+        clearInterval(checkGameStartInterval);
+      }
+    }, 5000); // Проверяем каждые 5 секунд
+
+    // Очистка при размонтировании
+    return () => clearInterval(checkGameStartInterval);
+  }, [gameDetails, isGameStarted]);
+
+
+
+  // ✅ Инициализация счёта: если игра ещё не началась — оставляем как есть,
+  // если началась — берём данные из gameDetails
+  useEffect(() => {
+    if (!gameDetails) return;
+
+    const now = new Date();
+    const gameStart = new Date(gameDetails.event_date);
+    const gameHasStarted = now >= gameStart;
+
+    if (gameHasStarted) {
+      // Игра уже идёт или прошла — берём реальный счёт
+      setLiveScore({
+        home: gameDetails.homeScore ?? '0',
+        away: gameDetails.awayScore ?? '0',
+      });
+      setPeriodScores({
+        team1_first: gameDetails.team1_first ?? '0',
+        team1_second: gameDetails.team1_second ?? '0',
+        team1_third: gameDetails.team1_third ?? '0',
+        team2_first: gameDetails.team2_first ?? '0',
+        team2_second: gameDetails.team2_second ?? '0',
+        team2_third: gameDetails.team2_third ?? '0',
+      });
+      if (!isGameStarted) {
+        setIsGameStarted(true);
+      }
+    } else {
+      // Игра ещё не началась — сбрасываем счёт на 0:0 (на случай, если данные пришли с прошлой игры)
+      setLiveScore({ home: '0', away: '0' });
+      setPeriodScores({
+        team1_first: '0',
+        team1_second: '0',
+        team1_third: '0',
+        team2_first: '0',
+        team2_second: '0',
+        team2_third: '0',
+      });
+    }
+  }, [gameDetails, isGameStarted]);
+
+
   useEffect(() => {
     if (gameDetails && !f2fLoadedRef.current) {
       loadF2fGames(gameDetails);
@@ -549,6 +666,71 @@ export default function GameDetailsScreen() {
     await loadGameData(true);
     setRefreshing(false);
   };
+
+
+  // === ФОНОВОЕ ОБНОВЛЕНИЕ СЧЁТА ВО ВРЕМЯ ИГРЫ ===
+  useEffect(() => {
+    if (!gameDetails) return;
+
+    // Функция обновления счёта
+    const updateLiveScore = async () => {
+      // --- ПЕРЕНОСИМ ПРОВЕРКУ СЮДА ---
+      const gameStart = new Date(gameDetails.event_date);
+      const gameEnd = new Date(gameStart.getTime() + 100 * 60 * 1000); // +100 минут
+      const now = new Date();
+      const isGameLive = isGameStarted && now <= gameEnd;
+
+      if (!isGameLive) {
+        return; // Ничего не делаем
+      }
+      // --- КОНЕЦ ПЕРЕНОСА ---
+
+      try {
+        const freshGame = await getGameById(gameDetails.id, false);
+        if (!freshGame) return;
+
+        const newHome = freshGame.homeScore ?? '0';
+        const newAway = freshGame.awayScore ?? '0';
+        const currentHome = liveScore.home;
+        const currentAway = liveScore.away;
+
+        const newPeriods = {
+          team1_first: freshGame.team1_first ?? '0',
+          team1_second: freshGame.team1_second ?? '0',
+          team1_third: freshGame.team1_third ?? '0',
+          team2_first: freshGame.team2_first ?? '0',
+          team2_second: freshGame.team2_second ?? '0',
+          team2_third: freshGame.team2_third ?? '0',
+        };
+
+        const periodsChanged =
+          newPeriods.team1_first !== periodScores.team1_first ||
+          newPeriods.team1_second !== periodScores.team1_second ||
+          newPeriods.team1_third !== periodScores.team1_third ||
+          newPeriods.team2_first !== periodScores.team2_first ||
+          newPeriods.team2_second !== periodScores.team2_second ||
+          newPeriods.team2_third !== periodScores.team2_third;
+
+        if (newHome !== currentHome || newAway !== currentAway || periodsChanged) {
+          console.log(`🔄 Live data updated`);
+          setLiveScore({ home: newHome, away: newAway });
+          setPeriodScores(newPeriods);
+        }
+      } catch (err) {
+        console.warn('⚠️ Failed to update live score:', err);
+      }
+    };
+
+    // Запускаем первое обновление немедленно
+    updateLiveScore();
+
+    // Запускаем интервал каждые 2 минуты
+    const intervalId = setInterval(updateLiveScore, 2 * 60 * 1000);
+
+    // Очистка при размонтировании
+    return () => clearInterval(intervalId);
+  }, [gameDetails?.id, isGameStarted]); // <-- Упрощаем зависимости
+
 
   // === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ОТОБРАЖЕНИЯ ===
   const getOutcomeText = (outcome: string): string => {
@@ -641,10 +823,8 @@ export default function GameDetailsScreen() {
   const displayDateTime = hideTime ? formattedDate : `${formattedDate} • ${formattedTime}`;
   const now = new Date();
   const gameDate = new Date(event_date);
-  const isGameStarted = now >= gameDate;
-  const homeGoalsDisplay = homeScore ?? 0;
-  const awayGoalsDisplay = awayScore ?? 0;
-  const scoreDisplay = isGameStarted ? `${homeGoalsDisplay} : ${awayGoalsDisplay}` : 'VS';
+  //const isGameStarted = now >= gameDate;
+  const scoreDisplay = isGameStarted ? `${liveScore.home} : ${liveScore.away}` : 'VS';
   const showPeriodScores = isGameStarted;
   const homeOutcomeText = extractOutcome(homeOutcome);
   const awayOutcomeText = extractOutcome(awayOutcome);
@@ -786,17 +966,17 @@ export default function GameDetailsScreen() {
               </View>
               <View style={styles.periodRow}>
                 <Text style={styles.periodTeam}>{homeTeamName}</Text>
-                <Text style={styles.periodScore}>{team1_first || 0}</Text>
-                <Text style={styles.periodScore}>{team1_second || 0}</Text>
-                <Text style={styles.periodScore}>{team1_third || 0}</Text>
-                <Text style={styles.periodTotal}>{homeGoalsDisplay}</Text>
+                <Text style={styles.periodScore}>{periodScores.team1_first}</Text>
+                <Text style={styles.periodScore}>{periodScores.team1_second}</Text>
+                <Text style={styles.periodScore}>{periodScores.team1_third}</Text>
+                <Text style={styles.periodTotal}>{liveScore.home}</Text>
               </View>
               <View style={styles.periodRow}>
                 <Text style={styles.periodTeam}>{awayTeamName}</Text>
-                <Text style={styles.periodScore}>{team2_first || 0}</Text>
-                <Text style={styles.periodScore}>{team2_second || 0}</Text>
-                <Text style={styles.periodScore}>{team2_third || 0}</Text>
-                <Text style={styles.periodTotal}>{awayGoalsDisplay}</Text>
+                <Text style={styles.periodScore}>{periodScores.team2_first}</Text>
+                <Text style={styles.periodScore}>{periodScores.team2_second}</Text>
+                <Text style={styles.periodScore}>{periodScores.team2_third}</Text>
+                <Text style={styles.periodTotal}>{liveScore.away}</Text>
               </View>
             </View>
           </View>
@@ -815,25 +995,7 @@ export default function GameDetailsScreen() {
             backgroundColor={colors.surface}
           />
           <View style={styles.tabContent}>
-            {tabIndex === 0 && venueData && (
-              <View style={styles.venueInfo}>
-                <Text style={styles.venueName}>{venueData.name}</Text>
-                {venueData.address && <Text style={styles.venueAddress}>{venueData.address}</Text>}
-                {venueData.coordinates && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      const url = `https://yandex.ru/maps/?pt=${venueData.coordinates.longitude},${venueData.coordinates.latitude}&z=17`;
-                      Linking.openURL(url).catch(() => console.warn('Не удалось открыть Яндекс.Карты'));
-                    }}
-                    style={styles.mapLinkButton}
-                  >
-                    <Text style={styles.mapLinkText}>Открыть в </Text>
-                    <Image source={require('../../assets/icons/YandexMap.png')} style={styles.mapIcon} />
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
-            {tabIndex === 1 && gameDetails?.protocol && (
+            {tabs[tabIndex] === 'Протокол' && gameDetails?.protocol && (
               <View style={styles.protocolTab}>
                 {renderProtocolByPeriods(
                   gameDetails.protocol,
@@ -852,7 +1014,7 @@ export default function GameDetailsScreen() {
                 )}
               </View>
             )}
-            {tabIndex === 2 && gameDetails?.player_stats && (
+            {tabs[tabIndex] === 'Статистика' && gameDetails?.player_stats && (
               <ScrollView style={styles.statsTab}>
                 {Object.entries(gameDetails.player_stats).map(([teamId, statsArray]) => {
                   if (!Array.isArray(statsArray)) return null;
@@ -864,7 +1026,25 @@ export default function GameDetailsScreen() {
                 })}
               </ScrollView>
             )}
-            {tabIndex === 3 && (
+            {tabs[tabIndex] === 'Арена' && venueData && (
+              <View style={styles.venueInfo}>
+                <Text style={styles.venueName}>{venueData.name}</Text>
+                {venueData.address && <Text style={styles.venueAddress}>{venueData.address}</Text>}
+                {venueData.coordinates && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      const url = `https://yandex.ru/maps/?pt=${venueData.coordinates.longitude},${venueData.coordinates.latitude}&z=17`;
+                      Linking.openURL(url).catch(() => console.warn('Не удалось открыть Яндекс.Карты'));
+                    }}
+                    style={styles.mapLinkButton}
+                  >
+                    <Text style={styles.mapLinkText}>Открыть в </Text>
+                    <Image source={require('../../assets/icons/YandexMap.png')} style={styles.mapIcon} />
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+            {tabs[tabIndex] === 'F2F' && (
               <View style={styles.f2fTab}>
                 {f2fLoading ? (
                   <LoadingSpinner />
@@ -1027,16 +1207,16 @@ const styles = StyleSheet.create({
   protocolEventScoreSeparator: { fontSize: 16, color: colors.text },
   protocolEventVideoButton: { marginLeft: 'auto', padding: 4 },
   // Статистика
-  statsTab: { maxHeight: 500 },
+  statsTab: { maxHeight: 600 },
   teamStatsSection: { marginBottom: 24 },
-  statsTableContainer: { marginVertical: 16, marginHorizontal: 16 },
+  statsTableContainer: { marginVertical: 16, marginHorizontal: 0 },
   statsTableTitle: { fontSize: 18, fontWeight: '600', color: colors.text, marginBottom: 8 },
   statsTableHeader: { flexDirection: 'row', backgroundColor: colors.primary, paddingVertical: 8, paddingHorizontal: 8 },
   statsHeaderCell: { justifyContent: 'center', alignItems: 'center' },
   statsHeaderText: { color: colors.background, fontWeight: '600', fontSize: 12, textAlign: 'center' },
-  statsRow: { flexDirection: 'row', paddingVertical: 8, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+  statsRow: { flexDirection: 'row', paddingVertical: 4, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
   statsCell: { justifyContent: 'center', alignItems: 'center', padding: 4 },
-  statsCellNumber: { flex: 0.5, justifyContent: 'center', alignItems: 'center' },
+  statsCellNumber: { flex: 0.5, justifyContent: 'center', fontWeight: '600', alignItems: 'center' },
   statsCellPhoto: { flex: 0.5, justifyContent: 'center', alignItems: 'center' },
   statsCellName: { flex: 2, justifyContent: 'center', alignItems: 'flex-start', paddingLeft: 8 },
   statsText: { fontSize: 12, color: colors.text, textAlign: 'center' },

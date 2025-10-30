@@ -741,45 +741,37 @@ export async function getUpcomingGamesMasterData(forceRefresh = false): Promise<
 // --- ЭКСПОРТИРУЕМЫЕ ФУНКЦИИ ---
 
 /**
- * Получает текущую игру (ближайшая предстоящая или идущая)
- * Игра считается текущей, если она попадает в текущий день (с 00:00 до 23:59:59).
- * Также включает игры, которые идут прямо сейчас (LIVE).
+ * Получает текущую игру.
+ * Игра считается текущей, если текущая дата попадает в диапазон:
+ * с 00:00 предыдущего дня (относительно дня игры)
+ * до 23:59 следующего дня (относительно дня игры).
  */
 export async function getCurrentGame(forceRefresh = false): Promise<Game | null> {
   try {
     console.log('Getting current game from master data...');
     const allUpcomingGames = await getUpcomingGamesMasterData(forceRefresh);
-    
-    
-
     if (!allUpcomingGames || allUpcomingGames.length === 0) {
       return null;
     }
 
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // 00:00:00
-    const todayEnd = new Date(todayStart);
-    todayEnd.setDate(todayEnd.getDate() + 1); // 00:00:00 следующего дня
 
-    // Сортируем по дате (ближайшая первая)
-    const sortedGames = [...allUpcomingGames].sort(
-      (a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime()
-    );
-
-    // Ищем первую игру, которая:
-    // - либо идёт прямо сейчас (LIVE: за 5 мин до — до 90 мин после),
-    // - либо проходит сегодня (даже если ещё не началась)
-    const currentGame = sortedGames.find(game => {
+    // Найдём игру, для которой текущая дата попадает в [gameDay - 1 день, gameDay + 1 день]
+    const currentGame = allUpcomingGames.find(game => {
       const gameDate = new Date(game.event_date);
-      
-      // LIVE: за 5 минут до начала и до 90 минут после
-      const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000);
-      const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000);
-      const isLive = now >= liveStart && now <= liveEnd;
+      // Нормализуем gameDate к 00:00 дня игры
+      const gameDay = new Date(gameDate.getFullYear(), gameDate.getMonth(), gameDate.getDate());
 
-      const isToday = gameDate >= todayStart && gameDate < todayEnd;
+      // Диапазон: с 00:00 предыдущего дня
+      const rangeStart = new Date(gameDay);
+      rangeStart.setDate(gameDay.getDate() - 1); // 00:00 дня перед игрой
 
-      return isLive || isToday;
+      // ...по 23:59:59 следующего дня
+      const rangeEnd = new Date(gameDay);
+      rangeEnd.setDate(gameDay.getDate() + 2); // 00:00 через два дня
+      rangeEnd.setMilliseconds(-1); // → 23:59:59.999 следующего дня
+
+      return now >= rangeStart && now <= rangeEnd;
     });
 
     if (currentGame) {
@@ -787,7 +779,7 @@ export async function getCurrentGame(forceRefresh = false): Promise<Game | null>
       return currentGame;
     }
 
-    console.log('No game found for current day or live window, returning NULL');
+    console.log('No current game found in ±1 day window');
     return null;
   } catch (error) {
     console.error('Error getting current game from master data:', error);
@@ -795,32 +787,38 @@ export async function getCurrentGame(forceRefresh = false): Promise<Game | null>
   }
 }
 
+
 /**
- * Получает список будущих игр (до 5 штук), исключая текущую игру (если она есть)
+ * Получает список будущих игр (до 5 штук), исключая игры, которые считаются "текущими".
+ * "Текущая" игра определяется как игра, чья дата попадает в диапазон
+ * с 00:00 предыдущего дня по 23:59 следующего дня.
  */
 export async function getFutureGames(forceRefresh = false): Promise<Game[]> {
   try {
     console.log('Getting future games from master data...');
     const allUpcomingGames = await getUpcomingGamesMasterData(forceRefresh);
+    if (!allUpcomingGames) {
+      return [];
+    }
 
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const todayEnd = new Date(todayStart);
-    todayEnd.setDate(todayEnd.getDate() + 1);
 
-    // Фильтруем: исключаем игры, которые считаются "текущими"
+    // Фильтруем: оставляем ТОЛЬКО те игры, которые НЕ являются "текущими"
     const filteredGames = allUpcomingGames.filter(game => {
       const gameDate = new Date(game.event_date);
-      
-      // LIVE: за 5 минут до начала и до 90 минут после
-      const liveStart = new Date(gameDate.getTime() - 5 * 60 * 1000);
-      const liveEnd = new Date(gameDate.getTime() + 90 * 60 * 1000);
-      const isLive = now >= liveStart && now <= liveEnd;
+      // Нормализуем gameDate к 00:00 дня игры
+      const gameDay = new Date(gameDate.getFullYear(), gameDate.getMonth(), gameDate.getDate());
 
-      const isToday = gameDate >= todayStart && gameDate < todayEnd;
+      // Диапазон "актуальности" игры: с 00:00 предыдущего дня по 23:59 следующего дня
+      const rangeStart = new Date(gameDay);
+      rangeStart.setDate(gameDay.getDate() - 1); // 00:00 дня перед игрой
 
-      // Исключаем, если игра "текущая" (LIVE или сегодня)
-      return !(isLive || isToday);
+      const rangeEnd = new Date(gameDay);
+      rangeEnd.setDate(gameDay.getDate() + 2); // 00:00 через два дня
+      rangeEnd.setMilliseconds(-1); // → 23:59:59.999 следующего дня
+
+      // Если текущая дата НЕ попадает в этот диапазон, игра идёт в "Ближайшие"
+      return !(now >= rangeStart && now <= rangeEnd);
     });
 
     // Сортируем по дате (ближайшие первыми)
@@ -828,7 +826,6 @@ export async function getFutureGames(forceRefresh = false): Promise<Game[]> {
 
     // Берём первые 5
     const futureGames = filteredGames.slice(0, 5);
-
     console.log(`Loaded ${futureGames.length} future games (after excluding current)`);
     return futureGames;
   } catch (error) {
