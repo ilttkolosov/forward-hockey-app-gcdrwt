@@ -40,70 +40,55 @@ const CURRENT_TOURNAMENT_CONFIG_KEY = 'current_tournament_config'; // Для в�
  */
 export const fetchTournamentConfig = async (tournamentId: string): Promise<TournamentConfig> => {
   try {
-    // Используем тот же URL, но ожидаем TournamentConfig
-    const response = await fetch(`https://www.hc-forward.com/wp-json/app/v1/get-table/${tournamentId}`); // Убран пробел!
+    const response = await fetch(`https://www.hc-forward.com/wp-json/app/v1/get-table/${tournamentId}`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
-    const data = await response.json();
+    const rawData = await response.json();
+    //console.log(`[API] Ответ для турнира ${tournamentId}:`, JSON.stringify(rawData, null, 2));
 
-    // Проверяем структуру ответа
     let configData: TournamentConfig | null = null;
-
-    if (data && typeof data === 'object') {
-      // Проверяем, есть ли league_id и season_id в корне ответа
-      if (data.league_id !== undefined && data.season_id !== undefined) {
-        // Предполагаем, что таблица находится в поле data.data или data.tables
+    if (rawData && typeof rawData === 'object') {
+      if (rawData.league_id !== undefined && rawData.season_id !== undefined) {
         let tables: TournamentTable[] = [];
-        if (Array.isArray(data.data)) {
-          tables = data.data;
-        } else if (Array.isArray(data.tables)) {
-          tables = data.tables;
-        } else if (Array.isArray(data)) {
-          // Если data - это сразу массив таблиц
-          tables = data;
+        if (Array.isArray(rawData.data)) {
+          tables = rawData.data;
+        } else if (Array.isArray(rawData.tables)) {
+          tables = rawData.tables;
+        } else if (Array.isArray(rawData)) {
+          tables = rawData;
         } else {
-          throw new Error('Tables not found in response under "data" or "tables" or as root array');
+          throw new Error('Tables not found in response');
         }
+
+        // 🔎 Логируем первую строку таблицы
+        if (tables.length > 0) {
+          //console.log(`[API] Первая строка таблицы для ${tournamentId}:`, tables[0]);
+        }
+
         configData = {
-          league_id: data.league_id,
-          season_id: data.season_id,
-          tables: tables,
+          league_id: rawData.league_id,
+          season_id: rawData.season_id,
+          tables,
         };
       } else {
-        // Если league_id и season_id нет в корне, возможно, это старая структура
-        // Попробуем найти таблицу и предположить, что её нужно кэшировать отдельно
-        // Но для получения league_id/season_id нужно изменить API или понять структуру
-        // Пока бросим ошибку, если структура не соответствует ожидаемой TournamentConfig
-        throw new Error('Response does not contain league_id and season_id at root level');
+        throw new Error('No league_id/season_id in root');
       }
     } else {
-      throw new Error('Invalid tournament config response format, not an object');
+      throw new Error('Invalid response format');
     }
 
-    if (!configData) {
-        throw new Error('Could not parse TournamentConfig from response');
-    }
-
-    // === СОХРАНЕНИЕ ВСЕЙ КОНФИГУРАЦИИ В КЭШ ===
+    // Сохраняем в кэш
     await AsyncStorage.setItem(`${CURRENT_TOURNAMENT_CONFIG_KEY}_${tournamentId}`, JSON.stringify(configData));
-    // Сохраняем также таблицу отдельно для совместимости с fetchTournamentTable
     await AsyncStorage.setItem(`${CURRENT_TOURNAMENT_DATA_KEY}_${tournamentId}`, JSON.stringify(configData.tables));
 
+    console.log(`[CACHE] Сохранена конфигурация турнира ${tournamentId} в AsyncStorage`);
     return configData;
   } catch (error) {
-    console.error('❌ Failed to fetch tournament config:', error);
-    // В случае ошибки, возвращаем кэшированные данные
-    const cachedConfig = await getCachedTournamentConfig(tournamentId);
-    if (cachedConfig) {
-        return cachedConfig;
-    }
-    // Если кэша нет, пробуем вернуть старую кэшированную таблицу, но это не даст league_id/season_id
-    // Лучше бросить ошибку или вернуть null, если критично
-    // Для совместимости, если fetchTournamentTable использовалась, можно попробовать её кэш
-    // Но fetchTournamentTable возвращает только таблицу.
-    // Пока бросим ошибку, если не удалось получить полный config.
-    throw error; // Перебрасываем ошибку, чтобы вызывающий код мог обработать
+    console.error('❌ fetchTournamentConfig error:', error);
+    const cached = await getCachedTournamentConfig(tournamentId);
+    if (cached) return cached;
+    throw error;
   }
 };
 
@@ -160,10 +145,14 @@ export const getCachedTournamentTable = async (tournamentId: string): Promise<To
   try {
     const cached = await AsyncStorage.getItem(key);
     if (cached) {
-      return JSON.parse(cached);
+      const parsed = JSON.parse(cached);
+      //console.log(`[CACHE] Загружена таблица из кэша для ${tournamentId}. Первые 2 строки:`, parsed.slice(0, 2));
+      return parsed;
+    } else {
+      console.log(`[CACHE] Нет данных в кэше для ${tournamentId}`);
     }
   } catch (e) {
-    console.error('❌ Failed to get cached tournament table:', e);
+    console.error('❌ getCachedTournamentTable error:', e);
   }
   return [];
 };

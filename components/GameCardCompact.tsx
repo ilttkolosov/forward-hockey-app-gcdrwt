@@ -64,6 +64,7 @@ export default function GameCardCompact({ game, showScore = true, onPress }: Gam
     homeOutcome,
     awayOutcome,
     event_date,
+    season_name,
   } = game;
 
   const homeTeamName = homeTeam?.name || '—';
@@ -191,12 +192,18 @@ export default function GameCardCompact({ game, showScore = true, onPress }: Gam
         </View>
 
         {/* Footer */}
+        {/* Footer */}
         <View style={styles.footer}>
-          <View style={styles.gameInfo}>
+          <View style={styles.gameInfoRow}>
             <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
               {(!tournament || tournament.trim() === 'Товарищеский матч') ? '🤝 ' : '🏆 '}
               {getLeagueDisplayName(tournament)}
             </Text>
+            {season_name && season_name.trim() !== '' && (
+              <Text style={[commonStyles.textSecondary, styles.seasonText]} numberOfLines={1}>
+                {season_name}
+              </Text>
+            )}
           </View>
         </View>
       </View>
@@ -294,11 +301,22 @@ const styles = StyleSheet.create({
   footer: {
     marginTop: 4,
   },
-  gameInfo: {
-    gap: 4,
+  gameInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   leagueText: {
     fontSize: 12,
     fontStyle: 'italic',
+    textAlign: 'left',
+    flex: 1, // Занимает всё доступное пространство слева
+    marginRight: 8, // Отступ от сезона
+  },
+  seasonText: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    textAlign: 'right',
+    flexShrink: 1, // Сжимается, если места мало
   },
 });

@@ -50,18 +50,65 @@ export default function SeasonGamesScreen() {
       return;
     }
 
+    // Определяем, это "недавние игры" или конкретный сезон
+    const isRecent = id === 'recent';
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const oneYearAgo = new Date(now);
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+    const oneYearAgoStr = oneYearAgo.toISOString().split('T')[0];
+
     try {
       setError(null);
       setLoading(true);
       if (bypassCache) setRefreshing(true);
 
-      const games = await getGames({
-        date_from,
-        date_to,
-        teams: '74',
-        useCache: !bypassCache, // ← обход кэша при обновлении
-      });
+      let games: Game[] = [];
 
+      if (isRecent && !bypassCache) {
+        // 1. Сначала пытаемся взять из кэша за последний год
+        try {
+          const yearlyGames = await getGames({
+            date_from: oneYearAgoStr,
+            date_to: todayStr,
+            teams: '74',
+            useCache: true,
+          });
+
+          // 2. Отфильтровываем только за последний месяц
+          const oneMonthAgo = new Date(now);
+          oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
+          const monthStartStr = oneMonthAgo.toISOString().split('T')[0];
+
+          games = yearlyGames.filter(game => {
+            return game.event_date >= monthStartStr && game.event_date <= todayStr;
+          });
+
+          console.log(`✅ [Recent] Found ${games.length} games in yearly cache`);
+        } catch (e) {
+          console.warn('⚠️ [Recent] No yearly cache, falling back to API');
+        }
+
+        // 3. Если в кэше ничего нет — идём в API
+        if (games.length === 0) {
+          games = await getGames({
+            date_from: date_from,
+            date_to: date_to,
+            teams: '74',
+            useCache: false,
+          });
+        }
+      } else {
+        // Обычный сезон — работаем как раньше
+        games = await getGames({
+          date_from,
+          date_to,
+          teams: '74',
+          useCache: !bypassCache,
+        });
+      }
+
+      // Сортируем по убыванию даты
       games.sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
       setAllGames(games);
       setFilteredGames(games);

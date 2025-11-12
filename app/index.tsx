@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
 import { commonStyles, colors } from '../styles/commonStyles';
 import { Game } from '../types';
-import { getCurrentGame, getFutureGames, getUpcomingGamesCount, getGameById } from '../data/gameData';
+import { getCurrentGame, getFutureGames, getUpcomingGamesCount, getGameById, getUpcomingGamesMasterData } from '../data/gameData';
 import { getPlayers } from '../data/playerData';
 import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -83,7 +83,7 @@ const headerStyles = StyleSheet.create({
 });
 
 export default function HomeScreen() {
-  const [currentGame, setCurrentGame] = useState<Game | null>(null);
+  const [currentGames, setCurrentGames] = useState<Game[]>([]);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
   const [upcomingCount, setUpcomingCount] = useState<number>(0);
   const [playersCount, setPlayersCount] = useState<number>(0);
@@ -107,15 +107,30 @@ export default function HomeScreen() {
     try {
       setError(null);
       if (!force) setLoading(true);
-
-      const [current, upcoming, upcomingCount, players] = await Promise.all([
-        getCurrentGame(force),
+      const [allUpcoming, upcoming, upcomingCount, players] = await Promise.all([
+        getUpcomingGamesMasterData(force), // ← получаем ВСЕ игры
         getFutureGames(force),
         getUpcomingGamesCount(),
         getPlayers(),
       ]);
 
-      setCurrentGame(current ?? null);
+      // Фильтруем "текущие" игры по тому же критерию, что и в getCurrentGame
+      const now = new Date();
+      const currentGames = allUpcoming.filter(game => {
+        const gameDate = new Date(game.event_date);
+        const gameDay = new Date(gameDate.getFullYear(), gameDate.getMonth(), gameDate.getDate());
+        const rangeStart = new Date(gameDay);
+        rangeStart.setDate(gameDay.getDate() - 1); // 00:00 дня перед игрой
+        const rangeEnd = new Date(gameDay);
+        rangeEnd.setDate(gameDay.getDate() + 2); // 00:00 через два дня
+        rangeEnd.setMilliseconds(-1); // → 23:59:59.999 следующего дня
+        return now >= rangeStart && now <= rangeEnd;
+      });
+
+      // Сортируем по времени (возрастание)
+      currentGames.sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
+
+      setCurrentGames(currentGames);
       setUpcomingGames(upcoming);
       setUpcomingCount(upcomingCount);
       setPlayersCount(players.length);
@@ -172,12 +187,14 @@ export default function HomeScreen() {
         </View>
 
         {/* Current Game */}
-        {currentGame && (
+        {currentGames.length > 0 && (
           <View style={{ marginBottom: 0 }}>
             <Text style={[commonStyles.subtitle, { marginBottom: 12 }]}>
-              Текущая игра
+              {currentGames.length === 1 ? 'Текущая игра' : 'Текущие игры'}
             </Text>
-            <GameCard game={currentGame} showScore={true} />
+            {currentGames.map((game) => (
+              <GameCard key={game.id} game={game} showScore={true} />
+            ))}
           </View>
         )}
 

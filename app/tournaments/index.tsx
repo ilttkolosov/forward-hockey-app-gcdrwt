@@ -244,6 +244,15 @@ export default function TournamentsScreen() {
                 <View style={styles.teamLogoPlaceholder} />
               )}
               <Text style={[styles.cell, styles.teamName]}>{row.team_name}</Text>
+              <TouchableOpacity
+                onPress={() => router.push({
+                  pathname: `/command/${row.team_id}`,
+                  params: { tournamentId: tournamentId }
+                })}
+                style={styles.navArrowContainer}
+              >
+                <Icon name="information-circle-outline" type="Ionicons" size={20} color={colors.primary} />
+              </TouchableOpacity>
             </View>
             <Text style={[styles.cell, styles.games]}>{row.games}</Text>
             <Text style={[styles.cell, styles.points]}>{row.points_2x}</Text>
@@ -443,5 +452,15 @@ const styles = StyleSheet.create({
   detailButtonText: {
     color: '#fff',
     fontWeight: 'bold',
+  },
+  navArrowContainer: {
+  marginLeft: 'auto',
+  paddingVertical: 4,
+  paddingHorizontal: 6,
+  },
+  navArrow: {
+    color: colors.primary,
+    fontWeight: 'bold',
+    fontSize: 16,
   },
 });

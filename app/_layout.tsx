@@ -61,6 +61,28 @@ const initializeTournamentsInBackground = async (config: StartupConfig) => {
   }
 };
 
+// --- ФОНОВАЯ ЗАГРУЗКА АРХИВНЫХ ИГР ---
+const preloadPastGamesInBackground = async () => {
+  try {
+    console.log('[Preload] 🕰️ Запуск фоновой загрузки архивных игр (последний год)...');
+    const now = new Date();
+    const startDate = new Date(now);
+    startDate.setFullYear(startDate.getFullYear() - 1); // Минус 1 год
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = now.toISOString().split('T')[0];
+    // Загружаем игры команды 74 за последний год
+    await getGames({
+      date_from: startDateStr,
+      date_to: endDateStr,
+      teams: '74',
+      useCache: true,
+    });
+    console.log('[Preload] ✅ Архивные игры (последний год) загружены и закэшированы');
+  } catch (error) {
+    console.warn('[Preload] ❌ Ошибка фоновой загрузки архивных игр:', error);
+  }
+};
+
 const preloadCurrentTournamentGames = async (config: StartupConfig) => {
   try {
     const currentTournament = config.tournamentsNow?.[0];
@@ -90,13 +112,15 @@ const preloadCurrentTournamentGames = async (config: StartupConfig) => {
   }
 };
 
-const initializePlayersInBackground = async () => {
+const initializePlayersInBackground = async (): Promise<Player[]> => {
   try {
     console.log('🔄 Starting background player data initialization...');
-    await playerDownloadService.refreshPlayersData();
+    const players = await playerDownloadService.refreshPlayersData();
     console.log('✅ Player data initialized in background');
+    return players;
   } catch (e) {
     console.error('❌ Failed to initialize players in background:', e);
+    return [];
   }
 };
 
@@ -323,17 +347,30 @@ export default function RootLayout() {
       // 👇 Игры текущего турнира — фон
       preloadCurrentTournamentGames(config);
 
-      // Игроки
+      // 👇 Архивные игры — фон (НОВОЕ!)
+      preloadPastGamesInBackground();
+
+      // Игроки — ОБНОВЛЁННАЯ ЛОГИКА
       const localPlayersVersion = parseInt(await AsyncStorage.getItem(PLAYERS_VERSION_KEY) || '0');
       const shouldUpdatePlayers = config.players_version > localPlayersVersion;
-      if (shouldUpdatePlayers) {
-        initializePlayersInBackground();
+      const playersDataLoaded = await playerDownloadService.isDataLoaded();
+      let playersList: Player[] = [];
+
+      if (shouldUpdatePlayers || !playersDataLoaded) {
+        // Полная перезагрузка данных игроков
+        setInitializationMessage('Загрузка данных игроков...');
+        setProgress(45);
+        playersList = await initializePlayersInBackground();
         await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(config.players_version));
       } else {
-        const dataLoaded = await playerDownloadService.isDataLoaded();
-        if (!dataLoaded) {
-          initializePlayersInBackground();
-        }
+        // Загружаем игроков из кэша и проверяем фото
+        playersList = await playerDownloadService.getPlayersFromStorage();
+        setInitializationMessage('Проверка фото игроков...');
+        setProgress(45);
+        await playerDownloadService.verifyAndRestorePlayerPhotos(playersList, (current, total) => {
+          const progress = 45 + Math.floor((current / total) * 10);
+          setProgress(progress);
+        });
       }
 
       setInitializationMessage('Готово!');
@@ -364,6 +401,7 @@ export default function RootLayout() {
         <Stack.Screen name="game/[id]" />
         <Stack.Screen name="season/[id]" />
         <Stack.Screen name="tournaments/[id]" />
+        <Stack.Screen name="command/[id]" />
         <Stack.Screen name="mobilegames/[id]" />
       </Stack>
     </GestureHandlerRootView>

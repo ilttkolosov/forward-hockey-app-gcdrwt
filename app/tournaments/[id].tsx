@@ -21,7 +21,15 @@ import SegmentedControl from '@react-native-segmented-control/segmented-control'
 import GameCardCompact from '../../components/GameCardCompact';
 import { getGames, gameDetailsCache } from '../../data/gameData';
 import type { Game } from '../../types';
-import { fetchTournamentConfig, getCachedTournamentConfig, TournamentConfig } from '../../services/tournamentsApi';
+import {
+  fetchTournamentConfig,
+  getCachedTournamentConfig,
+  TournamentConfig,
+  fetchTournamentTable,
+  getCachedTournamentTable,
+} from '../../services/tournamentsApi';
+import { loadTeamLogo } from '../../services/teamStorage';
+import CommandCard from '../../components/CommandCard';
 
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 const TOURNAMENTS_PAST_KEY = 'tournaments_past';
@@ -31,6 +39,21 @@ const RUSSIAN_MONTHS = [
   'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
   'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'
 ];
+
+interface TournamentTableRowWithLogo {
+  team_id: string;
+  position: string;
+  team_name: string;
+  games: string;
+  wins: string;
+  losses: string;
+  draws: string;
+  overtime_wins: string;
+  overtime_losses: string;
+  points_2x: string;
+  pkpercent: string;
+  logo_uri: string | null;
+}
 
 const styles = StyleSheet.create({
   container: {
@@ -158,6 +181,10 @@ export default function TournamentDetailScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchModal, setShowSearchModal] = useState(false);
 
+  // === СТАТИСТИКА ===
+  const [tournamentTable, setTournamentTable] = useState<TournamentTableRowWithLogo[] | null>(null);
+  const [tableLoading, setTableLoading] = useState(false);
+
   // Ref для прокрутки
   const scrollViewRef = useRef<ScrollView>(null);
 
@@ -240,6 +267,40 @@ export default function TournamentDetailScreen() {
     }
   }, [tournamentConfig, calculateFilterCounts]);
 
+  const loadTournamentTable = useCallback(async (force = false) => {
+    if (!id) return;
+    setTableLoading(true);
+    try {
+      let table = null;
+      if (!force) {
+        table = await getCachedTournamentTable(id);
+      }
+      if (!table || force) {
+        console.log(`[TournamentDetail] Кэш пуст или force=true → запрашиваем API для турнира ${id}`);
+        table = await fetchTournamentTable(id);
+      }
+
+      console.log(`[TournamentDetail] Получена таблица для турнира ${id}. Длина: ${table.length}`);
+      if (table.length > 0) {
+        //console.log(`[TournamentDetail] Пример первой строки:`, table[0]);
+      }
+
+      const tableWithLogos = await Promise.all(
+        table.map(async (row: any) => {
+          const logo_uri = await loadTeamLogo(row.team_id.toString()).catch(() => null);
+          return { ...row, logo_uri };
+        })
+      );
+
+      setTournamentTable(tableWithLogos);
+    } catch (err) {
+      console.error(`💥 [TournamentDetail] Ошибка загрузки турнирной таблицы ${id}:`, err);
+      setTournamentTable([]);
+    } finally {
+      setTableLoading(false);
+    }
+  }, [id]);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -260,11 +321,19 @@ export default function TournamentDetailScreen() {
     }
   }, [loadTournamentInfo, loadTournamentConfig]);
 
+  // Загружаем игры при открытии вкладки "Игры"
   useEffect(() => {
     if (activeTab === 0 && tournamentConfig && tournamentGames.length === 0 && !gamesLoading) {
       loadTournamentGames();
     }
   }, [activeTab, tournamentConfig, tournamentGames.length, gamesLoading, loadTournamentGames]);
+
+  // Загружаем таблицу при открытии вкладки "Статистика"
+  useEffect(() => {
+    if (activeTab === 1 && tournamentTable === null && !tableLoading) {
+      loadTournamentTable();
+    }
+  }, [activeTab, tournamentTable, tableLoading, loadTournamentTable]);
 
   useEffect(() => {
     if (id) {
@@ -281,23 +350,22 @@ export default function TournamentDetailScreen() {
     if (activeTab === 0) {
       loadTournamentGames(true);
     }
+    if (activeTab === 1) {
+      loadTournamentTable(true);
+    }
   };
 
   const handleBackPress = () => router.back();
 
-  // === ПОИСК ===
-  // === ФИЛЬТРАЦИЯ И СОРТИРОВКА ИГР ===
+  // === ПОИСК И ФИЛЬТРАЦИЯ ===
   const filteredGames = useMemo(() => {
     let result: Game[] = [];
-
     if (isPastTournament) {
-      // Для прошедших турниров — все игры, сортировка по убыванию даты
-      result = [...tournamentGames].sort((a, b) => 
+      result = [...tournamentGames].sort((a, b) =>
         new Date(b.event_date).getTime() - new Date(a.event_date).getTime()
       );
     } else {
       const now = new Date();
-      // Фильтрация по текущему фильтру
       result = tournamentGames.filter(game => {
         const gameDate = new Date(game.event_date);
         switch (gameFilter) {
@@ -315,17 +383,12 @@ export default function TournamentDetailScreen() {
             return true;
         }
       });
-
-      // Дополнительная сортировка: только для "Прошедшие" — по убыванию
       if (gameFilter === 'past') {
-        result = result.sort((a, b) => 
+        result = result.sort((a, b) =>
           new Date(b.event_date).getTime() - new Date(a.event_date).getTime()
         );
       }
-      // Для "Текущие" и "Будущие" — оставляем исходный порядок (уже от API + сортировка в getGames)
     }
-
-    // Применяем поиск, если есть запрос
     if (searchQuery.trim().length >= 2) {
       const q = searchQuery.toLowerCase().trim();
       result = result.filter(game => {
@@ -338,19 +401,16 @@ export default function TournamentDetailScreen() {
         return day.includes(q) || monthName.includes(q);
       });
     }
-
     return result;
   }, [tournamentGames, gameFilter, searchQuery, isPastTournament]);
 
-  // === СМЕНА ФИЛЬТРА → ПРОКРУТКА НАВЕРХ ===
   const handleFilterChange = (index: number) => {
     const filter = index === 0 ? 'current' : index === 1 ? 'upcoming' : 'past';
     setGameFilter(filter);
-    setSearchQuery(''); // сброс поиска при смене фильтра
+    setSearchQuery('');
     scrollViewRef.current?.scrollTo({ y: 0, animated: true });
   };
 
-  // === ПОИСК ===
   const handleSearchPress = () => setShowSearchModal(true);
   const handleCloseSearch = () => {
     setShowSearchModal(false);
@@ -414,7 +474,6 @@ export default function TournamentDetailScreen() {
       {/* Содержимое вкладок */}
       {activeTab === 0 ? (
         <View style={styles.tabContent}>
-          {/* Фильтры — только для текущих турниров */}
           {isPastTournament === false && (
             <View style={styles.filtersContainer}>
               <SegmentedControl
@@ -435,8 +494,6 @@ export default function TournamentDetailScreen() {
               />
             </View>
           )}
-
-          {/* Список игр */}
           <ScrollView
             ref={scrollViewRef}
             style={styles.content}
@@ -471,7 +528,36 @@ export default function TournamentDetailScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={{ padding: 16 }}>
-            <Text style={commonStyles.text}>📊 Вкладка "Статистика" (в разработке)</Text>
+            {tableLoading ? (
+              <LoadingSpinner />
+            ) : tournamentTable && tournamentTable.length > 0 ? (
+              tournamentTable.map((row) => (
+                <CommandCard
+                  key={row.team_id}
+                  teamId={row.team_id}
+                  teamName={row.team_name}
+                  logoUri={row.logo_uri}
+                  position={row.position}
+                  games={row.games}
+                  wins={row.wins}
+                  losses={row.losses}
+                  draws={row.draws}
+                  overtime_wins={row.overtime_wins}
+                  overtime_losses={row.overtime_losses}
+                  points_2x={row.points_2x}
+                  goals_for={row.goals_for}
+                  goals_against={row.goals_against}
+                  goal_diff={row.goal_diff}
+                  ppg_percent={row.ppg_percent}
+                  pkpercent={row.penalty_kill_percent}
+                  tournamentId={id}
+                />
+              ))
+            ) : (
+              <Text style={[commonStyles.text, { textAlign: 'center' }]}>
+                Нет данных по статистике
+              </Text>
+            )}
           </View>
         </ScrollView>
       )}

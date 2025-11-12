@@ -25,6 +25,16 @@ import GameCardCompact from '../../components/GameCardCompact';
 import ProtocolEventCard from '../../components/ProtocolEventCard';
 import { getPlayerById } from '../../data/playerData';
 
+// Определение типа видео
+const isYouTubeUrl = (url: string): boolean => {
+  return /(?:youtube\.com\/watch\?v=|youtu\.be\/)/.test(url.trim());
+};
+
+const isVKUrl = (url: string): boolean => {
+  return /vk\.com\/video/.test(url.trim());
+};
+
+
 // === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 const parseVKVideoUrl = (url: string): { ownerId: string; videoId: string } | null => {
   try {
@@ -62,6 +72,21 @@ const getVKEmbedUrl = (videoUrl: string, autoplay: boolean = true): string => {
     return videoUrl;
   }
 };
+
+
+const getYouTubeEmbedUrl = (url: string): string => {
+  try {
+    const videoIdMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&?/]+)/);
+    if (videoIdMatch && videoIdMatch[1]) {
+      return `https://www.youtube.com/embed/${videoIdMatch[1]}?autoplay=1&mute=0&enablejsapi=1&origin=https://www.hc-forward.com`;
+    }
+    return url; // fallback
+  } catch (error) {
+    console.error('Error processing YouTube URL:', error);
+    return url;
+  }
+};
+
 
 // Проверяет, заполнен ли протокол игры
 const isProtocolFilled = (protocol: any): boolean => {
@@ -349,28 +374,28 @@ const renderPlayerStatsTable = (
         </View>
         {isGoalie ? (
           <>
-            <View style={styles.statsCell}><Text style={styles.statsText}>{formatTimeSeconds(timeg)}</Text></View>
-            <View style={styles.statsCell}><Text style={styles.statsText}>{ga || '0'}</Text></View>
-            <View style={styles.statsCell}><Text style={styles.statsText}>{sv || '0'}</Text></View>
-            <View style={styles.statsCell}>
+            <View style={[styles.statsCell, { width: 50  }]}><Text style={styles.statsText}>{formatTimeSeconds(timeg)}</Text></View>
+            <View style={[styles.statsCell, { width: 30  }]}><Text style={styles.statsText}>{ga || '0'}</Text></View>
+            <View style={[styles.statsCell, { width: 30  }]}><Text style={styles.statsText}>{sv || '0'}</Text></View>
+            <View style={[styles.statsCell, { width: 50  }]}>
               <Text style={styles.statsText}>
                 {sv || ga ? ((parseInt(sv, 10) || 0) / ((parseInt(sv, 10) || 0) + (parseInt(ga, 10) || 0)) * 100).toFixed(2) : '0.00'}%
               </Text>
             </View>
-            <View style={styles.statsCell}><Text style={styles.statsText}>{pim || '0'}</Text></View>
+            {/*<View style={styles.statsCell}><Text style={styles.statsText}>{pim || '0'}</Text></View>*/}
           </>
         ) : (
           <>
-            <View style={styles.statsCell}>
+            {/*<View style={styles.statsCell}>
               <Text style={styles.statsText}>
                 {row.position === '8' ? 'Н' : row.position === '9' ? 'З' : '?'}
               </Text>
-            </View>
-            <View style={styles.statsCell}><Text style={styles.statsText}>{g || '0'}</Text></View>
-            <View style={styles.statsCell}><Text style={styles.statsText}>{a || '0'}</Text></View>
-            <View style={styles.statsCell}><Text style={styles.statsText}>{(parseInt(g, 10) || 0) + (parseInt(a, 10) || 0)}</Text></View>
-            <View style={styles.statsCell}><Text style={styles.statsText}>{pim || '0'}</Text></View>
-            <View style={styles.statsCell}><Text style={styles.statsText}>{pn || '0'}</Text></View>
+            </View>*/}
+            <View style={[styles.statsCell, { width: 30  }]}><Text style={styles.statsText}>{g || '0'}</Text></View>
+            <View style={[styles.statsCell, { width: 30  }]}><Text style={styles.statsText}>{a || '0'}</Text></View>
+            <View style={[styles.statsCell, { width: 30 }]}><Text style={styles.statsText}>{(parseInt(g, 10) || 0) + (parseInt(a, 10) || 0)}</Text></View>
+            <View style={[styles.statsCell, { width: 30 }]}><Text style={styles.statsText}>{pim || '0'}</Text></View>
+            {/*<View style={styles.statsCell}><Text style={styles.statsText}>{pn || '0'}</Text></View>*/}
           </>
         )}
       </View>
@@ -385,11 +410,11 @@ const renderPlayerStatsTable = (
             <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}></Text></View>
             <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}></Text></View>
             <View style={[styles.statsHeaderCell, { flex: 2 }]}><Text style={styles.statsHeaderText}></Text></View>
-            <View style={[styles.statsHeaderCell, { flex: 1 }]}><Text style={styles.statsHeaderText}>ВНП</Text></View>
-            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>П6</Text></View>
-            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>Бр</Text></View>
-            <View style={[styles.statsHeaderCell, { flex: 1 }]}><Text style={styles.statsHeaderText}>ОБ%</Text></View>
-            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>ШМ</Text></View>
+            <View style={[styles.statsHeaderCell, { width: 50 }]}><Text style={styles.statsHeaderText}>ВНП</Text></View>
+            <View style={[styles.statsHeaderCell, { width: 30 }]}><Text style={styles.statsHeaderText}>П6</Text></View>
+            <View style={[styles.statsHeaderCell, { width: 30 }]}><Text style={styles.statsHeaderText}>Бр</Text></View>
+            <View style={[styles.statsHeaderCell, { width: 50 }]}><Text style={styles.statsHeaderText}>ОБ%</Text></View>
+            {/*<View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>ШМ</Text></View>*/}
           </View>
           {goalies.map(row => renderRow(row, true))}
         </>
@@ -401,12 +426,12 @@ const renderPlayerStatsTable = (
             <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}></Text></View>
             <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}></Text></View>
             <View style={[styles.statsHeaderCell, { flex: 2 }]}><Text style={styles.statsHeaderText}></Text></View>
-            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>П</Text></View>
-            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>Г</Text></View>
-            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>П</Text></View>
-            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>О</Text></View>
-            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>ШМ</Text></View>
-            <View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>КШ</Text></View>
+            {/*<View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>П</Text></View>*/}
+            <View style={[styles.statsHeaderCell, { width: 30 }]}><Text style={styles.statsHeaderText}>Г</Text></View>
+            <View style={[styles.statsHeaderCell, { width: 30 }]}><Text style={styles.statsHeaderText}>П</Text></View>
+            <View style={[styles.statsHeaderCell, { width: 30 }]}><Text style={styles.statsHeaderText}>О</Text></View>
+            <View style={[styles.statsHeaderCell, { width: 30 }]}><Text style={styles.statsHeaderText}>ШМ</Text></View>
+            {/*<View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>КШ</Text></View>*/}
           </View>
           {fieldPlayers.map(row => renderRow(row, false))}
         </>
@@ -567,7 +592,7 @@ export default function GameDetailsScreen() {
       const now = Date.now();
       sortedGames.forEach(game => {
         if (!gameDetailsCache[game.id]) {
-          gameDetailsCache[game.id] = { game, timestamp: now };
+          gameDetailsCache[game.id] = { data: game, timestamp: now };
         }
       });
       console.log(`✅ Loaded ${sortedGames.length} F2F games`);
@@ -957,12 +982,12 @@ export default function GameDetailsScreen() {
         {showPeriodScores && (
           <View style={styles.periodScores}>
             <View style={styles.periodTable}>
-              <View style={styles.periodHeader}>
+              <View style={styles.periodHeaderTable}>
                 <Text style={styles.periodHeaderText}>Счет по периодам</Text>
                 <Text style={styles.periodHeaderNumber}>1</Text>
                 <Text style={styles.periodHeaderNumber}>2</Text>
                 <Text style={styles.periodHeaderNumber}>3</Text>
-                <Text style={styles.periodHeaderNumber}>Итого</Text>
+                <Text style={[styles.periodHeaderNumber, {flex: 1.5}]}>Итого</Text>
               </View>
               <View style={styles.periodRow}>
                 <Text style={styles.periodTeam}>{homeTeamName}</Text>
@@ -1015,7 +1040,7 @@ export default function GameDetailsScreen() {
               </View>
             )}
             {tabs[tabIndex] === 'Статистика' && gameDetails?.player_stats && (
-              <ScrollView style={styles.statsTab}>
+              <View>
                 {Object.entries(gameDetails.player_stats).map(([teamId, statsArray]) => {
                   if (!Array.isArray(statsArray)) return null;
                   return (
@@ -1024,7 +1049,7 @@ export default function GameDetailsScreen() {
                     </View>
                   );
                 })}
-              </ScrollView>
+              </View>
             )}
             {tabs[tabIndex] === 'Арена' && venueData && (
               <View style={styles.venueInfo}>
@@ -1211,16 +1236,16 @@ const styles = StyleSheet.create({
   teamStatsSection: { marginBottom: 24 },
   statsTableContainer: { marginVertical: 16, marginHorizontal: 0 },
   statsTableTitle: { fontSize: 18, fontWeight: '600', color: colors.text, marginBottom: 8 },
-  statsTableHeader: { flexDirection: 'row', backgroundColor: colors.primary, paddingVertical: 8, paddingHorizontal: 8 },
+  statsTableHeader: { flexDirection: 'row', backgroundColor: colors.primary, paddingVertical: 8, paddingHorizontal: 8, borderTopLeftRadius: 10, borderTopRightRadius: 10 },
   statsHeaderCell: { justifyContent: 'center', alignItems: 'center' },
   statsHeaderText: { color: colors.background, fontWeight: '600', fontSize: 12, textAlign: 'center' },
-  statsRow: { flexDirection: 'row', paddingVertical: 4, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+  statsRow: { flexDirection: 'row', paddingVertical: 8, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
   statsCell: { justifyContent: 'center', alignItems: 'center', padding: 4 },
-  statsCellNumber: { flex: 0.5, justifyContent: 'center', fontWeight: '600', alignItems: 'center' },
-  statsCellPhoto: { flex: 0.5, justifyContent: 'center', alignItems: 'center' },
+  statsCellNumber: { width: 30, justifyContent: 'center', fontWeight: '600', alignItems: 'center' },
+  statsCellPhoto: { width: 30, justifyContent: 'center', alignItems: 'center' },
   statsCellName: { flex: 2, justifyContent: 'center', alignItems: 'flex-start', paddingLeft: 8 },
-  statsText: { fontSize: 12, color: colors.text, textAlign: 'center' },
-  statsPlayerPhoto: { width: 24, height: 24, borderRadius: 12 },
+  statsText: { fontSize: 12, color: colors.text, textAlign: 'left' },
+  statsPlayerPhoto: { width: 30, height: 30, borderRadius: 15 },
   statsPlayerPhotoPlaceholder: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.border },
   // Модальное окно видео
   videoModalOverlay: {
@@ -1258,16 +1283,21 @@ const styles = StyleSheet.create({
   protocolPeriodSection: {
     marginBottom: 24,
   },
-  periodHeader: {
+  periodHeaderTable: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     marginBottom: 12,
+    backgroundColor: colors.primary,
+    paddingVertical: 0,
+    paddingHorizontal: 16,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
   },
   periodHeaderText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
+    fontWeight: '400',
+    color: colors.background,
     padding: 16,
   },
       // Стили для протокола (таблица)

@@ -96,6 +96,58 @@ export class PlayerDownloadService {
     }
   }
 
+  // Проверяет наличие фото для списка игроков и перезагружает отсутствующие
+  async verifyAndRestorePlayerPhotos(
+    players: Player[],
+    onProgress?: (current: number, total: number) => void
+  ): Promise<void> {
+    console.log(`🔍 Проверка фото для ${players.length} игроков...`);
+    await this.ensurePlayersDirectoryExists();
+    
+    let downloadedCount = 0;
+    const total = players.length;
+
+    for (let i = 0; i < players.length; i++) {
+      const player = players[i];
+      let photoExists = false;
+
+      try {
+        if (player.photoPath) {
+          const fileInfo = await getInfoAsync(player.photoPath);
+          photoExists = fileInfo.exists;
+        }
+      } catch (e) {
+        console.warn(`Ошибка проверки фото для игрока ${player.id}:`, e);
+      }
+
+      if (!photoExists) {
+        console.log(`🖼️ Фото для игрока ${player.id} отсутствует — загружаем...`);
+        const photoData = await this.fetchPlayerPhoto(player.id);
+        if (photoData?.photo_url) {
+          const newPhotoPath = await this.downloadAndCacheImage(photoData.photo_url, player.id);
+          if (newPhotoPath) {
+            // Обновляем путь в объекте игрока
+            player.photoPath = newPhotoPath;
+            player.photo = newPhotoPath; // для совместимости
+            downloadedCount++;
+          }
+        }
+      }
+
+      onProgress?.(i + 1, total);
+    }
+
+    // Сохраняем обновлённые пути
+    if (downloadedCount > 0) {
+      await this.savePlayersToStorage(players);
+      console.log(`✅ Восстановлено ${downloadedCount} фото игроков`);
+    } else {
+      console.log('✅ Все фото игроков на месте');
+    }
+  }
+
+
+
   //Загрузка фото игроков в оптимальном разрешении  
   async downloadAndCacheImage(originalUrl: string, playerId: string): Promise<string | null> {
     if (!originalUrl) return null;
