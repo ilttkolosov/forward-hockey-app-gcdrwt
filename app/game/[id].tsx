@@ -378,7 +378,7 @@ const renderPlayerStatsTable = (
             <View style={[styles.statsCell, { width: 50  }]}><Text style={styles.statsText}>{formatTimeSeconds(timeg)}</Text></View>
             <View style={[styles.statsCell, { width: 30  }]}><Text style={styles.statsText}>{ga || '0'}</Text></View>
             <View style={[styles.statsCell, { width: 30  }]}><Text style={styles.statsText}>{sv || '0'}</Text></View>
-            <View style={[styles.statsCell, { width: 50  }]}>
+            <View style={[styles.statsCell, { width: 60  }]}>
               <Text style={styles.statsText}>
                 {sv || ga ? ((parseInt(sv, 10) || 0) / ((parseInt(sv, 10) || 0) + (parseInt(ga, 10) || 0)) * 100).toFixed(2) : '0.00'}%
               </Text>
@@ -392,9 +392,9 @@ const renderPlayerStatsTable = (
                 {row.position === '8' ? 'Н' : row.position === '9' ? 'З' : '?'}
               </Text>
             </View>*/}
-            <View style={[styles.statsCell, { width: 30  }]}><Text style={styles.statsText}>{g || '0'}</Text></View>
-            <View style={[styles.statsCell, { width: 30  }]}><Text style={styles.statsText}>{a || '0'}</Text></View>
-            <View style={[styles.statsCell, { width: 30 }]}><Text style={styles.statsText}>{(parseInt(g, 10) || 0) + (parseInt(a, 10) || 0)}</Text></View>
+            <View style={[styles.statsCell, { width: 30 }]}><Text style={styles.statsText}>{g || '0'}</Text></View>
+            <View style={[styles.statsCell, { width: 30 }]}><Text style={styles.statsText}>{a || '0'}</Text></View>
+            <View style={[styles.statsCell, { width: 30 }]}><Text style={[styles.statsText, {fontWeight: '800'}]}>{(parseInt(g, 10) || 0) + (parseInt(a, 10) || 0)}</Text></View>
             <View style={[styles.statsCell, { width: 30 }]}><Text style={styles.statsText}>{pim || '0'}</Text></View>
             {/*<View style={styles.statsCell}><Text style={styles.statsText}>{pn || '0'}</Text></View>*/}
           </>
@@ -414,7 +414,7 @@ const renderPlayerStatsTable = (
             <View style={[styles.statsHeaderCell, { width: 50 }]}><Text style={styles.statsHeaderText}>ВНП</Text></View>
             <View style={[styles.statsHeaderCell, { width: 30 }]}><Text style={styles.statsHeaderText}>П6</Text></View>
             <View style={[styles.statsHeaderCell, { width: 30 }]}><Text style={styles.statsHeaderText}>Бр</Text></View>
-            <View style={[styles.statsHeaderCell, { width: 50 }]}><Text style={styles.statsHeaderText}>ОБ%</Text></View>
+            <View style={[styles.statsHeaderCell, { width: 60 }]}><Text style={styles.statsHeaderText}>ОБ%</Text></View>
             {/*<View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>ШМ</Text></View>*/}
           </View>
           {goalies.map(row => renderRow(row, true))}
@@ -430,7 +430,7 @@ const renderPlayerStatsTable = (
             {/*<View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>П</Text></View>*/}
             <View style={[styles.statsHeaderCell, { width: 30 }]}><Text style={styles.statsHeaderText}>Г</Text></View>
             <View style={[styles.statsHeaderCell, { width: 30 }]}><Text style={styles.statsHeaderText}>П</Text></View>
-            <View style={[styles.statsHeaderCell, { width: 30 }]}><Text style={styles.statsHeaderText}>О</Text></View>
+            <View style={[styles.statsHeaderCell, { width: 30 }]}><Text style={[styles.statsHeaderText, {fontWeight: '800'}]}>О</Text></View>
             <View style={[styles.statsHeaderCell, { width: 30 }]}><Text style={styles.statsHeaderText}>ШМ</Text></View>
             {/*<View style={[styles.statsHeaderCell, { flex: 0.5 }]}><Text style={styles.statsHeaderText}>КШ</Text></View>*/}
           </View>

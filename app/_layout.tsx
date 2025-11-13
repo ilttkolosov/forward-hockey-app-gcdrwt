@@ -345,17 +345,30 @@ export default function RootLayout() {
       const shouldUpdatePlayers = config.players_version > localPlayersVersion;
       const playersDataLoaded = await playerDownloadService.isDataLoaded();
 
+      let playersList: Player[] = [];
+
       if (shouldUpdatePlayers || !playersDataLoaded) {
+        // Полная перезагрузка игроков
         setInitializationMessage('Загрузка данных игроков...');
         setProgress(65);
-        const playersList = await playerDownloadService.refreshPlayersDataWithProgress((loaded, total) => {
+        playersList = await playerDownloadService.refreshPlayersDataWithProgress((loaded, total) => {
           setDynamicStatus(`Загружено игроков ${loaded} из ${total}`);
         });
         await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(config.players_version));
       } else {
-        // Быстрая загрузка из кэша — не показываем прогресс по игрокам
-        const playersList = await playerDownloadService.getPlayersFromStorage();
+        // Загрузка из кэша
+        playersList = await playerDownloadService.getPlayersFromStorage();
         setDynamicStatus(`Загружено игроков ${playersList.length}`);
+      }
+
+      // 🔥 ВАЖНО: ВСЕГДА проверяем фото после загрузки игроков, особенно при обновлении приложения
+      if (playersList.length > 0) {
+        setInitializationMessage('Проверка фото игроков...');
+        setProgress(80);
+        setDynamicStatus('Проверка целостности фото...');
+        await playerDownloadService.verifyAndRestorePlayerPhotos(playersList, (current, total) => {
+          setDynamicStatus(`Восстановлено фото ${current} из ${total}`);
+        });
       }
 
       // === 6. Фоновые задачи (запускаем после основного прогресса) ===

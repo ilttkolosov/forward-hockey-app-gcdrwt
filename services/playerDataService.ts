@@ -488,14 +488,15 @@ async fetchPlayerPhoto(playerId: string): Promise<PlayerPhoto | null> {
       }
 
       // --- ПРОВЕРКА ФЛАГА ПЕРЕД ЗАГРУЗКОЙ ФОТО ---
-      const photosDownloaded = await this.arePhotosDownloaded();
-      console.log(`PlayerDownloadService: Photos download flag is ${photosDownloaded ? 'TRUE' : 'FALSE'}.`);
-
+      //const photosDownloaded = await this.arePhotosDownloaded();
+      //console.log(`PlayerDownloadService: Photos download flag is ${photosDownloaded ? 'TRUE' : 'FALSE'}.`);
+      
+      // ✅ Загружаем ВСЕ данные, ВКЛЮЧАЯ ФОТО, при полной перезагрузке
       const allPlayers = await this.processPlayersConcurrently(
         playersList,
         onProgress,
         5,
-        photosDownloaded // <-- ПЕРЕДАЁМ ФЛАГ В processPlayersConcurrently
+        false, // ← ВСЕГДА загружаем фото при полной загрузке
       );
 
       allPlayers.sort((a, b) => a.number - b.number);
@@ -503,7 +504,7 @@ async fetchPlayerPhoto(playerId: string): Promise<PlayerPhoto | null> {
       onProgress?.('Сохранение данных…');
       await this.savePlayersToStorage(allPlayers);
       await this.setDataLoaded(true);
-
+      await this.setPhotosDownloadedFlag(true); // ← Теперь точно загружены
       // --- УСТАНОВКА ФЛАГА ПОСЛЕ УСПЕШНОЙ ЗАГРУЗКИ ВСЕГО ---
       // Флаг устанавливается ТОЛЬКО если фото *не* были пропущены и *все* данные сохранены
       if (!photosDownloaded) { // Если фото *не* были пропущены, значит они *должны* были быть загружены
@@ -519,6 +520,7 @@ async fetchPlayerPhoto(playerId: string): Promise<PlayerPhoto | null> {
       console.error('Error loading all players data:', error);
       throw error;
     }
+    await this.setPhotosDownloadedFlag(true); // ← Теперь точно загружены
   }
 
   async savePlayersToStorage(players: Player[]): Promise<void> {
@@ -554,7 +556,6 @@ async fetchPlayerPhoto(playerId: string): Promise<PlayerPhoto | null> {
     try {
       console.log('Refreshing players data...');
       await this.setDataLoaded(false);
-      // ВАЖНО: сбрасываем флаг фото при обновлении
       await this.setPhotosDownloadedFlag(false); // <-- СБРОС ФЛАГА
       return await this.loadAllPlayersData(onProgress);
     } catch (error) {
