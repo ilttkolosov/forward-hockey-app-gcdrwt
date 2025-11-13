@@ -30,6 +30,7 @@ import {
 } from '../../services/tournamentsApi';
 import { loadTeamLogo } from '../../services/teamStorage';
 import CommandCard from '../../components/CommandCard';
+import { trackScreenView } from '../../services/analyticsService';
 
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 const TOURNAMENTS_PAST_KEY = 'tournaments_past';
@@ -180,7 +181,7 @@ export default function TournamentDetailScreen() {
   const [gameFilter, setGameFilter] = useState<'current' | 'upcoming' | 'past'>('current');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchModal, setShowSearchModal] = useState(false);
-
+ 
   // === СТАТИСТИКА ===
   const [tournamentTable, setTournamentTable] = useState<TournamentTableRowWithLogo[] | null>(null);
   const [tableLoading, setTableLoading] = useState(false);
@@ -437,6 +438,16 @@ export default function TournamentDetailScreen() {
 
   const tournamentName = tournamentInfo?.tournament_Name || 'Турнир не найден';
   const leagueName = tournamentInfo?.league_name || 'Все игры и статистика';
+
+  // === Аналитика ===
+  useEffect(() => {
+    if (tournamentId) {
+      trackScreenView('Экран турнира с ID', {
+        tournament_id: id,
+        tournament_name: tournamentName || 'unknown',
+      });
+    }
+  }, [tournamentId]);
 
   return (
     <SafeAreaView style={styles.container}>

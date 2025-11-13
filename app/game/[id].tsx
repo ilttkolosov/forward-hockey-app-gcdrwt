@@ -24,6 +24,7 @@ import SegmentedControl from '@react-native-segmented-control/segmented-control'
 import GameCardCompact from '../../components/GameCardCompact';
 import ProtocolEventCard from '../../components/ProtocolEventCard';
 import { getPlayerById } from '../../data/playerData';
+import { trackScreenView } from '../../services/analyticsService';
 
 // Определение типа видео
 const isYouTubeUrl = (url: string): boolean => {
@@ -453,6 +454,17 @@ export default function GameDetailsScreen() {
   const [tabIndex, setTabIndex] = useState(0);
   const [f2fGames, setF2fGames] = useState<Game[]>([]);
   const [f2fLoading, setF2fLoading] = useState(false);
+  
+  //Аналитика экрана
+    useEffect(() => {
+    if (id) {
+      trackScreenView('Страница игры с ID', {
+        game_id: id,
+        screen_type: 'game_details',
+      });
+    }
+  }, [id]);
+  
   // Динамически формируем список вкладок
   // const baseTabs = ['Арена', 'Статистика', 'F2F'];
   // Динамически формируем список вкладок в нужном порядке

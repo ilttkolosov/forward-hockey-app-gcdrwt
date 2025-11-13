@@ -24,7 +24,7 @@ import { fetchTournamentTable, getCachedTournamentConfig } from '../services/tou
 import { getGames } from '../data/gameData';
 import Constants from 'expo-constants';
 import type { Player } from '../types';
-//import AppMetrica from '@appmetrica/react-native-analytics';
+import { initAnalytics, trackEvent } from '../services/analyticsService';
 
 // === КОНСТАНТЫ ===
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
@@ -288,6 +288,10 @@ export default function RootLayout() {
   }, []);
 
   const initializeApp = async () => {
+
+    // Инициализация аналитики — делаем ДО загрузки конфига
+    await initAnalytics();
+
     try {
       // === 1. Конфигурация ===
       setInitializationMessage('Получение конфигурации...');
@@ -298,40 +302,7 @@ export default function RootLayout() {
       const appWasUpdated = currentAppVersion !== lastAppVersion;
       const localTeamsVersion = parseInt(await AsyncStorage.getItem(TEAMS_VERSION_KEY) || '0');
       const shouldUpdateTeams = config.teams_version > localTeamsVersion || appWasUpdated;
-      // --- ИНИЦИАЛИЗАЦИЯ APPMETRICA ТОЛЬКО В NATIVE-СБОРКАХ ---
-      let AppMetrica: any = null;
-      try {
-        // Попытка динамически импортировать AppMetrica
-        // В Expo Go этот импорт завершится ошибкой и мы перейдем в catch
-        AppMetrica = (await import('@appmetrica/react-native-analytics')).default;
-        
-        const APP_METRICA_API_KEY = '2a2cbf5f-f609-4a7b-80c6-99ba84d59501';
-        AppMetrica.activate({
-          apiKey: APP_METRICA_API_KEY,
-          sessionTimeout: 120,
-          logs: true, // true только в режиме разработки
-        });
-        AppMetrica.reportEvent('App_Started');
-        console.log('[AppMetrica] Initialized successfully');
-      } catch (e) {
-        AppMetrica = null; // AppMetrica останется null, и мы не будем использовать её ниже
-        console.warn('[AppMetrica] Not available in this environment (e.g. Expo Go). Skipping.');
-        console.log('AppMetrica is', AppMetrica);
-        
-      }
       
-      // --- ОТПРАВКА СОБЫТИЯ ---
-       if (AppMetrica) {
-        AppMetrica.reportEvent('startup_config_loaded', {
-          teams_version: config.teams_version,
-          players_version: config.players_version,
-          tournaments_now_count: config.tournamentsNow?.length || 0,
-          tournaments_past_count: config.tournamentsPast?.length || 0,
-          current_App_Version: currentAppVersion,
-        });
-      } 
-      // --- КОНЕЦ ОТПРАВКИ СОБЫТИЯ ---
-
 
       // === 2. Восстановление справочников из AsyncStorage ===
       let referenceDataRestored = false;
@@ -397,6 +368,15 @@ export default function RootLayout() {
       setInitializationMessage('Готово!');
       setProgress(100);
       setTimeout(() => setIsInitializing(false), 200);
+
+      trackEvent('Загрузка начальной конфигурации приложения', {
+        teams_version: config.teams_version,
+        players_version: config.players_version,
+        tournaments_now_count: config.tournamentsNow?.length || 0,
+        tournaments_past_count: config.tournamentsPast?.length || 0,
+        current_App_Version: currentAppVersion,
+      });
+
     } catch (error) {
       console.error('💥 App initialization failed:', error);
       setInitializationError('Ошибка инициализации приложения');

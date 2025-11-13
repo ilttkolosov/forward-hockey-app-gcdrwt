@@ -28,6 +28,7 @@ import {
 import { loadTeamLogo } from '../../services/teamStorage';
 import Icon from '../../components/Icon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { trackScreenView } from '../../services/analyticsService';
 
 const styles = StyleSheet.create({
   container: {
@@ -216,7 +217,6 @@ scrollView: {
 export default function TeamDetailScreen() {
   const router = useRouter();
   const { id: teamId, tournamentId } = useLocalSearchParams<{ id: string; tournamentId: string }>();
-
   const [teamName, setTeamName] = useState<string>('');
   const [teamLogoUri, setTeamLogoUri] = useState<string | null>(null);
   const [tournamentName, setTournamentName] = useState<string>('');
@@ -226,6 +226,16 @@ export default function TeamDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState(0); // 0 = past, 1 = upcoming
+
+  //Аналитика команды
+  useEffect(() => {
+    if (teamId) {
+      trackScreenView('Страница команды с ID', {
+        team_id: teamId,
+        team_name: teamName || 'unknown',
+      });
+    }
+  }, [teamId]);
 
   const loadTeamData = useCallback(async () => {
     if (!teamId || !tournamentId) {

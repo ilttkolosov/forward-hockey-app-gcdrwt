@@ -466,15 +466,13 @@ async fetchPlayerPhoto(playerId: string): Promise<PlayerPhoto | null> {
        await this.clearAllData();
       // --- КОНЕЦ: Принудительная очистка для отладки ---
 
-      // --- ПРИНУДИТЕЛЬНО УСТАНАВЛИВАЕМ ФЛАГ ФОТО В FALSE ДЛЯ ОТЛАДКИ ---
-      // ВРЕМЕННО: Раскомментируйте следующую строку, чтобы заставить загрузку фото
+      // --- ПРИНУДИТЕЛЬНО УСТАНАВЛИВАЕМ ФЛАГ ФОТО В FALSE ДЛЯ ОТЛАДКИ --
       await this.setPhotosDownloadedFlag(false);
       console.log(`PlayerDownloadService: DEBUG - PLAYER_PHOTOS_DOWNLOADED_KEY forcibly set to FALSE.`);
 
       console.log('Starting complete player data loading process...');
       
       // --- ПРИНУДИТЕЛЬНО УСТАНАВЛИВАЕМ ФЛАГ В FALSE ДЛЯ ОТЛАДКИ ---
-      // ЗАКОММЕНТИРУЙТЕ ИЛИ УДАЛИТЕ ЭТУ СТРОКУ ПОСЛЕ ОТЛАДКИ
       await this.setPhotosDownloadedFlag(false);
       console.log(`PlayerDownloadService: DEBUG - PLAYER_PHOTOS_DOWNLOADED_KEY forcibly set to FALSE.`);
 
@@ -565,13 +563,13 @@ async fetchPlayerPhoto(playerId: string): Promise<PlayerPhoto | null> {
     }
   }
 
-  // --- НОВАЯ ФУНКЦИЯ С ПОДДЕРЖКОЙ ПРОГРЕССА ПО ИГРОКАМ ---
+
+  // --- НОВАЯ ФУНКЦИЯ С ПОДДЕРЖКОЙ ПРОГРЕССА И ВОССТАНОВЛЕНИЯ ФОТО ---
   async refreshPlayersDataWithProgress(
     onProgress: (loaded: number, total: number) => void
   ): Promise<Player[]> {
     try {
       console.log('🔄 Starting refreshPlayersDataWithProgress...');
-      // 1. Получаем полный список игроков
       const playersList = await this.fetchPlayersList();
       const total = playersList.length;
       if (total === 0) {
@@ -579,32 +577,27 @@ async fetchPlayerPhoto(playerId: string): Promise<PlayerPhoto | null> {
         return [];
       }
 
-      // 2. Уведомляем о начале
       onProgress(0, total);
 
-      // 3. Обрабатываем игроков ОДИН ЗА ДРУГИМ (последовательно) для точного прогресса
+      // 1. Загрузка деталей и фото (без восстановления — первичная загрузка)
       const allPlayers: Player[] = [];
       for (let i = 0; i < playersList.length; i++) {
         const listItem = playersList[i];
         try {
-          // Загружаем детали и фото
           const [details, photoData] = await Promise.all([
             this.fetchPlayerDetails(listItem.id),
             this.fetchPlayerPhoto(listItem.id)
           ]);
 
-          // Обрабатываем фото
           let photoPath: string | null = null;
           if (photoData?.photo_url) {
             photoPath = await this.downloadAndCacheImage(photoData.photo_url, listItem.id);
           }
 
-          // Формируем итоговый объект игрока
           const player = this.convertToPlayer(listItem, details, photoPath);
           allPlayers.push(player);
         } catch (err) {
-          console.warn(`⚠️ Ошибка при обработке игрока ${listItem.id}, пропускаем...`, err);
-          // Даже в случае ошибки — считаем игрока "обработанным"
+          console.warn(`⚠️ Ошибка при обработке игрока ${listItem.id}, сохраняем без фото...`, err);
           allPlayers.push(this.convertToPlayer(listItem, {
             id: listItem.id,
             name: listItem.name,
@@ -614,17 +607,26 @@ async fetchPlayerPhoto(playerId: string): Promise<PlayerPhoto | null> {
             metrics: { onetwofive: '', height: '', weight: '', ka: '' }
           }, null));
         }
-
-        // Отправляем прогресс
         onProgress(i + 1, total);
       }
 
-      // 4. Сохраняем и помечаем как загруженные
+      // 2. Сохраняем игроков
       await this.savePlayersToStorage(allPlayers);
       await this.setDataLoaded(true);
-      await this.setPhotosDownloadedFlag(true); // или false — по логике вашего приложения
+      console.log(`✅ Сохранено ${allPlayers.length} игроков`);
 
-      console.log(`✅ Загружено ${allPlayers.length} игроков с прогрессом`);
+      // 3. 🔁 ВАЖНО: Проверяем и восстанавливаем отсутствующие фото (например, после обновления путей)
+      console.log('🔍 Проверка целостности фото игроков...');
+      onProgress(0, allPlayers.length); // Сбрасываем прогресс для второго этапа (опционально) или продолжаем
+      await this.verifyAndRestorePlayerPhotos(allPlayers, (current, totalPhotos) => {
+        // Можно отображать как "Восстановление фото: X из Y"
+        onProgress(current, totalPhotos);
+      });
+
+      // 4. Устанавливаем флаг загрузки фото
+      await this.setPhotosDownloadedFlag(true);
+
+      console.log(`✅ Загрузка и восстановление фото игроков завершены`);
       return allPlayers;
     } catch (error) {
       console.error('💥 Ошибка в refreshPlayersDataWithProgress:', error);

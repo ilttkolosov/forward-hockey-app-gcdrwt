@@ -20,6 +20,7 @@ import ErrorMessage from '../components/ErrorMessage';
 import Icon from '../components/Icon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDeclension } from './tournaments/index'; // ← импортируем склонение
+import { trackScreenView } from '../services/analyticsService'; //импорт аналитики
 
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 
@@ -147,6 +148,10 @@ export default function HomeScreen() {
     loadData();
     loadTournamentsCount();
   }, [loadData, loadTournamentsCount]);
+
+  useEffect(() => {
+    trackScreenView('Главный экран');
+  }, []);
 
   const onRefresh = () => {
     setRefreshing(true);
