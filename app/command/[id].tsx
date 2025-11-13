@@ -86,41 +86,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingHorizontal: 16,
   },
-  statsSection: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: colors.surface,
-    marginBottom: 16,
-  },
-  statsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 12,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 16,
-  },
-  statItem: {
-    alignItems: 'center',
-    minWidth: 60,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginBottom: 4,
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  segmentedContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
   content: {
     flex: 1,
   },
@@ -138,10 +103,6 @@ const styles = StyleSheet.create({
   borderBottomWidth: 1,
   borderBottomColor: colors.border,
 },
-backButton: {
-  padding: 8,
-  zIndex: 1,
-},
 headerRight: {
   width: 44, // ≈ ширина backButton + padding
 },
@@ -156,6 +117,7 @@ centeredHeader: {
   alignItems: 'center',
   flexDirection: 'row',
   zIndex: 0,
+  pointerEvents: 'none',
 },
 headerLogo: {
   width: 32,
@@ -245,6 +207,9 @@ gamesHeader: {
 segmentedContainer: {
   paddingHorizontal: 16,
   paddingVertical: 8,
+},
+scrollView: {
+  flex: 1,
 },
 });
 
@@ -363,99 +328,88 @@ export default function TeamDetailScreen() {
     );
   }
 
-  return (
+    return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.headerContainer}>
-        {/* Кнопка "Назад" */}
-        <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
-          <Icon name="chevron-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        {/* Абсолютно центрированный заголовок с логотипом и названием */}
-        <View style={styles.centeredHeader}>
-          {teamLogoUri ? (
-            <Image source={{ uri: teamLogoUri }} style={styles.headerLogo} resizeMode="contain" />
-          ) : (
-            <View style={styles.headerLogoPlaceholder}>
-              <Text style={styles.headerLogoText}>{teamName.charAt(0)}</Text>
-            </View>
-          )}
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {teamName}
-          </Text>
-        </View>
-        {/* Пустой элемент справа для баланса */}
-        <View style={styles.headerRight} />
-      </View>
-
-      {/* Tournament Name 
-      <Text style={styles.tournamentName}>{tournamentName}</Text>*/}
-
-      {/* Stats */}
-      {stats && (
-        <View style={styles.statsSection}>
-          <Text style={styles.statsTitle}>
-            Статистика в турнире:
-          </Text>
-          <Text style={[styles.statsTitle, { marginTop: 4, fontSize: 18, fontWeight: '700' }]}>
-            {tournamentName}
-          </Text>
-          {/* Центрированный блок статистики */}
-          <View style={styles.statsContent}>
-            <View style={styles.statsGrid}>
-              <StatItem label="Место" value={`#${stats.position}`} />
-              <StatItem label="Игры" value={stats.games} />
-              <StatItem label="Победы" value={stats.wins} color={colors.success} />
-              <StatItem label="Поражения" value={stats.losses} color={colors.error} />
-              {stats.draws !== '0' && <StatItem label="Ничьи" value={stats.draws} />}
-              {stats.overtime_wins !== '0' && <StatItem label="ВБ" value={stats.overtime_wins} />}
-              {stats.overtime_losses !== '0' && <StatItem label="ПБ" value={stats.overtime_losses} />}
-              <StatItem label="Очки" value={stats.points_2x} />
-              <StatItem label="Забито" value={stats.goals_for} />
-              <StatItem label="Пропущено" value={stats.goals_against} />
-              <StatItem
-                label="+/-"
-                value={stats.goal_diff?.startsWith('-') ? stats.goal_diff : `+${stats.goal_diff}`}
-              />
-              <StatItem
-                label="% реализации большинства"
-                value={`${parseFloat(stats.ppg_percent || 0).toFixed(1)}%`}
-              />
-              <StatItem
-                label="% нейтрализации большинства"
-                value={`${parseFloat(stats.pkpercent || stats.penalty_kill_percent || 0).toFixed(1)}%`}
-              />
-            </View>
+        {/* Header */}
+        <View style={styles.headerContainer}>
+          <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
+            <Icon name="chevron-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+          <View style={styles.centeredHeader}>
+            {teamLogoUri ? (
+              <Image source={{ uri: teamLogoUri }} style={styles.headerLogo} resizeMode="contain" />
+            ) : (
+              <View style={styles.headerLogoPlaceholder}>
+                <Text style={styles.headerLogoText}>{teamName.charAt(0)}</Text>
+              </View>
+            )}
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {teamName}
+            </Text>
           </View>
-          {/* Горизонтальный разделитель */}
-          <View style={styles.divider} />
+          <View style={styles.headerRight} />
         </View>
-      )}
-
-      {/* Заголовок перед вкладками */}
-      <Text style={styles.gamesHeader}>
-        Все игры команды {teamName} в текущем турнире
-      </Text>
-
-      {/* Tabs */}
-      <View style={styles.segmentedContainer}>
-        <SegmentedControl
-          values={['Прошедшие', 'Предстоящие']}
-          selectedIndex={activeTab}
-          onChange={(e) => setActiveTab(e.nativeEvent.selectedSegmentIndex)}
-          tintColor={colors.primary}
-          fontStyle={{ fontSize: 14, fontWeight: '600' }}
-          activeFontStyle={{ fontWeight: '700' }}
-          springEnabled={false}
-        />
-      </View>
-
-      {/* Games List */}
       <ScrollView
-        style={styles.content}
+        style={styles.scrollView}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >
+        {/* Stats */}
+        {stats && (
+          <View style={styles.statsSection}>
+            <Text style={styles.statsTitle}>Статистика в турнире:</Text>
+            <Text style={[styles.statsTitle, { marginTop: 4, fontSize: 18, fontWeight: '700' }]}>
+              {tournamentName}
+            </Text>
+            <View style={styles.statsContent}>
+              <View style={styles.statsGrid}>
+                <StatItem label="Место" value={`#${stats.position}`} />
+                <StatItem label="Игры" value={stats.games} />
+                <StatItem label="Победы" value={stats.wins} color={colors.success} />
+                <StatItem label="Поражения" value={stats.losses} color={colors.error} />
+                {stats.draws !== '0' && <StatItem label="Ничьи" value={stats.draws} />}
+                {stats.overtime_wins !== '0' && <StatItem label="ВБ" value={stats.overtime_wins} />}
+                {stats.overtime_losses !== '0' && <StatItem label="ПБ" value={stats.overtime_losses} />}
+                <StatItem label="Очки" value={stats.points_2x} />
+                <StatItem label="Забито" value={stats.goals_for} />
+                <StatItem label="Пропущено" value={stats.goals_against} />
+                <StatItem
+                  label="+/-"
+                  value={stats.goal_diff?.startsWith('-') ? stats.goal_diff : `+${stats.goal_diff}`}
+                />
+                <StatItem
+                  label="% реализации большинства"
+                  value={`${parseFloat(stats.ppg_percent || 0).toFixed(1)}%`}
+                />
+                <StatItem
+                  label="% нейтрализации большинства"
+                  value={`${parseFloat(stats.pkpercent || stats.penalty_kill_percent || 0).toFixed(1)}%`}
+                />
+              </View>
+            </View>
+            <View style={styles.divider} />
+          </View>
+        )}
+
+        {/* Заголовок перед вкладками */}
+        <Text style={styles.gamesHeader}>
+          Все игры команды {teamName} в текущем турнире
+        </Text>
+
+        {/* Tabs */}
+        <View style={styles.segmentedContainer}>
+          <SegmentedControl
+            values={['Прошедшие', 'Предстоящие']}
+            selectedIndex={activeTab}
+            onChange={(e) => setActiveTab(e.nativeEvent.selectedSegmentIndex)}
+            tintColor={colors.primary}
+            fontStyle={{ fontSize: 14, fontWeight: '600' }}
+            activeFontStyle={{ fontWeight: '700' }}
+            springEnabled={false}
+          />
+        </View>
+
+        {/* Games List */}
         <View style={styles.gamesListContainer}>
           {activeTab === 0
             ? pastGames.length > 0
@@ -466,6 +420,9 @@ export default function TeamDetailScreen() {
               : <Text style={[commonStyles.text, { textAlign: 'center' }]}>Нет предстоящих игр</Text>
           }
         </View>
+
+        {/* Отступ снизу */}
+        <View style={{ height: 32 }} />
       </ScrollView>
     </SafeAreaView>
   );

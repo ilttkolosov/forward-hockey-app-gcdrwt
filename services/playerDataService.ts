@@ -565,6 +565,74 @@ async fetchPlayerPhoto(playerId: string): Promise<PlayerPhoto | null> {
     }
   }
 
+  // --- НОВАЯ ФУНКЦИЯ С ПОДДЕРЖКОЙ ПРОГРЕССА ПО ИГРОКАМ ---
+  async refreshPlayersDataWithProgress(
+    onProgress: (loaded: number, total: number) => void
+  ): Promise<Player[]> {
+    try {
+      console.log('🔄 Starting refreshPlayersDataWithProgress...');
+      // 1. Получаем полный список игроков
+      const playersList = await this.fetchPlayersList();
+      const total = playersList.length;
+      if (total === 0) {
+        onProgress(0, 0);
+        return [];
+      }
+
+      // 2. Уведомляем о начале
+      onProgress(0, total);
+
+      // 3. Обрабатываем игроков ОДИН ЗА ДРУГИМ (последовательно) для точного прогресса
+      const allPlayers: Player[] = [];
+      for (let i = 0; i < playersList.length; i++) {
+        const listItem = playersList[i];
+        try {
+          // Загружаем детали и фото
+          const [details, photoData] = await Promise.all([
+            this.fetchPlayerDetails(listItem.id),
+            this.fetchPlayerPhoto(listItem.id)
+          ]);
+
+          // Обрабатываем фото
+          let photoPath: string | null = null;
+          if (photoData?.photo_url) {
+            photoPath = await this.downloadAndCacheImage(photoData.photo_url, listItem.id);
+          }
+
+          // Формируем итоговый объект игрока
+          const player = this.convertToPlayer(listItem, details, photoPath);
+          allPlayers.push(player);
+        } catch (err) {
+          console.warn(`⚠️ Ошибка при обработке игрока ${listItem.id}, пропускаем...`, err);
+          // Даже в случае ошибки — считаем игрока "обработанным"
+          allPlayers.push(this.convertToPlayer(listItem, {
+            id: listItem.id,
+            name: listItem.name,
+            number: listItem.number,
+            position: listItem.position,
+            birth_date: listItem.birth_date,
+            metrics: { onetwofive: '', height: '', weight: '', ka: '' }
+          }, null));
+        }
+
+        // Отправляем прогресс
+        onProgress(i + 1, total);
+      }
+
+      // 4. Сохраняем и помечаем как загруженные
+      await this.savePlayersToStorage(allPlayers);
+      await this.setDataLoaded(true);
+      await this.setPhotosDownloadedFlag(true); // или false — по логике вашего приложения
+
+      console.log(`✅ Загружено ${allPlayers.length} игроков с прогрессом`);
+      return allPlayers;
+    } catch (error) {
+      console.error('💥 Ошибка в refreshPlayersDataWithProgress:', error);
+      throw error;
+    }
+  }
+
+
   // --- ОБНОВЛЁННАЯ ФУНКЦИЯ ДЛЯ ОЧИСТКИ ---
   async clearAllData(): Promise<void> {
     try {
