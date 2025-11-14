@@ -345,6 +345,17 @@ export default function TournamentDetailScreen() {
     }
   }, [id, loadData]);
 
+  // === Аналитика: отслеживание просмотра экрана турнира ===
+  useEffect(() => {
+    if (tournamentInfo && !loading && !error) {
+      trackScreenView('TournamentDetailScreen', {
+        tournament_id: id,
+        tournament_name: tournamentInfo.tournament_Name || 'unknown',
+      });
+    }
+  }, [tournamentInfo, loading, error, id]);
+
+
   const onRefresh = () => {
     setRefreshing(true);
     loadData();
@@ -439,15 +450,6 @@ export default function TournamentDetailScreen() {
   const tournamentName = tournamentInfo?.tournament_Name || 'Турнир не найден';
   const leagueName = tournamentInfo?.league_name || 'Все игры и статистика';
 
-  // === Аналитика ===
-  useEffect(() => {
-    if (tournamentId) {
-      trackScreenView('Экран турнира с ID', {
-        tournament_id: id,
-        tournament_name: tournamentName || 'unknown',
-      });
-    }
-  }, [tournamentId]);
 
   return (
     <SafeAreaView style={styles.container}>

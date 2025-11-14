@@ -529,16 +529,50 @@ async fetchEvents(params: {
   //   return parsed.name || "Товарищеский матч";
   // }
 
-  // Универсальный GET-метод для произвольных эндпоинтов
+  // Универсальный GET-метод для произвольных эндпоинтов - ДОЛГОЕ ПОЛУЧЕНИЕ ДАННЫХ
   async get<T = any>(endpoint: string): Promise<T> {
+    const url = `${this.baseUrl}${endpoint}`;
+    console.log('⏳ [API] Начало запроса к:', url);
+
+    const startTime = Date.now();
+
+    // --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ --- 
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36', // ← Для совместимости
+      },
+      mode: 'no-cors', // ← Позволяет обходить CORS (если есть)
+      cache: 'no-store', // ← Запрещает кэширование на уровне браузера/приложения
+    });
+
+    const fetchTime = Date.now() - startTime;
+    console.log(`✅ [API] fetch() завершён за ${fetchTime} мс, статус: ${response.status}`);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} for ${url}`);
+    }
+
+    const jsonStartTime = Date.now();
+    const jsonData = await response.json();
+    const jsonTime = Date.now() - jsonStartTime;
+    console.log(`✅ [API] JSON.parse() завершён за ${jsonTime} мс`);
+
+    return jsonData;
+  }  
+  
+ /* async get<T = any>(endpoint: string): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
     console.log('API Service: GET request to', url);
     const response = await fetch(url);
+    console.log("Получили параметры конфигурации через Универсальный GET-метод");
+
     if (!response.ok) {
       throw new Error(`HTTP ${response.status} for ${url}`);
     }
     return response.json() as Promise<T>;
-  }
+  }*/
 
 }
 

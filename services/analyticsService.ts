@@ -7,7 +7,7 @@ let isInitialized = false;
 let deviceId: string | null = null;
 
 // Получаем или генерируем стабильный ID устройства
-const getOrCreateDeviceId = async (): Promise<string> => {
+export const getOrCreateDeviceId = async (): Promise<string> => {
   if (deviceId) return deviceId;
 
   // Device.deviceId доступен на Android и iOS

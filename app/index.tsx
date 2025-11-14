@@ -261,6 +261,14 @@ export default function HomeScreen() {
             ))}
           </View>
         )}
+        {/* Ссылка "О программе" */}
+        <View style={{ alignItems: 'center', marginVertical: 24 }}>
+          <Link href="/about" asChild>
+            <Text style={[commonStyles.textSecondary, { fontSize: 14 }]}>
+              О программе
+            </Text>
+          </Link>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

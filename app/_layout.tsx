@@ -296,6 +296,7 @@ export default function RootLayout() {
       // === 1. Конфигурация ===
       setInitializationMessage('Получение конфигурации...');
       setProgress(5);
+      console.log("Начали инициализацию приложения");
       const config = await fetchStartupConfig();
       const currentAppVersion = Constants.expoConfig?.version || Constants.manifest?.version || '1.0.0';
       const lastAppVersion = await AsyncStorage.getItem(APP_VERSION_KEY);
@@ -303,7 +304,7 @@ export default function RootLayout() {
       const localTeamsVersion = parseInt(await AsyncStorage.getItem(TEAMS_VERSION_KEY) || '0');
       const shouldUpdateTeams = config.teams_version > localTeamsVersion || appWasUpdated;
       
-
+      console.log("Начали Восстановление справочников из AsyncStorage");
       // === 2. Восстановление справочников из AsyncStorage ===
       let referenceDataRestored = false;
       if (!shouldUpdateTeams) {
@@ -312,6 +313,7 @@ export default function RootLayout() {
       }
 
       // === 3. Команды и справочники ===
+      console.log("Начали загрузку списка команд");
       const existingTeams = await loadTeamList();
       const hasCachedTeams = existingTeams && existingTeams.length > 0;
       let teamsCount = existingTeams?.length || 0;
@@ -367,7 +369,7 @@ export default function RootLayout() {
         setProgress(80);
         setDynamicStatus('Проверка целостности фото...');
         await playerDownloadService.verifyAndRestorePlayerPhotos(playersList, (current, total) => {
-          setDynamicStatus(`Восстановлено фото ${current} из ${total}`);
+          setDynamicStatus(`Восстановлено игроков ${current} из ${total}`);
         });
       }
 
