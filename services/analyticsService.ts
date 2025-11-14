@@ -1,25 +1,19 @@
 // src/services/analyticsService.ts
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
+import AppMetrica, { AppMetricaConfig } from '@appmetrica/react-native-analytics';
 
-let AppMetrica: any = null;
 let isInitialized = false;
-export let isAnalyticsReady = false;
 let deviceId: string | null = null;
 
-// Получаем или генерируем стабильный ID устройства
 export const getOrCreateDeviceId = async (): Promise<string> => {
   if (deviceId) return deviceId;
-
-  // Device.deviceId доступен на Android и iOS
   if (Device.deviceId) {
     deviceId = Device.deviceId;
   } else {
-    // Резервный вариант: генерируем UUID и сохраняем в AsyncStorage (редко нужно)
     const { getItem, setItem } = await import('@react-native-async-storage/async-storage');
     deviceId = await getItem('analytics_device_id');
     if (!deviceId) {
-      // Генерация UUID v4
       deviceId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
         const r = (Math.random() * 16) | 0;
         const v = c === 'x' ? r : (r & 0x3) | 0x8;
@@ -28,63 +22,56 @@ export const getOrCreateDeviceId = async (): Promise<string> => {
       await setItem('analytics_device_id', deviceId);
     }
   }
-
   return deviceId;
 };
 
-// Инициализация аналитики
 export const initAnalytics = async () => {
   if (isInitialized) return;
 
   try {
-    AppMetrica = (await import('@appmetrica/react-native-analytics')).default;
+    const uniqueDeviceId = await getOrCreateDeviceId();
     const APP_METRICA_API_KEY = '2a2cbf5f-f609-4a7b-80c6-99ba84d59501';
 
-    // Получаем уникальный ID устройства
-    const uniqueDeviceId = await getOrCreateDeviceId();
-
-    // Активируем AppMetrica
-    AppMetrica.activate({
+    // Используем AppMetricaConfig с userProfileID при активации
+    const config: AppMetricaConfig = {
       apiKey: APP_METRICA_API_KEY,
       sessionTimeout: 120,
       logs: __DEV__,
-    });
+      userProfileID: uniqueDeviceId, // ← КЛЮЧЕВОЕ ИЗМЕНЕНИЕ
+      appVersion: Constants.expoConfig?.version || '1.0.0',
+    };
 
-    // Устанавливаем Device ID как User ID для группировки
-    AppMetrica.setUserProfileID(uniqueDeviceId);
+    AppMetrica.activate(config);
 
-    // Отправляем событие инициализации с контекстом
     const context = {
       device_os: Device.osName || 'unknown',
       device_os_version: Device.osVersion || 'unknown',
       device_model: Device.modelName || 'unknown',
-      app_version: Constants.expoConfig?.version || '1.0.0',
+      app_version: config.appVersion,
     };
 
     AppMetrica.reportEvent('App_Started', context);
     isInitialized = true;
-    isAnalyticsReady = true; 
-    console.log('[Analytics] Initialized with Device ID:', uniqueDeviceId);
+    console.log('[Analytics] AppMetrica initialized with Device ID:', uniqueDeviceId);
   } catch (e) {
-    console.warn('[Analytics] AppMetrica not available (Expo Go). Skipping.');
-    AppMetrica = null;
-    isAnalyticsReady = false; // даже в Expo Go — флаг false, но это нормально
+    console.warn('[Analytics] AppMetrica failed to initialize:', e);
+    // Не устанавливаем AppMetrica = null — пусть остаётся undefined
   }
 };
 
-// Универсальный трекинг событий
 export const trackEvent = (eventName: string, params: Record<string, any> = {}) => {
-  if (!AppMetrica) return;
-  AppMetrica.reportEvent(eventName, params);
+  // НЕ проверяем AppMetrica, если она не импортирована — она undefined
+  // Но если activate прошёл — reportEvent будет работать
+  try {
+    AppMetrica.reportEvent(eventName, params);
+  } catch (e) {
+    console.warn('[Analytics] Failed to send event:', e);
+  }
 };
 
-// Отслеживание просмотра экрана с контекстом (например, ID сущности)
-export const trackScreenView = (
-  screenName: string,
-  params: Record<string, any> = {}
-) => {
+export const trackScreenView = (screenName: string, params: Record<string, any> = {}) => {
   trackEvent('screen_view', {
     screen_name: screenName,
-    ...params, // ← сюда попадут gameId, tournamentId, teamId и т.д.
+    ...params,
   });
 };

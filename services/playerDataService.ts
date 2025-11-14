@@ -97,52 +97,89 @@ export class PlayerDownloadService {
   }
 
   // Проверяет наличие фото для списка игроков и перезагружает отсутствующие
+  // Проверяет наличие фото для списка игроков и перезагружает отсутствующие ПАРАЛЛЕЛЬНО
   async verifyAndRestorePlayerPhotos(
     players: Player[],
     onProgress?: (current: number, total: number) => void
   ): Promise<void> {
     console.log(`🔍 Проверка фото для ${players.length} игроков...`);
     await this.ensurePlayersDirectoryExists();
-    
-    let downloadedCount = 0;
+
     const total = players.length;
+    if (total === 0) {
+      onProgress?.(0, 0);
+      console.log('✅ Нет игроков для проверки фото');
+      return;
+    }
 
-    for (let i = 0; i < players.length; i++) {
-      const player = players[i];
-      let photoExists = false;
-
+    // 1. Собираем список отсутствующих фото
+    const missingPhotos: Player[] = [];
+    for (const player of players) {
+      if (!player.photoPath) {
+        missingPhotos.push(player);
+        continue;
+      }
       try {
-        if (player.photoPath) {
-          const fileInfo = await getInfoAsync(player.photoPath);
-          photoExists = fileInfo.exists;
+        const fileInfo = await getInfoAsync(player.photoPath);
+        if (!fileInfo.exists) {
+          missingPhotos.push(player);
         }
       } catch (e) {
         console.warn(`Ошибка проверки фото для игрока ${player.id}:`, e);
+        missingPhotos.push(player);
       }
-
-      if (!photoExists) {
-        console.log(`🖼️ Фото для игрока ${player.id} отсутствует — загружаем...`);
-        const photoData = await this.fetchPlayerPhoto(player.id);
-        if (photoData?.photo_url) {
-          const newPhotoPath = await this.downloadAndCacheImage(photoData.photo_url, player.id);
-          if (newPhotoPath) {
-            // Обновляем путь в объекте игрока
-            player.photoPath = newPhotoPath;
-            player.photo = newPhotoPath; // для совместимости
-            downloadedCount++;
-          }
-        }
-      }
-
-      onProgress?.(i + 1, total);
     }
 
-    // Сохраняем обновлённые пути
-    if (downloadedCount > 0) {
-      await this.savePlayersToStorage(players);
-      console.log(`✅ Восстановлено ${downloadedCount} фото игроков`);
-    } else {
+    console.log(`🖼️ Найдено ${missingPhotos.length} отсутствующих фото`);
+    if (missingPhotos.length === 0) {
+      onProgress?.(total, total);
       console.log('✅ Все фото игроков на месте');
+      return;
+    }
+
+    // 2. Загружаем отсутствующие фото параллельно (с лимитом)
+    const concurrencyLimit = 7;
+    const batches = Math.ceil(missingPhotos.length / concurrencyLimit);
+    let restoredCount = 0;
+
+    for (let i = 0; i < batches; i++) {
+      const start = i * concurrencyLimit;
+      const end = Math.min(start + concurrencyLimit, missingPhotos.length);
+      const batch = missingPhotos.slice(start, end);
+
+      const batchPromises = batch.map(async (player) => {
+        try {
+          const photoData = await this.fetchPlayerPhoto(player.id);
+          if (photoData?.photo_url) {
+            const newPhotoPath = await this.downloadAndCacheImage(photoData.photo_url, player.id);
+            if (newPhotoPath) {
+              player.photoPath = newPhotoPath;
+              player.photo = newPhotoPath;
+              restoredCount++;
+              return true;
+            }
+          }
+        } catch (err) {
+          console.warn(`Не удалось восстановить фото для игрока ${player.id}:`, err);
+        }
+        return false;
+      });
+
+      await Promise.all(batchPromises);
+
+      // Обновляем прогресс: уже проверено + восстановлено
+      const checkedSoFar = Math.min((i + 1) * concurrencyLimit, missingPhotos.length);
+      // Приближённый прогресс: основанный на количестве обработанных игроков
+      const progressValue = total - missingPhotos.length + checkedSoFar;
+      onProgress?.(Math.min(progressValue, total), total);
+    }
+
+    // 3. Сохраняем обновлённые пути, если что-то восстановлено
+    if (restoredCount > 0) {
+      await this.savePlayersToStorage(players);
+      console.log(`✅ Восстановлено ${restoredCount} фото игроков`);
+    } else {
+      console.log('⚠️ Не удалось восстановить ни одного фото');
     }
   }
 
