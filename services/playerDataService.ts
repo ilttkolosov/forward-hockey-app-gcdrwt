@@ -566,11 +566,12 @@ async fetchPlayerPhoto(playerId: string): Promise<PlayerPhoto | null> {
 
 
   // --- НОВАЯ ФУНКЦИЯ С ПОДДЕРЖКОЙ ПРОГРЕССА И ВОССТАНОВЛЕНИЯ ФОТО ---
+  // --- НОВАЯ РЕАЛИЗАЦИЯ С ПАРАЛЛЕЛЬНОЙ ЗАГРУЗКОЙ И ПРОГРЕССОМ ---
   async refreshPlayersDataWithProgress(
     onProgress: (loaded: number, total: number) => void
   ): Promise<Player[]> {
     try {
-      console.log('🔄 Starting refreshPlayersDataWithProgress...');
+      console.log('🔄 Starting PARALLEL refreshPlayersDataWithProgress...');
       const playersList = await this.fetchPlayersList();
       const total = playersList.length;
       if (total === 0) {
@@ -578,37 +579,52 @@ async fetchPlayerPhoto(playerId: string): Promise<PlayerPhoto | null> {
         return [];
       }
 
+      // Инициализация
+      const allPlayers: Player[] = [];
+      const concurrencyLimit = 7;
+      const batches = Math.ceil(total / concurrencyLimit);
+      const playersPerBatch = concurrencyLimit;
+
       onProgress(0, total);
 
-      // 1. Загрузка деталей и фото (без восстановления — первичная загрузка)
-      const allPlayers: Player[] = [];
-      for (let i = 0; i < playersList.length; i++) {
-        const listItem = playersList[i];
-        try {
-          const [details, photoData] = await Promise.all([
-            this.fetchPlayerDetails(listItem.id),
-            this.fetchPlayerPhoto(listItem.id)
-          ]);
+      // Загружаем игроков параллельно по батчам
+      for (let batchIndex = 0; batchIndex < batches; batchIndex++) {
+        const start = batchIndex * playersPerBatch;
+        const end = Math.min(start + playersPerBatch, total);
+        const batch = playersList.slice(start, end);
 
-          let photoPath: string | null = null;
-          if (photoData?.photo_url) {
-            photoPath = await this.downloadAndCacheImage(photoData.photo_url, listItem.id);
+        const batchPromises = batch.map(async (listItem) => {
+          try {
+            const [details, photoData] = await Promise.all([
+              this.fetchPlayerDetails(listItem.id),
+              this.fetchPlayerPhoto(listItem.id)
+            ]);
+
+            let photoPath: string | null = null;
+            if (photoData?.photo_url) {
+              photoPath = await this.downloadAndCacheImage(photoData.photo_url, listItem.id);
+            }
+
+            return this.convertToPlayer(listItem, details, photoPath);
+          } catch (err) {
+            console.warn(`⚠️ Ошибка при обработке игрока ${listItem.id}, сохраняем без фото...`, err);
+            return this.convertToPlayer(listItem, {
+              id: listItem.id,
+              name: listItem.name,
+              number: listItem.number,
+              position: listItem.position,
+              birth_date: listItem.birth_date,
+              metrics: { onetwofive: '', height: '', weight: '', ka: '' }
+            }, null);
           }
+        });
 
-          const player = this.convertToPlayer(listItem, details, photoPath);
-          allPlayers.push(player);
-        } catch (err) {
-          console.warn(`⚠️ Ошибка при обработке игрока ${listItem.id}, сохраняем без фото...`, err);
-          allPlayers.push(this.convertToPlayer(listItem, {
-            id: listItem.id,
-            name: listItem.name,
-            number: listItem.number,
-            position: listItem.position,
-            birth_date: listItem.birth_date,
-            metrics: { onetwofive: '', height: '', weight: '', ka: '' }
-          }, null));
-        }
-        onProgress(i + 1, total);
+        const batchResults = await Promise.all(batchPromises);
+        allPlayers.push(...batchResults);
+
+        // Обновляем прогресс: уже обработано (batchIndex + 1) * playersPerBatch
+        const loadedSoFar = Math.min((batchIndex + 1) * playersPerBatch, total);
+        onProgress(loadedSoFar, total);
       }
 
       // 2. Сохраняем игроков
@@ -616,18 +632,16 @@ async fetchPlayerPhoto(playerId: string): Promise<PlayerPhoto | null> {
       await this.setDataLoaded(true);
       console.log(`✅ Сохранено ${allPlayers.length} игроков`);
 
-      // 3. 🔁 ВАЖНО: Проверяем и восстанавливаем отсутствующие фото (например, после обновления путей)
+      // 3. Проверяем и восстанавливаем фото (можно также сделать параллельно, но редко нужно)
       console.log('🔍 Проверка целостности фото игроков...');
-      onProgress(0, allPlayers.length); // Сбрасываем прогресс для второго этапа (опционально) или продолжаем
       await this.verifyAndRestorePlayerPhotos(allPlayers, (current, totalPhotos) => {
-        // Можно отображать как "Восстановление фото: X из Y"
         onProgress(current, totalPhotos);
       });
 
-      // 4. Устанавливаем флаг загрузки фото
+      // 4. Финальный флаг
       await this.setPhotosDownloadedFlag(true);
-
       console.log(`✅ Загрузка и восстановление фото игроков завершены`);
+
       return allPlayers;
     } catch (error) {
       console.error('💥 Ошибка в refreshPlayersDataWithProgress:', error);

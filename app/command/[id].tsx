@@ -29,6 +29,7 @@ import { loadTeamLogo } from '../../services/teamStorage';
 import Icon from '../../components/Icon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { trackScreenView } from '../../services/analyticsService';
+import { useTrackScreenView } from '../../hooks/useTrackScreenView';
 
 const styles = StyleSheet.create({
   container: {
@@ -227,16 +228,6 @@ export default function TeamDetailScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState(0); // 0 = past, 1 = upcoming
 
-  //Аналитика команды
-  useEffect(() => {
-    if (teamId) {
-      trackScreenView('Страница команды с ID', {
-        team_id: teamId,
-        team_name: teamName || 'unknown',
-      });
-    }
-  }, [teamId]);
-
   const loadTeamData = useCallback(async () => {
     if (!teamId || !tournamentId) {
       setError('Недостаточно параметров: teamId или tournamentId');
@@ -304,6 +295,12 @@ export default function TeamDetailScreen() {
   useEffect(() => {
     loadTeamData();
   }, [loadTeamData]);
+
+  //Аналитика команды
+  useTrackScreenView('Экран команды с ID', {
+    team_id: teamId,
+    //tournament_name: tournamentName || 'unknown',
+  });
 
   const onRefresh = () => {
     setRefreshing(true);

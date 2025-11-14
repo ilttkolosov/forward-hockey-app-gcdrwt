@@ -21,6 +21,7 @@ import Icon from '../components/Icon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDeclension } from './tournaments/index'; // ← импортируем склонение
 import { trackScreenView } from '../services/analyticsService'; //импорт аналитики
+import { useTrackScreenView } from '../hooks/useTrackScreenView';
 
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 
@@ -149,9 +150,7 @@ export default function HomeScreen() {
     loadTournamentsCount();
   }, [loadData, loadTournamentsCount]);
 
-  useEffect(() => {
-    trackScreenView('Главный экран');
-  }, []);
+  useTrackScreenView('Главный экран');
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -174,6 +173,9 @@ export default function HomeScreen() {
       </SafeAreaView>
     );
   }
+
+
+
 
   return (
     <SafeAreaView edges={['top']} style={commonStyles.container}>

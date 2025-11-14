@@ -25,6 +25,7 @@ import { getGames } from '../data/gameData';
 import Constants from 'expo-constants';
 import type { Player } from '../types';
 import { initAnalytics, trackEvent } from '../services/analyticsService';
+import * as Device from 'expo-device';
 
 // === КОНСТАНТЫ ===
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
@@ -345,22 +346,30 @@ export default function RootLayout() {
       // === 5. Игроки ===
       const localPlayersVersion = parseInt(await AsyncStorage.getItem(PLAYERS_VERSION_KEY) || '0');
       const shouldUpdatePlayers = config.players_version > localPlayersVersion;
+      console.log('🔍 Players version check:', {
+        configVersion: config.players_version,
+        localVersion: localPlayersVersion,
+        shouldUpdate: shouldUpdatePlayers
+      });
       const playersDataLoaded = await playerDownloadService.isDataLoaded();
 
       let playersList: Player[] = [];
 
       if (shouldUpdatePlayers || !playersDataLoaded) {
         // Полная перезагрузка игроков
+        console.log('🔄 Запуск ПРИНУДИТЕЛЬНОЙ перезагрузки игроков (версия обновлена)');
         setInitializationMessage('Загрузка данных игроков...');
         setProgress(65);
         playersList = await playerDownloadService.refreshPlayersDataWithProgress((loaded, total) => {
           setDynamicStatus(`Загружено игроков ${loaded} из ${total}`);
         });
         await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(config.players_version));
+        console.log('✅ Версия игроков сохранена:', config.players_version);
       } else {
         // Загрузка из кэша
         playersList = await playerDownloadService.getPlayersFromStorage();
         setDynamicStatus(`Загружено игроков ${playersList.length}`);
+        console.log('📦 Игроки загружены из кэша');
       }
 
       // 🔥 ВАЖНО: ВСЕГДА проверяем фото после загрузки игроков, особенно при обновлении приложения
@@ -373,7 +382,18 @@ export default function RootLayout() {
         });
       }
 
-      // === 6. Фоновые задачи (запускаем после основного прогресса) ===
+      // === 6. Отправка события о запуске приложения ===
+      trackEvent('App_Launch', {
+        app_version: currentAppVersion,
+        platform: Device.platformApiLevel ? 'Android' : 'iOS',
+        os_name: Device.osName || 'unknown',
+        os_version: Device.osVersion || 'unknown',
+        device_model: Device.modelName || 'unknown',
+        // Уникальный ID уже установлен через setUserProfileID в initAnalytics
+      });
+
+
+      // === 7. Фоновые задачи (запускаем после основного прогресса) ===
       setInitializationMessage('Финальная настройка...');
       setProgress(90);
       initializeTournamentsInBackground(config);

@@ -4,6 +4,7 @@ import Constants from 'expo-constants';
 
 let AppMetrica: any = null;
 let isInitialized = false;
+export let isAnalyticsReady = false;
 let deviceId: string | null = null;
 
 // Получаем или генерируем стабильный ID устройства
@@ -62,10 +63,12 @@ export const initAnalytics = async () => {
 
     AppMetrica.reportEvent('App_Started', context);
     isInitialized = true;
+    isAnalyticsReady = true; 
     console.log('[Analytics] Initialized with Device ID:', uniqueDeviceId);
   } catch (e) {
     console.warn('[Analytics] AppMetrica not available (Expo Go). Skipping.');
     AppMetrica = null;
+    isAnalyticsReady = false; // даже в Expo Go — флаг false, но это нормально
   }
 };
 

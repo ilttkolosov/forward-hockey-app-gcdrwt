@@ -75,67 +75,39 @@ export class PlayerDownloadService {
 
 //Загрузка фото игроков в оптимальном разрешении  
 async downloadAndCacheImage(originalUrl: string, playerId: string): Promise<string | null> {
-  if (!originalUrl) return null;
+  if (!originalUrl?.trim()) return null;
+
   const normalizedUrl = originalUrl.trim();
-  if (!normalizedUrl) return null;
+  const lastDotIndex = normalizedUrl.lastIndexOf('.');
+  if (lastDotIndex === -1) return null;
 
-  // Разделяем URL на базовую часть и расширение
-  const urlObj = new URL(normalizedUrl);
-  const pathname = urlObj.pathname;
-  const lastDotIndex = pathname.lastIndexOf('.');
-  if (lastDotIndex === -1) {
-    console.warn(`PlayerDownloadService: No file extension found in URL for player ${playerId}: ${normalizedUrl}`);
-    return null;
-  }
+  const base = normalizedUrl.substring(0, lastDotIndex);
+  const ext = normalizedUrl.substring(lastDotIndex);
 
-  const ext = pathname.substring(lastDotIndex); // включая точку: ".jpg", ".png"
-  const baseUrl = normalizedUrl.substring(0, normalizedUrl.length - ext.length);
-
-  // Список суффиксов в порядке приоритета (от большего к меньшему)
-  const sizeSuffixes = ['-640x480', '-300x300', '-150x150'];
-  const candidates = [
-    ...sizeSuffixes.map(suffix => `${baseUrl}${suffix}${ext}`),
-    normalizedUrl, // fallback: оригинал
-  ];
-
-  // Проверка существования файла через HEAD-запрос
-  const checkUrlExists = async (url: string): Promise<boolean> => {
-    try {
-      const response = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-      return response.ok;
-    } catch (error) {
-      console.warn(`PlayerDownloadService: HEAD check failed for ${url}:`, error);
-      return false;
-    }
-  };
-
-  // Ищем первый доступный URL
-  let finalUrl = normalizedUrl;
-  for (const url of candidates) {
-    if (await checkUrlExists(url)) {
-      finalUrl = url;
-      console.log(`PlayerDownloadService: Selected image for player ${playerId}: ${url}`);
-      break;
-    } else {
-      console.log(`PlayerDownloadService: Image not found: ${url}`);
-    }
-  }
+  // Пробуем сразу загрузить 300x300 (оптимальный размер)
+  const preferredUrl = `${base}-300x300${ext}`;
 
   try {
     await this.ensurePlayersDirectoryExists();
     const filename = `player_${playerId}${ext}`;
     const fileUri = `${PLAYERS_DIRECTORY}${filename}`;
-    console.log(`PlayerDownloadService: Downloading image for player ${playerId} from ${finalUrl}`);
-    const downloadResult = await downloadAsync(finalUrl, fileUri);
-    if (downloadResult.status === 200) {
-      console.log(`PlayerDownloadService: Successfully downloaded image for player ${playerId} to ${downloadResult.uri}`);
-      return downloadResult.uri;
-    } else {
-      console.error(`PlayerDownloadService: Failed to download image for player ${playerId}, status: ${downloadResult.status}`);
-      return null;
+
+    // Пытаемся загрузить сразу 300x300
+    let downloadResult;
+    try {
+      downloadResult = await downloadAsync(preferredUrl, fileUri);
+    } catch (e) {
+      // Если 300x300 не существует — загружаем оригинал
+      console.log(`Player ${playerId}: 300x300 not found, fallback to original`);
+      downloadResult = await downloadAsync(normalizedUrl, fileUri);
     }
+
+    if (downloadResult.status === 200) {
+      return downloadResult.uri;
+    }
+    return null;
   } catch (error) {
-    console.error(`PlayerDownloadService: Error downloading image for player ${playerId}:`, error);
+    console.warn(`Failed to download photo for player ${playerId}:`, error);
     return null;
   }
 }
