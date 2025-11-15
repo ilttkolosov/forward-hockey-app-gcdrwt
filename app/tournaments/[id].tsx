@@ -346,12 +346,11 @@ export default function TournamentDetailScreen() {
     }
   }, [id, loadData]);
 
-/*   // === Аналитика: отслеживание просмотра экрана турнира ===
-  useTrackScreenView('Экран турнира с ID', {
+   // === Аналитика: отслеживание просмотра экрана турнира ===
+  useTrackScreenView('Экран турнира', {
     tournament_id: id,
     //tournament_name: tournamentName || 'unknown',
   });
- */
 
   const onRefresh = () => {
     setRefreshing(true);

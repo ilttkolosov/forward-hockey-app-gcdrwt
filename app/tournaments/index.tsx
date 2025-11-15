@@ -160,7 +160,7 @@ export default function TournamentsScreen() {
     loadTournamentsFromCache();
   }, []);
 
-  //useTrackScreenView('Экран турниров');
+  useTrackScreenView('Экран турнирной таблицы');
 
   const onRefresh = async () => {
     setRefreshing(true);

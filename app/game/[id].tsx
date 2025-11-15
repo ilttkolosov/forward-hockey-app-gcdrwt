@@ -614,11 +614,11 @@ export default function GameDetailsScreen() {
     }
   }, [id, loadGameData]);
 
-/*   //Аналитика экрана
-  useTrackScreenView('Экран игры с ID', {
+   //Аналитика экрана
+  useTrackScreenView('Экран игры', {
     game_id: id,
     //tournament_name: tournamentName || 'unknown',
-  }); */
+  }); 
 
 
   // === ОТСЛЕЖИВАНИЕ СТАРТА ИГРЫ ===

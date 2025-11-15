@@ -150,7 +150,7 @@ export default function HomeScreen() {
     loadTournamentsCount();
   }, [loadData, loadTournamentsCount]);
 
-  //useTrackScreenView('Главный экран');
+  useTrackScreenView('Главный экран');
 
   const onRefresh = () => {
     setRefreshing(true);

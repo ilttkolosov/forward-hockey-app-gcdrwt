@@ -390,17 +390,6 @@ export default function RootLayout() {
         }
       }
 
-      // === 6. Отправка события о запуске приложения ===
-      trackEvent('App_Launch', {
-        app_version: currentAppVersion,
-        platform: Device.platformApiLevel ? 'Android' : 'iOS',
-        os_name: Device.osName || 'unknown',
-        os_version: Device.osVersion || 'unknown',
-        device_model: Device.modelName || 'unknown',
-        // Уникальный ID уже установлен через setUserProfileID в initAnalytics
-      });
-
-
       // === 7. Фоновые задачи (запускаем после основного прогресса) ===
       setDynamicStatus(`Запуск фоновых задач`);
       setInitializationMessage('Финальная настройка...');

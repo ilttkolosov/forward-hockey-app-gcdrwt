@@ -1,7 +1,6 @@
 // hooks/useTrackScreenView.ts
 import { useEffect } from 'react';
 import { trackScreenView } from '../services/analyticsService';
-import { isAnalyticsReady } from '../services/analyticsService';
 
 export const useTrackScreenView = (screenName: string, params: Record<string, any> = {}) => {
   useEffect(() => {

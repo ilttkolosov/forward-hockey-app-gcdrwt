@@ -67,7 +67,7 @@ export const initAnalytics = async () => {
 
 export const trackEvent = (eventName: string, params: Record<string, any> = {}) => {
   if (!AppMetrica || !isInitialized) {
-    // В Expo Go или при ошибке — просто логируем, не крашим  //package: com.kolosovaleksandr.Forward2014 
+    // В Expo Go или при ошибке — просто логируем, не крашим 
     if (__DEV__) {
       console.log(`[Analytics DEV] Would send event: ${eventName}`, params);
     }

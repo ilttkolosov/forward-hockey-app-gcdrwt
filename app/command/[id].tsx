@@ -297,10 +297,10 @@ export default function TeamDetailScreen() {
   }, [loadTeamData]);
 
   //Аналитика команды
-  //useTrackScreenView('Экран команды с ID', {
-  //  team_id: teamId,
+  useTrackScreenView('Экран команды', {
+    team_id: teamId,
     //tournament_name: tournamentName || 'unknown',
-  //});
+  });
 
   const onRefresh = () => {
     setRefreshing(true);
