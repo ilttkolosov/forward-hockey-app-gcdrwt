@@ -372,14 +372,22 @@ export default function RootLayout() {
         console.log('📦 Игроки загружены из кэша');
       }
 
-      // 🔥 ВАЖНО: ВСЕГДА проверяем фото после загрузки игроков, особенно при обновлении приложения
-      if (playersList.length > 0) {
+      // ✅ Проверяем фото ТОЛЬКО если игроки были загружены из кэша (не при полной перезагрузке)
+      if (playersList.length > 0 && !(shouldUpdatePlayers || !playersDataLoaded)) {
         setInitializationMessage('Проверка фото игроков...');
         setProgress(80);
         setDynamicStatus('Проверка целостности фото...');
-        await playerDownloadService.verifyAndRestorePlayerPhotos(playersList, (current, total) => {
-          setDynamicStatus(`Восстановлено игроков ${current} из ${total}`);
-        });
+        try {
+          await playerDownloadService.verifyAndRestorePlayerPhotos(playersList, (current, total) => {
+            // Защита от частых обновлений — обновляем только при изменении
+            if (current === 1 || current === total || current % 5 === 0) {
+              setDynamicStatus(`Восстановлено игроков ${current} из ${total}`);
+            }
+          });
+        } catch (err) {
+          console.warn('⚠️ Non-fatal error during photo verification:', err);
+          // Не прерываем инициализацию из-за ошибки фото
+        }
       }
 
       // === 6. Отправка события о запуске приложения ===
@@ -394,6 +402,7 @@ export default function RootLayout() {
 
 
       // === 7. Фоновые задачи (запускаем после основного прогресса) ===
+      setDynamicStatus(`Запуск фоновых задач`);
       setInitializationMessage('Финальная настройка...');
       setProgress(90);
       initializeTournamentsInBackground(config);
@@ -403,14 +412,6 @@ export default function RootLayout() {
       setInitializationMessage('Готово!');
       setProgress(100);
       setTimeout(() => setIsInitializing(false), 200);
-
-      trackEvent('Загрузка начальной конфигурации приложения', {
-        teams_version: config.teams_version,
-        players_version: config.players_version,
-        tournaments_now_count: config.tournamentsNow?.length || 0,
-        tournaments_past_count: config.tournamentsPast?.length || 0,
-        current_App_Version: currentAppVersion,
-      });
 
     } catch (error) {
       console.error('💥 App initialization failed:', error);

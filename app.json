@@ -25,7 +25,8 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.kolosovaleksandr.Forward2014"
+      "package": "com.kolosovaleksandr.Forward2014",
+      "jsEngine": "hermes"
     },
     "web": {
       "favicon": "./assets/images/final_quest_240x240.png",
@@ -34,7 +35,10 @@
     "plugins": [
       "expo-font",
       "expo-router",
-      "expo-web-browser"
+      "expo-web-browser",
+      ["./plugins/withAppMetrica.js", {
+        "apiKey": "2a2cbf5f-f609-4a7b-80c6-99ba84d59501"
+      }]
     ],
     "scheme": "natively",
     "experiments": {

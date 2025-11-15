@@ -115,7 +115,7 @@ export class PlayerDownloadService {
     // 1. Собираем список отсутствующих фото
     const missingPhotos: Player[] = [];
     for (const player of players) {
-      if (!player.photoPath) {
+      if (!player.photoPath || typeof player.photoPath !== 'string' || player.photoPath.trim() === '') {
         missingPhotos.push(player);
         continue;
       }
@@ -557,7 +557,7 @@ async fetchPlayerPhoto(playerId: string): Promise<PlayerPhoto | null> {
       console.error('Error loading all players data:', error);
       throw error;
     }
-    await this.setPhotosDownloadedFlag(true); // ← Теперь точно загружены
+    //await this.setPhotosDownloadedFlag(true); // ← Теперь точно загружены
   }
 
   async savePlayersToStorage(players: Player[]): Promise<void> {
