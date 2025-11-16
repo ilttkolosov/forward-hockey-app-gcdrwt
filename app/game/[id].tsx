@@ -26,6 +26,7 @@ import ProtocolEventCard from '../../components/ProtocolEventCard';
 import { getPlayerById } from '../../data/playerData';
 import { trackScreenView } from '../../services/analyticsService';
 import { useTrackScreenView } from '../../hooks/useTrackScreenView';
+import { useWhistleSound } from '../../hooks/useWhistleSound';
 
 // Определение типа видео
 const isYouTubeUrl = (url: string): boolean => {
@@ -88,7 +89,8 @@ const getYouTubeEmbedUrl = (url: string): string => {
     return url;
   }
 };
-
+// Подключаем звуки
+const { playWhistle } = useWhistleSound();
 
 // Проверяет, заполнен ли протокол игры
 const isProtocolFilled = (protocol: any): boolean => {
@@ -177,7 +179,8 @@ const renderProtocolByPeriods = (
   protocol: any,
   gameDetails: Game,
   protocolPlayers: Record<string, any>,
-  onVideoPress: (url: string) => void
+  onVideoPress: (url: string) => void,
+  onWhistlePress: () => void
 ) => {
   const { homeTeamLogo, awayTeamLogo } = gameDetails;
   // Группируем события по периодам
@@ -259,35 +262,38 @@ const renderProtocolByPeriods = (
             <View key={item.key} style={styles.protocolTableRow}>
               {/* Столбец 1: Отступ */}
               <View style={styles.protocolTableCellSpacer} />
-              {/* Столбцы 2-3: Логотип/иконка */}
-              <View style={[styles.protocolTableCellLogo, styles.protocolTableCellIcon]}>
+              {/* Столбцы 2-3: КЛИКАБЕЛЬНЫЙ кружок с иконкой */}
+              <TouchableOpacity
+                onPress={onWhistlePress}
+                activeOpacity={0.7}
+                style={[styles.protocolTableCellLogo, styles.protocolTableCellIcon]}
+              >
                 <View style={styles.protocolIconCircle}>
                   <Icon name={item.icon} type="material-community" size={20} color={colors.text} />
                 </View>
-              </View>
+              </TouchableOpacity>
               {/* Столбец 4: Отступ */}
               <View style={styles.protocolTableCellSpacer} />
-              {/* Столбец 5: Заголовок периода */}
+              {/* Столбец 5: НЕКЛИКАБЕЛЬНЫЙ текст */}
               <View style={styles.protocolTableCellContent}>
                 <Text style={styles.protocolPeriodTitleText}>{item.title}</Text>
               </View>
             </View>
           );
         } else if (item.type === 'final') {
-          // Финальный элемент "Матч окончен"
           return (
             <View key={item.key} style={styles.protocolTableRow}>
-              {/* Столбец 1: Отступ */}
               <View style={styles.protocolTableCellSpacer} />
-              {/* Столбцы 2-3: Логотип/иконка */}
-              <View style={[styles.protocolTableCellLogo, styles.protocolTableCellIcon]}>
+              <TouchableOpacity
+                onPress={onWhistlePress}
+                activeOpacity={0.7}
+                style={[styles.protocolTableCellLogo, styles.protocolTableCellIcon]}
+              >
                 <View style={styles.protocolIconCircle}>
                   <Icon name={item.icon} type="material-community" size={20} color={colors.text} />
                 </View>
-              </View>
-              {/* Столбец 4: Отступ */}
+              </TouchableOpacity>
               <View style={styles.protocolTableCellSpacer} />
-              {/* Столбец 5: Текст "Матч окончен" */}
               <View style={styles.protocolTableCellContent}>
                 <Text style={styles.protocolFinalText}>{item.title}</Text>
               </View>

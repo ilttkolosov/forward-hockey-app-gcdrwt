@@ -254,7 +254,7 @@ export default function HomeScreen() {
               <Text style={commonStyles.subtitle}>Ближайшие игры</Text>
               <Link href="/upcoming" asChild>
                 <TouchableOpacity>
-                  <Text style={[commonStyles.textSecondary, { fontSize: 14 }]}>Все игры</Text>
+                  <Text style={[commonStyles.subtitle, { fontSize: 14 }]}>Все игры</Text>
                 </TouchableOpacity>
               </Link>
             </View>

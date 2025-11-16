@@ -30,6 +30,7 @@
     "eas": "^0.1.0",
     "eas-cli": "^16.20.1",
     "expo": "~54.0.1",
+    "expo-av": "~16.0.7",
     "expo-blur": "^15.0.6",
     "expo-constants": "~18.0.10",
     "expo-dev-client": "~6.0.15",
