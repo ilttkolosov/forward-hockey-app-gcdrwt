@@ -1,14 +1,14 @@
 {
   "expo": {
-    "name": "Forward",
-    "slug": "Forward",
-    "version": "1.0.50",
+    "name": "Динамо-Форвард 14",
+    "slug": "Dynamo-Forward",
+    "version": "1.0.51",
     "orientation": "portrait",
     "icon": "./assets/icons/myIcon.png",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/icons/myIcon.png",
+      "image": "./assets/icons/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
