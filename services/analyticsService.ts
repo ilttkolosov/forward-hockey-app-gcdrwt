@@ -56,6 +56,7 @@ export const initAnalytics = async () => {
       device_os_version: Device.osVersion || 'unknown',
       device_model: Device.modelName || 'unknown',
       app_version: config.appVersion,
+      userProfileID: uniqueDeviceId,
     });
 
     isInitialized = true;

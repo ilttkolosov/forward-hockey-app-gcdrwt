@@ -1027,7 +1027,10 @@ export default function GameDetailsScreen() {
             onChange={(event) => setTabIndex(event.nativeEvent.selectedSegmentIndex)}
             tintColor={colors.primary}
             fontStyle={{ fontSize: 14, fontWeight: '600', color: colors.text }}
-            activeFontStyle={{ fontWeight: '700' }}
+            activeFontStyle={{ 
+              fontWeight: '700',
+              color: colors.background, // ← Контрастный цвет для активной вкладки (например, белый)
+            }}
             backgroundColor={colors.surface}
           />
           <View style={styles.tabContent}>

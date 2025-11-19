@@ -89,7 +89,7 @@ export default function CommandCard({
       <View style={commonStyles.gameCard}>
         {/* Заголовок: место и очки */}
         <View style={styles.header}>
-          <Text style={styles.positionText}>#{position}</Text>
+          <Text style={styles.positionText}>Текущее место в турнире {position}</Text>
           <Text style={commonStyles.textSecondary}>{points_2x} очков</Text>
         </View>
 
@@ -110,9 +110,9 @@ export default function CommandCard({
         {/* Основная статистика */}
         <View style={styles.statsSection}>
           {/* Обязательные поля */}
-          <StatRow label="И" value={games} />
-          <StatRow label="В" value={wins} color={colors.success} />
-          <StatRow label="П" value={losses} color={colors.error} />
+          <StatRow label="Игр" value={games} />
+          <StatRow label="Побед" value={wins} color={colors.success} />
+          <StatRow label="Поражений" value={losses} color={colors.error} />
           {/* Условные поля */}
           {showIfNonZero(draws, 'Н')}
           {showIfNonZero(overtime_wins, 'ВБ')}

@@ -318,7 +318,11 @@ export default function TournamentsScreen() {
           onChange={(event) => setActiveTab(event.nativeEvent.selectedSegmentIndex)}
           tintColor={colors.primary}
           fontStyle={{ fontSize: 14, fontWeight: '600' }}
-          activeFontStyle={{ fontWeight: '700' }}
+          activeFontStyle={{ 
+            fontWeight: '700',
+            color: colors.background, // ← Контрастный цвет для активной вкладки (например, белый)
+          }}
+
           springEnabled={false}
         />
       </View>
