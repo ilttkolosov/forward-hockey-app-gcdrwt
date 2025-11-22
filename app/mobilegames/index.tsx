@@ -13,8 +13,8 @@ import { colors, commonStyles } from '../../styles/commonStyles';
 import Icon from '../../components/Icon';
 
 const games = [
-  { id: '1', name: 'Memory', description: 'Найди пары игроков' },
-  // Можно добавить другие игры позже
+  { id: "1", name: 'Memory', description: 'Найди пары игроков' },
+  { id: 'hockey', name: 'Хоккей', description: 'Сыграй в аэрохоккей' },
 ];
 
 export default function MobileGamesScreen() {
