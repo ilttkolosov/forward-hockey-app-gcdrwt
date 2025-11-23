@@ -14,7 +14,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.kolosovaleksandr.Forward2014",
+      "bundleIdentifier": "com.aleksandrkolosov.forward2014",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -25,7 +25,7 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.kolosovaleksandr.Forward2014",
+      "package": "com.aleksandrkolosov.forward2014",
       "jsEngine": "hermes"
     },
     "web": {
