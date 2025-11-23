@@ -14,7 +14,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.kolosovaleksandr.Forward2014",
+      "bundleIdentifier": "com.aleksandrkolosov.forward2014",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
