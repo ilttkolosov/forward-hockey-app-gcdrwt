@@ -2,7 +2,7 @@
   "expo": {
     "name": "ХК Форвард 14",
     "slug": "Forward",
-    "version": "1.0.52",
+    "version": "1.0.53",
     "orientation": "portrait",
     "icon": "./assets/icons/myIcon.png",
     "userInterfaceStyle": "dark",
@@ -14,7 +14,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.aleksandrkolosov.forward2014",
+      "bundleIdentifier": "com.kolosovaleksandr.Forward2014",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -25,7 +25,7 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.aleksandrkolosov.forward2014",
+      "package": "com.kolosovaleksandr.Forward2014",
       "jsEngine": "hermes"
     },
     "web": {
