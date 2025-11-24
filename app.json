@@ -26,6 +26,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.kolosovaleksandr.Forward2014",
+      "googleServicesFile": "./google-services.json",
       "jsEngine": "hermes"
     },
     "web": {

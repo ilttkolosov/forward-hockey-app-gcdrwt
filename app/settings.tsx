@@ -31,15 +31,15 @@ Notifications.setNotificationHandler({
 });
 
 const sendTokenToYourServer = async (token: string) => {
-  const osVersion = Platform.Version?.toString() || 'unknown';
-  const deviceModel = Constants.deviceName || 'Unknown device';
-  const appVersion = Constants.expoConfig?.version || '1.0.0';
-  const deviceInfo = `${Platform.OS} ${osVersion}, ${deviceModel}, v${appVersion}`;
-
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), OPERATION_TIMEOUT_MS);
 
   try {
+    const osVersion = Platform.Version?.toString() || 'unknown';
+    const deviceModel = Constants.deviceName || 'Unknown device';
+    const appVersion = Constants.expoConfig?.version || '1.0.0';
+    const deviceInfo = `${Platform.OS} ${osVersion}, ${deviceModel}, v${appVersion}`;
+
     const response = await fetch('https://www.hc-forward.com/wp-json/app/v1/push-token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -105,8 +105,8 @@ const ensurePushPermissions = async (): Promise<boolean> => {
   }
 
   try {
-    const projectId = Constants?.expoConfig?.extra?.eas?.projectId;
-    const tokenObj = await Notifications.getExpoPushTokenAsync({ projectId });
+    // 🔥 БЕЗ projectId — обход ошибки Firebase на Android
+    const tokenObj = await Notifications.getExpoPushTokenAsync();
     await sendTokenToYourServer(tokenObj.data);
     await AsyncStorage.setItem('expo_push_token', tokenObj.data);
     return true;
@@ -136,7 +136,7 @@ export default function SettingsScreen() {
       }
     };
     loadSetting();
-    trackScreenView('Настройки приложения');
+    trackScreenView('Настройки');
   }, []);
 
   const togglePush = async (value: boolean) => {
@@ -149,7 +149,7 @@ export default function SettingsScreen() {
 
       try {
         const success = await ensurePushPermissions();
-        setModalVisible(false); // просто закрываем при успехе
+        setModalVisible(false);
         if (!success) {
           setIsEnabled(false);
           await AsyncStorage.setItem(PUSH_ENABLED_KEY, 'false');
@@ -157,7 +157,6 @@ export default function SettingsScreen() {
           await AsyncStorage.setItem(PUSH_ENABLED_KEY, 'true');
         }
       } catch (error: any) {
-        // Показ ошибки в том же модальном окне
         setModalMessage(error.message || 'Неизвестная ошибка');
         setShowError(true);
         setTimeout(() => setModalVisible(false), 2000);
@@ -178,12 +177,11 @@ export default function SettingsScreen() {
           await AsyncStorage.removeItem('expo_push_token');
         }
         await AsyncStorage.setItem(PUSH_ENABLED_KEY, 'false');
-        setModalVisible(false); // просто закрываем при успехе
+        setModalVisible(false);
       } catch (error: any) {
         setModalMessage(error.message || 'Не удалось отключить');
         setShowError(true);
         setTimeout(() => setModalVisible(false), 2000);
-        // Состояние остаётся выключенным
         await AsyncStorage.setItem(PUSH_ENABLED_KEY, 'false');
       }
     }
@@ -196,7 +194,7 @@ export default function SettingsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Icon name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[commonStyles.title, { marginLeft: 8 }]}>Настройки приложения</Text>
+        <Text style={[commonStyles.title, { marginLeft: 8 }]}>Настройки</Text>
       </View>
 
       {/* Content */}
@@ -214,7 +212,7 @@ export default function SettingsScreen() {
             <Switch
               value={isEnabled}
               onValueChange={togglePush}
-              trackColor={{ false: '#888888', true: colors.primary }}
+              trackColor={{ false: '#C5C5C5', true: colors.primary }}
               thumbColor={isEnabled ? colors.white : '#888888'}
               disabled={modalVisible}
             />
