@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "384827440984",
+    "project_id": "forward2014-297a1",
+    "storage_bucket": "forward2014-297a1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:384827440984:android:a95425d4dc4cfc6929ef2d",
+        "android_client_info": {
+          "package_name": "com.kolosovaleksandr.Forward2014"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDJrpqpwqW000SAOZZ2vsFCt_MqvDFA_ak"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
