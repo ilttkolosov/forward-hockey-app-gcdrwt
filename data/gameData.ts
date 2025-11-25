@@ -35,6 +35,7 @@ let masterDataLoadPromise: Promise<Game[]> | null = null; // <-- Promise для 
 
 // --- КОНСТАНТЫ ---
 const CACHE_DURATION = 5 * 60 * 1000; // 5 минут
+const PAST_GAMES_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 часа (или больше)
 // --- КОНЕЦ КОНСТАНТ ---
 
 // --- ТИПЫ ДЛЯ КЭША ---
@@ -588,6 +589,55 @@ export async function getGames(params: {
 
   return await requestPromise;
 }
+
+// Кэш для прошедших игр Динамо-Форвард
+let pastGamesForTeam74Cache: { data: Game[]; timestamp: number } | null = null;
+
+/**
+ * Получает прошедшие игры ТОЛЬКО для команды 74 (Динамо-Форвард) за последние 3 года
+ */
+export async function getPastGamesForTeam74(): Promise<Game[]> {
+  const now = Date.now();
+
+  // Проверяем кэш
+  if (pastGamesForTeam74Cache && now - pastGamesForTeam74Cache.timestamp < PAST_GAMES_CACHE_DURATION) {
+    console.log('✅ Returning past games for team 74 from dedicated cache');
+    return pastGamesForTeam74Cache.data;
+  }
+
+  try {
+    console.log('Getting past games for team 74...');
+    const nowDate = new Date();
+    const pastDate = new Date(nowDate);
+    pastDate.setFullYear(pastDate.getFullYear() - 3);
+    const pastDateString = pastDate.toISOString().split('T')[0];
+    const todayString = nowDate.toISOString().split('T')[0];
+
+    // Запрашиваем через getGames (без кэширования в общем кэше, чтобы не мешать другим запросам)
+    const games = await getGames({
+      date_from: pastDateString,
+      date_to: todayString,
+      teams: '74',
+      useCache: false, // ← отключаем стандартный кэш, чтобы не загрязнять gamesCache
+    });
+
+    // Сортируем по убыванию даты (сначала самые свежие)
+    games.sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
+
+    // Сохраняем в свой кэш
+    pastGamesForTeam74Cache = {
+      data: games,
+      timestamp: now,
+    };
+
+    console.log(`Loaded and cached ${games.length} past games for team 74`);
+    return games;
+  } catch (error) {
+    console.error('Error loading past games for team 74:', error);
+    return [];
+  }
+}
+
 
 /**
  * Получает одну игру по ID с детальной информацией и кэшированием.

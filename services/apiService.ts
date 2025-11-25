@@ -506,6 +506,8 @@ async fetchEvents(params: {
       if (outcome === 't' || outcome === 'tie' || outcome === 'draw' || outcome === 'nich') return 'draw';
       if (outcome === 'bullitwin') return 'bullitwin';
       if (outcome === 'bullitlose') return 'bullitlose';
+      if (outcome === 'overtimewin') return 'overtimewin';
+      if (outcome === 'overtimeloss') return 'overtimeloss';
     }
     return 'unknown';
   }

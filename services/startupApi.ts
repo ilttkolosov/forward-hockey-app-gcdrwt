@@ -42,18 +42,37 @@ export interface StartupConfig {
 export const fetchStartupConfig = async (): Promise<StartupConfig> => {
   console.log('Начали получение конфигурации из статического файла');
 
-  const response = await fetch('https://www.hc-forward.com/wp-content/themes/marquee/inc/MobileAppConfig.txt');
-  
+  // Генерируем уникальный URL для обхода кэша
+  const url = `https://www.hc-forward.com/wp-content/themes/marquee/inc/MobileAppConfig.txt?_t=${Date.now()}`;
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    }
+  });
+
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} при загрузке MobileAppConfig.txt`);
   }
 
-  const result = await response.json();
+  // (Опционально) Логируем сырые данные для отладки
+  const text = await response.text();
+  //console.log('Сырой ответ от сервера:', text);
+
+  let result;
+  try {
+    result = JSON.parse(text);
+  } catch (e) {
+    throw new Error('Невалидный JSON в MobileAppConfig.txt');
+  }
 
   if (result.status !== 'success') {
     throw new Error('Ошибка в статическом файле конфигурации: статус не "success"');
   }
 
-  console.log('Получили конфигурацию из статического файла');
-  return result.data; // ← именно data, как в JSON
+  console.log('Получили конфигурацию из статического файла: ', result.data);
+  return result.data;
 };

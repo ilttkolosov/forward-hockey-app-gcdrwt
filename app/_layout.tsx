@@ -21,7 +21,7 @@ import { getUpcomingGamesMasterData } from '../data/gameData';
 import SplashScreen from '../components/SplashScreen';
 import { fetchStartupConfig, StartupConfig } from '../services/startupApi';
 import { fetchTournamentTable, getCachedTournamentConfig } from '../services/tournamentsApi';
-import { getGames } from '../data/gameData';
+import { getGames, getPastGamesForTeam74 } from '../data/gameData';
 import Constants from 'expo-constants';
 import type { Player } from '../types';
 import { initAnalytics, trackEvent } from '../services/analyticsService';
@@ -318,7 +318,8 @@ export default function RootLayout() {
       const existingTeams = await loadTeamList();
       const hasCachedTeams = existingTeams && existingTeams.length > 0;
       let teamsCount = existingTeams?.length || 0;
-
+      //console.log("Текущая версия команд: ", localTeamsVersion);
+      //console.log("Версия команд в установочном файле : ", config.teams_version);
       if (shouldUpdateTeams || !hasCachedTeams) {
         setInitializationMessage('Обновление команд...');
         setProgress(20);
@@ -337,6 +338,18 @@ export default function RootLayout() {
         setDynamicStatus(`Загружено команд ${teamsCount}`);
         setProgress(40);
       }
+
+
+      // Фоновая предзагрузка прошедших игр для команды 74
+      setInitializationMessage('Фоновая загрузка прошедших игр...');
+      setProgress(50);
+      getPastGamesForTeam74()
+        .then(games => {
+          console.log(`✅ Preloaded ${games.length} past games for team 74 in background`);
+        })
+        .catch(err => {
+          console.warn('⚠️ Failed to preload past games for team 74:', err);
+        });
 
       // === 4. Загрузка предстоящих игр ===
       setInitializationMessage('Загрузка ближайших игр...');

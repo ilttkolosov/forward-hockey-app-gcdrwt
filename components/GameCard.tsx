@@ -113,6 +113,8 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
       case 'win': return 'Победа';
       case 'loss': return 'Поражение';
       case 'draw': return 'Ничья';
+      case 'overtimewin': return 'Победа в ОТ';
+      case 'overtimeloss': return 'Поражение в ОТ';      
       case 'bullitwin': return 'Победа ПБ';
       case 'bullitlose': return 'Поражение ПБ';
       default:
@@ -162,8 +164,8 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
             {isFinished && homeOutcome && (
               <View style={styles.outcomeBadgeContainer}>
                 <Text style={[styles.outcomeText, {
-                  color: ['win', 'bullitwin'].includes(homeOutcome) ? colors.success :
-                         ['loss', 'bullitlose'].includes(homeOutcome) ? colors.error : colors.warning
+                  color: ['win', 'overtimewin', 'bullitwin'].includes(homeOutcome) ? colors.success :
+                         ['loss', 'overtimeloss', 'bullitlose'].includes(homeOutcome) ? colors.error : colors.warning
                 }]}>
                   {getOutcomeText(homeOutcome)}
                 </Text>
@@ -195,8 +197,8 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
             {isFinished && awayOutcome && (
               <View style={styles.outcomeBadgeContainer}>
                 <Text style={[styles.outcomeText, {
-                  color: ['win', 'bullitwin'].includes(awayOutcome) ? colors.success :
-                         ['loss', 'bullitlose'].includes(awayOutcome) ? colors.error : colors.warning
+                  color: ['win', 'overtimewin', 'bullitwin'].includes(awayOutcome) ? colors.success :
+                         ['loss', 'overtimeloss', 'bullitlose'].includes(awayOutcome) ? colors.error : colors.warning
                 }]}>
                   {getOutcomeText(awayOutcome)}
                 </Text>

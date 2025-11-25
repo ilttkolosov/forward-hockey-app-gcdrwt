@@ -20,6 +20,7 @@ import Icon from '../../components/Icon';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
+import { useTrackScreenView } from '../hooks/useTrackScreenView';
 
 const { width } = Dimensions.get('window');
 
@@ -66,6 +67,7 @@ export default function MemoryGameScreen() {
   useEffect(() => {
     blinkAnimationsRef.current = cards.map(() => new Animated.Value(1));
   }, [cards]);
+
 
   const loadRecords = useCallback(async () => {
     try {

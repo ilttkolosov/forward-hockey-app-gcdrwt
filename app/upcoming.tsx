@@ -1,42 +1,75 @@
 // app/upcoming.tsx
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  RefreshControl,
+  TouchableOpacity,
+  FlatList,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import { commonStyles, colors } from '../styles/commonStyles';
 import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { Game } from '../types';
-import { getUpcomingGamesCount, getUpcomingGamesMasterData } from '../data/gameData';
-// УБРАНО: import { Link } from 'expo-router'; // Больше не нужен
+import {
+  getUpcomingGamesMasterData,
+  getPastGamesForTeam74,
+} from '../data/gameData';
 import Icon from '../components/Icon';
-import { useRouter } from 'expo-router'; // Добавлен импорт
+import { StyleSheet } from 'react-native';
+import { useTrackScreenView } from '../hooks/useTrackScreenView';
+import { useRouter } from 'expo-router';
 
-export default function UpcomingGamesScreen() {
-  const [games, setGames] = useState<Game[]>([]);
-  const [gamesCount, setGamesCount] = useState<number>(0);
+export default function TeamGamesScreen() {
+  const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
+  const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
+  const [pastGames, setPastGames] = useState<Game[]>([]);
+  const [upcomingCount, setUpcomingCount] = useState(0);
+  const [pastCount, setPastCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const router = useRouter();
 
-  const router = useRouter(); // Инициализируем router
+  const upcomingListRef = useRef<FlatList<Game>>(null);
+  const pastListRef = useRef<FlatList<Game>>(null);
 
   const handleBackPress = () => {
-    router.back(); // Используем router.back() для навигации назад
+    router.back();
+  };
+
+  const loadUpcoming = async () => {
+    try {
+      const games = await getUpcomingGamesMasterData();
+      setUpcomingGames(games);
+      setUpcomingCount(games.length);
+    } catch (err) {
+      console.error('Error loading upcoming games:', err);
+      setError('Не удалось загрузить предстоящие игры.');
+    }
+  };
+
+  const loadPast = async () => {
+    try {
+      const games = await getPastGamesForTeam74();
+      setPastGames(games);
+      setPastCount(games.length);
+    } catch (err) {
+      console.error('Error loading past games:', err);
+      setError('Не удалось загрузить прошедшие игры.');
+    }
   };
 
   const loadData = async () => {
+    setError(null);
     try {
-      setError(null);
-      console.log('UpcomingGamesScreen: Loading data...');
-      const upcomingGamesData = await getUpcomingGamesMasterData();
-      console.log(`UpcomingGamesScreen: Loaded ${upcomingGamesData.length} games`);
-      const totalCount = upcomingGamesData.length;
-      setGames(upcomingGamesData);
-      setGamesCount(totalCount);
+      await Promise.all([loadUpcoming(), loadPast()]);
     } catch (err) {
-      console.error('UpcomingGamesScreen: Error loading data:', err);
-      setError('Не удалось загрузить предстоящие игры. Попробуйте еще раз.');
+      // Ошибки обрабатываются внутри
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -51,6 +84,33 @@ export default function UpcomingGamesScreen() {
     setRefreshing(true);
     loadData();
   };
+
+  //Аналитика экрана
+  useTrackScreenView('Экран все игры Динамо-Форвард');
+
+  const handleTabChange = (index: number) => {
+    const newTab = index === 0 ? 'upcoming' : 'past';
+    setActiveTab(newTab);
+
+    // Скролл вверх при смене вкладки
+    if (newTab === 'upcoming' && upcomingListRef.current) {
+      upcomingListRef.current.scrollToOffset({ offset: 0, animated: true });
+    } else if (newTab === 'past' && pastListRef.current) {
+      pastListRef.current.scrollToOffset({ offset: 0, animated: true });
+    }
+  };
+
+  const renderGame = ({ item }: { item: Game }) => (
+    <GameCard game={item} showScore={activeTab === 'past'} />
+  );
+
+  const renderEmpty = () => (
+    <View style={commonStyles.errorContainer}>
+      <Text style={commonStyles.text}>
+        {activeTab === 'upcoming' ? 'Нет предстоящих игр' : 'Нет прошедших игр'}
+      </Text>
+    </View>
+  );
 
   if (loading) {
     return (
@@ -70,48 +130,59 @@ export default function UpcomingGamesScreen() {
 
   return (
     <SafeAreaView style={commonStyles.container}>
-      <ScrollView
-        style={commonStyles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header - Используем TouchableOpacity с handleBackPress, как в других экранах */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24 }}>
+      {/* Fixed Header */}
+      <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
           <TouchableOpacity onPress={handleBackPress} style={{ marginRight: 16 }}>
-            {/* Оборачиваем Icon в View, чтобы избежать потенциальной ошибки отрисовки */}
-            <View style={{ justifyContent: 'center', alignItems: 'center' }}>
-              <Icon name="chevron-back" size={24} color={colors.text} />
-            </View>
+            <Icon name="chevron-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <View>
-            <Text style={commonStyles.title}>Предстоящие игры</Text>
-            <Text style={commonStyles.textSecondary}>
-              {gamesCount > 0 ? `Всего ${gamesCount} игр запланировано` : 'Нет запланированных игр'}
-            </Text>
-          </View>
+          <Text style={styles.screenTitle}>Все игры Динамо-Форвард</Text>
         </View>
 
-        {/* Games List */}
-        {games.length > 0 ? (
-          <View style={{ gap: 16 }}>
-            {games.map((game) => (
-              <GameCard key={game.id} game={game} showScore={false} />
-            ))}
-          </View>
-        ) : (
-          <View style={commonStyles.errorContainer}>
-            <Text style={commonStyles.text}>Нет предстоящих игр.</Text>
-            <Text style={commonStyles.textSecondary}>
-              Проверьте позже или обновите страницу.
-            </Text>
-          </View>
-        )}
+        {/* Segmented Control — как в players.tsx */}
+        <SegmentedControl
+          values={[`Предстоящие (${upcomingCount})`, `Прошедшие (${pastCount})`]}
+          selectedIndex={activeTab === 'upcoming' ? 0 : 1}
+          onChange={(event) => handleTabChange(event.nativeEvent.selectedSegmentIndex)}
+          tintColor={colors.primary}
+          fontStyle={{ fontSize: 14, fontWeight: '600' }}
+          activeFontStyle={{ fontWeight: '700' }}
+          springEnabled={false}
+        />
+      </View>
 
-        {/* Bottom spacing */}
-        <View style={{ height: 32 }} />
-      </ScrollView>
+      {/* Scrollable Content */}
+      {activeTab === 'upcoming' ? (
+        <FlatList
+          ref={upcomingListRef}
+          data={upcomingGames}
+          renderItem={renderGame}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={{ padding: 16, paddingBottom: 64 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={renderEmpty()}
+        />
+      ) : (
+        <FlatList
+          ref={pastListRef}
+          data={pastGames}
+          renderItem={renderGame}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={{ padding: 16, paddingBottom: 64 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={renderEmpty()}
+        />
+      )}
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  screenTitle: {
+    fontSize: 20,        // ↓ меньше, чем у commonStyles.title (обычно 24)
+    fontWeight: '600',   // ↓ чуть легче (вместо bold / 700)
+    color: colors.text,
+  },
+});

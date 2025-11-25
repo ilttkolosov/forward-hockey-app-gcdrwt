@@ -172,6 +172,7 @@ const getPeriodLabel = (timeStr: string, protocol: any): string => {
   return 'other';
 };
 
+
 // === РЕНДЕР ПРОТОКОЛА ===
 const renderProtocolByPeriods = (
   protocol: any,
@@ -180,6 +181,7 @@ const renderProtocolByPeriods = (
   onVideoPress: (url: string) => void
 ) => {
   const { homeTeamLogo, awayTeamLogo } = gameDetails;
+
   // Группируем события по периодам
   const periods: { [key: string]: any[] } = {
     period1: [],
@@ -188,12 +190,14 @@ const renderProtocolByPeriods = (
     overtime: [],
     shootout: [],
   };
+
   protocol.events?.forEach((event: any) => {
     const periodKey = getPeriodLabel(event.time, protocol);
     if (periods[periodKey]) {
       periods[periodKey].push(event);
     }
   });
+
   // Заголовки периодов
   const periodLabels: { [key: string]: string } = {
     period1: '1 период',
@@ -202,37 +206,54 @@ const renderProtocolByPeriods = (
     overtime: 'Овертайм, начинаем с ',
     shootout: 'Буллиты, начинаем с ',
   };
-  // Начальный счет
+
+  // === ОПРЕДЕЛЕНИЕ РЕШАЮЩЕГО ГОЛА В БУЛЛИТАХ ===
+  let decisiveShootoutGoal: any = null;
+  if (protocol.pms) {
+    const maintime = parseInt(protocol.maintime || '60', 10);
+    const shootoutGoals = protocol.events
+      .filter((ev: any) => {
+        if (ev.type !== 'g') return false;
+        const [minStr] = ev.time.split(':');
+        const minutes = parseInt(minStr, 10);
+        return minutes >= maintime;
+      })
+      .sort((a: any, b: any) => {
+        // Сортируем по времени по убыванию
+        const [aMin, aSec] = a.time.split(':').map(Number);
+        const [bMin, bSec] = b.time.split(':').map(Number);
+        return (bMin * 60 + bSec) - (aMin * 60 + aSec);
+      });
+    decisiveShootoutGoal = shootoutGoals[0] || null;
+  }
+
+  // === СЧЁТ ДО БУЛЛИТОВ ===
   let currentScore = { home: 0, away: 0 };
-  // Создаем массив для всех событий, включая заголовки периодов
   const allEvents: any[] = [];
-  Object.entries(periods).forEach(([key, events]) => {
+
+  // Обрабатываем основные периоды
+  ['period1', 'period2', 'period3', 'overtime'].forEach(key => {
+    const events = periods[key];
     if (events.length === 0) return;
-    // Добавляем заголовок периода как отдельное событие
-    const periodTitle = `${periodLabels[key]} ${currentScore.home} – ${currentScore.away}`;
+
     allEvents.push({
       type: 'periodHeader',
-      title: periodTitle,
+      title: `${periodLabels[key]} ${currentScore.home} – ${currentScore.away}`,
       icon: 'whistle-outline',
       key: `period-${key}`,
     });
-    // Добавляем события периода
+
     events.forEach((event: any) => {
-      // Определяем, какая команда
       const isHomeTeam = event.team === 0;
       const teamLogo = isHomeTeam ? homeTeamLogo : awayTeamLogo;
-      // Создаем копию текущего счета
       let tempScore = { ...currentScore };
-      // Обновляем счет, если это гол
+
       if (event.type === 'g') {
-        if (isHomeTeam) {
-          tempScore.home++;
-        } else {
-          tempScore.away++;
-        }
-        // Обновляем глобальный счет для следующих событий
+        if (isHomeTeam) tempScore.home++;
+        else tempScore.away++;
         currentScore = tempScore;
       }
+
       allEvents.push({
         ...event,
         teamLogo,
@@ -241,7 +262,53 @@ const renderProtocolByPeriods = (
       });
     });
   });
-  // Добавляем финальный элемент "Матч окончен"
+
+  // Сохраняем счёт до буллитов
+  const scoreBeforeShootout = { ...currentScore };
+
+  // Обрабатываем буллиты
+  if (protocol.pms && periods.shootout.length > 0) {
+    allEvents.push({
+      type: 'periodHeader',
+      title: `${periodLabels.shootout} ${scoreBeforeShootout.home} – ${scoreBeforeShootout.away}`,
+      icon: 'whistle-outline',
+      key: 'period-shootout',
+    });
+
+    periods.shootout.forEach((event: any) => {
+      const isHomeTeam = event.team === 0;
+      const teamLogo = isHomeTeam ? homeTeamLogo : awayTeamLogo;
+
+      // Проверка: является ли это решающим голом?
+      const isDecisiveGoal =
+        decisiveShootoutGoal &&
+        event.time === decisiveShootoutGoal.time &&
+        event.type === decisiveShootoutGoal.type &&
+        event.comment === decisiveShootoutGoal.comment;
+
+      let eventScore = { ...scoreBeforeShootout };
+      if (isDecisiveGoal) {
+        if (isHomeTeam) eventScore.home += 1;
+        else eventScore.away += 1;
+      }
+
+      allEvents.push({
+        ...event,
+        teamLogo,
+        score: eventScore,
+        isHomeTeam,
+        isDecisiveGoal, // ← можно использовать в ProtocolEventCard, если нужно особое оформление
+      });
+    });
+
+    // Обновляем глобальный счёт (для финальной строки, если нужно)
+    if (decisiveShootoutGoal) {
+      if (decisiveShootoutGoal.team === 0) currentScore.home += 1;
+      else currentScore.away += 1;
+    }
+  }
+
+  // Финальная строка — строго из gameDetails
   const finalEvent = {
     type: 'final',
     title: `Матч окончен. Счет ${gameDetails.homeScore} : ${gameDetails.awayScore}.`,
@@ -249,7 +316,8 @@ const renderProtocolByPeriods = (
     key: 'final-event',
   };
   allEvents.push(finalEvent);
-  // Рендерим все события в виде таблицы
+
+  // === РЕНДЕР ===
   return (
     <View style={styles.protocolTable}>
       {allEvents.map((item: any, idx: number) => {
@@ -257,57 +325,43 @@ const renderProtocolByPeriods = (
         if (item.type === 'periodHeader') {
           return (
             <View key={item.key} style={styles.protocolTableRow}>
-              {/* Столбец 1: Отступ */}
               <View style={styles.protocolTableCellSpacer} />
-              {/* Столбцы 2-3: Логотип/иконка */}
               <View style={[styles.protocolTableCellLogo, styles.protocolTableCellIcon]}>
                 <View style={styles.protocolIconCircle}>
                   <Icon name={item.icon} type="material-community" size={20} color={colors.text} />
                 </View>
               </View>
-              {/* Столбец 4: Отступ */}
               <View style={styles.protocolTableCellSpacer} />
-              {/* Столбец 5: Заголовок периода */}
               <View style={styles.protocolTableCellContent}>
                 <Text style={styles.protocolPeriodTitleText}>{item.title}</Text>
               </View>
             </View>
           );
         } else if (item.type === 'final') {
-          // Финальный элемент "Матч окончен"
           return (
             <View key={item.key} style={styles.protocolTableRow}>
-              {/* Столбец 1: Отступ */}
               <View style={styles.protocolTableCellSpacer} />
-              {/* Столбцы 2-3: Логотип/иконка */}
               <View style={[styles.protocolTableCellLogo, styles.protocolTableCellIcon]}>
                 <View style={styles.protocolIconCircle}>
                   <Icon name={item.icon} type="material-community" size={20} color={colors.text} />
                 </View>
               </View>
-              {/* Столбец 4: Отступ */}
               <View style={styles.protocolTableCellSpacer} />
-              {/* Столбец 5: Текст "Матч окончен" */}
               <View style={styles.protocolTableCellContent}>
                 <Text style={styles.protocolFinalText}>{item.title}</Text>
               </View>
             </View>
           );
         } else {
-          // Это обычное событие
           return (
             <View key={idx} style={styles.protocolTableRow}>
-              {/* Столбец 1: Отступ */}
               <View style={styles.protocolTableCellSpacer} />
-              {/* Столбцы 2-3: Логотип команды */}
               <View style={isLastEvent ? styles.protocolTableCellLogoLast : styles.protocolTableCellLogo}>
                 <View style={styles.protocolLogoCircle}>
                   <Image source={{ uri: item.teamLogo }} style={styles.protocolEventTeamLogo} />
                 </View>
               </View>
-              {/* Столбец 4: Отступ */}
               <View style={styles.protocolTableCellSpacer} />
-              {/* Столбец 5: Карточка события */}
               <View style={styles.protocolTableCellContent}>
                 <ProtocolEventCard
                   event={item}

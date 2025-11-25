@@ -406,7 +406,7 @@ export default function TeamDetailScreen() {
         {/* Tabs */}
         <View style={styles.segmentedContainer}>
           <SegmentedControl
-            values={['Прошедшие', 'Предстоящие']}
+            values={['Предстоящие', 'Прошедшие']}
             selectedIndex={activeTab}
             onChange={(e) => setActiveTab(e.nativeEvent.selectedSegmentIndex)}
             tintColor={colors.primary}
@@ -421,14 +421,17 @@ export default function TeamDetailScreen() {
 
         {/* Games List */}
         <View style={styles.gamesListContainer}>
+          
           {activeTab === 0
-            ? pastGames.length > 0
+
+            ? upcomingGames.length > 0
+              ? upcomingGames.map(game => <GameCardCompact key={game.id} game={game} showScore />)
+              : <Text style={[commonStyles.text, { textAlign: 'center' }]}>Нет предстоящих игр</Text>          
+            : pastGames.length > 0
               ? pastGames.map(game => <GameCardCompact key={game.id} game={game} showScore />)
               : <Text style={[commonStyles.text, { textAlign: 'center' }]}>Нет прошедших игр</Text>
-            : upcomingGames.length > 0
-              ? upcomingGames.map(game => <GameCardCompact key={game.id} game={game} showScore />)
-              : <Text style={[commonStyles.text, { textAlign: 'center' }]}>Нет предстоящих игр</Text>
           }
+
         </View>
 
         {/* Отступ снизу */}
