@@ -14,7 +14,7 @@ import Icon from '../../components/Icon';
 
 const games = [
   { id: "1", name: 'Memory', description: 'Найди пары игроков' },
-  { id: 'hockey', name: 'Хоккей', description: 'Сыграй в аэрохоккей' },
+  //{ id: 'hockey', name: 'Хоккей', description: 'Сыграй в аэрохоккей' },
 ];
 
 export default function MobileGamesScreen() {

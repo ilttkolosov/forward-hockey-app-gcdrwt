@@ -199,25 +199,35 @@ export default function SettingsScreen() {
 
       {/* Content */}
       <View style={styles.content}>
-        <View style={styles.settingItem}>
-          <View style={styles.settingText}>
-            <Text style={styles.settingTitle}>Push-уведомления</Text>
-            <Text style={styles.settingSubtitle}>
-              Уведомления о матчах команды «Динамо-Форвард»
-            </Text>
+        {/* Заголовок раздела */}
+        <Text style={styles.sectionTitle}>PUSH-уведомления</Text>
+
+        {/* Блок настроек */}
+        <View style={styles.settingSection}>
+          <View style={styles.settingItem}>
+            <View style={styles.settingText}>
+              <Text style={styles.settingTitle}>Уведомления о матчах</Text>
+              <Text style={styles.settingSubtitle}>
+                Получать уведомления о предстоящих и текущих играх команды «Динамо-Форвард»
+              </Text>
+            </View>
+            {isChecking ? (
+              <Text style={styles.switchPlaceholder}>Загрузка...</Text>
+            ) : (
+              <Switch
+                value={isEnabled}
+                onValueChange={togglePush}
+                // Улучшенный стиль: темный трек
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor={isEnabled ? colors.white : colors.textSecondary}
+                ios_backgroundColor={colors.border}
+                disabled={modalVisible}
+              />
+            )}
           </View>
-          {isChecking ? (
-            <Text style={styles.switchPlaceholder}>Загрузка...</Text>
-          ) : (
-            <Switch
-              value={isEnabled}
-              onValueChange={togglePush}
-              trackColor={{ false: '#C5C5C5', true: colors.primary }}
-              thumbColor={isEnabled ? colors.white : '#888888'}
-              disabled={modalVisible}
-            />
-          )}
         </View>
+
+        {/* Сюда можно добавить другие настройки в будущем */}
       </View>
 
       {/* Единое модальное окно */}
@@ -253,7 +263,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    marginBottom: 16,
+    marginBottom: 24,
   },
   backButton: {
     padding: 4,
@@ -263,17 +273,30 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: colors.background,
   },
+  // Новый стиль заголовка раздела
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 16,
+    marginTop: 8,
+  },
+  // Контейнер для группы настроек с отделением
+  settingSection: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
   settingItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   settingText: {
     flex: 1,
-    marginRight: 12,
+    marginRight: 16,
   },
   settingTitle: {
     fontSize: 16,
@@ -282,8 +305,9 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   settingSubtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: colors.textSecondary,
+    lineHeight: 18,
   },
   switchPlaceholder: {
     fontSize: 14,

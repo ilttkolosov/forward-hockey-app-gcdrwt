@@ -264,15 +264,16 @@ export default function HomeScreen() {
           </View>
         )}
         {/* Ссылки "Настройки" и "О программе" в одной строке */}
-        <View style={{ flexDirection: 'row', justifyContent: 'center', marginVertical: 24 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginVertical: 24, paddingHorizontal: 32 }}>
           <Link href="/settings" asChild>
-            <Text style={[commonStyles.textSecondary, { fontSize: 14, marginRight: 30 }]}>
+            <Text style={[commonStyles.textSecondary, { fontSize: 14 }]}>
               Настройки
             </Text>
           </Link>
+          <Text style={[commonStyles.textSecondary, { fontSize: 14, paddingHorizontal: 8 }]}></Text>
           <Link href="/about" asChild>
-            <Text style={[commonStyles.textSecondary, { fontSize: 14, marginLeft: 30 }]}>
-              _•_ О программе
+            <Text style={[commonStyles.textSecondary, { fontSize: 14 }]}>
+              О программе
             </Text>
           </Link>
         </View>

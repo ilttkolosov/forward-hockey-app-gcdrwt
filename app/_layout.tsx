@@ -25,6 +25,7 @@ import { getGames, getPastGamesForTeam74 } from '../data/gameData';
 import Constants from 'expo-constants';
 import type { Player } from '../types';
 import { initAnalytics, trackEvent } from '../services/analyticsService';
+import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 
 // === КОНСТАНТЫ ===
@@ -267,6 +268,43 @@ const progressStyles = StyleSheet.create({
   },
 });
 
+/**
+ * Фоновая проверка статуса push-уведомлений и обновление локального флага
+ */
+const syncPushSubscriptionStatus = async () => {
+  try {
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') {
+      await AsyncStorage.setItem('push_notifications_enabled', 'false');
+      console.log('✅ Push disabled: permission not granted');
+      return;
+    }
+
+    const tokenObj = await Notifications.getExpoPushTokenAsync();
+    const token = tokenObj.data;
+
+    // Отправляем запрос на проверку подписки
+    const response = await fetch('https://www.hc-forward.com/wp-json/app/v1/push-subscription', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || result.status !== 'success') {
+      throw new Error(result.error || 'Неизвестная ошибка');
+    }
+
+    const isEnabled = result.data.is_subscribed;
+    await AsyncStorage.setItem('push_notifications_enabled', String(isEnabled));
+    console.log('✅ Push subscription status synced:', isEnabled ? 'enabled' : 'disabled');
+  } catch (error) {
+    console.warn('⚠️ Failed to sync push subscription status:', error);
+  }
+};
+
+
 // --- ОСНОВНОЙ КОМПОНЕНТ ---
 export default function RootLayout() {
   const [isInitializing, setIsInitializing] = useState(true);
@@ -293,6 +331,13 @@ export default function RootLayout() {
     // Инициализация аналитики — делаем ДО загрузки конфига
     await initAnalytics();
 
+    // Фоновая синхронизация статуса push-подписки
+    syncPushSubscriptionStatus();
+
+    // === Отслеживаем загрузку предстоящих игр ===
+    let upcomingGamesPromise: Promise<void> | null = null;
+    let upcomingGamesFinished = false;
+
     try {
       // === 1. Конфигурация ===
       setInitializationMessage('Получение конфигурации...');
@@ -312,6 +357,19 @@ export default function RootLayout() {
         referenceDataRestored = await restoreReferenceDataFromStorage();
         setProgress(15);
       }
+
+      // === 2.1 ЗАПУСКАЕМ загрузку предстоящих игр в фоне (не ждём) ===
+      console.log('🚀 Запуск фоновой загрузки предстоящих игр...');
+      upcomingGamesPromise = getUpcomingGamesMasterData()
+      .then(() => {
+        upcomingGamesFinished = true;
+        console.log('✅ Предстоящие игры загружены в фоне');
+      })
+      .catch(err => {
+        upcomingGamesFinished = true; // даже при ошибке считаем "завершённой"
+        console.warn('⚠️ Ошибка фоновой загрузки предстоящих игр:', err);
+      });
+
 
       // === 3. Команды и справочники ===
       console.log("Начали загрузку списка команд");
@@ -340,7 +398,8 @@ export default function RootLayout() {
       }
 
 
-      // Фоновая предзагрузка прошедших игр для команды 74
+      // === 4.  Фоновая предзагрузка прошедших игр для команды 74
+      setDynamicStatus(`Загрузка основных данных программы`);
       setInitializationMessage('Фоновая загрузка прошедших игр...');
       setProgress(50);
       getPastGamesForTeam74()
@@ -350,11 +409,6 @@ export default function RootLayout() {
         .catch(err => {
           console.warn('⚠️ Failed to preload past games for team 74:', err);
         });
-
-      // === 4. Загрузка предстоящих игр ===
-      setInitializationMessage('Загрузка ближайших игр...');
-      setProgress(60);
-      await getUpcomingGamesMasterData();
 
       // === 5. Игроки ===
       const localPlayersVersion = parseInt(await AsyncStorage.getItem(PLAYERS_VERSION_KEY) || '0');
@@ -392,7 +446,7 @@ export default function RootLayout() {
         setDynamicStatus('Проверка целостности фото...');
         try {
           await playerDownloadService.verifyAndRestorePlayerPhotosFromApi(playersList, (current, total) => {
-            setDynamicStatus(`Проверено фото: ${current} из ${total}`);
+            setDynamicStatus(`Проверяем наличия файлов с фото для всех игроков`);
           });
         } catch (err) {
           console.warn('⚠️ Ошибка при проверке фото игроков:', err);
@@ -407,6 +461,15 @@ export default function RootLayout() {
       initializeTournamentsInBackground(config);
       preloadCurrentTournamentGames(config);
       preloadPastGamesInBackground();
+
+      // === Ожидаем завершения загрузки предстоящих игр, если ещё не готово ===
+      if (!upcomingGamesFinished && upcomingGamesPromise) {
+        setInitializationMessage('Ожидание загрузки предстоящих игр...');
+        setDynamicStatus('Завершение загрузки данных игр...');
+        setProgress(95);
+        await upcomingGamesPromise;
+      }
+
 
       setInitializationMessage('Готово!');
       setProgress(100);

@@ -4,7 +4,7 @@ export default ({ config }) => {
     ...config,
     name: 'ХК Форвард 14',
     slug: 'Forward',
-    version: '1.0.54',
+    version: '1.0.56',
     orientation: 'portrait',
     icon: './assets/icons/myIcon.png',
     userInterfaceStyle: 'dark',

@@ -14,15 +14,41 @@ import { Player } from '../types';
 // === УСЛОВНЫЙ ИМПОРТ ZIP (работает в EAS, не ломает Expo Go) ===
 let ZipArchive: any = null;
 let isZipSupported = false;
+
 try {
-  // @ts-ignore
-  ZipArchive = require('react-native-zip-archive').default;
-  isZipSupported = true;
-  console.log('✅ react-native-zip-archive is available (EAS Build)');
+  console.log('🔍 Попытка загрузить react-native-zip-archive...');
+  const zipModule = require('react-native-zip-archive');
+  console.log('📦 Модуль react-native-zip-archive загружен:', typeof zipModule);
+
+  if (zipModule && typeof zipModule === 'object') {
+    // Проверяем наличие unzip напрямую или в .default
+    if (typeof zipModule.unzip === 'function') {
+      ZipArchive = zipModule;
+      console.log('✅ Используем прямой экспорт unzip из модуля');
+    } else if (zipModule.default && typeof zipModule.default.unzip === 'function') {
+      ZipArchive = zipModule.default;
+      console.log('✅ Используем .default.unzip из модуля');
+    } else {
+      console.warn('⚠️ Модуль react-native-zip-archive не содержит метод unzip');
+      throw new Error('unzip method not found');
+    }
+  } else {
+    console.warn('⚠️ Модуль react-native-zip-archive не является объектом');
+    throw new Error('Invalid module format');
+  }
+
+  if (ZipArchive && typeof ZipArchive.unzip === 'function') {
+    isZipSupported = true;
+    console.log('✅ react-native-zip-archive инициализирован успешно. Поддержка ZIP включена.');
+  } else {
+    throw new Error('unzip method not available after resolution');
+  }
 } catch (e) {
-  console.warn('⚠️ react-native-zip-archive not available (likely Expo Go). Using fallback.');
+  console.warn('⚠️ react-native-zip-archive недоступен:', e instanceof Error ? e.message : e);
   isZipSupported = false;
+  ZipArchive = null;
 }
+
 
 // === КОНСТАНТЫ ===
 const PLAYERS_DATA_LOADED_KEY = 'playersDataLoaded';
@@ -148,34 +174,76 @@ export class PlayerDownloadSystem {
   }
 
   async downloadAndExtractPhotoArchive(version: number): Promise<boolean> {
-    if (!isZipSupported) return false;
+    if (!isZipSupported) {
+      console.log('📁 Поддержка ZIP отключена — пропускаем загрузку архива.');
+      return false;
+    }
 
     const zipUrl = `${PHOTO_ARCHIVE_BASE_URL}${version}.zip`;
     const zipPath = `${documentDirectory}players_v${version}.zip`;
     const extractDir = PLAYERS_DIRECTORY;
 
     try {
+      console.log(`📥 Начало загрузки архива: ${zipUrl}`);
+      console.log(`📁 Временный путь архива: ${zipPath}`);
+      console.log(`📂 Директория распаковки: ${extractDir}`);
+
       await this.ensurePlayersDirectoryExists();
 
       // Очистка старых фото
+      console.log('🧹 Очистка старых фото из директории...');
       const dirInfo = await getInfoAsync(extractDir);
-      if (dirInfo.exists) {
+      if (dirInfo.exists && dirInfo.isDirectory) {
         const files = await readDirectoryAsync(extractDir);
+        console.log(`🗑️ Найдено файлов для удаления: ${files.length}`);
         await Promise.all(files.map(f => deleteAsync(`${extractDir}${f}`)));
+        console.log('✅ Старые фото удалены.');
       }
 
-      // Скачивание и распаковка
+      // Скачивание архива
+      console.log('⬇️ Запуск скачивания архива...');
       const downloadRes = await downloadAsync(zipUrl, zipPath);
-      if (downloadRes.status !== 200) return false;
+      if (downloadRes.status !== 200) {
+        console.error(`❌ Ошибка скачивания архива. Статус: ${downloadRes.status}`);
+        return false;
+      }
+      console.log(`✅ Архив успешно скачан. Размер: ${downloadRes.headers?.['Content-Length'] || 'неизвестно'} байт`);
+
+      // Проверка существования ZIP
+      const zipFileInfo = await getInfoAsync(zipPath);
+      if (!zipFileInfo.exists) {
+        console.error('❌ Файл архива не найден после скачивания');
+        return false;
+      }
+      console.log(`📁 Размер архива на диске: ${zipFileInfo.size} байт`);
+
+      // Распаковка
+      console.log('📦 Запуск распаковки архива...');
+      if (!ZipArchive || typeof ZipArchive.unzip !== 'function') {
+        console.error('❌ ZipArchive.unzip недоступен в момент распаковки!');
+        return false;
+      }
+
       await ZipArchive.unzip(zipPath, extractDir);
+      console.log(`✅ Архив распакован в: ${extractDir}`);
+
+      // Удаление ZIP
       await deleteAsync(zipPath, { idempotent: true });
+      console.log('🗑️ Временный архив удалён.');
+
+      // Проверка распакованных файлов
+      const extractedFiles = await readDirectoryAsync(extractDir);
+      console.log(`🖼️ Распаковано файлов: ${extractedFiles.length}`);
+      if (extractedFiles.length === 0) {
+        console.warn('⚠️ Архив распакован, но файлы отсутствуют!');
+      }
+
       return true;
     } catch (error) {
-      console.error('Archive download/extract failed:', error);
+      console.error(`💥 Критическая ошибка при работе с архивом v${version}:`, error);
       return false;
     }
   }
-
   // --- Основная загрузка ---
   async loadAllPlayersDataWithBatch(
     version: number,
