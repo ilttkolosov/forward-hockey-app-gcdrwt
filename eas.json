@@ -13,7 +13,8 @@
         "simulator": false
       },
       "distribution": "internal",
-      "autoIncrement": true
+      "autoIncrement": true,
+      "environment": "preview" 
     },
     "internal": {
       "android": {
@@ -23,7 +24,8 @@
         "simulator": false
       },
       "distribution": "internal",
-      "autoIncrement": true
+      "autoIncrement": true,
+      "environment": "preview"
     },
     "production": {
       "autoIncrement": true
