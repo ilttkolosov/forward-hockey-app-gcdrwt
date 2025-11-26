@@ -26,6 +26,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.kolosovaleksandr.Forward2014",
+      "googleServicesFile": "{\"project_info\":{\"project_number\":\"1234567890\",\"firebase_url\":\"https://...\"}, ... }",
       "jsEngine": "hermes"
     },
     "web": {
