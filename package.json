@@ -9,7 +9,9 @@
     "web": "EXPO_NO_TELEMETRY=1 expo start --web",
     "build:web": "expo export -p web && npx workbox generateSW workbox-config.js",
     "build:android": "expo prebuild -p android",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "prebuild": "node scripts/generate-app-json.js",
+    "eas-build": "npm run prebuild && eas build"
   },
   "dependencies": {
     "@appmetrica/react-native-analytics": "^3.5.0",

@@ -38,5 +38,7 @@ netlify.toml
 pnpm-lock.yaml
 package-lock.json
 
+app.json
+
 # Firebase credentials
 google-services.json
