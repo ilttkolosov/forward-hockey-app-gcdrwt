@@ -7,48 +7,14 @@ import {
   downloadAsync,
   deleteAsync,
   readDirectoryAsync,
+  readAsStringAsync,
+  writeAsStringAsync,
+  EncodingType,
 } from 'expo-file-system/legacy';
-
 import { Player } from '../types';
 
-// === УСЛОВНЫЙ ИМПОРТ ZIP (работает в EAS, не ломает Expo Go) ===
-let ZipArchive: any = null;
-let isZipSupported = false;
-
-try {
-  console.log('🔍 Попытка загрузить react-native-zip-archive...');
-  const zipModule = require('react-native-zip-archive');
-  console.log('📦 Модуль react-native-zip-archive загружен:', typeof zipModule);
-
-  if (zipModule && typeof zipModule === 'object') {
-    // Проверяем наличие unzip напрямую или в .default
-    if (typeof zipModule.unzip === 'function') {
-      ZipArchive = zipModule;
-      console.log('✅ Используем прямой экспорт unzip из модуля');
-    } else if (zipModule.default && typeof zipModule.default.unzip === 'function') {
-      ZipArchive = zipModule.default;
-      console.log('✅ Используем .default.unzip из модуля');
-    } else {
-      console.warn('⚠️ Модуль react-native-zip-archive не содержит метод unzip');
-      throw new Error('unzip method not found');
-    }
-  } else {
-    console.warn('⚠️ Модуль react-native-zip-archive не является объектом');
-    throw new Error('Invalid module format');
-  }
-
-  if (ZipArchive && typeof ZipArchive.unzip === 'function') {
-    isZipSupported = true;
-    console.log('✅ react-native-zip-archive инициализирован успешно. Поддержка ZIP включена.');
-  } else {
-    throw new Error('unzip method not available after resolution');
-  }
-} catch (e) {
-  console.warn('⚠️ react-native-zip-archive недоступен:', e instanceof Error ? e.message : e);
-  isZipSupported = false;
-  ZipArchive = null;
-}
-
+// === ЧИСТЫЙ JS РАСПАКОВЩИК ZIP (БЕЗ НАТИВНЫХ МОДУЛЕЙ) ===
+import { unzip } from 'fflate';
 
 // === КОНСТАНТЫ ===
 const PLAYERS_DATA_LOADED_KEY = 'playersDataLoaded';
@@ -79,16 +45,13 @@ export class PlayerDownloadSystem {
     const loaded = await AsyncStorage.getItem(PLAYERS_DATA_LOADED_KEY);
     return loaded === 'true';
   }
-
   async arePhotosDownloaded(): Promise<boolean> {
     const downloaded = await AsyncStorage.getItem(PLAYER_PHOTOS_DOWNLOADED_KEY);
     return downloaded === 'true';
   }
-
   async setDataLoaded(loaded: boolean): Promise<void> {
     await AsyncStorage.setItem(PLAYERS_DATA_LOADED_KEY, loaded.toString());
   }
-
   async setPhotosDownloadedFlag(downloaded: boolean): Promise<void> {
     await AsyncStorage.setItem(PLAYER_PHOTOS_DOWNLOADED_KEY, downloaded.toString());
   }
@@ -100,7 +63,6 @@ export class PlayerDownloadSystem {
       await makeDirectoryAsync(PLAYERS_DIRECTORY, { intermediates: true });
     }
   }
-
   private calculateAge(birthDate: string): number {
     try {
       const birth = new Date(birthDate);
@@ -115,7 +77,6 @@ export class PlayerDownloadSystem {
       return 0;
     }
   }
-
   private getExtensionFromUrl(url: string): string {
     if (!url) return 'jpg';
     const match = url.match(/\.([a-zA-Z0-9]+)(\?|#|$)/);
@@ -128,7 +89,6 @@ export class PlayerDownloadSystem {
     const normalizedUrl = originalUrl.trim();
     const lastDotIndex = normalizedUrl.lastIndexOf('.');
     if (lastDotIndex === -1) return null;
-
     const base = normalizedUrl.substring(0, lastDotIndex);
     const ext = normalizedUrl.substring(lastDotIndex);
     const sizeSuffixes = ['-640x480', '-300x300', '-150x150'];
@@ -136,8 +96,6 @@ export class PlayerDownloadSystem {
       ...sizeSuffixes.map(suffix => `${base}${suffix}${ext}`),
       normalizedUrl,
     ];
-
-    // Проверка через HEAD
     const checkExists = async (url: string): Promise<boolean> => {
       try {
         const res = await fetch(url, { method: 'HEAD' });
@@ -146,7 +104,6 @@ export class PlayerDownloadSystem {
         return false;
       }
     };
-
     let finalUrl = normalizedUrl;
     for (const url of candidates) {
       if (await checkExists(url)) {
@@ -154,7 +111,6 @@ export class PlayerDownloadSystem {
         break;
       }
     }
-
     await this.ensurePlayersDirectoryExists();
     const filename = `player_${playerId}${ext}`;
     const fileUri = `${PLAYERS_DIRECTORY}${filename}`;
@@ -162,88 +118,73 @@ export class PlayerDownloadSystem {
     return result.status === 200 ? result.uri : null;
   }
 
-  // --- Основные функции ---
-  async fetchAllPlayersFull(): Promise<PlayerFullApiResponse[]> {
-    const response = await fetch(`${this.baseUrl}/get-players-full`);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const result = await response.json();
-    if (result.status !== 'success' || !Array.isArray(result.data)) {
-      throw new Error('Invalid API response structure');
-    }
-    return result.data;
-  }
-
+  // --- ОСНОВНАЯ ФУНКЦИЯ: РАСПАКОВКА .ZIP ЧЕРЕЗ fflate ---
   async downloadAndExtractPhotoArchive(version: number): Promise<boolean> {
-    if (!isZipSupported) {
-      console.log('📁 Поддержка ZIP отключена — пропускаем загрузку архива.');
-      return false;
-    }
-
     const zipUrl = `${PHOTO_ARCHIVE_BASE_URL}${version}.zip`;
     const zipPath = `${documentDirectory}players_v${version}.zip`;
     const extractDir = PLAYERS_DIRECTORY;
 
     try {
-      console.log(`📥 Начало загрузки архива: ${zipUrl}`);
-      console.log(`📁 Временный путь архива: ${zipPath}`);
-      console.log(`📂 Директория распаковки: ${extractDir}`);
-
+      console.log(`📥 Скачивание .zip: ${zipUrl}`);
       await this.ensurePlayersDirectoryExists();
 
       // Очистка старых фото
-      console.log('🧹 Очистка старых фото из директории...');
       const dirInfo = await getInfoAsync(extractDir);
       if (dirInfo.exists && dirInfo.isDirectory) {
         const files = await readDirectoryAsync(extractDir);
-        console.log(`🗑️ Найдено файлов для удаления: ${files.length}`);
         await Promise.all(files.map(f => deleteAsync(`${extractDir}${f}`)));
-        console.log('✅ Старые фото удалены.');
       }
 
-      // Скачивание архива
-      console.log('⬇️ Запуск скачивания архива...');
+      // Скачивание ZIP как Base64
       const downloadRes = await downloadAsync(zipUrl, zipPath);
       if (downloadRes.status !== 200) {
-        console.error(`❌ Ошибка скачивания архива. Статус: ${downloadRes.status}`);
-        return false;
-      }
-      console.log(`✅ Архив успешно скачан. Размер: ${downloadRes.headers?.['Content-Length'] || 'неизвестно'} байт`);
-
-      // Проверка существования ZIP
-      const zipFileInfo = await getInfoAsync(zipPath);
-      if (!zipFileInfo.exists) {
-        console.error('❌ Файл архива не найден после скачивания');
-        return false;
-      }
-      console.log(`📁 Размер архива на диске: ${zipFileInfo.size} байт`);
-
-      // Распаковка
-      console.log('📦 Запуск распаковки архива...');
-      if (!ZipArchive || typeof ZipArchive.unzip !== 'function') {
-        console.error('❌ ZipArchive.unzip недоступен в момент распаковки!');
+        console.error('❌ Ошибка скачивания .zip');
         return false;
       }
 
-      await ZipArchive.unzip(zipPath, extractDir);
-      console.log(`✅ Архив распакован в: ${extractDir}`);
+      // Чтение ZIP как Base64 → Uint8Array
+      const zipBase64 = await readAsStringAsync(zipPath, { encoding: EncodingType.Base64 });
+      const binaryString = atob(zipBase64);
+      const zipArray = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        zipArray[i] = binaryString.charCodeAt(i);
+      }
 
-      // Удаление ZIP
+      // Распаковка с помощью fflate
+      const entries: Record<string, Uint8Array> = {};
+      await new Promise<void>((resolve, reject) => {
+        unzip(zipArray, (error, unzipped) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          Object.entries(unzipped).forEach(([name, data]) => {
+            entries[name] = data as Uint8Array;
+          });
+          resolve();
+        });
+      });
+
+      // Запись файлов в файловую систему
+      await Promise.all(
+        Object.entries(entries).map(async ([filename, data]) => {
+          if (filename.endsWith('/')) return; // пропускаем папки
+          const fileUri = `${extractDir}${filename}`;
+          const base64 = Buffer.from(data).toString('base64');
+          await writeAsStringAsync(fileUri, base64, { encoding: EncodingType.Base64 });
+        })
+      );
+
+      console.log(`✅ Распаковано файлов: ${Object.keys(entries).length}`);
       await deleteAsync(zipPath, { idempotent: true });
-      console.log('🗑️ Временный архив удалён.');
 
-      // Проверка распакованных файлов
-      const extractedFiles = await readDirectoryAsync(extractDir);
-      console.log(`🖼️ Распаковано файлов: ${extractedFiles.length}`);
-      if (extractedFiles.length === 0) {
-        console.warn('⚠️ Архив распакован, но файлы отсутствуют!');
-      }
-
-      return true;
+      return Object.keys(entries).length > 0;
     } catch (error) {
-      console.error(`💥 Критическая ошибка при работе с архивом v${version}:`, error);
+      console.error(`💥 Ошибка при работе с .zip v${version}:`, error);
       return false;
     }
   }
+
   // --- Основная загрузка ---
   async loadAllPlayersDataWithBatch(
     version: number,
@@ -251,18 +192,14 @@ export class PlayerDownloadSystem {
   ): Promise<Player[]> {
     onProgress?.('Загрузка данных игроков…');
     const fullPlayers = await this.fetchAllPlayersFull();
-
-    onProgress?.('Загрузка фото архивом…');
+    onProgress?.('Загрузка фото архивом (.zip)…');
     const photosLoaded = await this.downloadAndExtractPhotoArchive(version);
 
     let players: Player[] = [];
     if (photosLoaded) {
-      // ✅ Архив загружен — строим photoPath по id
       players = fullPlayers.map(data => {
         const ext = this.getExtensionFromUrl(data.photo_url);
         const photoPath = `${PLAYERS_DIRECTORY}player_${String(data.id)}.${ext}`;
-        const height = data.metrics?.height ? parseInt(data.metrics.height) || 0 : 0;
-        const weight = data.metrics?.weight ? parseInt(data.metrics.weight) || 0 : 0;
         return {
           id: String(data.id),
           fullName: data.name,
@@ -272,8 +209,8 @@ export class PlayerDownloadSystem {
           birthDate: data.birth_date,
           age: this.calculateAge(data.birth_date),
           handedness: data.metrics?.onetwofive || '',
-          height,
-          weight,
+          height: data.metrics?.height ? parseInt(data.metrics.height) || 0 : 0,
+          weight: data.metrics?.weight ? parseInt(data.metrics.weight) || 0 : 0,
           captainStatus: data.metrics?.ka || '',
           photoPath,
           photo: photoPath,
@@ -282,7 +219,7 @@ export class PlayerDownloadSystem {
         };
       });
     } else {
-      // ⚠️ Fallback — загрузка фото по одному
+      // Fallback — загрузка по одному
       onProgress?.('Загрузка фото по одному (fallback)...');
       players = [];
       for (let i = 0; i < fullPlayers.length; i++) {
@@ -290,8 +227,6 @@ export class PlayerDownloadSystem {
         const photoPath = data.photo_url
           ? await this.downloadAndCacheImage(data.photo_url, String(data.id))
           : null;
-        const height = data.metrics?.height ? parseInt(data.metrics.height) || 0 : 0;
-        const weight = data.metrics?.weight ? parseInt(data.metrics.weight) || 0 : 0;
         players.push({
           id: String(data.id),
           fullName: data.name,
@@ -301,8 +236,8 @@ export class PlayerDownloadSystem {
           birthDate: data.birth_date,
           age: this.calculateAge(data.birth_date),
           handedness: data.metrics?.onetwofive || '',
-          height,
-          weight,
+          height: data.metrics?.height ? parseInt(data.metrics.height) || 0 : 0,
+          weight: data.metrics?.weight ? parseInt(data.metrics.weight) || 0 : 0,
           captainStatus: data.metrics?.ka || '',
           photoPath: photoPath || '',
           photo: photoPath || '',
@@ -314,14 +249,23 @@ export class PlayerDownloadSystem {
     }
 
     players.sort((a, b) => a.number - b.number);
-    onProgress?.('Сохранение данных…');
     await this.savePlayersToStorage(players);
     await this.setDataLoaded(true);
     await this.setPhotosDownloadedFlag(true);
     return players;
   }
 
-  // --- Хранилище ---
+  // --- Остальные методы (без изменений) ---
+  async fetchAllPlayersFull(): Promise<PlayerFullApiResponse[]> {
+    const response = await fetch(`${this.baseUrl}/get-players-full`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const result = await response.json();
+    if (result.status !== 'success' || !Array.isArray(result.data)) {
+      throw new Error('Invalid API response structure');
+    }
+    return result.data;
+  }
+
   async savePlayersToStorage(players: Player[]): Promise<void> {
     await AsyncStorage.setItem(PLAYERS_STORAGE_KEY, JSON.stringify(players));
   }
@@ -331,7 +275,6 @@ export class PlayerDownloadSystem {
     return data ? JSON.parse(data) : [];
   }
 
-  // --- Публичный метод для _layout.tsx ---
   async refreshPlayersData(
     version: number,
     onProgress?: (stage: string, current?: number, total?: number) => void
@@ -341,10 +284,6 @@ export class PlayerDownloadSystem {
     return await this.loadAllPlayersDataWithBatch(version, onProgress);
   }
 
-  /**
-   * Проверяет наличие фото для списка игроков и восстанавливает отсутствующие,
-   * используя photo_url из полного API-списка (а не старый эндпоинт).
-   */
   async verifyAndRestorePlayerPhotosFromApi(
     cachedPlayers: Player[],
     onProgress?: (current: number, total: number) => void
@@ -356,24 +295,17 @@ export class PlayerDownloadSystem {
       onProgress?.(0, 0);
       return;
     }
-
-    // 1. Загружаем актуальный список игроков с photo_url
     let apiPlayers: PlayerFullApiResponse[];
     try {
       apiPlayers = await this.fetchAllPlayersFull();
-      console.log(`✅ Получено ${apiPlayers.length} записей с photo_url из /get-players-full`);
     } catch (error) {
       console.warn('⚠️ Не удалось получить photo_url из API — пропускаем восстановление фото:', error);
       return;
     }
-
-    // Создаём мапу: id → photo_url
     const photoUrlMap = new Map<string, string>();
     for (const p of apiPlayers) {
       photoUrlMap.set(String(p.id), p.photo_url);
     }
-
-    // 2. Проверяем каждое фото
     const missingPlayers: Player[] = [];
     for (const player of cachedPlayers) {
       if (!player.photoPath || typeof player.photoPath !== 'string' || player.photoPath.trim() === '') {
@@ -390,15 +322,10 @@ export class PlayerDownloadSystem {
         missingPlayers.push(player);
       }
     }
-
-    console.log(`🖼️ Найдено ${missingPlayers.length} отсутствующих фото`);
     if (missingPlayers.length === 0) {
       onProgress?.(total, total);
-      console.log('✅ Все фото на месте — восстановление не требуется');
       return;
     }
-
-    // 3. Восстанавливаем отсутствующие
     let restoredCount = 0;
     for (let i = 0; i < missingPlayers.length; i++) {
       const player = missingPlayers[i];
@@ -413,14 +340,10 @@ export class PlayerDownloadSystem {
       }
       onProgress?.(i + 1, missingPlayers.length);
     }
-
-    // 4. Сохраняем обновлённые пути
     if (restoredCount > 0) {
       await this.savePlayersToStorage(cachedPlayers);
-      console.log(`✅ Восстановлено ${restoredCount} фото игроков`);
     }
   }
 }
 
-// Экспорт единственного экземпляра
 export const playerDownloadService = new PlayerDownloadSystem();

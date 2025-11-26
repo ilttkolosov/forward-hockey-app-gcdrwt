@@ -27,6 +27,8 @@ import type { Player } from '../types';
 import { initAnalytics, trackEvent } from '../services/analyticsService';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import { Buffer } from 'buffer';
+global.Buffer = Buffer;
 
 // === КОНСТАНТЫ ===
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
