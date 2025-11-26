@@ -157,11 +157,11 @@ export async function getPlayers(): Promise<Player[]> {
  */
 export async function getPlayerById(playerId: string): Promise<Player | null> {
   try {
-    console.log('Data/playerData: Attempting to get player by ID:', playerId);
+    //console.log('Data/playerData: Attempting to get player by ID:', playerId);
     const players = await getPlayers();
     const player = players.find(p => p.id === playerId);
     if (player) {
-      console.log('Data/playerData: Player found:', player.name);
+      //console.log('Data/playerData: Player found:', player.name);
       return player;
     }
     console.log('Data/playerData: Player not found');

@@ -373,8 +373,8 @@ export default function RootLayout() {
         console.log('🔄 Запуск ПРИНУДИТЕЛЬНОЙ перезагрузки игроков (версия обновлена)');
         setInitializationMessage('Загрузка данных игроков...');
         setProgress(65);
-        playersList = await playerDownloadService.refreshPlayersDataWithProgress((loaded, total) => {
-          setDynamicStatus(`Загружено игроков ${loaded} из ${total}`);
+        playersList = await playerDownloadService.refreshPlayersData(config.players_version, (stage, current, total) => {
+          setDynamicStatus(`Загружено игроков ${stage} / ${current} из ${total}`);
         });
         await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(config.players_version));
         console.log('✅ Версия игроков сохранена:', config.players_version);
@@ -391,15 +391,12 @@ export default function RootLayout() {
         setProgress(80);
         setDynamicStatus('Проверка целостности фото...');
         try {
-          await playerDownloadService.verifyAndRestorePlayerPhotos(playersList, (current, total) => {
-            // Защита от частых обновлений — обновляем только при изменении
-            if (current === 1 || current === total || current % 5 === 0) {
-              setDynamicStatus(`Восстановлено игроков ${current} из ${total}`);
-            }
+          await playerDownloadService.verifyAndRestorePlayerPhotosFromApi(playersList, (current, total) => {
+            setDynamicStatus(`Проверено фото: ${current} из ${total}`);
           });
         } catch (err) {
-          console.warn('⚠️ Non-fatal error during photo verification:', err);
-          // Не прерываем инициализацию из-за ошибки фото
+          console.warn('⚠️ Ошибка при проверке фото игроков:', err);
+          // Не останавливаем инициализацию
         }
       }
 
