@@ -6,6 +6,7 @@ import {
   makeDirectoryAsync,
   downloadAsync,
   deleteAsync,
+  readDirectoryAsync,
 } from 'expo-file-system/legacy';
 
 import { Player } from '../types';
@@ -159,15 +160,15 @@ export class PlayerDownloadSystem {
       // Очистка старых фото
       const dirInfo = await getInfoAsync(extractDir);
       if (dirInfo.exists) {
-        const files = await FileSystem.readDirectoryAsync(extractDir);
-        await Promise.all(files.map(f => FileSystem.deleteAsync(`${extractDir}${f}`)));
+        const files = await readDirectoryAsync(extractDir);
+        await Promise.all(files.map(f => deleteAsync(`${extractDir}${f}`)));
       }
 
       // Скачивание и распаковка
-      const downloadRes = await FileSystem.downloadAsync(zipUrl, zipPath);
+      const downloadRes = await downloadAsync(zipUrl, zipPath);
       if (downloadRes.status !== 200) return false;
       await ZipArchive.unzip(zipPath, extractDir);
-      await FileSystem.deleteAsync(zipPath, { idempotent: true });
+      await deleteAsync(zipPath, { idempotent: true });
       return true;
     } catch (error) {
       console.error('Archive download/extract failed:', error);
@@ -189,7 +190,6 @@ export class PlayerDownloadSystem {
     let players: Player[] = [];
     if (photosLoaded) {
       // ✅ Архив загружен — строим photoPath по id
-      console.log('✅ Архив загружен — строим photoPath по id');
       players = fullPlayers.map(data => {
         const ext = this.getExtensionFromUrl(data.photo_url);
         const photoPath = `${PLAYERS_DIRECTORY}player_${String(data.id)}.${ext}`;
@@ -215,8 +215,7 @@ export class PlayerDownloadSystem {
       });
     } else {
       // ⚠️ Fallback — загрузка фото по одному
-      onProgress?.('Загрузка фото через API ...');
-      console.log('⚠️ Fallback — загрузка фото по одному');
+      onProgress?.('Загрузка фото по одному (fallback)...');
       players = [];
       for (let i = 0; i < fullPlayers.length; i++) {
         const data = fullPlayers[i];
@@ -274,92 +273,85 @@ export class PlayerDownloadSystem {
     return await this.loadAllPlayersDataWithBatch(version, onProgress);
   }
 
-/**
- * Проверяет наличие фото для списка игроков и восстанавливает отсутствующие,
- * используя photo_url из полного API-списка (а не старый эндпоинт).
- */
-async verifyAndRestorePlayerPhotosFromApi(
-  cachedPlayers: Player[],
-  onProgress?: (current: number, total: number) => void
-): Promise<void> {
-  console.log(`🔍 Начало проверки фото для ${cachedPlayers.length} игроков...`);
-  await this.ensurePlayersDirectoryExists();
-
-  const total = cachedPlayers.length;
-  if (total === 0) {
-    onProgress?.(0, 0);
-    return;
-  }
-
-  // 1. Загружаем актуальный список игроков с photo_url
-  let apiPlayers: PlayerFullApiResponse[];
-  try {
-    apiPlayers = await this.fetchAllPlayersFull();
-    console.log(`✅ Получено ${apiPlayers.length} записей с photo_url из /get-players-full`);
-  } catch (error) {
-    console.warn('⚠️ Не удалось получить photo_url из API — пропускаем восстановление фото:', error);
-    return;
-  }
-
-  // Создаём мапу: id → photo_url
-  const photoUrlMap = new Map<string, string>();
-  for (const p of apiPlayers) {
-    photoUrlMap.set(String(p.id), p.photo_url);
-  }
-
-  // 2. Проверяем каждое фото
-  const missingPlayers: Player[] = [];
-  for (const player of cachedPlayers) {
-    if (!player.photoPath || typeof player.photoPath !== 'string' || player.photoPath.trim() === '') {
-      missingPlayers.push(player);
-      continue;
+  /**
+   * Проверяет наличие фото для списка игроков и восстанавливает отсутствующие,
+   * используя photo_url из полного API-списка (а не старый эндпоинт).
+   */
+  async verifyAndRestorePlayerPhotosFromApi(
+    cachedPlayers: Player[],
+    onProgress?: (current: number, total: number) => void
+  ): Promise<void> {
+    console.log(`🔍 Начало проверки фото для ${cachedPlayers.length} игроков...`);
+    await this.ensurePlayersDirectoryExists();
+    const total = cachedPlayers.length;
+    if (total === 0) {
+      onProgress?.(0, 0);
+      return;
     }
+
+    // 1. Загружаем актуальный список игроков с photo_url
+    let apiPlayers: PlayerFullApiResponse[];
     try {
-      const fileInfo = await getInfoAsync(player.photoPath);
-      if (!fileInfo.exists) {
+      apiPlayers = await this.fetchAllPlayersFull();
+      console.log(`✅ Получено ${apiPlayers.length} записей с photo_url из /get-players-full`);
+    } catch (error) {
+      console.warn('⚠️ Не удалось получить photo_url из API — пропускаем восстановление фото:', error);
+      return;
+    }
+
+    // Создаём мапу: id → photo_url
+    const photoUrlMap = new Map<string, string>();
+    for (const p of apiPlayers) {
+      photoUrlMap.set(String(p.id), p.photo_url);
+    }
+
+    // 2. Проверяем каждое фото
+    const missingPlayers: Player[] = [];
+    for (const player of cachedPlayers) {
+      if (!player.photoPath || typeof player.photoPath !== 'string' || player.photoPath.trim() === '') {
+        missingPlayers.push(player);
+        continue;
+      }
+      try {
+        const fileInfo = await getInfoAsync(player.photoPath);
+        if (!fileInfo.exists) {
+          missingPlayers.push(player);
+        }
+      } catch (e) {
+        console.warn(`Ошибка проверки фото для игрока ${player.id}:`, e);
         missingPlayers.push(player);
       }
-    } catch (e) {
-      console.warn(`Ошибка проверки фото для игрока ${player.id}:`, e);
-      missingPlayers.push(player);
     }
-  }
 
-  console.log(`🖼️ Найдено ${missingPlayers.length} отсутствующих фото`);
+    console.log(`🖼️ Найдено ${missingPlayers.length} отсутствующих фото`);
+    if (missingPlayers.length === 0) {
+      onProgress?.(total, total);
+      console.log('✅ Все фото на месте — восстановление не требуется');
+      return;
+    }
 
-  if (missingPlayers.length === 0) {
-    onProgress?.(total, total);
-    console.log('✅ Все фото на месте — восстановление не требуется');
-    return;
-  }
-
-  // 3. Восстанавливаем отсутствующие
-  let restoredCount = 0;
-  for (let i = 0; i < missingPlayers.length; i++) {
-    const player = missingPlayers[i];
-    const photoUrl = photoUrlMap.get(player.id);
-
-    if (photoUrl) {
-      const newPhotoPath = await this.downloadAndCacheImage(photoUrl, player.id);
-      if (newPhotoPath) {
-        player.photoPath = newPhotoPath;
-        player.photo = newPhotoPath;
-        restoredCount++;
+    // 3. Восстанавливаем отсутствующие
+    let restoredCount = 0;
+    for (let i = 0; i < missingPlayers.length; i++) {
+      const player = missingPlayers[i];
+      const photoUrl = photoUrlMap.get(player.id);
+      if (photoUrl) {
+        const newPhotoPath = await this.downloadAndCacheImage(photoUrl, player.id);
+        if (newPhotoPath) {
+          player.photoPath = newPhotoPath;
+          player.photo = newPhotoPath;
+          restoredCount++;
+        }
       }
+      onProgress?.(i + 1, missingPlayers.length);
     }
 
-    onProgress?.(i + 1, missingPlayers.length);
+    // 4. Сохраняем обновлённые пути
+    if (restoredCount > 0) {
+      await this.savePlayersToStorage(cachedPlayers);
+      console.log(`✅ Восстановлено ${restoredCount} фото игроков`);
+    }
   }
-
-  // 4. Сохраняем обновлённые пути
-  if (restoredCount > 0) {
-    await this.savePlayersToStorage(cachedPlayers);
-    console.log(`✅ Восстановлено ${restoredCount} фото игроков`);
-  }
-  
-}
-
-
 }
 
 // Экспорт единственного экземпляра

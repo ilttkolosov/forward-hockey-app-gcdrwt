@@ -1,0 +1,59 @@
+// app.config.js
+export default ({ config }) => {
+  return {
+    ...config,
+    name: 'ХК Форвард 14',
+    slug: 'Forward',
+    version: '1.0.54',
+    orientation: 'portrait',
+    icon: './assets/icons/myIcon.png',
+    userInterfaceStyle: 'dark',
+    newArchEnabled: true,
+    splash: {
+      image: './assets/icons/splash.png',
+      resizeMode: 'contain',
+      backgroundColor: '#000000',
+    },
+    ios: {
+      supportsTablet: true,
+      bundleIdentifier: 'com.aleksandrkolosov.forward2014',
+      infoPlist: {
+        ITSAppUsesNonExemptEncryption: false,
+      },
+    },
+    android: {
+      adaptiveIcon: {
+        foregroundImage: './assets/icons/myIcon.png',
+        backgroundColor: '#000000',
+      },
+      edgeToEdgeEnabled: true,
+      package: 'com.kolosovaleksandr.Forward2014',
+      googleServicesFile: process.env.GOOGLE_SERVICES_JSON
+        ? process.env.GOOGLE_SERVICES_JSON
+        : './google-services.json', // fallback для локальной разработки
+      jsEngine: 'hermes',
+    },
+    web: {
+      favicon: './assets/images/final_quest_240x240.png',
+      bundler: 'metro',
+    },
+    plugins: [
+      'expo-font',
+      'expo-router',
+      'expo-web-browser',
+      ['./plugins/withAppMetrica.js', {
+        apiKey: '2a2cbf5f-f609-4a7b-80c6-99ba84d59501',
+      }],
+    ],
+    scheme: 'natively',
+    experiments: {
+      typedRoutes: true,
+    },
+    extra: {
+      router: {},
+      eas: {
+        projectId: 'bfe76357-fffa-4dbf-b498-214a56573bcd',
+      },
+    },
+  };
+};
