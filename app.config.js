@@ -10,7 +10,7 @@ export default ({ config }) => {
     userInterfaceStyle: 'dark',
     newArchEnabled: true,
     splash: {
-      //image: './assets/icons/splash.png',
+      image: './assets/icons/splash.png',
       resizeMode: 'contain',
       backgroundColor: '#ffffffff',
     },
