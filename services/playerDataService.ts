@@ -12,20 +12,14 @@ import {
   EncodingType,
 } from 'expo-file-system/legacy';
 import { Player } from '../types';
-
-// === ЧИСТЫЙ JS РАСПАКОВЩИК ZIP (БЕЗ НАТИВНЫХ МОДУЛЕЙ) ===
 import { unzip } from 'fflate';
 
-// === КОНСТАНТЫ ===
 const PLAYERS_DATA_LOADED_KEY = 'playersDataLoaded';
 const PLAYERS_STORAGE_KEY = 'localPlayersData';
 const PLAYER_PHOTOS_DOWNLOADED_KEY = 'playerPhotosDownloaded';
 const PLAYERS_DIRECTORY = `${documentDirectory || ''}players/`;
 const PHOTO_ARCHIVE_BASE_URL = 'https://www.hc-forward.com/wp-content/uploads/app/player_photos_v';
 
-/**
- * Интерфейс для ответа нового эндпоинта /get-players-full
- */
 interface PlayerFullApiResponse {
   id: number;
   name: string;
@@ -40,7 +34,6 @@ interface PlayerFullApiResponse {
 export class PlayerDownloadSystem {
   private baseUrl = 'https://www.hc-forward.com/wp-json/app/v1';
 
-  // --- Флаги ---
   async isDataLoaded(): Promise<boolean> {
     const loaded = await AsyncStorage.getItem(PLAYERS_DATA_LOADED_KEY);
     return loaded === 'true';
@@ -56,13 +49,13 @@ export class PlayerDownloadSystem {
     await AsyncStorage.setItem(PLAYER_PHOTOS_DOWNLOADED_KEY, downloaded.toString());
   }
 
-  // --- Вспомогательные ---
   async ensurePlayersDirectoryExists(): Promise<void> {
     const dirInfo = await getInfoAsync(PLAYERS_DIRECTORY);
     if (!dirInfo.exists) {
       await makeDirectoryAsync(PLAYERS_DIRECTORY, { intermediates: true });
     }
   }
+
   private calculateAge(birthDate: string): number {
     try {
       const birth = new Date(birthDate);
@@ -77,13 +70,13 @@ export class PlayerDownloadSystem {
       return 0;
     }
   }
+
   private getExtensionFromUrl(url: string): string {
     if (!url) return 'jpg';
     const match = url.match(/\.([a-zA-Z0-9]+)(\?|#|$)/);
     return match ? match[1].toLowerCase() : 'jpg';
   }
 
-  // --- Загрузка фото по одному (fallback) ---
   async downloadAndCacheImage(originalUrl: string, playerId: string): Promise<string | null> {
     if (!originalUrl?.trim()) return null;
     const normalizedUrl = originalUrl.trim();
@@ -118,31 +111,32 @@ export class PlayerDownloadSystem {
     return result.status === 200 ? result.uri : null;
   }
 
-  // --- ОСНОВНАЯ ФУНКЦИЯ: РАСПАКОВКА .ZIP ЧЕРЕЗ fflate ---
-  async downloadAndExtractPhotoArchive(version: number): Promise<boolean> {
+  async downloadAndExtractPhotoArchive(
+    version: number,
+    onProgress: (message: string) => void
+  ): Promise<boolean> {
     const zipUrl = `${PHOTO_ARCHIVE_BASE_URL}${version}.zip`;
     const zipPath = `${documentDirectory}players_v${version}.zip`;
     const extractDir = PLAYERS_DIRECTORY;
 
     try {
-      console.log(`📥 Скачивание .zip: ${zipUrl}`);
+      onProgress('Скачивание архива фото...');
       await this.ensurePlayersDirectoryExists();
 
-      // Очистка старых фото
       const dirInfo = await getInfoAsync(extractDir);
       if (dirInfo.exists && dirInfo.isDirectory) {
         const files = await readDirectoryAsync(extractDir);
         await Promise.all(files.map(f => deleteAsync(`${extractDir}${f}`)));
       }
 
-      // Скачивание ZIP как Base64
       const downloadRes = await downloadAsync(zipUrl, zipPath);
       if (downloadRes.status !== 200) {
         console.error('❌ Ошибка скачивания .zip');
         return false;
       }
 
-      // Чтение ZIP как Base64 → Uint8Array
+      onProgress('Распаковка архива...');
+
       const zipBase64 = await readAsStringAsync(zipPath, { encoding: EncodingType.Base64 });
       const binaryString = atob(zipBase64);
       const zipArray = new Uint8Array(binaryString.length);
@@ -150,7 +144,6 @@ export class PlayerDownloadSystem {
         zipArray[i] = binaryString.charCodeAt(i);
       }
 
-      // Распаковка с помощью fflate
       const entries: Record<string, Uint8Array> = {};
       await new Promise<void>((resolve, reject) => {
         unzip(zipArray, (error, unzipped) => {
@@ -165,35 +158,39 @@ export class PlayerDownloadSystem {
         });
       });
 
-      // Запись файлов в файловую систему
       await Promise.all(
         Object.entries(entries).map(async ([filename, data]) => {
-          if (filename.endsWith('/')) return; // пропускаем папки
+          if (filename.endsWith('/')) return;
           const fileUri = `${extractDir}${filename}`;
           const base64 = Buffer.from(data).toString('base64');
           await writeAsStringAsync(fileUri, base64, { encoding: EncodingType.Base64 });
         })
       );
 
-      console.log(`✅ Распаковано файлов: ${Object.keys(entries).length}`);
       await deleteAsync(zipPath, { idempotent: true });
 
-      return Object.keys(entries).length > 0;
+      const count = Object.keys(entries).length;
+      onProgress(`Загружено фото из архива (${count})`);
+      return count > 0;
     } catch (error) {
       console.error(`💥 Ошибка при работе с .zip v${version}:`, error);
       return false;
     }
   }
 
-  // --- Основная загрузка ---
   async loadAllPlayersDataWithBatch(
     version: number,
-    onProgress?: (stage: string, current?: number, total?: number) => void
+    onProgress?: (stage: string, message?: string) => void
   ): Promise<Player[]> {
     onProgress?.('Загрузка данных игроков…');
+
     const fullPlayers = await this.fetchAllPlayersFull();
-    onProgress?.('Загрузка фото архивом (.zip)…');
-    const photosLoaded = await this.downloadAndExtractPhotoArchive(version);
+    const total = fullPlayers.length;
+
+    onProgress?.('Выбор источника фото…');
+    const photosLoaded = await this.downloadAndExtractPhotoArchive(version, (msg) => {
+      onProgress?.('Загрузка фото', msg);
+    });
 
     let players: Player[] = [];
     if (photosLoaded) {
@@ -218,9 +215,9 @@ export class PlayerDownloadSystem {
           isAssistantCaptain: data.metrics?.ka === 'А',
         };
       });
+      onProgress?.('Загрузка фото', `Обработано ${players.length} фото из архива`);
     } else {
-      // Fallback — загрузка по одному
-      onProgress?.('Загрузка фото по одному (fallback)...');
+      onProgress?.('Загрузка фото', 'Архив недоступен. Загрузка по одному…');
       players = [];
       for (let i = 0; i < fullPlayers.length; i++) {
         const data = fullPlayers[i];
@@ -244,7 +241,7 @@ export class PlayerDownloadSystem {
           isCaptain: data.metrics?.ka === 'К',
           isAssistantCaptain: data.metrics?.ka === 'А',
         });
-        onProgress?.('Загрузка фото...', i + 1, fullPlayers.length);
+        onProgress?.('Загрузка фото', `Загружено ${i + 1} из ${total}`);
       }
     }
 
@@ -255,7 +252,6 @@ export class PlayerDownloadSystem {
     return players;
   }
 
-  // --- Остальные методы (без изменений) ---
   async fetchAllPlayersFull(): Promise<PlayerFullApiResponse[]> {
     const response = await fetch(`${this.baseUrl}/get-players-full`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -277,7 +273,7 @@ export class PlayerDownloadSystem {
 
   async refreshPlayersData(
     version: number,
-    onProgress?: (stage: string, current?: number, total?: number) => void
+    onProgress?: (stage: string, message?: string) => void
   ): Promise<Player[]> {
     await this.setDataLoaded(false);
     await this.setPhotosDownloadedFlag(false);

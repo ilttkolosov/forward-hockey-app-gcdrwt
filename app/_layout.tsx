@@ -360,19 +360,6 @@ export default function RootLayout() {
         setProgress(15);
       }
 
-      // === 2.1 ЗАПУСКАЕМ загрузку предстоящих игр в фоне (не ждём) ===
-      console.log('🚀 Запуск фоновой загрузки предстоящих игр...');
-      upcomingGamesPromise = getUpcomingGamesMasterData()
-      .then(() => {
-        upcomingGamesFinished = true;
-        console.log('✅ Предстоящие игры загружены в фоне');
-      })
-      .catch(err => {
-        upcomingGamesFinished = true; // даже при ошибке считаем "завершённой"
-        console.warn('⚠️ Ошибка фоновой загрузки предстоящих игр:', err);
-      });
-
-
       // === 3. Команды и справочники ===
       console.log("Начали загрузку списка команд");
       const existingTeams = await loadTeamList();
@@ -396,14 +383,25 @@ export default function RootLayout() {
           await forceReloadReferenceData();
         }
         setDynamicStatus(`Загружено команд ${teamsCount}`);
-        setProgress(40);
+        setProgress(30);
       }
 
+      // === 3.1 ЗАПУСКАЕМ загрузку предстоящих игр в фоне (не ждём) ===
+      console.log('🚀 Запуск фоновой загрузки предстоящих игр...');
+      upcomingGamesPromise = getUpcomingGamesMasterData()
+      .then(() => {
+        upcomingGamesFinished = true;
+        console.log('✅ Предстоящие игры загружены в фоне');
+      })
+      .catch(err => {
+        upcomingGamesFinished = true; // даже при ошибке считаем "завершённой"
+        console.warn('⚠️ Ошибка фоновой загрузки предстоящих игр:', err);
+      });
 
       // === 4.  Фоновая предзагрузка прошедших игр для команды 74
       setDynamicStatus(`Загрузка основных данных программы`);
       setInitializationMessage('Фоновая загрузка прошедших игр...');
-      setProgress(50);
+      setProgress(40);
       getPastGamesForTeam74()
         .then(games => {
           console.log(`✅ Preloaded ${games.length} past games for team 74 in background`);
@@ -421,21 +419,17 @@ export default function RootLayout() {
         shouldUpdate: shouldUpdatePlayers
       });
       const playersDataLoaded = await playerDownloadService.isDataLoaded();
-
       let playersList: Player[] = [];
-
       if (shouldUpdatePlayers || !playersDataLoaded) {
-        // Полная перезагрузка игроков
         console.log('🔄 Запуск ПРИНУДИТЕЛЬНОЙ перезагрузки игроков (версия обновлена)');
         setInitializationMessage('Загрузка данных игроков...');
-        setProgress(65);
-        playersList = await playerDownloadService.refreshPlayersData(config.players_version, (stage, current, total) => {
-          setDynamicStatus(`Загружено игроков ${stage} / ${current} из ${total}`);
+        setProgress(55);
+        playersList = await playerDownloadService.refreshPlayersData(config.players_version, (stage, message) => {
+          setDynamicStatus(message || stage);
         });
         await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(config.players_version));
         console.log('✅ Версия игроков сохранена:', config.players_version);
       } else {
-        // Загрузка из кэша
         playersList = await playerDownloadService.getPlayersFromStorage();
         setDynamicStatus(`Загружено игроков ${playersList.length}`);
         console.log('📦 Игроки загружены из кэша');
@@ -444,8 +438,8 @@ export default function RootLayout() {
       // ✅ Проверяем фото ТОЛЬКО если игроки были загружены из кэша (не при полной перезагрузке)
       if (playersList.length > 0 && !(shouldUpdatePlayers || !playersDataLoaded)) {
         setInitializationMessage('Проверка фото игроков...');
-        setProgress(80);
-        setDynamicStatus('Проверка целостности фото...');
+        setProgress(70);
+        setDynamicStatus('Проверка целостности фото и логотипов...');
         try {
           await playerDownloadService.verifyAndRestorePlayerPhotosFromApi(playersList, (current, total) => {
             setDynamicStatus(`Проверяем наличия файлов с фото для всех игроков`);
@@ -459,7 +453,7 @@ export default function RootLayout() {
       // === 7. Фоновые задачи (запускаем после основного прогресса) ===
       setDynamicStatus(`Запуск фоновых задач`);
       setInitializationMessage('Финальная настройка...');
-      setProgress(90);
+      setProgress(80);
       initializeTournamentsInBackground(config);
       preloadCurrentTournamentGames(config);
       preloadPastGamesInBackground();
