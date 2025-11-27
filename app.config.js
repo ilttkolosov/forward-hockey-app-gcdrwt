@@ -4,15 +4,15 @@ export default ({ config }) => {
     ...config,
     name: 'ХК Форвард 14',
     slug: 'Forward',
-    version: '1.0.56',
+    version: '1.0.58',
     orientation: 'portrait',
     icon: './assets/icons/myIcon.png',
     userInterfaceStyle: 'dark',
     newArchEnabled: true,
     splash: {
-      image: './assets/icons/splash.png',
+      //image: './assets/icons/splash.png',
       resizeMode: 'contain',
-      backgroundColor: '#000000',
+      backgroundColor: '#ffffffff',
     },
     ios: {
       supportsTablet: true,
@@ -24,7 +24,7 @@ export default ({ config }) => {
     android: {
       adaptiveIcon: {
         foregroundImage: './assets/icons/myIcon.png',
-        backgroundColor: '#000000',
+        backgroundColor: '#ffffffff',
       },
       edgeToEdgeEnabled: true,
       package: 'com.kolosovaleksandr.Forward2014',
