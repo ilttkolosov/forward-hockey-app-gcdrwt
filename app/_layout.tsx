@@ -15,11 +15,11 @@ import { colors } from '../styles/commonStyles';
 import { playerDownloadService } from '../services/playerDataService';
 import PlayerDataLoadingScreen from '../components/PlayerDataLoadingScreen';
 import { apiService } from '../services/apiService';
-import { loadTeamList, saveTeamList, saveTeamLogo, verifyAndRestoreTeamLogos } from '../services/teamStorage';
+import { loadTeamList, saveTeamList, saveTeamLogo } from '../services/teamStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { getUpcomingGamesMasterData } from '../data/gameData';
-import SplashScreen from '../components/SplashScreen';
+//import SplashScreen from '../components/SplashScreen';
 import { fetchStartupConfig, StartupConfig } from '../services/startupApi';
 import { fetchTournamentTable, getCachedTournamentConfig } from '../services/tournamentsApi';
 import { getGames, getPastGamesForTeam74 } from '../data/gameData';
@@ -381,8 +381,7 @@ export default function RootLayout() {
       const existingTeams = await loadTeamList();
       const hasCachedTeams = existingTeams && existingTeams.length > 0;
       let teamsCount = existingTeams?.length || 0;
-      //console.log("Текущая версия команд: ", localTeamsVersion);
-      //console.log("Версия команд в установочном файле : ", config.teams_version);
+
       if (shouldUpdateTeams || !hasCachedTeams) {
         setInitializationMessage('Обновление команд...');
         setProgress(20);
@@ -400,27 +399,6 @@ export default function RootLayout() {
         }
         setDynamicStatus(`Загружено команд ${teamsCount}`);
         setProgress(30);
-      }
-
-      // ✅ Проверка логотипов команд из кэша (если команды взяты из кэша)
-      if (existingTeams && existingTeams.length > 0 && !shouldUpdateTeams) {
-        setInitializationMessage('Проверка логотипов команд...');
-        setDynamicStatus('Анализ целостности логотипов...');
-        setProgress(35);
-        try {
-          await verifyAndRestoreTeamLogos(existingTeams, (current, total) => {
-            if (total === 0) {
-              setDynamicStatus('Все логотипы на месте');
-            } else if (current < total) {
-              setDynamicStatus(`Восстанавливаем логотипы: ${current} из ${total}`);
-            } else {
-              setDynamicStatus(`✅ Восстановлено ${total} логотипов команд`);
-            }
-          });
-        } catch (err) {
-          console.warn('⚠️ Ошибка при проверке логотипов команд:', err);
-          setDynamicStatus('Ошибка при восстановлении логотипов');
-        }
       }
 
 

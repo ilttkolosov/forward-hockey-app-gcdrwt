@@ -125,7 +125,7 @@ export default function AboutScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>О приложении</Text>
           <Text style={styles.text}>Название: ХК Динамо Форвард 2014</Text>
-          <Text style={styles.text}>Версия приложения: {appVersion}</Text>
+          <Text style={styles.text}>Номер сборки: {appVersion}</Text>
           <Text style={styles.text}>Версия данных игроков: {playersVersion ?? '—'}</Text>
           <Text style={styles.text}>Версия данных команд: {teamsVersion ?? '—'}</Text>
         </View>
@@ -138,9 +138,7 @@ export default function AboutScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Окружение</Text>
-          <Text style={styles.text}>Expo SDK: {expoSdkVersion}</Text>
-          <Text style={styles.text}>Expo Runtime: {expoRuntimeVersion}</Text>
+          <Text style={styles.sectionTitle}>Окружение: Expo SDK</Text>
         </View>
 
         <View style={styles.section}>

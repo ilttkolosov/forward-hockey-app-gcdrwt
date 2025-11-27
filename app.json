@@ -2,7 +2,7 @@
   "expo": {
     "name": "ХК Форвард 14",
     "slug": "Forward",
-    "version": "1.0.57",
+    "version": "1.0.58",
     "orientation": "portrait",
     "icon": "./assets/icons/myIcon.png",
     "userInterfaceStyle": "dark",
