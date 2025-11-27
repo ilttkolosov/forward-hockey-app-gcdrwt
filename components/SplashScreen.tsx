@@ -1,4 +1,4 @@
-// components/SplashScreen.tsx
+// components/SplashScreen.tsx - не испоьзуется!!!
 import React from 'react';
 import { View, Text, Image, StyleSheet, ActivityIndicator } from 'react-native';
 import { colors } from '../styles/commonStyles';
@@ -8,12 +8,12 @@ export default function SplashScreen({ message = 'Загрузка...' }: { mess
     <View style={styles.container}>
       {/* Логотип */}
       <Image
-        source={require('../assets/icons/splash_2.png')}
+        source={require('../assets/icons/myIcon.png')}
         style={styles.logo}
         resizeMode="contain"
       />
       {/* Заголовок (опционально можно убрать, если логотип уже включает текст) */}
-      <Text style={styles.title}>ХК Динамо Форвард 2014</Text>
+      <Text style={styles.title}>ХК Динамо-Форвард 2014</Text>
       <ActivityIndicator size="large" color={colors.primary} style={styles.loader} />
       <Text style={styles.message}>{message}</Text>
     </View>
@@ -30,7 +30,7 @@ const styles = StyleSheet.create({
   },
   logo: {
     width: 600,
-    height: 480,
+    height: 600,
     marginBottom: 24,
   },
   title: {

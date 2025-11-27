@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   Animated,
   Easing,
@@ -223,8 +224,15 @@ const SplashScreenWithProgress = ({
     inputRange: [0, 100],
     outputRange: ['0%', '100%'],
   });
+
   return (
     <View style={progressStyles.container}>
+      {/* Логотип: расположен "между верхом и заголовком" */}
+      <Image
+        source={require('../assets/icons/myIcon.png')} 
+        style={progressStyles.logo}
+        resizeMode="contain"
+      />
       <Text style={progressStyles.title}>ХК Динамо Форвард 2014</Text>
       <Text style={progressStyles.message}>{message}</Text>
       <Text style={[progressStyles.message, { marginTop: 8, fontSize: 13, color: colors.text }]}>
@@ -240,16 +248,23 @@ const SplashScreenWithProgress = ({
 const progressStyles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-start', // ← теперь не центрируем всё, а начинаем сверху
     alignItems: 'center',
     backgroundColor: colors.background,
+    paddingTop: 100, // ← отступ сверху, чтобы логотип не упирался в статус-бар
     paddingHorizontal: 32,
+  },
+  logo: {
+    width: 200,
+    height: 200,
+    marginBottom: 50, // ← отступ до заголовка
   },
   title: {
     fontSize: 20,
     fontWeight: '700',
     color: colors.text,
-    marginBottom: 24,
+    marginBottom: 16,
+    textAlign: 'center',
   },
   message: {
     fontSize: 14,
@@ -263,6 +278,7 @@ const progressStyles = StyleSheet.create({
     backgroundColor: colors.border,
     borderRadius: 2,
     overflow: 'hidden',
+    marginTop: 8,
   },
   progressBar: {
     height: '100%',
@@ -439,14 +455,24 @@ export default function RootLayout() {
       if (playersList.length > 0 && !(shouldUpdatePlayers || !playersDataLoaded)) {
         setInitializationMessage('Проверка фото игроков...');
         setProgress(70);
-        setDynamicStatus('Проверка целостности фото и логотипов...');
+        setDynamicStatus('Анализ целостности фото...');
+
         try {
-          await playerDownloadService.verifyAndRestorePlayerPhotosFromApi(playersList, (current, total) => {
-            setDynamicStatus(`Проверяем наличия файлов с фото для всех игроков`);
-          });
+          await playerDownloadService.verifyAndRestorePlayerPhotosFromApi(
+            playersList,
+            (current, total) => {
+              if (total === 0) {
+                setDynamicStatus('Все фото на месте — восстановление не требуется');
+              } else if (current < total) {
+                setDynamicStatus(`Восстанавливаем фото: ${current} из ${total}`);
+              } else {
+                setDynamicStatus(`✅ Восстановлено ${total} фото`);
+              }
+            }
+          );
         } catch (err) {
           console.warn('⚠️ Ошибка при проверке фото игроков:', err);
-          // Не останавливаем инициализацию
+          setDynamicStatus('Ошибка при восстановлении фото');
         }
       }
 
