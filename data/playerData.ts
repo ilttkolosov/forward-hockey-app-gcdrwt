@@ -1,9 +1,7 @@
 // data/playerData.ts
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Player } from '../types';
 import { playerDownloadService } from '../services/playerDataService';
-import { ApiPlayerResponse } from '../types/apiTypes';
 
 // --- ГЛОБАЛЬНЫЕ МАССИВЫ ДЛЯ ГРУППИРОВКИ ---
 let massiv1: Player[] = []; // Вратари
@@ -218,19 +216,6 @@ export async function refreshPlayersData(): Promise<Player[]> {
 /**
  * Clears all cached player data
  */
-export async function clearPlayersData(): Promise<void> {
-  try {
-    console.log('Data/playerData: Clearing all player data...');
-    await playerDownloadService.clearAllData();
-    console.log('Data/playerData: All player data cleared successfully via PlayerDownloadService');
-  } catch (error) {
-    console.error('Data/playerData: Error clearing player data via PlayerDownloadService:', error);
-    // Можно пробросить ошибку дальше, если нужно
-    // throw error;
-    // Или обработать локально
-  }
-}
-
 /**
  * Fallback players data for when API is unavailable
  */

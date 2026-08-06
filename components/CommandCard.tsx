@@ -208,6 +208,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minWidth: 40,
   },
+  statItem: {
+    alignItems: 'center',
+    minWidth: 40,
+  },
   statLabel: {
     fontSize: 12,
     fontWeight: '600',

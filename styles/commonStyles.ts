@@ -16,6 +16,8 @@ export const colors = {
   card: '#FFFFFF',         // White card background
   border: '#E1E8ED',       // Light border
   shadow: 'rgba(0, 0, 0, 0.1)',
+  white: '#FFFFFF',
+  grey: '#7F8C8D',
 };
 
 export const buttonStyles = StyleSheet.create({

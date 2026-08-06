@@ -694,6 +694,9 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
     await loadTeams();
 
     const apiGameDetails = await apiService.fetchEventById(id);
+    if (!apiGameDetails) {
+      return null;
+    }
     const game = await convertApiEventToGame(apiGameDetails);
 
     // Сохраняем в кэш только если useCache !== false

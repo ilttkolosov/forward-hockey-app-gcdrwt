@@ -25,10 +25,10 @@ import { useTrackScreenView } from '../hooks/useTrackScreenView';
 
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 
-const quickNavStyles = {
+const quickNavStyles = StyleSheet.create({
   container: {
-    flexDirection: 'row' as const,
-    flexWrap: 'wrap' as const,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     marginVertical: 24,
   },
@@ -38,7 +38,7 @@ const quickNavStyles = {
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    alignItems: 'center' as const,
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: colors.border,
   },
@@ -47,17 +47,17 @@ const quickNavStyles = {
   },
   title: {
     fontSize: 14,
-    fontWeight: '600' as const,
+    fontWeight: '600',
     color: colors.text,
-    textAlign: 'center' as const,
+    textAlign: 'center',
     marginBottom: 4,
   },
   subtitle: {
     fontSize: 12,
     color: colors.textSecondary,
-    textAlign: 'center' as const,
+    textAlign: 'center',
   },
-};
+});
 
 const headerStyles = StyleSheet.create({
   headerContainer: {

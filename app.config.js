@@ -1,5 +1,12 @@
 // app.config.js
+import fs from 'node:fs';
+import path from 'node:path';
+
 export default ({ config }) => {
+  const localGoogleServicesPath = path.resolve(process.cwd(), 'google-services.json');
+  const googleServicesFile = process.env.GOOGLE_SERVICES_JSON
+    || (fs.existsSync(localGoogleServicesPath) ? './google-services.json' : undefined);
+
   return {
     ...config,
     name: 'ХК Форвард 14',
@@ -7,7 +14,7 @@ export default ({ config }) => {
     version: '1.0.58',
     orientation: 'portrait',
     icon: './assets/icons/myIcon.png',
-    userInterfaceStyle: 'dark',
+    userInterfaceStyle: 'light',
     newArchEnabled: true,
     splash: {
       image: './assets/icons/splash.png',
@@ -28,9 +35,7 @@ export default ({ config }) => {
       },
       edgeToEdgeEnabled: true,
       package: 'com.kolosovaleksandr.Forward2014',
-      googleServicesFile: process.env.GOOGLE_SERVICES_JSON
-        ? process.env.GOOGLE_SERVICES_JSON
-        : './google-services.json', // fallback для локальной разработки
+      ...(googleServicesFile ? { googleServicesFile } : {}),
       jsEngine: 'hermes',
     },
     web: {
@@ -41,6 +46,7 @@ export default ({ config }) => {
       'expo-font',
       'expo-router',
       'expo-web-browser',
+      'expo-notifications',
       ['./plugins/withAppMetrica.js', {
         apiKey: '2a2cbf5f-f609-4a7b-80c6-99ba84d59501',
       }],

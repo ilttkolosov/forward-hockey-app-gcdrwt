@@ -114,7 +114,7 @@ export function getPlayerPositions(players: Player[]): string[] {
   });
 }
 
-export function getPlayerStats(player: Player): Array<{ label: string; value: string }> {
+export function getPlayerStats(player: Player): { label: string; value: string }[] {
   const stats = [];
   
   if (player.age) {

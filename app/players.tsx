@@ -358,7 +358,6 @@ export default function PlayersScreen() {
             fontWeight: '700',
             color: colors.background, // ← Контрастный цвет для активной вкладки (например, белый)
           }}
-          springEnabled={false}
         />
       </View>
       {/* Players List */}

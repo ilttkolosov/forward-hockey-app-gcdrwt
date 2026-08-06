@@ -53,6 +53,10 @@ interface TournamentTableRowWithLogo {
   overtime_wins: string;
   overtime_losses: string;
   points_2x: string;
+  goals_for: string;
+  goals_against: string;
+  goal_diff: string;
+  ppg_percent: string;
   pkpercent: string;
   logo_uri: string | null;
 }
@@ -479,7 +483,6 @@ export default function TournamentDetailScreen() {
             fontWeight: '700',
             color: colors.background, // ← Контрастный цвет для активной вкладки (например, белый)
           }}
-          springEnabled={false}
         />
       </View>
 
@@ -505,7 +508,6 @@ export default function TournamentDetailScreen() {
                   fontWeight: '700',
                   color: colors.background, // ← Контрастный цвет для активной вкладки (например, белый)
                 }}
-                springEnabled={false}
               />
             </View>
           )}
@@ -564,7 +566,7 @@ export default function TournamentDetailScreen() {
                   goals_against={row.goals_against}
                   goal_diff={row.goal_diff}
                   ppg_percent={row.ppg_percent}
-                  pkpercent={row.penalty_kill_percent}
+                  pkpercent={row.pkpercent}
                   tournamentId={id}
                 />
               ))

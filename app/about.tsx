@@ -105,11 +105,11 @@ export default function AboutScreen() {
   }, []);
 
   // === ДАННЫЕ ОБ УСТРОЙСТВЕ И ОКРУЖЕНИИ ===
-  const appVersion = Constants.expoConfig?.version || Constants.manifest?.version || '1.0.0';
+  const appVersion = Constants.expoConfig?.version || '1.0.0';
   const deviceModel = Device.modelName || 'Unknown';
   const osVersion = `${Device.osName || 'Unknown'} ${Device.osVersion || ''}`;
   const expoSdkVersion = Constants.expoSdkVersion || '—';
-  const expoRuntimeVersion = Constants.expoRuntimeVersion || Constants.manifest?.runtimeVersion || '—';
+  const expoRuntimeVersion = Constants.expoRuntimeVersion || '—';
 
   const handleEmailPress = () => {
     Linking.openURL('mailto:ilttkolosov@gmail.com');

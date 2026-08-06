@@ -8,7 +8,7 @@ export interface ApiEventsResponse {
 }
 
 export interface ApiEvent {
-  id: number;
+  id: string | number;
   title: string;
   date: string;
   leagues: number[];

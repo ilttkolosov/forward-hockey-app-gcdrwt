@@ -256,7 +256,6 @@ async fetchEvents(params: {
           // name: player.name, // <-- Старое логирование
           // post_title: player.post_title, // <-- Добавьте, если ожидаете post_title
           name: player.name, // <-- Логируем name
-          post_title: player.post_title, // <-- Логируем post_title для сравнения
           position: player.position,
         });
       });

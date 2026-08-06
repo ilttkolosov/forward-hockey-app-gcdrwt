@@ -20,7 +20,7 @@ import Icon from '../../components/Icon';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
-import { useTrackScreenView } from '../hooks/useTrackScreenView';
+import { useTrackScreenView } from '../../hooks/useTrackScreenView';
 
 const { width } = Dimensions.get('window');
 

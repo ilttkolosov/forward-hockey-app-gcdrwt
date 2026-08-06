@@ -11,7 +11,7 @@ let deviceId: string | null = null;
 // Попытка импорта только если мы НЕ в Expo Go
 if (!__DEV__ || Device.isDevice) {
   try {
-    // @ts-ignore
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     AppMetrica = require('@appmetrica/react-native-analytics').default;
   } catch (e) {
     console.warn('[Analytics] AppMetrica не запущена в этой сборке');
@@ -20,18 +20,14 @@ if (!__DEV__ || Device.isDevice) {
 
 export const getOrCreateDeviceId = async (): Promise<string> => {
   if (deviceId) return deviceId;
-  if (Device.deviceId) {
-    deviceId = Device.deviceId;
-  } else {
-    deviceId = await AsyncStorage.getItem('analytics_device_id');
-    if (!deviceId) {
-      deviceId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-        const r = (Math.random() * 16) | 0;
-        const v = c === 'x' ? r : (r & 0x3) | 0x8;
-        return v.toString(16);
-      });
-      await AsyncStorage.setItem('analytics_device_id', deviceId);
-    }
+  deviceId = await AsyncStorage.getItem('analytics_device_id');
+  if (!deviceId) {
+    deviceId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+    await AsyncStorage.setItem('analytics_device_id', deviceId);
   }
   return deviceId;
 };

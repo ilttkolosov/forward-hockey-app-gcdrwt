@@ -10,6 +10,7 @@ import {
   Image,
   Linking,
   Animated,
+  LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -358,7 +359,7 @@ const renderProtocolByPeriods = (
               <View style={styles.protocolTableCellSpacer} />
               <View style={isLastEvent ? styles.protocolTableCellLogoLast : styles.protocolTableCellLogo}>
                 <View style={styles.protocolLogoCircle}>
-                  <Image source={{ uri: item.teamLogo }} style={styles.protocolEventTeamLogo} />
+                  <Image source={{ uri: item.teamLogo || undefined }} style={styles.protocolEventTeamLogo} />
                 </View>
               </View>
               <View style={styles.protocolTableCellSpacer} />
@@ -366,8 +367,8 @@ const renderProtocolByPeriods = (
                 <ProtocolEventCard
                   event={item}
                   teamLogo={item.teamLogo}
-                  homeTeamLogo={homeTeamLogo}
-                  awayTeamLogo={awayTeamLogo}
+                  homeTeamLogo={homeTeamLogo || ''}
+                  awayTeamLogo={awayTeamLogo || ''}
                   onVideoPress={onVideoPress}
                   playerStats={protocolPlayers}
                   score={item.score}
@@ -546,7 +547,7 @@ export default function GameDetailsScreen() {
   const gameInfoHeight = useRef(0); // Для хранения динамической высоты
 
   // Функция для получения высоты блока gameInfo
-  const handleGameInfoLayout = useCallback((event) => {
+  const handleGameInfoLayout = useCallback((event: LayoutChangeEvent) => {
     const { height } = event.nativeEvent.layout;
     gameInfoHeight.current = height;
   }, []);
@@ -566,7 +567,7 @@ export default function GameDetailsScreen() {
       const newProtocolPlayers: Record<string, any> = {};
       if (gameData.protocol?.events) {
         const playerIds = new Set<string>();
-        gameData.protocol.events.forEach(event => {
+        gameData.protocol.events.forEach((event: any) => {
           if (event.players) {
             event.players.forEach((id: string) => playerIds.add(id));
           }
@@ -716,16 +717,16 @@ export default function GameDetailsScreen() {
     if (gameHasStarted) {
       // Игра уже идёт или прошла — берём реальный счёт
       setLiveScore({
-        home: gameDetails.homeScore ?? '0',
-        away: gameDetails.awayScore ?? '0',
+        home: String(gameDetails.homeScore ?? '0'),
+        away: String(gameDetails.awayScore ?? '0'),
       });
       setPeriodScores({
-        team1_first: gameDetails.team1_first ?? '0',
-        team1_second: gameDetails.team1_second ?? '0',
-        team1_third: gameDetails.team1_third ?? '0',
-        team2_first: gameDetails.team2_first ?? '0',
-        team2_second: gameDetails.team2_second ?? '0',
-        team2_third: gameDetails.team2_third ?? '0',
+        team1_first: String(gameDetails.team1_first ?? '0'),
+        team1_second: String(gameDetails.team1_second ?? '0'),
+        team1_third: String(gameDetails.team1_third ?? '0'),
+        team2_first: String(gameDetails.team2_first ?? '0'),
+        team2_second: String(gameDetails.team2_second ?? '0'),
+        team2_third: String(gameDetails.team2_third ?? '0'),
       });
       if (!isGameStarted) {
         setIsGameStarted(true);
@@ -779,18 +780,18 @@ export default function GameDetailsScreen() {
         const freshGame = await getGameById(gameDetails.id, false);
         if (!freshGame) return;
 
-        const newHome = freshGame.homeScore ?? '0';
-        const newAway = freshGame.awayScore ?? '0';
+        const newHome = String(freshGame.homeScore ?? '0');
+        const newAway = String(freshGame.awayScore ?? '0');
         const currentHome = liveScore.home;
         const currentAway = liveScore.away;
 
         const newPeriods = {
-          team1_first: freshGame.team1_first ?? '0',
-          team1_second: freshGame.team1_second ?? '0',
-          team1_third: freshGame.team1_third ?? '0',
-          team2_first: freshGame.team2_first ?? '0',
-          team2_second: freshGame.team2_second ?? '0',
-          team2_third: freshGame.team2_third ?? '0',
+          team1_first: String(freshGame.team1_first ?? '0'),
+          team1_second: String(freshGame.team1_second ?? '0'),
+          team1_third: String(freshGame.team1_third ?? '0'),
+          team2_first: String(freshGame.team2_first ?? '0'),
+          team2_second: String(freshGame.team2_second ?? '0'),
+          team2_third: String(freshGame.team2_third ?? '0'),
         };
 
         const periodsChanged =
@@ -1123,10 +1124,12 @@ export default function GameDetailsScreen() {
               <View style={styles.venueInfo}>
                 <Text style={styles.venueName}>{venueData.name}</Text>
                 {venueData.address && <Text style={styles.venueAddress}>{venueData.address}</Text>}
-                {venueData.coordinates && (
+                {venueData.coordinates && (() => {
+                  const coordinates = venueData.coordinates;
+                  return (
                   <TouchableOpacity
                     onPress={() => {
-                      const url = `https://yandex.ru/maps/?pt=${venueData.coordinates.longitude},${venueData.coordinates.latitude}&z=17`;
+                      const url = `https://yandex.ru/maps/?pt=${coordinates.longitude},${coordinates.latitude}&z=17`;
                       Linking.openURL(url).catch(() => console.warn('Не удалось открыть Яндекс.Карты'));
                     }}
                     style={styles.mapLinkButton}
@@ -1134,7 +1137,8 @@ export default function GameDetailsScreen() {
                     <Text style={styles.mapLinkText}>Открыть в </Text>
                     <Image source={require('../../assets/icons/YandexMap.png')} style={styles.mapIcon} />
                   </TouchableOpacity>
-                )}
+                  );
+                })()}
               </View>
             )}
             {tabs[tabIndex] === 'F2F' && (
@@ -1388,6 +1392,15 @@ const styles = StyleSheet.create({
     borderLeftWidth: 2, // Видимая граница между столбцами
     borderLeftColor: colors.primary,
     borderRightWidth: 2, // Видимая граница между столбцами
+    borderRightColor: colors.primary,
+  },
+  protocolTableCellLogoLast: {
+    width: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderLeftWidth: 2,
+    borderLeftColor: colors.primary,
+    borderRightWidth: 2,
     borderRightColor: colors.primary,
   },
   protocolTableCellIcon: {

@@ -415,7 +415,6 @@ export default function TeamDetailScreen() {
               fontWeight: '700',
               color: colors.background, // ← Контрастный цвет для активной вкладки (например, белый)
             }}
-            springEnabled={false}
           />
         </View>
 

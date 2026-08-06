@@ -362,7 +362,7 @@ export default function RootLayout() {
       setProgress(5);
       console.log("Начали инициализацию приложения");
       const config = await fetchStartupConfig();
-      const currentAppVersion = Constants.expoConfig?.version || Constants.manifest?.version || '1.0.0';
+      const currentAppVersion = Constants.expoConfig?.version || '1.0.0';
       const lastAppVersion = await AsyncStorage.getItem(APP_VERSION_KEY);
       const appWasUpdated = currentAppVersion !== lastAppVersion;
       const localTeamsVersion = parseInt(await AsyncStorage.getItem(TEAMS_VERSION_KEY) || '0');

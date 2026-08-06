@@ -24,7 +24,8 @@ const OPERATION_TIMEOUT_MS = 6000; // 6 секунд
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),
@@ -56,9 +57,9 @@ const sendTokenToYourServer = async (token: string) => {
     if (!response.ok) {
       throw new Error(result.error || 'Не удалось сохранить токен');
     }
-  } catch (e) {
+  } catch (e: unknown) {
     clearTimeout(timeoutId);
-    if (e.name === 'AbortError') {
+    if (e instanceof Error && e.name === 'AbortError') {
       throw new Error('Превышено время ожидания');
     }
     throw e;
@@ -82,9 +83,9 @@ const deleteTokenFromServer = async (token: string) => {
     if (!response.ok) {
       throw new Error(result.error || 'Не удалось удалить токен');
     }
-  } catch (e) {
+  } catch (e: unknown) {
     clearTimeout(timeoutId);
-    if (e.name === 'AbortError') {
+    if (e instanceof Error && e.name === 'AbortError') {
       throw new Error('Превышено время ожидания');
     }
     throw e;
@@ -104,15 +105,11 @@ const ensurePushPermissions = async (): Promise<boolean> => {
     return false;
   }
 
-  try {
-    // 🔥 БЕЗ projectId — обход ошибки Firebase на Android
-    const tokenObj = await Notifications.getExpoPushTokenAsync();
-    await sendTokenToYourServer(tokenObj.data);
-    await AsyncStorage.setItem('expo_push_token', tokenObj.data);
-    return true;
-  } catch (e) {
-    throw e;
-  }
+  // БЕЗ projectId — получение токена из конфигурации нативной сборки
+  const tokenObj = await Notifications.getExpoPushTokenAsync();
+  await sendTokenToYourServer(tokenObj.data);
+  await AsyncStorage.setItem('expo_push_token', tokenObj.data);
+  return true;
 };
 
 export default function SettingsScreen() {

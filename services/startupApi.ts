@@ -5,8 +5,8 @@ import { apiService } from '../services/apiService';
 export interface StartupConfig {
   teams_version: number;   // "true" или "false" (как в WordPress)
   players_version: number; // "true" или "false"
-  league_id: string;
-  season_id: string;
+  league_id: string | number;
+  season_id: string | number;
   tournamentsNow: { tournament_ID: string; tournament_Name: string }[];
   tournamentsPast: { tournament_ID: string; tournament_Name: string }[];
 }

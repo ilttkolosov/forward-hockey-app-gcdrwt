@@ -23,27 +23,27 @@ export interface Game {
   homeOutcome?: string;
   awayOutcome?: string;
   // Поля для детальной информации (если игра завершена)
-  team1_first?: number;
-  team1_second?: number;
-  team1_third?: number;
-  team2_first?: number;
-  team2_second?: number;
-  team2_third?: number;
+  team1_first?: string | number;
+  team1_second?: string | number;
+  team1_third?: string | number;
+  team2_first?: string | number;
+  team2_second?: string | number;
+  team2_third?: string | number;
   // Дополнительные поля (если нужны)
   videoUrl?: string;
   // Поля из старого типа, оставлены для совместимости
   homeTeamLogo?: string | null; // ← Изменено на string | null
   awayTeamLogo?: string | null; // ← Изменено на string | null
-  homeScore?: number;
-  awayScore?: number;
+  homeScore?: string | number;
+  awayScore?: string | number;
   date: string;
   time: string;
   venue_name?: string;
   tournament?: string; // ← Это поле используется в app_season_[id].tsx
   season_name?: string; // ← Это поле используется в app_season_[id].tsx
   sp_video?: string;
-  team1_goals?: number;
-  team2_goals?: number;
+  team1_goals?: string | number;
+  team2_goals?: string | number;
   team1_outcome?: string;
   team2_outcome?: string;
   // Новое поле для названия лиги (league_name)
@@ -59,10 +59,11 @@ export interface Player {
   position: string;
   number: number;
   age?: number;
-  height?: string;
-  weight?: string;
+  height?: string | number;
+  weight?: string | number;
   nationality?: string;
   photo?: string;
+  photoPath?: string;
   // New properties as requested
   isCaptain?: boolean;
   isAssistantCaptain?: boolean;

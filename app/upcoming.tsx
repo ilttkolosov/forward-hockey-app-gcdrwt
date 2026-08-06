@@ -105,7 +105,7 @@ export default function TeamGamesScreen() {
   };
 
   const renderGame = ({ item }: { item: Game }) => (
-    <GameCard game={item} showScore={activeTab === 'past' || item.is_past} />
+    <GameCard game={item} showScore={activeTab === 'past' || item.status === 'finished'} />
   );
 
   const renderEmpty = () => (
@@ -197,7 +197,6 @@ export default function TeamGamesScreen() {
           tintColor={colors.primary}
           fontStyle={{ fontSize: 14, fontWeight: '600' }}
           activeFontStyle={{ fontWeight: '700' }}
-          springEnabled={false}
         />
       </View>
 

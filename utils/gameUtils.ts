@@ -22,7 +22,7 @@ export interface GameWithSeason {
   tournamentName: string | null;
   arenaName: string | null;
   seasonName: string | null;
-  seasonId?: number; // Calculated season ID
+  seasonId?: number | null; // Calculated season ID
 }
 
 /**

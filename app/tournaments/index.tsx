@@ -55,8 +55,8 @@ const ongoingPreloads = new Set<string>();
 export default function TournamentsScreen() {
   const [activeTab, setActiveTab] = useState<number>(0);
   const [tables, setTables] = useState<{
-    current: { name: string; id: string; data: TournamentTableWithLogos[] }[];
-    past: { name: string; id: string; data: TournamentTableWithLogos[] }[];
+    current: { name: string; id: string; data: TournamentTableWithLogos }[];
+    past: { name: string; id: string; data: TournamentTableWithLogos }[];
   }>({ current: [], past: [] });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -219,7 +219,7 @@ export default function TournamentsScreen() {
     router.push(`/tournaments/${tournamentId}`);
   };
 
-  const renderTable = (name: string, tournamentId: string, data: TournamentTableWithLogos[]) => {
+  const renderTable = (name: string, tournamentId: string, data: TournamentTableWithLogos) => {
     if (!data || !Array.isArray(data)) return null;
 
     return (
@@ -254,7 +254,7 @@ export default function TournamentsScreen() {
                 })}
                 style={styles.navArrowContainer}
               >
-                <Icon name="information-circle-outline" type="Ionicons" size={20} color={colors.primary} />
+                <Icon name="information-circle-outline" type="ion" size={20} color={colors.primary} />
               </TouchableOpacity>
             </View>
             <Text style={[styles.cell, styles.games]}>{row.games}</Text>
@@ -274,7 +274,7 @@ export default function TournamentsScreen() {
   if (loading) {
     return (
       <SafeAreaView style={commonStyles.container}>
-        <View style={styles.header}>
+        <View style={styles.headerContainer}>
           <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
             <Icon name="chevron-back" size={24} color={colors.text} />
           </TouchableOpacity>
@@ -323,7 +323,6 @@ export default function TournamentsScreen() {
             color: colors.background, // ← Контрастный цвет для активной вкладки (например, белый)
           }}
 
-          springEnabled={false}
         />
       </View>
 
