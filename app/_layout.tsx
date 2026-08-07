@@ -20,7 +20,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { getUpcomingGamesMasterData } from '../data/gameData';
 //import SplashScreen from '../components/SplashScreen';
-import { fetchStartupConfig, StartupConfig } from '../services/startupApi';
+import { loadStartupConfig, StartupConfig } from '../services/startupApi';
 import { fetchTournamentTable, getCachedTournamentConfig } from '../services/tournamentsApi';
 import { getGames, getPastGamesForTeam74 } from '../data/gameData';
 import Constants from 'expo-constants';
@@ -29,6 +29,10 @@ import { initAnalytics, trackEvent } from '../services/analyticsService';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Buffer } from 'buffer';
+import NetInfo from '@react-native-community/netinfo';
+import { dataAvailability } from '../services/dataAvailability';
+import { NetworkStatusProvider } from '../contexts/NetworkStatusContext';
+import OfflineBanner from '../components/OfflineBanner';
 global.Buffer = Buffer;
 
 // === КОНСТАНТЫ ===
@@ -160,7 +164,7 @@ const initializeTeams = async (onTeamLoaded: (loaded: number, total: number) => 
     return teams.length;
   } catch (error) {
     console.error('💥 Failed to initialize teams:', error);
-    return 0;
+    throw error;
   }
 };
 
@@ -324,7 +328,7 @@ const syncPushSubscriptionStatus = async () => {
 
 
 // --- ОСНОВНОЙ КОМПОНЕНТ ---
-export default function RootLayout() {
+function RootLayoutContent() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [initializationError, setInitializationError] = useState<string | null>(null);
   const [initializationMessage, setInitializationMessage] = useState('Запуск приложения...');
@@ -341,6 +345,8 @@ export default function RootLayout() {
   }, [progressAnimated]);
 
   const initializeApp = useCallback(async () => {
+    setInitializationError(null);
+    setIsInitializing(true);
 
     // Инициализация аналитики — делаем ДО загрузки конфига
     await initAnalytics();
@@ -357,12 +363,18 @@ export default function RootLayout() {
       setInitializationMessage('Получение конфигурации...');
       setProgress(5);
       console.log("Начали инициализацию приложения");
-      const config = await fetchStartupConfig();
+      const configResult = await loadStartupConfig();
+      const config = configResult.data;
+      const networkState = await NetInfo.fetch();
+      const canUseNetwork = networkState.isConnected !== false && networkState.isInternetReachable !== false;
+      if (configResult.source === 'cache') {
+        setDynamicStatus('Используется последняя сохранённая конфигурация');
+      }
       const currentAppVersion = Constants.expoConfig?.version || '1.0.0';
       const lastAppVersion = await AsyncStorage.getItem(APP_VERSION_KEY);
       const appWasUpdated = currentAppVersion !== lastAppVersion;
       const localTeamsVersion = parseInt(await AsyncStorage.getItem(TEAMS_VERSION_KEY) || '0');
-      const shouldUpdateTeams = config.teams_version > localTeamsVersion || appWasUpdated;
+      const shouldUpdateTeams = canUseNetwork && (config.teams_version > localTeamsVersion || appWasUpdated);
       
       console.log("Начали Восстановление справочников из AsyncStorage");
       // === 2. Восстановление справочников из AsyncStorage ===
@@ -379,19 +391,37 @@ export default function RootLayout() {
       let teamsCount = existingTeams?.length || 0;
 
       if (shouldUpdateTeams || !hasCachedTeams) {
-        setInitializationMessage('Обновление команд...');
-        setProgress(20);
-        teamsCount = await initializeTeams((loaded, total) => {
-          setDynamicStatus(`Загружено команд ${loaded} из ${total}`);
-        });
-        await forceReloadReferenceData();
-        await AsyncStorage.setItem(TEAMS_VERSION_KEY, String(config.teams_version));
-        await AsyncStorage.setItem(APP_VERSION_KEY, currentAppVersion);
+        if (!canUseNetwork && !hasCachedTeams) {
+          throw new Error('Нет сохранённых данных команд. Для первого запуска требуется интернет.');
+        }
+        try {
+          setInitializationMessage('Обновление команд...');
+          setProgress(20);
+          teamsCount = await initializeTeams((loaded, total) => {
+            setDynamicStatus(`Загружено команд ${loaded} из ${total}`);
+          });
+          await forceReloadReferenceData();
+          await AsyncStorage.setItem(TEAMS_VERSION_KEY, String(config.teams_version));
+          await AsyncStorage.setItem(APP_VERSION_KEY, currentAppVersion);
+        } catch (error) {
+          if (!hasCachedTeams) throw error;
+          dataAvailability.markCachedDataUsed('Не удалось обновить команды и справочники');
+          teamsCount = existingTeams?.length || 0;
+          await restoreReferenceDataFromStorage();
+        }
       } else {
         if (!referenceDataRestored) {
-          setInitializationMessage('Восстановление справочников...');
-          setProgress(25);
-          await forceReloadReferenceData();
+          if (canUseNetwork) {
+            setInitializationMessage('Восстановление справочников...');
+            setProgress(25);
+            try {
+              await forceReloadReferenceData();
+            } catch {
+              dataAvailability.markCachedDataUsed('Справочники не удалось обновить');
+            }
+          } else {
+            dataAvailability.markCachedDataUsed();
+          }
         }
         setDynamicStatus(`Загружено команд ${teamsCount}`);
         setProgress(30);
@@ -424,7 +454,7 @@ export default function RootLayout() {
 
       // === 5. Игроки ===
       const localPlayersVersion = parseInt(await AsyncStorage.getItem(PLAYERS_VERSION_KEY) || '0');
-      const shouldUpdatePlayers = config.players_version > localPlayersVersion;
+      const shouldUpdatePlayers = canUseNetwork && config.players_version > localPlayersVersion;
       console.log('🔍 Players version check:', {
         configVersion: config.players_version,
         localVersion: localPlayersVersion,
@@ -433,14 +463,24 @@ export default function RootLayout() {
       const playersDataLoaded = await playerDownloadService.isDataLoaded();
       let playersList: Player[] = [];
       if (shouldUpdatePlayers || !playersDataLoaded) {
+        if (!canUseNetwork && !playersDataLoaded) {
+          throw new Error('Нет сохранённых данных игроков. Для первого запуска требуется интернет.');
+        }
         console.log('🔄 Запуск ПРИНУДИТЕЛЬНОЙ перезагрузки игроков (версия обновлена)');
         setInitializationMessage('Загрузка данных игроков...');
         setProgress(55);
-        playersList = await playerDownloadService.refreshPlayersData(config.players_version, (stage, message) => {
-          setDynamicStatus(message || stage);
-        });
-        await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(config.players_version));
-        console.log('✅ Версия игроков сохранена:', config.players_version);
+        try {
+          playersList = await playerDownloadService.refreshPlayersData(config.players_version, (stage, message) => {
+            setDynamicStatus(message || stage);
+          });
+          await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(config.players_version));
+          console.log('✅ Версия игроков сохранена:', config.players_version);
+        } catch (error) {
+          playersList = await playerDownloadService.getPlayersFromStorage();
+          if (playersList.length === 0) throw error;
+          await playerDownloadService.setDataLoaded(true);
+          dataAvailability.markCachedDataUsed('Не удалось обновить данные игроков');
+        }
       } else {
         playersList = await playerDownloadService.getPlayersFromStorage();
         setDynamicStatus(`Загружено игроков ${playersList.length}`);
@@ -448,7 +488,7 @@ export default function RootLayout() {
       }
 
       // ✅ Проверяем фото ТОЛЬКО если игроки были загружены из кэша (не при полной перезагрузке)
-      if (playersList.length > 0 && !(shouldUpdatePlayers || !playersDataLoaded)) {
+      if (canUseNetwork && playersList.length > 0 && !(shouldUpdatePlayers || !playersDataLoaded)) {
         setInitializationMessage('Проверка фото игроков...');
         setProgress(70);
         setDynamicStatus('Анализ целостности фото...');
@@ -495,7 +535,7 @@ export default function RootLayout() {
 
     } catch (error) {
       console.error('💥 App initialization failed:', error);
-      setInitializationError('Ошибка инициализации приложения');
+      setInitializationError(error instanceof Error ? error.message : 'Ошибка инициализации приложения');
       setIsInitializing(false);
     }
   }, [setProgress]);
@@ -519,6 +559,7 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="dark" backgroundColor={colors.background} />
+      <OfflineBanner />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="players" />
@@ -531,5 +572,13 @@ export default function RootLayout() {
         <Stack.Screen name="mobilegames/[id]" />
       </Stack>
     </GestureHandlerRootView>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <NetworkStatusProvider>
+      <RootLayoutContent />
+    </NetworkStatusProvider>
   );
 }
