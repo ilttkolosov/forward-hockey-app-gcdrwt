@@ -99,6 +99,14 @@ async fetchEvents(params: {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     const result: ApiEventsResponse = await response.json();
+    // API may omit/null `data` when there are no events. A successful zero count
+    // is a valid empty result, not a transport or connectivity error.
+    if (result.count === 0 && !Array.isArray(result.data)) {
+      result.data = [];
+    }
+    if (!Array.isArray(result.data)) {
+      throw new Error('Invalid events response: data must be an array');
+    }
     console.log('API Service: Events response status:', result.status);
     console.log('API Service: Total events count:', result.count);
     return result;

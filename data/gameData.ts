@@ -600,7 +600,7 @@ export async function getGames(params: GetGamesParams): Promise<Game[]> {
         dataAvailability.markCachedDataUsed('Не удалось обновить матчи');
         return persistent.data;
       }
-      throw new Error('Не удалось загрузить матчи: проверьте подключение к интернету.', { cause: error });
+      throw new Error('Не удалось получить данные матчей с сервера.', { cause: error });
     } finally {
       // Удаляем промис из ongoingRequests
       ongoingRequests.delete(cacheKey);

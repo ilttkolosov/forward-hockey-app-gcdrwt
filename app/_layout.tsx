@@ -32,7 +32,6 @@ import { Buffer } from 'buffer';
 import NetInfo from '@react-native-community/netinfo';
 import { dataAvailability } from '../services/dataAvailability';
 import { NetworkStatusProvider } from '../contexts/NetworkStatusContext';
-import OfflineBanner from '../components/OfflineBanner';
 global.Buffer = Buffer;
 
 // === КОНСТАНТЫ ===
@@ -559,7 +558,6 @@ function RootLayoutContent() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="dark" backgroundColor={colors.background} />
-      <OfflineBanner />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="players" />

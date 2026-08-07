@@ -21,6 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDeclension } from './tournaments/index'; // ← импортируем склонение
 import { trackScreenView } from '../services/analyticsService'; //импорт аналитики
 import { useTrackScreenView } from '../hooks/useTrackScreenView';
+import { useNetworkStatus } from '../contexts/NetworkStatusContext';
 
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 
@@ -107,6 +108,7 @@ const warningStyles = StyleSheet.create({
 });
 
 export default function HomeScreen() {
+  const { isOffline } = useNetworkStatus();
   const [currentGames, setCurrentGames] = useState<Game[]>([]);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
   const [upcomingCount, setUpcomingCount] = useState<number>(0);
@@ -160,7 +162,7 @@ export default function HomeScreen() {
       setPlayersCount(players.length);
     } catch (err) {
       console.error('Error loading home screen data:', err);
-      setError(err instanceof Error ? err.message : 'Не удалось обновить данные. Показаны сохранённые значения.');
+      setError('Не удалось обновить данные с сервера.');
     } finally {
       if (!force) setLoading(false);
       setRefreshing(false);
@@ -180,6 +182,10 @@ export default function HomeScreen() {
     loadTournamentsCount();
   };
 
+  const warningMessage = isOffline
+    ? 'Нет подключения к интернету. Показаны последние сохранённые данные.'
+    : error;
+
   if (loading) {
     return (
       <SafeAreaView edges={['top']} style={commonStyles.container}>
@@ -196,9 +202,9 @@ export default function HomeScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >
-        {error && (
+        {warningMessage && (
           <View accessibilityRole="alert" style={warningStyles.container}>
-            <Text style={warningStyles.text}>{error}</Text>
+            <Text style={warningStyles.text}>{warningMessage}</Text>
             <TouchableOpacity onPress={() => loadData()}>
               <Text style={warningStyles.retry}>Повторить обновление</Text>
             </TouchableOpacity>
