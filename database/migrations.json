@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "migrations": [
     {
       "version": 1,
@@ -15,6 +15,11 @@
       "version": 3,
       "name": "tournament_table_cache",
       "sql": "CREATE TABLE IF NOT EXISTS tournament_configs (tournament_id TEXT PRIMARY KEY NOT NULL, league_id INTEGER, season_id INTEGER, version INTEGER NOT NULL DEFAULT 0, generated_at TEXT, updated_at TEXT NOT NULL, raw_json TEXT NOT NULL);\nCREATE INDEX IF NOT EXISTS idx_tournament_configs_version ON tournament_configs(version);\nINSERT OR IGNORE INTO sync_versions (entity, version, synced_at) VALUES ('tournaments', 0, NULL);"
+    },
+    {
+      "version": 4,
+      "name": "training_schedule",
+      "sql": "CREATE TABLE IF NOT EXISTS trainings (id TEXT PRIMARY KEY NOT NULL, uid TEXT NOT NULL UNIQUE, type TEXT NOT NULL CHECK(type IN ('ice', 'ofp')), title TEXT NOT NULL, start_at TEXT NOT NULL, end_at TEXT NOT NULL, timezone TEXT NOT NULL, location TEXT, note TEXT, team_id TEXT, team_name TEXT, updated_at TEXT, raw_json TEXT NOT NULL);\nCREATE INDEX IF NOT EXISTS idx_trainings_start_at ON trainings(start_at);\nCREATE INDEX IF NOT EXISTS idx_trainings_team_start ON trainings(team_id, start_at);\nINSERT OR IGNORE INTO metadata (key, value) VALUES ('trainings_last_sync_at', '');"
     }
   ]
 }

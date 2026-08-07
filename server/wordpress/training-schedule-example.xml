@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schedule schema_version="1"
+          timezone="Europe/Moscow"
+          team_id="forward-2014"
+          team_name="Динамо-Форвард 2014"
+          range_from="03.08"
+          range_to="09.08"
+          replace_range="true">
+  <event date="03.08" weekday="понедельник" type="ofp" start="14:15" end="15:15" />
+  <event date="03.08" weekday="понедельник" type="ice" start="16:00" end="17:30" />
+</schedule>

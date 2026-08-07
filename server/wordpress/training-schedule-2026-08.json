@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "timezone": "Europe/Moscow",
+  "team": {
+    "id": "forward-2014",
+    "name": "Динамо-Форвард 2014"
+  },
+  "range_from": "03.08",
+  "range_to": "09.08",
+  "replace_range": true,
+  "events": [
+    { "date": "03.08", "weekday": "понедельник", "type": "ofp", "start": "14:15", "end": "15:15" },
+    { "date": "03.08", "weekday": "понедельник", "type": "ice", "start": "16:00", "end": "17:30" },
+    { "date": "04.08", "weekday": "вторник", "type": "ofp", "start": "14:15", "end": "15:15" },
+    { "date": "04.08", "weekday": "вторник", "type": "ice", "start": "16:00", "end": "17:30" },
+    { "date": "05.08", "weekday": "среда", "type": "ofp", "start": "14:15", "end": "15:15" },
+    { "date": "05.08", "weekday": "среда", "type": "ice", "start": "16:00", "end": "17:30" },
+    { "date": "06.08", "weekday": "четверг", "type": "ofp", "start": "14:15", "end": "15:15" },
+    { "date": "06.08", "weekday": "четверг", "type": "ice", "start": "16:00", "end": "17:30" },
+    { "date": "07.08", "weekday": "пятница", "type": "ofp", "start": "14:15", "end": "15:15" },
+    { "date": "07.08", "weekday": "пятница", "type": "ice", "start": "16:00", "end": "17:30" },
+    { "date": "08.08", "weekday": "суббота", "type": "ice", "start": "14:45", "end": "16:15", "note": "Игровая тренировка" }
+  ]
+}

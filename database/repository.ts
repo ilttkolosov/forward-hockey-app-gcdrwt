@@ -1,6 +1,7 @@
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 import type { ApiTeam } from '../services/apiService';
 import type { ApiEvent, ApiLeague, ApiSeason, ApiVenue } from '../types/apiTypes';
+import type { Training } from '../types/training';
 import { DATABASE_NAME, migrateDatabase } from './index';
 
 export type ReferenceEntity = 'teams' | 'venues' | 'leagues' | 'seasons' | 'players' | 'tournaments';
@@ -361,4 +362,86 @@ export const getEventFromDatabase = async (id: string): Promise<ApiEvent | null>
   const db = await getDatabase();
   const row = await db.getFirstAsync<RawJsonRow>('SELECT raw_json FROM events WHERE id = ?', id);
   return row ? JSON.parse(row.raw_json) as ApiEvent : null;
+};
+
+export interface TrainingDatabaseQuery {
+  date_from?: string;
+  date_to?: string;
+  team?: string;
+}
+
+export const loadTrainingsFromDatabase = async (
+  query: TrainingDatabaseQuery = {}
+): Promise<Training[]> => {
+  const db = await getDatabase();
+  const conditions: string[] = [];
+  const values: string[] = [];
+  if (query.date_from) {
+    conditions.push('substr(start_at, 1, 10) >= ?');
+    values.push(query.date_from);
+  }
+  if (query.date_to) {
+    conditions.push('substr(start_at, 1, 10) <= ?');
+    values.push(query.date_to);
+  }
+  if (query.team) {
+    conditions.push('team_id = ?');
+    values.push(query.team);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const rows = await db.getAllAsync<RawJsonRow>(
+    `SELECT raw_json FROM trainings ${where} ORDER BY start_at ASC, type ASC`,
+    values
+  );
+  return parseRows<Training>(rows);
+};
+
+/**
+ * Полностью заменяет только успешно загруженное окно дат. Поэтому удалённое на
+ * сайте занятие исчезнет локально, а кэш за пределами окна останется нетронутым.
+ */
+export const replaceTrainingsInRange = async (
+  items: Training[],
+  dateFrom: string,
+  dateTo: string,
+  teamId: string
+): Promise<number> => {
+  const db = await getDatabase();
+  const synchronizedAt = nowIso();
+  await db.withExclusiveTransactionAsync(async tx => {
+    await tx.runAsync(
+      `DELETE FROM trainings
+       WHERE substr(start_at, 1, 10) BETWEEN ? AND ? AND team_id = ?`,
+      dateFrom,
+      dateTo,
+      teamId
+    );
+    for (const item of items) {
+      await tx.runAsync(
+        `INSERT INTO trainings
+          (id, uid, type, title, start_at, end_at, timezone, location, note,
+           team_id, team_name, updated_at, raw_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        String(item.id),
+        item.uid,
+        item.type,
+        item.title,
+        item.start_at,
+        item.end_at,
+        item.timezone || 'Europe/Moscow',
+        item.location || '',
+        item.note || '',
+        item.team?.id || '',
+        item.team?.name || '',
+        item.updated_at || synchronizedAt,
+        JSON.stringify(item)
+      );
+    }
+    await tx.runAsync(
+      `INSERT INTO metadata (key, value) VALUES ('trainings_last_sync_at', ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      synchronizedAt
+    );
+  });
+  return items.length;
 };

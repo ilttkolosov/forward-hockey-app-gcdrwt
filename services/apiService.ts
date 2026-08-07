@@ -22,6 +22,7 @@ import {
   ApiVenuesResponse 
 } from '../types/apiTypes';
 import { fetchWithTimeout } from './httpClient';
+import type { TrainingQuery, TrainingResponse } from '../types/training';
 
 // --- Старые интерфейсы для игроков (оставлены для совместимости) ---
 interface ApiPlayerListItem {
@@ -76,6 +77,27 @@ class ApiService {
   private teamListCache: ApiTeam[] | null = null;
 
   // --- НОВЫЕ МЕТОДЫ для новых эндпоинтов ---
+
+  /** Получает расписание тренировок. Пустой список является корректным ответом. */
+  async fetchTrainings(params: TrainingQuery): Promise<TrainingResponse> {
+    const url = new URL(`${this.baseUrl}/get-trainings`);
+    Object.entries(params).forEach(([key, value]) => {
+      if (value) url.searchParams.set(key, value);
+    });
+    console.log(`[Тренировки] Запрос расписания: ${url.toString()}`);
+
+    const response = await fetchWithTimeout(url.toString(), {}, 8_000);
+    if (!response.ok) {
+      throw new Error(`Сервер расписания вернул HTTP ${response.status}`);
+    }
+    const result = await response.json() as TrainingResponse;
+    if (result.status !== 'success' || !Array.isArray(result.data)) {
+      throw new Error('Сервер вернул некорректный формат расписания');
+    }
+    result.count = Number.isFinite(Number(result.count)) ? Number(result.count) : result.data.length;
+    console.log(`[Тренировки] Сервер вернул занятий: ${result.data.length}`);
+    return result;
+  }
 
   /**
  * Получает список игр с фильтрацией

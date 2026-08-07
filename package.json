@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "postinstall": "node scripts/seed-assets.mjs restore && node scripts/generate-player-photo-assets.mjs",
     "seed:generate": "node scripts/generate-seed-database.mjs && node scripts/seed-assets.mjs pack",
+    "seed:migrate": "node scripts/seed-assets.mjs restore && node scripts/migrate-seed-database.mjs && node scripts/seed-assets.mjs pack",
     "seed:restore": "node scripts/seed-assets.mjs restore",
     "seed:verify": "node scripts/seed-assets.mjs restore && node scripts/verify-seed-database.mjs",
     "photos:generate": "node scripts/generate-player-photo-assets.mjs",

@@ -18,10 +18,22 @@ function scalar(sql) {
   return result[0]?.values[0]?.[0];
 }
 
+const packagedUserVersion = Number(scalar('PRAGMA user_version'));
+if (packagedUserVersion > migrationConfig.schemaVersion) {
+  throw new Error(
+    `Seed user_version=${packagedUserVersion} новее схемы приложения ${migrationConfig.schemaVersion}`
+  );
+}
+for (const migration of migrationConfig.migrations) {
+  if (migration.version <= packagedUserVersion) continue;
+  db.run(migration.sql);
+  db.run(`PRAGMA user_version = ${migration.version}`);
+}
+
 const integrity = scalar('PRAGMA integrity_check');
 const userVersion = scalar('PRAGMA user_version');
 const counts = Object.fromEntries(
-  ['teams', 'venues', 'players', 'leagues', 'seasons', 'events', 'tournament_configs'].map(table => [
+  ['teams', 'venues', 'players', 'leagues', 'seasons', 'events', 'tournament_configs', 'trainings'].map(table => [
     table,
     Number(scalar(`SELECT COUNT(*) FROM ${table}`)),
   ])
@@ -47,4 +59,9 @@ if (
 }
 if (missingEventIds !== 0) throw new Error(`Нарушены связи event_teams: ${missingEventIds}`);
 
-console.log('[Seed] Проверка успешна:', { integrity, userVersion, counts });
+console.log('[Seed] Проверка успешна:', {
+  integrity,
+  packagedUserVersion,
+  migratedUserVersion: userVersion,
+  counts,
+});

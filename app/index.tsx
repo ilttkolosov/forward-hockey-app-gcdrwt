@@ -46,6 +46,9 @@ const quickNavStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  wideItem: {
+    width: '100%',
+  },
   icon: {
     marginBottom: 8,
   },
@@ -279,6 +282,15 @@ export default function HomeScreen() {
               <Text style={quickNavStyles.subtitle}>
                 {playersCount > 0 ? `${playersCount} игроков` : 'Состав команды'}
               </Text>
+            </TouchableOpacity>
+          </Link>
+
+          {/* Расписание тренировок */}
+          <Link href="/trainings" asChild>
+            <TouchableOpacity style={[quickNavStyles.item, quickNavStyles.wideItem]}>
+              <Icon name="calendar" size={24} color={colors.primary} style={quickNavStyles.icon} />
+              <Text style={quickNavStyles.title}>Тренировки</Text>
+              <Text style={quickNavStyles.subtitle}>Расписание льда и ОФП</Text>
             </TouchableOpacity>
           </Link>
         </View>

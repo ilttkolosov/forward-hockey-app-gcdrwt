@@ -1,6 +1,6 @@
 // _layout.tsx
 import React, { useCallback, useEffect, useState, useRef } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import {
@@ -28,9 +28,8 @@ import {
 } from '../services/tournamentsApi';
 import { getGames } from '../data/gameData';
 import type { Player } from '../types';
-import { initAnalytics, trackEvent } from '../services/analyticsService';
+import { initAnalytics } from '../services/analyticsService';
 import * as Notifications from 'expo-notifications';
-import * as Device from 'expo-device';
 import { Buffer } from 'buffer';
 import NetInfo from '@react-native-community/netinfo';
 import { dataAvailability } from '../services/dataAvailability';
@@ -44,7 +43,17 @@ import {
 } from '../services/referenceDataService';
 import { syncCompletedHistoricalGames } from '../services/historicalSync';
 import { showAppUpdateNotice } from '../services/appUpdateService';
+import { synchronizeTrainings } from '../services/trainingService';
 global.Buffer = Buffer;
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 // === КОНСТАНТЫ ===
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
@@ -253,11 +262,26 @@ const syncPushSubscriptionStatus = async () => {
 
 // --- ОСНОВНОЙ КОМПОНЕНТ ---
 function RootLayoutContent() {
+  const router = useRouter();
+  const lastNotificationResponse = Notifications.useLastNotificationResponse();
+  const handledNotificationId = useRef<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [initializationError, setInitializationError] = useState<string | null>(null);
   const [initializationMessage, setInitializationMessage] = useState('Запуск приложения...');
   const [dynamicStatus, setDynamicStatus] = useState<string>('Подготовка данных...');
   const progressAnimated = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const response = lastNotificationResponse;
+    const identifier = response?.notification.request.identifier;
+    if (isInitializing || !identifier || handledNotificationId.current === identifier) return;
+    handledNotificationId.current = identifier;
+    const route = response.notification.request.content.data?.route;
+    if (route === '/trainings') {
+      initializationLog('Открытие расписания по нажатию на уведомление о тренировке');
+      router.push('/trainings');
+    }
+  }, [isInitializing, lastNotificationResponse, router]);
 
   const setProgress = useCallback((value: number) => {
     Animated.timing(progressAnimated, {
@@ -457,6 +481,20 @@ function RootLayoutContent() {
       setDynamicStatus(`Загружено игроков ${playersList.length}`);
       setProgress(70);
 
+      const trainingsStartedAt = Date.now();
+      initializationLog('Фоновая синхронизация расписания тренировок запущена');
+      void synchronizeTrainings(canUseNetwork)
+        .then(result => {
+          initializationLog(
+            `Расписание тренировок подготовлено за ${elapsedMilliseconds(trainingsStartedAt)} мс: `
+            + `занятий=${result.trainings.length}, источник=`
+            + `${result.source === 'network' ? 'сеть' : 'SQLite'}`
+          );
+        })
+        .catch(error => {
+          console.warn('[Инициализация] Не удалось подготовить расписание тренировок:', error);
+        });
+
       if (canUseNetwork) {
         const historyStartedAt = Date.now();
         initializationLog('Фоновая синхронизация завершённых матчей запущена');
@@ -548,6 +586,7 @@ function RootLayoutContent() {
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="players" />
+        <Stack.Screen name="trainings" />
         <Stack.Screen name="player/[id]" />
         <Stack.Screen name="upcoming" />
         <Stack.Screen name="game/[id]" />
