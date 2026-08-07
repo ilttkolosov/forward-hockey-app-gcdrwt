@@ -27,6 +27,12 @@ jobs:
       - name: Typecheck and lint
         run: npm run check
 
+      - name: Bundle Android JavaScript
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: npx expo export --platform android --output-dir /tmp/forward-hockey-export
+
       - name: Validate Expo config
         env:
           CI: '1'
