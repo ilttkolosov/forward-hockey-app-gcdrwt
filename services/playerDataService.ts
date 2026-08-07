@@ -13,6 +13,7 @@ import {
 } from 'expo-file-system/legacy';
 import { Player } from '../types';
 import { unzip } from 'fflate';
+import { fetchWithTimeout } from './httpClient';
 
 const PLAYERS_DATA_LOADED_KEY = 'playersDataLoaded';
 const PLAYERS_STORAGE_KEY = 'localPlayersData';
@@ -91,7 +92,7 @@ export class PlayerDownloadSystem {
     ];
     const checkExists = async (url: string): Promise<boolean> => {
       try {
-        const res = await fetch(url, { method: 'HEAD' });
+        const res = await fetchWithTimeout(url, { method: 'HEAD' }, 5_000);
         return res.ok;
       } catch {
         return false;
@@ -253,7 +254,7 @@ export class PlayerDownloadSystem {
   }
 
   async fetchAllPlayersFull(): Promise<PlayerFullApiResponse[]> {
-    const response = await fetch(`${this.baseUrl}/get-players-full`);
+    const response = await fetchWithTimeout(`${this.baseUrl}/get-players-full`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const result = await response.json();
     if (result.status !== 'success' || !Array.isArray(result.data)) {
@@ -275,8 +276,7 @@ export class PlayerDownloadSystem {
     version: number,
     onProgress?: (stage: string, message?: string) => void
   ): Promise<Player[]> {
-    await this.setDataLoaded(false);
-    await this.setPhotosDownloadedFlag(false);
+    // Не сбрасываем успешный локальный набор до завершения обновления.
     return await this.loadAllPlayersDataWithBatch(version, onProgress);
   }
 
