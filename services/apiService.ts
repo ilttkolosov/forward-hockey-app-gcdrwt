@@ -57,6 +57,12 @@ interface ApiPlayerPhotoResponse {
   photo_url: string;
 }
 
+interface ApiErrorResponse {
+  code?: unknown;
+  message?: unknown;
+  data?: { status?: unknown };
+}
+
 //export const BASE_URL = "https://www.hc-forward.com/wp-json/app/v1";
 
 class ApiService {
@@ -96,6 +102,16 @@ async fetchEvents(params: {
   try {
     const response = await fetchWithTimeout(url.toString());
     if (!response.ok) {
+      // WordPress API currently returns 404/no_results for a valid list query
+      // whose result is empty. Keep compatibility until the server contract is
+      // changed to HTTP 200 with data: [] and count: 0.
+      if (response.status === 404) {
+        const payload = await response.json().catch(() => null) as ApiErrorResponse | null;
+        if (payload?.code === 'no_results') {
+          console.log('API Service: No events found; returning an empty list');
+          return { status: 'success', data: [], count: 0 };
+        }
+      }
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     const result: ApiEventsResponse = await response.json();

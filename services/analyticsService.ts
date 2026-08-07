@@ -1,6 +1,6 @@
 // services/analyticsService.ts
 import * as Device from 'expo-device';
-import Constants from 'expo-constants';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Ленивая загрузка AppMetrica — только в нативных сборках (не в Expo Go)
@@ -8,8 +8,11 @@ let AppMetrica: any = undefined;
 let isInitialized = false;
 let deviceId: string | null = null;
 
-// Попытка импорта только если мы НЕ в Expo Go
-if (!__DEV__ || Device.isDevice) {
+const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+
+// Физическое устройство может быть как Expo Go, так и development/release build.
+// Поэтому проверяем среду запуска, а не Device.isDevice.
+if (!isExpoGo) {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     AppMetrica = require('@appmetrica/react-native-analytics').default;
