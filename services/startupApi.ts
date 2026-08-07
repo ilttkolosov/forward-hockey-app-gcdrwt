@@ -35,7 +35,6 @@ export interface StartupConfig {
     historical_start_date?: string;
     historical_delay_days?: number;
     event_chunk_days?: number;
-    player_photo_archive_url_template?: string;
   };
   features?: Record<string, boolean>;
   maintenance?: { enabled?: boolean; message?: string; retry_after_seconds?: number };

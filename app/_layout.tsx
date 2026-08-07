@@ -271,7 +271,6 @@ function RootLayoutContent() {
         playersList = await playerDownloadService.initializeFromDatabase(
           config.players_version,
           canUseNetwork,
-          config.sync?.player_photo_archive_url_template,
           (stage, message) => setDynamicStatus(message || stage)
         );
         await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(config.players_version));
