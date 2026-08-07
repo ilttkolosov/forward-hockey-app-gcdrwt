@@ -281,7 +281,7 @@ export default function TournamentDetailScreen() {
       if (!force) {
         table = await getCachedTournamentTable(id);
       }
-      if (!table || force) {
+      if (table === null || force) {
         console.log(`[TournamentDetail] Кэш пуст или force=true → запрашиваем API для турнира ${id}`);
         table = await fetchTournamentTable(id);
       }

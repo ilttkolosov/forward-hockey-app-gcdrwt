@@ -3,7 +3,7 @@ import type { ApiTeam } from '../services/apiService';
 import type { ApiEvent, ApiLeague, ApiSeason, ApiVenue } from '../types/apiTypes';
 import { DATABASE_NAME, migrateDatabase } from './index';
 
-export type ReferenceEntity = 'teams' | 'venues' | 'leagues' | 'seasons' | 'players';
+export type ReferenceEntity = 'teams' | 'venues' | 'leagues' | 'seasons' | 'players' | 'tournaments';
 
 export interface LocalEventQuery {
   date_from?: string;
@@ -23,6 +23,15 @@ interface ValueRow {
 }
 
 interface VersionRow {
+  version: number;
+}
+
+interface TournamentConfigRow extends RawJsonRow {
+  version: number;
+}
+
+export interface StoredTournamentConfig<TConfig> {
+  config: TConfig;
   version: number;
 }
 
@@ -75,6 +84,62 @@ const setReferenceVersion = async (
     version,
     nowIso()
   );
+};
+
+export const loadTournamentConfigFromDatabase = async <TConfig>(
+  tournamentId: string
+): Promise<StoredTournamentConfig<TConfig> | null> => {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<TournamentConfigRow>(
+    'SELECT raw_json, version FROM tournament_configs WHERE tournament_id = ?',
+    tournamentId
+  );
+  if (!row) return null;
+  try {
+    return {
+      config: JSON.parse(row.raw_json) as TConfig,
+      version: Number(row.version || 0),
+    };
+  } catch (error) {
+    console.warn(`[Database] Повреждена конфигурация турнира ${tournamentId}:`, error);
+    return null;
+  }
+};
+
+export const saveTournamentConfigToDatabase = async <TConfig extends {
+  league_id?: number;
+  season_id?: number;
+  generated_at?: string;
+}>(
+  tournamentId: string,
+  config: TConfig,
+  version: number
+): Promise<void> => {
+  const db = await getDatabase();
+  await db.runAsync(
+    `INSERT INTO tournament_configs
+      (tournament_id, league_id, season_id, version, generated_at, updated_at, raw_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(tournament_id) DO UPDATE SET
+       league_id=excluded.league_id,
+       season_id=excluded.season_id,
+       version=excluded.version,
+       generated_at=excluded.generated_at,
+       updated_at=excluded.updated_at,
+       raw_json=excluded.raw_json`,
+    tournamentId,
+    config.league_id ?? null,
+    config.season_id ?? null,
+    Math.max(0, Math.trunc(version)),
+    config.generated_at || null,
+    nowIso(),
+    JSON.stringify(config)
+  );
+};
+
+export const markTournamentConfigsSynchronized = async (version: number): Promise<void> => {
+  const db = await getDatabase();
+  await setReferenceVersion(db, 'tournaments', Math.max(0, Math.trunc(version)));
 };
 
 export const loadTeamsFromDatabase = async (): Promise<ApiTeam[]> => {

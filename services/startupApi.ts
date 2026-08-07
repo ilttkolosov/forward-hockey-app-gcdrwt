@@ -30,7 +30,11 @@ export interface StartupConfig {
     google_play_url?: string;
     android_download_url?: string;
   };
-  api?: { base_url?: string; request_timeout_seconds?: number };
+  api?: {
+    base_url?: string;
+    request_timeout_seconds?: number;
+    tournament_table_cache_ttl_seconds?: number;
+  };
   sync?: {
     historical_start_date?: string;
     historical_delay_days?: number;

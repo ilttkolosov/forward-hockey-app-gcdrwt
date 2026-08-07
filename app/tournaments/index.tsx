@@ -120,7 +120,7 @@ export default function TournamentsScreen() {
         currentData = await Promise.all(
           currentTournaments.map(async (t: any) => {
             const data = await getCachedTournamentTable(t.tournament_ID);
-            const tableWithLogos = await addLogosToTable(data);
+            const tableWithLogos = await addLogosToTable(data ?? []);
             return {
               name: t.tournament_Name,
               id: String(t.tournament_ID),
@@ -163,7 +163,7 @@ export default function TournamentsScreen() {
         pastData = await Promise.all(
           pastTournaments.map(async (t: any) => {
             const data = await getCachedTournamentTable(t.tournament_ID);
-            const tableWithLogos = await addLogosToTable(data);
+            const tableWithLogos = await addLogosToTable(data ?? []);
             return {
               name: t.tournament_Name,
               id: String(t.tournament_ID),

@@ -18,7 +18,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getUpcomingGamesMasterData } from '../data/gameData';
 //import SplashScreen from '../components/SplashScreen';
 import { loadStartupConfig, StartupConfig } from '../services/startupApi';
-import { fetchTournamentTable, getCachedTournamentConfig } from '../services/tournamentsApi';
+import {
+  getCachedTournamentConfig,
+  getConfiguredTournamentVersion,
+  synchronizeTournamentConfigs,
+} from '../services/tournamentsApi';
 import { getGames } from '../data/gameData';
 import type { Player } from '../types';
 import { initAnalytics, trackEvent } from '../services/analyticsService';
@@ -65,28 +69,34 @@ const describeReferenceState = (state: ReferenceDataLocalState): string => (
 );
 
 // --- ФОНОВЫЕ ФУНКЦИИ ---
-const initializeTournamentsInBackground = async (config: StartupConfig) => {
+const initializeTournamentsInBackground = async (
+  config: StartupConfig,
+  canUseNetwork: boolean
+) => {
   const startedAt = Date.now();
   const allTournaments = [...(config.tournamentsNow || []), ...(config.tournamentsPast || [])];
-  initializationLog(`Фоновая подготовка ${allTournaments.length} турниров запущена`);
+  const targetVersion = getConfiguredTournamentVersion(config);
+  initializationLog(
+    `Проверка ${allTournaments.length} турнирных таблиц запущена; целевая версия=${targetVersion}`
+  );
   try {
     await AsyncStorage.setItem(TOURNAMENTS_NOW_KEY, JSON.stringify(config.tournamentsNow || []));
     await AsyncStorage.setItem(TOURNAMENTS_PAST_KEY, JSON.stringify(config.tournamentsPast || []));
-    if (allTournaments.length > 0) {
-      await Promise.all(
-        allTournaments.map(async (t) => {
-          await fetchTournamentTable(t.tournament_ID);
-        })
-      );
-    }
     const currentTournament = config.tournamentsNow?.[0];
     if (currentTournament) {
       await AsyncStorage.setItem(CURRENT_TOURNAMENT_ID_KEY, currentTournament.tournament_ID);
     } else {
       await AsyncStorage.removeItem(CURRENT_TOURNAMENT_ID_KEY);
     }
+
+    const result = await synchronizeTournamentConfigs(
+      allTournaments.map(tournament => tournament.tournament_ID),
+      targetVersion,
+      canUseNetwork
+    );
     initializationLog(
-      `Фоновая подготовка турниров завершена за ${elapsedMilliseconds(startedAt)} мс`
+      `Турнирные таблицы проверены за ${elapsedMilliseconds(startedAt)} мс: `
+      + `запрошено=${result.requested}, обновлено=${result.updated}, ошибок=${result.failed.length}`
     );
   } catch (e) {
     console.error('[Инициализация] Ошибка фоновой подготовки турниров:', e);
@@ -420,8 +430,8 @@ function RootLayoutContent() {
       setDynamicStatus(`Запуск фоновых задач`);
       setInitializationMessage('Финальная настройка...');
       setProgress(80);
-      void initializeTournamentsInBackground(config);
-      void preloadCurrentTournamentGames(config);
+      const tournamentsPreparation = initializeTournamentsInBackground(config, canUseNetwork);
+      void tournamentsPreparation.finally(() => preloadCurrentTournamentGames(config));
 
       // === Ожидаем завершения загрузки предстоящих игр, если ещё не готово ===
       if (!upcomingGamesFinished && upcomingGamesPromise) {

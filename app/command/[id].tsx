@@ -238,7 +238,7 @@ export default function TeamDetailScreen() {
     try {
       // 1. Загружаем турнирную таблицу (для статистики)
       let table = await getCachedTournamentTable(tournamentId);
-      if (!table || table.length === 0) {
+      if (table === null) {
         table = await fetchTournamentTable(tournamentId);
       }
 

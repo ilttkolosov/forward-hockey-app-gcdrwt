@@ -1,0 +1,23 @@
+--- a/admin-startup-config.php
++++ b/admin-startup-config.php
+@@
+         'api' => [
+             'base_url' => home_url('/wp-json/app/v1'),
+             'request_timeout_seconds' => 10,
++            'tournament_table_cache_ttl_seconds' => 300,
+@@
+         'api' => [
+             'base_url' => esc_url_raw(wp_unslash($_POST['api_base_url'] ?? home_url('/wp-json/app/v1'))),
+             'request_timeout_seconds' => min(60, max(3, (int)($_POST['request_timeout_seconds'] ?? 10))),
++            'tournament_table_cache_ttl_seconds' => min(86400, max(30, (int)($_POST['tournament_table_cache_ttl_seconds'] ?? 300))),
+@@
+-                    <th scope="row">Версия списка турниров</th>
+-                    <td><input type="number" name="tournaments_version" value="<?php echo esc_attr($config['tournaments_version']); ?>" min="1" style="width:100px;"></td>
++                    <th scope="row">Версия турниров и таблиц</th>
++                    <td>
++                        <input type="number" name="tournaments_version" value="<?php echo esc_attr($config['tournaments_version']); ?>" min="1" style="width:100px;">
++                        <p class="description">Меняется автоматически при сохранении матча или таблицы SportPress; вручную увеличьте при структурных изменениях.</p>
++                    </td>
+@@
+                 <tr><th scope="row">Таймаут запроса, секунд</th><td><input type="number" name="request_timeout_seconds" value="<?php echo esc_attr($config['api']['request_timeout_seconds']); ?>" min="3" max="60"></td></tr>
++                <tr><th scope="row">TTL турнирных таблиц, секунд</th><td><input type="number" name="tournament_table_cache_ttl_seconds" value="<?php echo esc_attr($config['api']['tournament_table_cache_ttl_seconds']); ?>" min="30" max="86400"><p class="description">Через этот интервал следующий запрос пересчитает таблицу через SportPress. Рекомендуется 300 секунд.</p></td></tr>

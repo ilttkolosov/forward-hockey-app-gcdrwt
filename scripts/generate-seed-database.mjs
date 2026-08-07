@@ -106,6 +106,38 @@ async function loadStartupConfig() {
   return payload.data;
 }
 
+async function loadTournamentConfigs(startupConfig) {
+  const tournaments = [
+    ...(startupConfig.tournamentsNow || []),
+    ...(startupConfig.tournamentsPast || []),
+  ];
+  const ids = [...new Set(tournaments.map(item => String(item.tournament_ID)).filter(Boolean))];
+  const version = Number(
+    startupConfig.data_versions?.tournaments ?? startupConfig.tournaments_version ?? 0
+  );
+  const result = [];
+
+  for (let index = 0; index < ids.length; index += 2) {
+    const batch = ids.slice(index, index + 2);
+    const responses = await Promise.all(batch.map(async id => {
+      console.log(`[Seed] Турнирная таблица ${id}`);
+      const payload = await fetchApi(`get-table/${id}`, { version });
+      return {
+        tournamentId: id,
+        config: {
+          league_id: Number(payload.league_id || 0),
+          season_id: Number(payload.season_id || 0),
+          tables: payload.data,
+          version: Number(payload.version ?? version),
+          generated_at: payload.generated_at || new Date().toISOString(),
+        },
+      };
+    }));
+    result.push(...responses);
+  }
+  return result;
+}
+
 function insertRows(db, sql, rows) {
   const statement = db.prepare(sql);
   try {
@@ -134,7 +166,10 @@ async function main() {
       fetchApi('get-season'),
       loadStartupConfig(),
     ]);
-  const events = await loadEvents(options.from, options.to, options.chunkMonths);
+  const [events, tournamentConfigs] = await Promise.all([
+    loadEvents(options.from, options.to, options.chunkMonths),
+    loadTournamentConfigs(startupConfig),
+  ]);
   const generatedAt = new Date().toISOString();
 
   const SQL = await initSqlJs({
@@ -162,7 +197,24 @@ async function main() {
       ['leagues', Number(dataVersions.leagues ?? startupConfig.leagues_version ?? startupConfig.teams_version ?? 0), generatedAt],
       ['seasons', Number(dataVersions.seasons ?? startupConfig.seasons_version ?? startupConfig.teams_version ?? 0), generatedAt],
       ['players', Number(dataVersions.players ?? startupConfig.players_version ?? 0), generatedAt],
+      ['tournaments', Number(dataVersions.tournaments ?? startupConfig.tournaments_version ?? 0), generatedAt],
     ]);
+
+    insertRows(
+      db,
+      `INSERT INTO tournament_configs
+        (tournament_id, league_id, season_id, version, generated_at, updated_at, raw_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      tournamentConfigs.map(({ tournamentId, config }) => [
+        tournamentId,
+        config.league_id,
+        config.season_id,
+        config.version,
+        config.generated_at,
+        generatedAt,
+        JSON.stringify(config),
+      ])
+    );
 
     insertRows(
       db,
@@ -303,6 +355,7 @@ async function main() {
     leagues: leaguesResponse.data.length,
     seasons: seasonsResponse.data.length,
     events: events.length,
+    tournamentConfigs: tournamentConfigs.length,
   });
 }
 

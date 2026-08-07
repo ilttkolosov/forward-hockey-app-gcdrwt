@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "migrations": [
     {
       "version": 1,
@@ -10,6 +10,11 @@
       "version": 2,
       "name": "local_repository_sync_state",
       "sql": "INSERT OR IGNORE INTO metadata (key, value) VALUES ('historical_events_through', '2026-07-31');\nINSERT OR IGNORE INTO sync_versions (entity, version, synced_at) VALUES ('teams', 0, NULL);\nINSERT OR IGNORE INTO sync_versions (entity, version, synced_at) VALUES ('venues', 0, NULL);\nINSERT OR IGNORE INTO sync_versions (entity, version, synced_at) VALUES ('leagues', 0, NULL);\nINSERT OR IGNORE INTO sync_versions (entity, version, synced_at) VALUES ('seasons', 0, NULL);\nINSERT OR IGNORE INTO sync_versions (entity, version, synced_at) VALUES ('players', 0, NULL);"
+    },
+    {
+      "version": 3,
+      "name": "tournament_table_cache",
+      "sql": "CREATE TABLE IF NOT EXISTS tournament_configs (tournament_id TEXT PRIMARY KEY NOT NULL, league_id INTEGER, season_id INTEGER, version INTEGER NOT NULL DEFAULT 0, generated_at TEXT, updated_at TEXT NOT NULL, raw_json TEXT NOT NULL);\nCREATE INDEX IF NOT EXISTS idx_tournament_configs_version ON tournament_configs(version);\nINSERT OR IGNORE INTO sync_versions (entity, version, synced_at) VALUES ('tournaments', 0, NULL);"
     }
   ]
 }

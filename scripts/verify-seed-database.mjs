@@ -21,7 +21,7 @@ function scalar(sql) {
 const integrity = scalar('PRAGMA integrity_check');
 const userVersion = scalar('PRAGMA user_version');
 const counts = Object.fromEntries(
-  ['teams', 'venues', 'players', 'leagues', 'seasons', 'events'].map(table => [
+  ['teams', 'venues', 'players', 'leagues', 'seasons', 'events', 'tournament_configs'].map(table => [
     table,
     Number(scalar(`SELECT COUNT(*) FROM ${table}`)),
   ])
@@ -36,7 +36,13 @@ if (integrity !== 'ok') throw new Error(`SQLite integrity_check: ${integrity}`);
 if (Number(userVersion) !== migrationConfig.schemaVersion) {
   throw new Error(`user_version=${userVersion}, ожидалось ${migrationConfig.schemaVersion}`);
 }
-if (counts.teams === 0 || counts.venues === 0 || counts.players === 0 || counts.events === 0) {
+if (
+  counts.teams === 0
+  || counts.venues === 0
+  || counts.players === 0
+  || counts.events === 0
+  || counts.tournament_configs === 0
+) {
   throw new Error(`Seed содержит пустые обязательные таблицы: ${JSON.stringify(counts)}`);
 }
 if (missingEventIds !== 0) throw new Error(`Нарушены связи event_teams: ${missingEventIds}`);
