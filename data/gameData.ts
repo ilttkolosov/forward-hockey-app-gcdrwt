@@ -33,8 +33,11 @@ const GAME_DETAIL_STORAGE_PREFIX = '@offline/game-detail/v1/';
 // --- КЭШ ДЛЯ МАСТЕР-ДАННЫХ ПРЕДСТОЯЩИХ ИГР ---
 let upcomingGamesMasterCache: { data: Game[]; timestamp: number } | null = null;
 const UPCOMING_MASTER_CACHE_DURATION = 5 * 60 * 1000; // 5 минут
+const UPCOMING_MASTER_STORAGE_KEY = '@offline/upcoming-master/v1';
 let isMasterDataLoading = false; // <-- Флаг загрузки
 let masterDataLoadPromise: Promise<Game[]> | null = null; // <-- Promise для ожидания текущей загрузки
+type UpcomingGamesListener = (games: Game[]) => void;
+const upcomingGamesListeners = new Set<UpcomingGamesListener>();
 // --- КОНЕЦ КЭША ---
 
 // --- КОНСТАНТЫ ---
@@ -425,6 +428,8 @@ const sortUpcomingGames = (games: Game[]): Game[] => {
  */
 // Глобальный Map для дедупликации запросов
 const ongoingRequests = new Map<string, Promise<Game[]>>();
+type GamesRequestSource = 'memory' | 'fresh' | 'persistent-fallback';
+const gamesRequestSources = new Map<string, GamesRequestSource>();
 
 interface GetGamesParams {
   date_from?: string;
@@ -515,6 +520,7 @@ export async function getGames(params: GetGamesParams): Promise<Game[]> {
     const cachedEntry = gamesCache[cacheKey];
     if (cachedEntry && now - cachedEntry.timestamp < GAMES_CACHE_DURATION) {
       console.log('✅ Returning games from memory cache for key:', cacheKey);
+      gamesRequestSources.set(cacheKey, 'memory');
       return cachedEntry.data;
     }
   }
@@ -528,12 +534,15 @@ export async function getGames(params: GetGamesParams): Promise<Game[]> {
   // 3. Создаём новый запрос
   const requestPromise = (async (): Promise<Game[]> => {
     try {
-      return await fetchAndCacheGames(params, cacheKey);
+      const games = await fetchAndCacheGames(params, cacheKey);
+      gamesRequestSources.set(cacheKey, 'fresh');
+      return games;
     } catch (error) {
       console.error('❌ Error in getGames:', error);
       const persistent = await readPersistentCache<Game[]>(getPersistentGamesKey(cacheKey));
       if (persistent) {
         gamesCache[cacheKey] = { data: persistent.data, timestamp: persistent.savedAt };
+        gamesRequestSources.set(cacheKey, 'persistent-fallback');
         dataAvailability.markCachedDataUsed('Не удалось обновить матчи');
         return persistent.data;
       }
@@ -712,18 +721,83 @@ function isCacheValid<T>(cache: CachedData<T> | null): boolean {
 //const UPCOMING_MASTER_CACHE_DURATION = 5 * 60 * 1000; // 5 минут
 //let isMasterDataLoading = false; // <-- Эта переменная должна существовать
 //let masterDataLoadPromise: Promise<Game[]> | null = null; // <-- И эта тоже
+const buildUpcomingGamesParams = (): GetGamesParams => {
+  const nowDate = new Date();
+  const futureDate = new Date(nowDate);
+  futureDate.setDate(futureDate.getDate() + 137);
+  return {
+    date_from: nowDate.toISOString().split('T')[0],
+    date_to: futureDate.toISOString().split('T')[0],
+    teams: '74',
+    useCache: true,
+  };
+};
+
+const notifyUpcomingGamesListeners = (games: Game[]) => {
+  upcomingGamesListeners.forEach(listener => {
+    try {
+      listener(games);
+    } catch (error) {
+      console.warn('[Предстоящие игры] Ошибка обработчика обновлённого снимка:', error);
+    }
+  });
+};
+
+/**
+ * Сообщает открытым экранам о завершении фонового обновления. Это позволяет
+ * показать свежий ответ API после быстрого старта из кэша без повторного запуска.
+ */
+export function subscribeUpcomingGamesUpdates(listener: UpcomingGamesListener): () => void {
+  upcomingGamesListeners.add(listener);
+  return () => {
+    upcomingGamesListeners.delete(listener);
+  };
+}
+
+/**
+ * Восстанавливает последний успешный список до запуска сетевого обновления.
+ * При отсутствии сохранённого списка создаёт допустимый пустой снимок, чтобы
+ * медленная сеть не удерживала splash-screen и главный экран.
+ */
+export async function restoreUpcomingGamesMasterData(): Promise<Game[]> {
+  if (upcomingGamesMasterCache) return upcomingGamesMasterCache.data;
+
+  const params = buildUpcomingGamesParams();
+  const { useCache: _useCache, ...cacheParams } = params;
+  const cacheKey = JSON.stringify(cacheParams);
+  const persistent = await readPersistentCache<Game[]>(UPCOMING_MASTER_STORAGE_KEY)
+    || await readPersistentCache<Game[]>(getPersistentGamesKey(cacheKey));
+
+  if (persistent) {
+    const data = sortUpcomingGames(persistent.data);
+    upcomingGamesMasterCache = { data, timestamp: persistent.savedAt };
+    gamesCache[cacheKey] = { data, timestamp: persistent.savedAt };
+    console.log(
+      `[Предстоящие игры] Восстановлен локальный снимок: ${data.length}, `
+      + `возраст=${Math.max(0, Math.round((Date.now() - persistent.savedAt) / 1000))} сек.`
+    );
+    return data;
+  }
+
+  upcomingGamesMasterCache = { data: [], timestamp: 0 };
+  console.log('[Предстоящие игры] Локальный снимок отсутствует; используется пустой список до ответа сети');
+  return [];
+}
+
 /**
 * Мастер-функция для получения всех предстоящих игр команды 74.
-* Делает единственный запрос к API и возвращает сырые данные.
-* --- ОБНОВЛЕНО: Использует getGames с фильтром по дате ---
-* Диапазон: с сегодня на 37 дней вперёд.
+* Делает единственный запрос к API. Диапазон: с сегодня на 137 дней вперёд.
 */
 export async function getUpcomingGamesMasterData(forceRefresh = false): Promise<Game[]> {
-  const now = Date.now();
+  // Обычные потребители не ждут уже запущенное фоновое обновление: им сразу
+  // возвращается последний локальный снимок. Принудительный запрос ожидает сеть.
+  if (!forceRefresh && upcomingGamesMasterCache && isMasterDataLoading) {
+    console.log('✅ Возвращён локальный снимок предстоящих игр во время фонового обновления');
+    return upcomingGamesMasterCache.data;
+  }
 
-  // ✅ ВСЕГДА проверяем, не идёт ли уже загрузка (даже при forceRefresh)
   if (isMasterDataLoading && masterDataLoadPromise) {
-    console.log('⏳ Master data loading is already in progress, waiting... (even with forceRefresh)');
+    console.log('[Предстоящие игры] Сетевое обновление уже выполняется; принудительный запрос ожидает его');
     return await masterDataLoadPromise;
   }
 
@@ -733,36 +807,55 @@ export async function getUpcomingGamesMasterData(forceRefresh = false): Promise<
     return upcomingGamesMasterCache!.data;
   }
 
+  if (!forceRefresh && upcomingGamesMasterCache) {
+    console.log('✅ Возвращён устаревший локальный снимок; обновление запущено в фоне');
+    void getUpcomingGamesMasterData(true).catch(error => {
+      console.warn('[Предстоящие игры] Фоновое обновление снимка не выполнено:', error);
+    });
+    return upcomingGamesMasterCache.data;
+  }
+
   // Запускаем загрузку
   isMasterDataLoading = true;
   masterDataLoadPromise = (async () => {
     try {
-      console.log(forceRefresh ? '🔄 Force-refreshing master upcoming games from API...' : '🔄 Loading master upcoming games from API...');
-      const nowDate = new Date();
-      const futureDate = new Date(nowDate);
-      futureDate.setDate(futureDate.getDate() + 137);
-      const todayString = nowDate.toISOString().split('T')[0];
-      const futureDateString = futureDate.toISOString().split('T')[0];
-
+      console.log(
+        forceRefresh
+          ? '[Предстоящие игры] Принудительное обновление снимка из API'
+          : '[Предстоящие игры] Загрузка снимка из API'
+      );
+      const requestParams = buildUpcomingGamesParams();
       const games = await getGames({
-        date_from: todayString,
-        date_to: futureDateString,
-        teams: '74',
+        ...requestParams,
         useCache: !forceRefresh,
       });
 
       const sortedGames = sortUpcomingGames(games);
-      console.log(`Loaded ${sortedGames.length} master upcoming games`);
+      const { useCache: _useCache, ...cacheParams } = requestParams;
+      const requestSource = gamesRequestSources.get(JSON.stringify(cacheParams));
+
+      if (requestSource === 'persistent-fallback') {
+        if (!upcomingGamesMasterCache) await restoreUpcomingGamesMasterData();
+        console.warn(
+          '[Предстоящие игры] API не обновил снимок; сохранённый набор оставлен без изменения времени'
+        );
+        return upcomingGamesMasterCache?.data || sortedGames;
+      }
+
+      console.log(`[Предстоящие игры] В актуальном снимке ${sortedGames.length} матчей`);
 
       // Обновляем кэш ВСЕГДА при успешной загрузке
       upcomingGamesMasterCache = {
         data: sortedGames,
-        timestamp: now,
+        timestamp: Date.now(),
       };
+      await writePersistentCache(UPCOMING_MASTER_STORAGE_KEY, sortedGames);
+      notifyUpcomingGamesListeners(sortedGames);
 
       return sortedGames;
     } catch (error) {
       console.error('❌ Failed to load master upcoming games:', error);
+      if (!upcomingGamesMasterCache) await restoreUpcomingGamesMasterData();
       if (upcomingGamesMasterCache) {
         dataAvailability.markCachedDataUsed('Не удалось обновить предстоящие матчи');
         return upcomingGamesMasterCache.data;

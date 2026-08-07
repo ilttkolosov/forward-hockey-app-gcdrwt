@@ -49,11 +49,14 @@ export interface StartupConfigResult {
   data: StartupConfig;
   source: 'network' | 'cache';
   savedAt: number;
+  /** Продолжающееся обновление сети, если старт уже разрешён из локального кэша. */
+  backgroundRefresh?: Promise<StartupConfig | null>;
 }
 
 const STARTUP_CONFIG_CACHE_KEY = '@offline/startup-config/v1';
 const STARTUP_CONFIG_URL = 'https://www.hc-forward.com/wp-content/themes/marquee/inc/MobileAppConfig.txt';
 const REQUEST_TIMEOUT_MS = 8_000;
+const CACHED_CONFIG_NETWORK_GRACE_MS = 750;
 
 const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
 
@@ -185,11 +188,35 @@ export const loadStartupConfig = async (): Promise<StartupConfigResult> => {
   const network = await NetInfo.fetch();
   const canUseNetwork = network.isConnected !== false && network.isInternetReachable !== false;
   if (canUseNetwork) {
-    try {
-      const data = await fetchStartupConfig();
-      return { data, source: 'network', savedAt: Date.now() };
-    } catch (error) {
+    const networkRefresh = fetchStartupConfig().catch(error => {
       console.warn('Стартовая конфигурация не обновлена, используется локальная:', error);
+      return null;
+    });
+
+    if (cached) {
+      const result = await Promise.race([
+        networkRefresh.then(data => ({ kind: 'network' as const, data })),
+        wait(CACHED_CONFIG_NETWORK_GRACE_MS).then(() => ({ kind: 'cache' as const, data: null })),
+      ]);
+      if (result.kind === 'network' && result.data) {
+        return { data: result.data, source: 'network', savedAt: Date.now() };
+      }
+      if (result.kind === 'cache') {
+        dataAvailability.markCachedDataUsed('Сеть медленно отвечает на запрос конфигурации');
+        console.log(
+          `[Инициализация] Конфигурация: сеть не ответила за ${CACHED_CONFIG_NETWORK_GRACE_MS} мс, `
+          + 'запуск продолжается с локальной копией'
+        );
+        return {
+          data: validateStartupConfig(cached.data),
+          source: 'cache',
+          savedAt: cached.savedAt,
+          backgroundRefresh: networkRefresh,
+        };
+      }
+    } else {
+      const data = await networkRefresh;
+      if (data) return { data, source: 'network', savedAt: Date.now() };
     }
   }
 

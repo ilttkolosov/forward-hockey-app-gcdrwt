@@ -15,7 +15,10 @@ import { colors } from '../styles/commonStyles';
 import { playerDownloadService } from '../services/playerDataService';
 import PlayerDataLoadingScreen from '../components/PlayerDataLoadingScreen';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getUpcomingGamesMasterData } from '../data/gameData';
+import {
+  getUpcomingGamesMasterData,
+  restoreUpcomingGamesMasterData,
+} from '../data/gameData';
 //import SplashScreen from '../components/SplashScreen';
 import { loadStartupConfig, StartupConfig } from '../services/startupApi';
 import {
@@ -48,9 +51,11 @@ const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 const TOURNAMENTS_PAST_KEY = 'tournaments_past';
 const CURRENT_TOURNAMENT_ID_KEY = 'current_tournament_id';
 const PLAYERS_VERSION_KEY = 'players_version';
+const UPCOMING_GAMES_NETWORK_GRACE_MS = 750;
 
 const elapsedMilliseconds = (startedAt: number) => Date.now() - startedAt;
 const initializationLog = (message: string) => console.log(`[Инициализация] ${message}`);
+const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
 
 const REFERENCE_LABELS: Record<string, string> = {
   teams: 'команды',
@@ -273,6 +278,7 @@ function RootLayoutContent() {
 
     // === Отслеживаем загрузку предстоящих игр ===
     let upcomingGamesPromise: Promise<void> | null = null;
+    let upcomingGamesRefreshPromise: Promise<void> | null = null;
     let upcomingGamesFinished = false;
 
     const startUpcomingGames = (reason: string) => {
@@ -282,23 +288,52 @@ function RootLayoutContent() {
       }
 
       const startedAt = Date.now();
-      initializationLog(`Предстоящие игры: фоновый запрос запущен (${reason})`);
-      upcomingGamesPromise = getUpcomingGamesMasterData()
-        .then(games => {
-          upcomingGamesFinished = true;
+      initializationLog(`Предстоящие игры: локальная подготовка запущена (${reason})`);
+      upcomingGamesPromise = (async () => {
+        try {
+          const localGames = await restoreUpcomingGamesMasterData();
           initializationLog(
-            `Предстоящие игры: получено ${games.length}, завершено за `
+            `Предстоящие игры: локально доступно ${localGames.length}, `
             + `${elapsedMilliseconds(startedAt)} мс`
           );
-        })
-        .catch(error => {
+
+          const refreshStartedAt = Date.now();
+          initializationLog('Предстоящие игры: сетевое обновление запущено в фоне');
+          upcomingGamesRefreshPromise = getUpcomingGamesMasterData(true)
+            .then(games => {
+              initializationLog(
+                `Предстоящие игры: цикл сетевого обновления завершён; доступно ${games.length}, `
+                + `${elapsedMilliseconds(refreshStartedAt)} мс`
+              );
+            })
+            .catch(error => {
+              console.warn(
+                `[Инициализация] Предстоящие игры: фоновое обновление завершилось с ошибкой через `
+                + `${elapsedMilliseconds(refreshStartedAt)} мс:`,
+                error
+              );
+            });
+
+          const networkFinishedWithinGrace = await Promise.race([
+            upcomingGamesRefreshPromise.then(() => true),
+            wait(UPCOMING_GAMES_NETWORK_GRACE_MS).then(() => false),
+          ]);
+          if (networkFinishedWithinGrace) {
+            initializationLog(
+              'Предстоящие игры: цикл сетевого обновления завершён в пределах быстрого запуска'
+            );
+          } else {
+            initializationLog(
+              `Предстоящие игры: сеть не ответила за ${UPCOMING_GAMES_NETWORK_GRACE_MS} мс; `
+              + 'запуск продолжается с локальным снимком'
+            );
+          }
+        } catch (error) {
+          console.warn('[Инициализация] Предстоящие игры: локальная подготовка не выполнена:', error);
+        } finally {
           upcomingGamesFinished = true;
-          console.warn(
-            `[Инициализация] Предстоящие игры: запрос завершился с ошибкой через `
-            + `${elapsedMilliseconds(startedAt)} мс:`,
-            error
-          );
-        });
+        }
+      })();
     };
 
     try {
@@ -323,6 +358,26 @@ function RootLayoutContent() {
         + `за ${elapsedMilliseconds(configStartedAt)} мс; ревизия=${config.config_revision ?? 'не указана'}`
       );
       void showAppUpdateNotice(config);
+      if (configResult.backgroundRefresh) {
+        const backgroundConfigStartedAt = Date.now();
+        void configResult.backgroundRefresh.then(latestConfig => {
+          if (!latestConfig) {
+            initializationLog(
+              `Фоновое обновление конфигурации не выполнено за `
+              + `${elapsedMilliseconds(backgroundConfigStartedAt)} мс; локальная копия сохранена`
+            );
+            return;
+          }
+          initializationLog(
+            `Фоновая конфигурация получена за ${elapsedMilliseconds(backgroundConfigStartedAt)} мс; `
+            + `ревизия=${latestConfig.config_revision ?? 'не указана'}`
+          );
+          void showAppUpdateNotice(latestConfig);
+          if (latestConfig.config_revision !== config.config_revision) {
+            initializationLog('Новая ревизия конфигурации сохранена и будет полностью применена при следующем запуске');
+          }
+        });
+      }
 
       const networkStartedAt = Date.now();
       const networkState = await NetInfo.fetch();
@@ -431,7 +486,14 @@ function RootLayoutContent() {
       setInitializationMessage('Финальная настройка...');
       setProgress(80);
       const tournamentsPreparation = initializeTournamentsInBackground(config, canUseNetwork);
-      void tournamentsPreparation.finally(() => preloadCurrentTournamentGames(config));
+      void tournamentsPreparation.finally(async () => {
+        if (upcomingGamesPromise) await upcomingGamesPromise;
+        if (upcomingGamesRefreshPromise) {
+          initializationLog('Предзагрузка турнира ожидает завершения запроса предстоящих игр');
+          await upcomingGamesRefreshPromise;
+        }
+        await preloadCurrentTournamentGames(config);
+      });
 
       // === Ожидаем завершения загрузки предстоящих игр, если ещё не готово ===
       if (!upcomingGamesFinished && upcomingGamesPromise) {

@@ -12,14 +12,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
 import { commonStyles, colors } from '../styles/commonStyles';
 import { Game } from '../types';
-import { getCurrentGame, getFutureGames, getUpcomingGamesCount, getGameById, getUpcomingGamesMasterData } from '../data/gameData';
+import {
+  getFutureGames,
+  getUpcomingGamesCount,
+  getUpcomingGamesMasterData,
+  subscribeUpcomingGamesUpdates,
+} from '../data/gameData';
 import { getPlayers } from '../data/playerData';
 import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Icon from '../components/Icon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDeclension } from './tournaments/index'; // ← импортируем склонение
-import { trackScreenView } from '../services/analyticsService'; //импорт аналитики
 import { useTrackScreenView } from '../hooks/useTrackScreenView';
 import { useNetworkStatus } from '../contexts/NetworkStatusContext';
 
@@ -129,10 +133,10 @@ export default function HomeScreen() {
     }
   }, []);
 
-  const loadData = useCallback(async (force = false) => {
+  const loadData = useCallback(async (force = false, showLoading = true) => {
     try {
       setError(null);
-      if (!force) setLoading(true);
+      if (!force && showLoading) setLoading(true);
       const [allUpcoming, upcoming, upcomingCount, players] = await Promise.all([
         getUpcomingGamesMasterData(force), // ← получаем ВСЕ игры
         getFutureGames(force),
@@ -173,6 +177,13 @@ export default function HomeScreen() {
     loadData();
     loadTournamentsCount();
   }, [loadData, loadTournamentsCount]);
+
+  useEffect(() => subscribeUpcomingGamesUpdates(games => {
+    console.log(
+      `[Главный экран] Получен обновлённый фоновый снимок предстоящих игр: ${games.length}`
+    );
+    void loadData(false, false);
+  }), [loadData]);
 
   useTrackScreenView('Главный экран');
 

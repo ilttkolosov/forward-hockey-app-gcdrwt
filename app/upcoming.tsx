@@ -19,6 +19,7 @@ import { Game } from '../types';
 import {
   getUpcomingGamesMasterData,
   getPastGamesForTeam74,
+  subscribeUpcomingGamesUpdates,
 } from '../data/gameData';
 import Icon from '../components/Icon';
 import { useRouter } from 'expo-router';
@@ -88,6 +89,11 @@ export default function TeamGamesScreen() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => subscribeUpcomingGamesUpdates(games => {
+    console.log(`[Экран матчей] Получен обновлённый фоновый снимок: ${games.length}`);
+    void loadData();
+  }), [loadData]);
 
   const onRefresh = () => {
     setRefreshing(true);
