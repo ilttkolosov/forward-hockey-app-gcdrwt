@@ -1,5 +1,5 @@
 // plugins/withAppMetrica.js
-const { withAndroidManifest } = require('@expo/config-plugins');
+const { withAndroidManifest } = require('expo/config-plugins');
 
 module.exports = (config, { apiKey }) => {
   return withAndroidManifest(config, (modConfig) => {
