@@ -32,6 +32,8 @@ import { Buffer } from 'buffer';
 import NetInfo from '@react-native-community/netinfo';
 import { dataAvailability } from '../services/dataAvailability';
 import { NetworkStatusProvider } from '../contexts/NetworkStatusContext';
+import { SQLiteProvider } from 'expo-sqlite';
+import { DATABASE_ASSET_SOURCE, DATABASE_NAME, migrateDatabase } from '../database';
 global.Buffer = Buffer;
 
 // === КОНСТАНТЫ ===
@@ -575,8 +577,14 @@ function RootLayoutContent() {
 
 export default function RootLayout() {
   return (
-    <NetworkStatusProvider>
-      <RootLayoutContent />
-    </NetworkStatusProvider>
+    <SQLiteProvider
+      databaseName={DATABASE_NAME}
+      assetSource={DATABASE_ASSET_SOURCE}
+      onInit={migrateDatabase}
+    >
+      <NetworkStatusProvider>
+        <RootLayoutContent />
+      </NetworkStatusProvider>
+    </SQLiteProvider>
   );
 }

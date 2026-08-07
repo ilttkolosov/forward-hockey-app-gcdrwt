@@ -21,7 +21,21 @@
 - быстрый локальный F2F без сетевого запроса;
 - миграции схемы.
 
-В сборку включается `assets/database/forward_seed.db`. При первом запуске он копируется в изменяемое хранилище приложения. Обновления никогда не меняют bundled asset напрямую.
+Перед запуском и EAS-сборкой `npm postinstall` восстанавливает `assets/database/forward_seed.db` из версионируемых частей в `assets/database/seed-parts/` и проверяет SHA-256 по `seed-manifest.json`. В собранное приложение включается уже цельная SQLite-база. При первом запуске она копируется в изменяемое хранилище приложения. Обновления никогда не меняют bundled asset напрямую.
+
+## Текущий статус
+
+Реализован фундамент этапа 1:
+
+- подключён `expo-sqlite`;
+- добавлена схема v1 и последовательные миграции через `PRAGMA user_version`;
+- `SQLiteProvider` копирует bundled seed только при отсутствии рабочей базы;
+- генератор создаёт seed из текущих endpoint’ов;
+- seed хранится в GitHub частями и детерминированно восстанавливается после `npm ci`;
+- валидатор проверяет `integrity_check`, версию схемы, обязательные таблицы и внешние связи;
+- seed v1 содержит 949 игр, 98 команд, 33 арены, 38 игроков, 35 лиг и 4 сезона; размер около 2,9 МБ.
+
+Текущие UI-экраны ещё не переведены на SQLite. До завершения repository-слоя чистый первый запуск без сети по-прежнему не является полным пользовательским сценарием.
 
 ## Схема SQLite
 
@@ -31,8 +45,9 @@
 - `players(id PRIMARY KEY, name, number, position, birth_date, metrics_json, photo_url, photo_revision, updated_at)`.
 - `leagues(id PRIMARY KEY, name, updated_at)`.
 - `seasons(id PRIMARY KEY, name, updated_at)`.
-- `events(id PRIMARY KEY, title, event_date, venue_id, results_json, protocol_json, player_stats_json, updated_at)`.
+- `events(id PRIMARY KEY, title, event_date, video_url, results_json, protocol_json, player_stats_json, updated_at, raw_json)`.
 - `event_teams(event_id, team_id, side, PRIMARY KEY(event_id, team_id))`.
+- `event_venues(event_id, venue_id, position, PRIMARY KEY(event_id, venue_id))`.
 - `event_leagues(event_id, league_id, PRIMARY KEY(event_id, league_id))`.
 - `event_seasons(event_id, season_id, PRIMARY KEY(event_id, season_id))`.
 - `sync_versions(entity PRIMARY KEY, version, synced_at)`.
@@ -88,9 +103,9 @@ F2F выбирает матчи, в которых одновременно уч
 
 ## Этапы внедрения
 
-1. Исправить контракт пустого `/get-events` на сервере; клиентская совместимость уже добавлена.
-2. Добавить `expo-sqlite`, миграции и слой repository.
-3. Создать build-time генератор seed-базы и отчёт о размере данных/assets.
+1. Исправить контракт пустого `/get-events` на сервере; клиентская совместимость уже добавлена. **Частично готово.**
+2. Добавить `expo-sqlite` и миграции. **Готово.**
+3. Создать build-time генератор seed-базы и отчёт о размере данных. **Готово для текстовых данных; assets изображений — следующий подэтап.**
 4. Подключить стартовую инициализацию и перенос данных из AsyncStorage.
 5. Перевести экраны на SQLite через единый repository API.
 6. Внедрить delta-синхронизацию и транзакционные upsert/delete.

@@ -52,7 +52,7 @@
 
 Первый запуск на полностью чистом устройстве требует интернет: приложению необходимо хотя бы один раз получить исходный набор данных. После успешной синхронизации повторный запуск возможен без сети.
 
-Целевая архитектура следующего этапа — встроенная seed-база SQLite с командами, аренами, игроками и историей матчей. Она уберёт требование интернета даже при первом запуске. План и контракт синхронизации описаны в [docs/LOCAL_DATA_ARCHITECTURE.md](docs/LOCAL_DATA_ARCHITECTURE.md).
+В сборку уже включена seed-база SQLite с командами, аренами, игроками, лигами, сезонами и 949 играми за 2023–2026 годы. На этом этапе экраны ещё используют legacy-кэши, поэтому первый запуск без сети станет полностью рабочим после перевода слоя данных на SQLite. План описан в [docs/LOCAL_DATA_ARCHITECTURE.md](docs/LOCAL_DATA_ARCHITECTURE.md).
 
 ## Источники данных
 
@@ -61,7 +61,7 @@
 - Базовый API: `https://www.hc-forward.com/wp-json/app/v1`.
 - Стартовая конфигурация: `MobileAppConfig.txt` в теме WordPress.
 - Матчи: `/get-events`.
-- Команды: `/get-teams` и связанные методы `apiService`.
+- Команды: `/get-team` и связанные методы `apiService`.
 - Игроки: `/get-players-full`.
 - Турнирные таблицы: `/get-table/{id}`.
 - Push-подписки: `/push-subscription`.
@@ -77,6 +77,7 @@ app/                       Экраны и маршруты Expo Router
 components/                Переиспользуемые UI-компоненты
 contexts/                  Глобальное состояние сети
 data/                      Сборка доменных данных приложения
+database/                  Схема SQLite, миграции и инициализация
 services/                  API, загрузка файлов, кэш и аналитика
 types/                     TypeScript-контракты
 utils/                     Форматирование и вспомогательная логика
@@ -88,6 +89,10 @@ docs/                      Baseline и сценарии ручной прове�
 Ключевые модули:
 
 - `app/_layout.tsx` — запуск приложения, восстановление данных и фоновые задачи.
+- `database/index.ts` — подключение bundled seed-базы и применение миграций.
+- `database/migrations.json` — единый источник схемы для приложения и seed-генератора.
+- `assets/database/seed-parts/` и `seed-manifest.json` — версионируемые части стартового снимка.
+- `assets/database/forward_seed.db` — автоматически восстановленная перед запуском/сборкой SQLite-база.
 - `services/startupApi.ts` — стартовая конфигурация, timeout/retry и fallback.
 - `services/persistentCache.ts` — типизированная оболочка постоянного кэша.
 - `services/dataAvailability.ts` — состояние использования сохранённых данных.
@@ -111,6 +116,19 @@ git switch stabilization/foundation
 git pull --ff-only origin stabilization/foundation
 npm ci
 npm run check
+```
+
+Пересоздание и проверка seed-базы из текущего API:
+
+```bash
+npm run seed:generate
+npm run seed:verify
+```
+
+По умолчанию загружаются матчи с `2023-01-01` по `2026-08-07`. Диапазон можно изменить:
+
+```bash
+npm run seed:generate -- --from 2023-01-01 --to 2026-08-07
 ```
 
 Запуск Metro:

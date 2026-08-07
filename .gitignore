@@ -37,3 +37,6 @@ netlify.toml
 
 # Firebase credentials
 google-services.json
+
+# Reconstructed from versioned chunks by npm postinstall
+assets/database/forward_seed.db

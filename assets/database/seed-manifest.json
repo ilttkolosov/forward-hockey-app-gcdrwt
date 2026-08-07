@@ -1,0 +1,33 @@
+{
+  "format": 1,
+  "database": "forward_seed.db",
+  "bytes": 3010560,
+  "sha256": "dc5dfd6c077f166266b26bdf67f0adb4dff141a426c11a76189bda0e2853c705",
+  "parts": [
+    {
+      "name": "forward_seed.db.part000",
+      "bytes": 750000,
+      "sha256": "3cbf6db3590a755ec2db61775cbbb844956df2ccfd20db807aef642240a22a6e"
+    },
+    {
+      "name": "forward_seed.db.part001",
+      "bytes": 750000,
+      "sha256": "71563db54e49f22778debfdd5cc1e482a959b25d9d9fd0cc4554a02b6c70b6ae"
+    },
+    {
+      "name": "forward_seed.db.part002",
+      "bytes": 750000,
+      "sha256": "40d7fcd5c003a2c0074b15be221b6a65c7c26b1164d038da30530b32085968a4"
+    },
+    {
+      "name": "forward_seed.db.part003",
+      "bytes": 750000,
+      "sha256": "8ff137775f3464072565f18877c2e65701867eb5a660b9b230d04560cbf6345b"
+    },
+    {
+      "name": "forward_seed.db.part004",
+      "bytes": 10560,
+      "sha256": "5065ad730581648b0829d18b3714a35ad497e430460fd11f06c8954da9930ecf"
+    }
+  ]
+}
