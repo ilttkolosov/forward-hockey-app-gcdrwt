@@ -28,9 +28,22 @@ const versionFor = (config: StartupConfig, entity: ReferenceEntity): number => {
 
 export const getConfiguredReferenceVersion = versionFor;
 
+const REFERENCE_ENTITIES = ['teams', 'venues', 'leagues', 'seasons'] as const;
+type StartupReferenceEntity = typeof REFERENCE_ENTITIES[number];
+
+export interface ReferenceDataLocalState {
+  localVersions: Record<StartupReferenceEntity, number>;
+  targetVersions: Record<StartupReferenceEntity, number>;
+  itemCounts: Record<StartupReferenceEntity, number>;
+  changedEntities: StartupReferenceEntity[];
+  missingEntities: StartupReferenceEntity[];
+  canStartUpcomingImmediately: boolean;
+}
+
 export const initializeReferenceData = async (
   config: StartupConfig,
-  canUseNetwork: boolean
+  canUseNetwork: boolean,
+  onLocalStateReady?: (state: ReferenceDataLocalState) => void
 ): Promise<{ teamsCount: number }> => {
   let [teams, venues, leagues, seasons] = await Promise.all([
     loadTeamsFromDatabase(),
@@ -40,14 +53,39 @@ export const initializeReferenceData = async (
   ]);
 
   const localVersions = Object.fromEntries(await Promise.all(
-    (['teams', 'venues', 'leagues', 'seasons'] as const).map(async entity => [
+    REFERENCE_ENTITIES.map(async entity => [
       entity,
       await getReferenceVersion(entity),
     ])
-  )) as Record<Exclude<ReferenceEntity, 'players'>, number>;
+  )) as Record<StartupReferenceEntity, number>;
+
+  const targetVersions = Object.fromEntries(
+    REFERENCE_ENTITIES.map(entity => [entity, versionFor(config, entity)])
+  ) as Record<StartupReferenceEntity, number>;
+  const itemCounts: Record<StartupReferenceEntity, number> = {
+    teams: teams.length,
+    venues: venues.length,
+    leagues: leagues.length,
+    seasons: seasons.length,
+  };
+  const changedEntities = REFERENCE_ENTITIES.filter(
+    entity => localVersions[entity] !== targetVersions[entity]
+  );
+  const missingEntities = REFERENCE_ENTITIES.filter(entity => itemCounts[entity] === 0);
+  const requiresNetworkRefresh = canUseNetwork
+    && (changedEntities.length > 0 || missingEntities.length > 0);
+
+  onLocalStateReady?.({
+    localVersions,
+    targetVersions,
+    itemCounts,
+    changedEntities,
+    missingEntities,
+    canStartUpcomingImmediately: missingEntities.length === 0 && !requiresNetworkRefresh,
+  });
 
   const update = async <T>(
-    entity: Exclude<ReferenceEntity, 'players'>,
+    entity: StartupReferenceEntity,
     current: T[],
     fetcher: () => Promise<T[]>,
     replace: (items: T[], version: number) => Promise<void>

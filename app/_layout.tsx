@@ -30,7 +30,11 @@ import { dataAvailability } from '../services/dataAvailability';
 import { NetworkStatusProvider } from '../contexts/NetworkStatusContext';
 import { SQLiteProvider } from 'expo-sqlite';
 import { DATABASE_ASSET_SOURCE, DATABASE_NAME, migrateDatabase } from '../database';
-import { initializeReferenceData } from '../services/referenceDataService';
+import {
+  getConfiguredReferenceVersion,
+  initializeReferenceData,
+  type ReferenceDataLocalState,
+} from '../services/referenceDataService';
 import { syncCompletedHistoricalGames } from '../services/historicalSync';
 import { showAppUpdateNotice } from '../services/appUpdateService';
 global.Buffer = Buffer;
@@ -41,12 +45,33 @@ const TOURNAMENTS_PAST_KEY = 'tournaments_past';
 const CURRENT_TOURNAMENT_ID_KEY = 'current_tournament_id';
 const PLAYERS_VERSION_KEY = 'players_version';
 
+const elapsedMilliseconds = (startedAt: number) => Date.now() - startedAt;
+const initializationLog = (message: string) => console.log(`[Инициализация] ${message}`);
+
+const REFERENCE_LABELS: Record<string, string> = {
+  teams: 'команды',
+  venues: 'арены',
+  leagues: 'лиги',
+  seasons: 'сезоны',
+};
+
+const describeReferenceState = (state: ReferenceDataLocalState): string => (
+  (['teams', 'venues', 'leagues', 'seasons'] as const)
+    .map(entity => (
+      `${REFERENCE_LABELS[entity]}=${state.itemCounts[entity]} `
+      + `(версия ${state.localVersions[entity]}/${state.targetVersions[entity]})`
+    ))
+    .join('; ')
+);
+
 // --- ФОНОВЫЕ ФУНКЦИИ ---
 const initializeTournamentsInBackground = async (config: StartupConfig) => {
+  const startedAt = Date.now();
+  const allTournaments = [...(config.tournamentsNow || []), ...(config.tournamentsPast || [])];
+  initializationLog(`Фоновая подготовка ${allTournaments.length} турниров запущена`);
   try {
     await AsyncStorage.setItem(TOURNAMENTS_NOW_KEY, JSON.stringify(config.tournamentsNow || []));
     await AsyncStorage.setItem(TOURNAMENTS_PAST_KEY, JSON.stringify(config.tournamentsPast || []));
-    const allTournaments = [...(config.tournamentsNow || []), ...(config.tournamentsPast || [])];
     if (allTournaments.length > 0) {
       await Promise.all(
         allTournaments.map(async (t) => {
@@ -60,29 +85,39 @@ const initializeTournamentsInBackground = async (config: StartupConfig) => {
     } else {
       await AsyncStorage.removeItem(CURRENT_TOURNAMENT_ID_KEY);
     }
+    initializationLog(
+      `Фоновая подготовка турниров завершена за ${elapsedMilliseconds(startedAt)} мс`
+    );
   } catch (e) {
-    console.error('Failed to initialize tournaments in background:', e);
+    console.error('[Инициализация] Ошибка фоновой подготовки турниров:', e);
   }
 };
 
 const preloadCurrentTournamentGames = async (config: StartupConfig) => {
+  const startedAt = Date.now();
   try {
     const currentTournament = config.tournamentsNow?.[0];
-    if (!currentTournament?.tournament_ID) return;
+    if (!currentTournament?.tournament_ID) {
+      initializationLog('Предзагрузка турнира пропущена: текущий турнир не задан');
+      return;
+    }
     const tournamentId = currentTournament.tournament_ID;
-    console.log(`[Preload] Loading full config for tournament ${tournamentId}...`);
+    console.log(`[Предзагрузка] Получение конфигурации турнира ${tournamentId}`);
     const fullConfig = await getCachedTournamentConfig(tournamentId);
     if (!fullConfig?.league_id || !fullConfig?.season_id) {
-      console.warn(`[Preload] Missing league_id or season_id for tournament ${tournamentId}`);
+      console.warn(`[Предзагрузка] У турнира ${tournamentId} отсутствуют league_id или season_id`);
       return;
     }
     const league = String(fullConfig.league_id);
     const season = String(fullConfig.season_id);
-    console.log(`[Preload] 🎮 Загрузка игр для турнира ${tournamentId} (лига=${league}, сезон=${season})`);
-    await getGames({ league, season, useCache: true });
-    console.log(`[Preload] ✅ Игры для турнира ${tournamentId} предзагружены и закэшированы`);
+    console.log(`[Предзагрузка] Загрузка игр турнира ${tournamentId} (лига=${league}, сезон=${season})`);
+    const games = await getGames({ league, season, useCache: true });
+    console.log(
+      `[Предзагрузка] Турнир ${tournamentId}: подготовлено ${games.length} игр `
+      + `за ${elapsedMilliseconds(startedAt)} мс`
+    );
   } catch (error) {
-    console.warn('[Preload] Ошибка предзагрузки игр текущего турнира:', error);
+    console.warn('[Предзагрузка] Ошибка загрузки игр текущего турнира:', error);
   }
 };
 
@@ -170,7 +205,7 @@ const syncPushSubscriptionStatus = async () => {
     const { status } = await Notifications.getPermissionsAsync();
     if (status !== 'granted') {
       await AsyncStorage.setItem('push_notifications_enabled', 'false');
-      console.log('✅ Push disabled: permission not granted');
+      console.log('[Инициализация] Push отключены: разрешение пользователя не выдано');
       return;
     }
 
@@ -192,9 +227,11 @@ const syncPushSubscriptionStatus = async () => {
 
     const isEnabled = result.data.is_subscribed;
     await AsyncStorage.setItem('push_notifications_enabled', String(isEnabled));
-    console.log('✅ Push subscription status synced:', isEnabled ? 'enabled' : 'disabled');
+    console.log(
+      `[Инициализация] Статус push-подписки синхронизирован: ${isEnabled ? 'включена' : 'отключена'}`
+    );
   } catch (error) {
-    console.warn('⚠️ Failed to sync push subscription status:', error);
+    console.warn('[Инициализация] Не удалось синхронизировать push-подписку:', error);
   }
 };
 
@@ -217,99 +254,201 @@ function RootLayoutContent() {
   }, [progressAnimated]);
 
   const initializeApp = useCallback(async () => {
+    const initializationStartedAt = Date.now();
     setInitializationError(null);
     setIsInitializing(true);
-
-    // Инициализация аналитики — делаем ДО загрузки конфига
-    await initAnalytics();
-
-    // Фоновая синхронизация статуса push-подписки
-    syncPushSubscriptionStatus();
+    setInitializationMessage('Запуск приложения...');
+    setDynamicStatus('Подготовка данных...');
+    setProgress(0);
 
     // === Отслеживаем загрузку предстоящих игр ===
     let upcomingGamesPromise: Promise<void> | null = null;
     let upcomingGamesFinished = false;
 
+    const startUpcomingGames = (reason: string) => {
+      if (upcomingGamesPromise) {
+        initializationLog('Запрос предстоящих игр уже запущен, повторный запуск пропущен');
+        return;
+      }
+
+      const startedAt = Date.now();
+      initializationLog(`Предстоящие игры: фоновый запрос запущен (${reason})`);
+      upcomingGamesPromise = getUpcomingGamesMasterData()
+        .then(games => {
+          upcomingGamesFinished = true;
+          initializationLog(
+            `Предстоящие игры: получено ${games.length}, завершено за `
+            + `${elapsedMilliseconds(startedAt)} мс`
+          );
+        })
+        .catch(error => {
+          upcomingGamesFinished = true;
+          console.warn(
+            `[Инициализация] Предстоящие игры: запрос завершился с ошибкой через `
+            + `${elapsedMilliseconds(startedAt)} мс:`,
+            error
+          );
+        });
+    };
+
     try {
+      initializationLog('Запуск приложения');
+
+      // Инициализация аналитики — делаем ДО загрузки конфига
+      const analyticsStartedAt = Date.now();
+      await initAnalytics();
+      initializationLog(`Аналитика подготовлена за ${elapsedMilliseconds(analyticsStartedAt)} мс`);
+
+      // Фоновая синхронизация статуса push-подписки
+      void syncPushSubscriptionStatus();
+
       // === 1. Конфигурация ===
       setInitializationMessage('Получение конфигурации...');
       setProgress(5);
-      console.log("Начали инициализацию приложения");
+      const configStartedAt = Date.now();
       const configResult = await loadStartupConfig();
       const config = configResult.data;
+      initializationLog(
+        `Конфигурация получена из ${configResult.source === 'network' ? 'сети' : 'кэша'} `
+        + `за ${elapsedMilliseconds(configStartedAt)} мс; ревизия=${config.config_revision ?? 'не указана'}`
+      );
       void showAppUpdateNotice(config);
+
+      const networkStartedAt = Date.now();
       const networkState = await NetInfo.fetch();
       const canUseNetwork = networkState.isConnected !== false && networkState.isInternetReachable !== false;
+      initializationLog(
+        `Проверка сети за ${elapsedMilliseconds(networkStartedAt)} мс: `
+        + `подключение=${String(networkState.isConnected)}, `
+        + `доступ в интернет=${String(networkState.isInternetReachable)}, `
+        + `сетевые запросы=${canUseNetwork ? 'разрешены' : 'отключены'}`
+      );
       if (configResult.source === 'cache') {
         setDynamicStatus('Используется последняя сохранённая конфигурация');
       }
-      console.log('Начали загрузку справочников из SQLite');
+
+      initializationLog('Проверка локальных справочников SQLite');
       setInitializationMessage('Подготовка локальных справочников...');
       setProgress(15);
-      const { teamsCount } = await initializeReferenceData(config, canUseNetwork);
+      const referencesStartedAt = Date.now();
+      const { teamsCount } = await initializeReferenceData(
+        config,
+        canUseNetwork,
+        state => {
+          initializationLog(`Состояние справочников: ${describeReferenceState(state)}`);
+          if (state.changedEntities.length > 0) {
+            initializationLog(
+              `Требуют обновления: ${state.changedEntities.map(entity => REFERENCE_LABELS[entity]).join(', ')}`
+            );
+          }
+          if (state.missingEntities.length > 0) {
+            initializationLog(
+              `Отсутствуют локальные данные: ${state.missingEntities.map(entity => REFERENCE_LABELS[entity]).join(', ')}`
+            );
+          }
+          if (state.canStartUpcomingImmediately) {
+            startUpcomingGames('локальные справочники полны и их версии актуальны');
+          } else {
+            initializationLog('Предстоящие игры: запуск отложен до подготовки справочников');
+          }
+        }
+      );
+      initializationLog(
+        `Справочники готовы за ${elapsedMilliseconds(referencesStartedAt)} мс; команд=${teamsCount}`
+      );
       setDynamicStatus(`Загружено команд ${teamsCount}`);
       setProgress(30);
 
-
-      // === 3.1 ЗАПУСКАЕМ загрузку предстоящих игр в фоне (не ждём) ===
-      console.log('🚀 Запуск фоновой загрузки предстоящих игр...');
-      upcomingGamesPromise = getUpcomingGamesMasterData()
-      .then(() => {
-        upcomingGamesFinished = true;
-        console.log('✅ Предстоящие игры загружены в фоне');
-      })
-      .catch(err => {
-        upcomingGamesFinished = true; // даже при ошибке считаем "завершённой"
-        console.warn('⚠️ Ошибка фоновой загрузки предстоящих игр:', err);
-      });
+      // Если справочники обновлялись, запрос запускается только теперь, с актуальными данными.
+      if (!upcomingGamesPromise) {
+        startUpcomingGames('справочники подготовлены');
+      } else {
+        initializationLog('Предстоящие игры уже загружаются параллельно с локальной подготовкой');
+      }
 
       // === 5. Игроки ===
       setInitializationMessage('Подготовка игроков и фотографий...');
       setProgress(55);
+      const playersStartedAt = Date.now();
+      const playersVersion = getConfiguredReferenceVersion(config, 'players');
+      initializationLog(`Игроки: подготовка версии ${playersVersion}`);
       let playersList: Player[] = [];
       try {
         playersList = await playerDownloadService.initializeFromDatabase(
-          config.players_version,
+          playersVersion,
           canUseNetwork,
           (stage, message) => setDynamicStatus(message || stage)
         );
-        await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(config.players_version));
+        await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(playersVersion));
       } catch (error) {
         playersList = await playerDownloadService.getPlayersFromStorage();
         if (playersList.length === 0) throw error;
         dataAvailability.markCachedDataUsed('Не удалось обновить данные игроков');
+        console.warn('[Инициализация] Игроки: использован предыдущий локальный набор:', error);
       }
+      initializationLog(
+        `Игроки: подготовлено ${playersList.length} записей за ${elapsedMilliseconds(playersStartedAt)} мс`
+      );
       setDynamicStatus(`Загружено игроков ${playersList.length}`);
       setProgress(70);
 
       if (canUseNetwork) {
-        void syncCompletedHistoricalGames(config.sync).catch(error => {
-          console.warn('[HistoricalSync] Фоновая синхронизация не выполнена:', error);
-        });
+        const historyStartedAt = Date.now();
+        initializationLog('Фоновая синхронизация завершённых матчей запущена');
+        void syncCompletedHistoricalGames(config.sync)
+          .then(result => {
+            if (result.skipped) {
+              initializationLog(
+                `Синхронизация завершённых матчей не требуется: безопасная дата ${result.requestedTo}`
+              );
+              return;
+            }
+            initializationLog(
+              `Синхронизация завершённых матчей: получено ${result.received}, сохранено ${result.stored}, `
+              + `диапазон ${result.requestedFrom}—${result.requestedTo}, `
+              + `${elapsedMilliseconds(historyStartedAt)} мс`
+            );
+          })
+          .catch(error => {
+            console.warn('[Инициализация] Фоновая синхронизация завершённых матчей не выполнена:', error);
+          });
+      } else {
+        initializationLog('Фоновая синхронизация завершённых матчей пропущена: нет интернета');
       }
 
       // === 7. Фоновые задачи (запускаем после основного прогресса) ===
       setDynamicStatus(`Запуск фоновых задач`);
       setInitializationMessage('Финальная настройка...');
       setProgress(80);
-      initializeTournamentsInBackground(config);
-      preloadCurrentTournamentGames(config);
+      void initializeTournamentsInBackground(config);
+      void preloadCurrentTournamentGames(config);
 
       // === Ожидаем завершения загрузки предстоящих игр, если ещё не готово ===
       if (!upcomingGamesFinished && upcomingGamesPromise) {
+        const waitStartedAt = Date.now();
+        initializationLog('Основные локальные данные готовы; ожидается только запрос предстоящих игр');
         setInitializationMessage('Ожидание загрузки предстоящих игр...');
         setDynamicStatus('Завершение загрузки данных игр...');
         setProgress(95);
         await upcomingGamesPromise;
+        initializationLog(
+          `Дополнительное ожидание предстоящих игр заняло ${elapsedMilliseconds(waitStartedAt)} мс`
+        );
+      } else {
+        initializationLog('Предстоящие игры завершены параллельно; дополнительное ожидание не требуется');
       }
 
 
       setInitializationMessage('Готово!');
       setProgress(100);
+      initializationLog(`Приложение готово за ${elapsedMilliseconds(initializationStartedAt)} мс`);
       setTimeout(() => setIsInitializing(false), 200);
 
     } catch (error) {
-      console.error('💥 App initialization failed:', error);
+      console.error(
+        `[Инициализация] Критическая ошибка через ${elapsedMilliseconds(initializationStartedAt)} мс:`,
+        error
+      );
       setInitializationError(error instanceof Error ? error.message : 'Ошибка инициализации приложения');
       setIsInitializing(false);
     }
