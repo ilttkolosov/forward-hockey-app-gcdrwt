@@ -9,7 +9,9 @@ export default ({ config }) => {
 
   return {
     ...config,
-    name: 'ХК Форвард 14',
+    // Keep the native project/target name ASCII-only. The localized name shown
+    // to users is restored per platform by withAppDisplayName below.
+    name: 'ForwardHockey14',
     slug: 'Forward',
     version: '1.0.58',
     orientation: 'portrait',
@@ -25,6 +27,7 @@ export default ({ config }) => {
       supportsTablet: true,
       bundleIdentifier: 'com.aleksandrkolosov.forward2014',
       infoPlist: {
+        CFBundleDisplayName: 'ХК Форвард 14',
         ITSAppUsesNonExemptEncryption: false,
       },
     },
@@ -49,6 +52,9 @@ export default ({ config }) => {
       'expo-notifications',
       ['./plugins/withAppMetrica.js', {
         apiKey: '2a2cbf5f-f609-4a7b-80c6-99ba84d59501',
+      }],
+      ['./plugins/withAppDisplayName.js', {
+        displayName: 'ХК Форвард 14',
       }],
     ],
     scheme: 'natively',
