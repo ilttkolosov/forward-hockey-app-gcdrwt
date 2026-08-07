@@ -19,7 +19,7 @@ export default ({ config }) => {
     splash: {
       image: './assets/icons/splash.png',
       resizeMode: 'contain',
-      backgroundColor: '#ffffffff',
+      backgroundColor: '#ffffff',
     },
     ios: {
       supportsTablet: true,
@@ -31,7 +31,7 @@ export default ({ config }) => {
     android: {
       adaptiveIcon: {
         foregroundImage: './assets/icons/myIcon.png',
-        backgroundColor: '#ffffffff',
+        backgroundColor: '#ffffff',
       },
       edgeToEdgeEnabled: true,
       package: 'com.kolosovaleksandr.Forward2014',
