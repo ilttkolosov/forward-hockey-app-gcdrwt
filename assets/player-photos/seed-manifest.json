@@ -1,4 +1,217 @@
 {
   "version": 24,
-  "photos": []
+  "photos": [
+    {
+      "id": "1570",
+      "filename": "player_1570.jpg"
+    },
+    {
+      "id": "2704",
+      "filename": "player_2704.png"
+    },
+    {
+      "id": "2706",
+      "filename": "player_2706.png"
+    },
+    {
+      "id": "2708",
+      "filename": "player_2708.png"
+    },
+    {
+      "id": "2712",
+      "filename": "player_2712.jpg"
+    },
+    {
+      "id": "293",
+      "filename": "player_293.jpg"
+    },
+    {
+      "id": "295",
+      "filename": "player_295.jpg"
+    },
+    {
+      "id": "297",
+      "filename": "player_297.jpg"
+    },
+    {
+      "id": "2971",
+      "filename": "player_2971.png"
+    },
+    {
+      "id": "2973",
+      "filename": "player_2973.jpg"
+    },
+    {
+      "id": "299",
+      "filename": "player_299.jpg"
+    },
+    {
+      "id": "3018",
+      "filename": "player_3018.jpg"
+    },
+    {
+      "id": "3022",
+      "filename": "player_3022.png"
+    },
+    {
+      "id": "3023",
+      "filename": "player_3023.jpg"
+    },
+    {
+      "id": "3049",
+      "filename": "player_3049.jpg"
+    },
+    {
+      "id": "331",
+      "filename": "player_331.jpg"
+    },
+    {
+      "id": "332",
+      "filename": "player_332.jpg"
+    },
+    {
+      "id": "334",
+      "filename": "player_334.jpg"
+    },
+    {
+      "id": "336",
+      "filename": "player_336.jpg"
+    },
+    {
+      "id": "338",
+      "filename": "player_338.jpg"
+    },
+    {
+      "id": "340",
+      "filename": "player_340.jpg"
+    },
+    {
+      "id": "342",
+      "filename": "player_342.jpg"
+    },
+    {
+      "id": "344",
+      "filename": "player_344.jpg"
+    },
+    {
+      "id": "346",
+      "filename": "player_346.jpg"
+    },
+    {
+      "id": "348",
+      "filename": "player_348.jpg"
+    },
+    {
+      "id": "350",
+      "filename": "player_350.jpg"
+    },
+    {
+      "id": "351",
+      "filename": "player_351.jpg"
+    },
+    {
+      "id": "353",
+      "filename": "player_353.jpg"
+    },
+    {
+      "id": "354",
+      "filename": "player_354.jpg"
+    },
+    {
+      "id": "3672",
+      "filename": "player_3672.jpg"
+    },
+    {
+      "id": "3771",
+      "filename": "player_3771.jpg"
+    },
+    {
+      "id": "3922",
+      "filename": "player_3922.jpg"
+    },
+    {
+      "id": "3924",
+      "filename": "player_3924.jpg"
+    },
+    {
+      "id": "3925",
+      "filename": "player_3925.jpg"
+    },
+    {
+      "id": "4223",
+      "filename": "player_4223.jpg"
+    },
+    {
+      "id": "4225",
+      "filename": "player_4225.jpg"
+    },
+    {
+      "id": "433",
+      "filename": "player_433.jpg"
+    },
+    {
+      "id": "435",
+      "filename": "player_435.jpg"
+    },
+    {
+      "id": "437",
+      "filename": "player_437.jpg"
+    },
+    {
+      "id": "482",
+      "filename": "player_482.jpg"
+    },
+    {
+      "id": "521",
+      "filename": "player_521.jpg"
+    },
+    {
+      "id": "5649",
+      "filename": "player_5649.jpg"
+    },
+    {
+      "id": "5651",
+      "filename": "player_5651.jpg"
+    },
+    {
+      "id": "5653",
+      "filename": "player_5653.jpg"
+    },
+    {
+      "id": "5796",
+      "filename": "player_5796.jpg"
+    },
+    {
+      "id": "75",
+      "filename": "player_75.jpg"
+    },
+    {
+      "id": "751",
+      "filename": "player_751.jpg"
+    },
+    {
+      "id": "76",
+      "filename": "player_76.jpg"
+    },
+    {
+      "id": "77",
+      "filename": "player_77.jpg"
+    },
+    {
+      "id": "831",
+      "filename": "player_831.jpg"
+    },
+    {
+      "id": "836",
+      "filename": "player_836.jpg"
+    },
+    {
+      "id": "845",
+      "filename": "player_845.jpg"
+    },
+    {
+      "id": "847",
+      "filename": "player_847.jpg"
+    }
+  ]
 }
