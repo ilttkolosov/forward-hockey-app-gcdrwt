@@ -92,8 +92,9 @@ export default function SeasonsScreen() {
     const endDateString = season.end.toISOString().split('T')[0];
 
     router.push({
-      pathname: `/season/${season.id}`,
+      pathname: '/season/[id]',
       params: {
+        id: season.id,
         date_from: startDateString,
         date_to: endDateString,
         seasonName: season.name,

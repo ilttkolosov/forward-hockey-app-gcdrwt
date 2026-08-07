@@ -61,7 +61,7 @@ export default function MemoryGameScreen() {
   const [showRecordsModal, setShowRecordsModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<number | ReturnType<typeof setInterval> | null>(null);
   const blinkAnimationsRef = useRef<Animated.Value[]>([]);
 
   useEffect(() => {

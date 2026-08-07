@@ -249,8 +249,8 @@ export default function TournamentsScreen() {
               <Text style={[styles.cell, styles.teamName]}>{row.team_name}</Text>
               <TouchableOpacity
                 onPress={() => router.push({
-                  pathname: `/command/${row.team_id}`,
-                  params: { tournamentId: tournamentId }
+                  pathname: '/command/[id]',
+                  params: { id: row.team_id, tournamentId }
                 })}
                 style={styles.navArrowContainer}
               >

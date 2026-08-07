@@ -208,7 +208,7 @@ export default function HomeScreen() {
         {/* Quick Navigation — НОВЫЙ ПОРЯДОК */}
         <View style={quickNavStyles.container}>
           {/* Турниры */}
-          <Link href="tournaments" asChild>
+          <Link href="/tournaments" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
               <Icon name="trophy" size={24} color={colors.primary} style={quickNavStyles.icon} />
               <Text style={quickNavStyles.title}>Турниры</Text>
@@ -219,7 +219,7 @@ export default function HomeScreen() {
           </Link>
 
           {/* Архив игр */}
-          <Link href="season" asChild>
+          <Link href="/season" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
               <Icon name="archive" size={24} color={colors.primary} style={quickNavStyles.icon} />
               <Text style={quickNavStyles.title}>Архив игр</Text>

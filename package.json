@@ -10,8 +10,9 @@
     "build:web": "expo export -p web && npx workbox generateSW workbox-config.js",
     "build:android": "expo prebuild -p android",
     "lint": "eslint .",
+    "generate:route-types": "node scripts/generate-route-types.js",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run lint",
+    "check": "npm run generate:route-types && npm run typecheck && npm run lint",
     "prebuild": "expo prebuild",
     "eas-build": "eas build"
   },

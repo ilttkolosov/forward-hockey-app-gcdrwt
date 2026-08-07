@@ -55,8 +55,8 @@ export default function CommandCard({
   const handlePress = () => {
     console.log(`[CommandCard] Нажата команда ${teamId} в турнире ${tournamentId}`);
     router.push({
-      pathname: `/command/${teamId}`,
-      params: { tournamentId },
+      pathname: '/command/[id]',
+      params: { id: teamId, tournamentId },
     });
   };
 
