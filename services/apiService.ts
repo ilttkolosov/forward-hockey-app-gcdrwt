@@ -21,6 +21,7 @@ import {
   ApiSeasonsResponse, 
   ApiVenuesResponse 
 } from '../types/apiTypes';
+import { fetchWithTimeout } from './httpClient';
 
 // --- Старые интерфейсы для игроков (оставлены для совместимости) ---
 interface ApiPlayerListItem {
@@ -93,7 +94,7 @@ async fetchEvents(params: {
   console.log('API Service: Fetching events with URL:', url.toString());
 
   try {
-    const response = await fetch(url.toString());
+    const response = await fetchWithTimeout(url.toString());
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -113,7 +114,7 @@ async fetchEvents(params: {
   async fetchEventById(id: string): Promise<ApiEvent | null> {
     console.log('API Service: Fetching event by ID via /get-events?event_id=', id);
     try {
-      const response = await fetch(`${this.baseUrl}/get-events?event_id=${id}`);
+      const response = await fetchWithTimeout(`${this.baseUrl}/get-events?event_id=${id}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -126,7 +127,7 @@ async fetchEvents(params: {
       return gameData; // ← возвращаем ApiEvent (один объект из data)
     } catch (error) {
       console.error('API Service: Error fetching event by ID:', error);
-      return null;
+      throw error;
     }
   }
 
@@ -138,7 +139,7 @@ async fetchEvents(params: {
     console.log('API Service: Fetching all leagues:', url);
 
     try {
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -166,7 +167,7 @@ async fetchEvents(params: {
     console.log('API Service: Fetching all seasons:', url);
 
     try {
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -194,7 +195,7 @@ async fetchEvents(params: {
     console.log('API Service: Fetching all venues:', url);
 
     try {
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -234,7 +235,7 @@ async fetchEvents(params: {
     console.log("API Service: [LOG] fetchPlayers - Начало загрузки списка игроков с /players/"); // <-- НОВОЕ ЛОГИРОВАНИЕ
     try {
       console.log("API Service: Fetching all players from API..."); // <-- Старое логирование
-      const response = await fetch(`${this.baseUrl}/players/`);
+      const response = await fetchWithTimeout(`${this.baseUrl}/players/`);
       if (!response.ok) {
         const errorMessage = `API Service: Error accessing players API! Status: ${response.status}`;
         console.error(errorMessage);
@@ -272,7 +273,7 @@ async fetchEvents(params: {
   async fetchPlayerDetails(id: string): Promise<ApiPlayerDetailsResponse | null> {
     try {
       console.log(`API Service: Fetching player details for ID: ${id}`);
-      const response = await fetch(`${this.baseUrl}/player/${id}`);
+      const response = await fetchWithTimeout(`${this.baseUrl}/player/${id}`);
       if (!response.ok) {
         if (response.status === 404) {
           console.log(`API Service: Player not found for ID: ${id}`);
@@ -292,7 +293,7 @@ async fetchEvents(params: {
   async fetchPlayerPhoto(id: string): Promise<ApiPlayerPhotoResponse | null> {
     try {
       console.log(`API Service: Fetching photo for player ID: ${id}`);
-      const response = await fetch(`${this.baseUrl}/player/${id}/photo`);
+      const response = await fetchWithTimeout(`${this.baseUrl}/player/${id}/photo`);
       if (!response.ok) {
         if (response.status === 404) {
           console.log(`API Service: Photo not found for player ID: ${id}`);
@@ -319,7 +320,7 @@ async fetchEvents(params: {
   async checkPlayersApiAvailability(): Promise<boolean> {
     try {
       console.log("API Service: Checking players API endpoint availability...");
-      const response = await fetch(`${this.baseUrl}/players/`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/players/`, {
         method: "HEAD",
       });
       const isAvailable = response.ok;
@@ -342,7 +343,7 @@ async fetchEvents(params: {
 
     try {
       console.log('API Service: Fetching full team list from /get-team');
-      const response = await fetch(`${this.baseUrl}/get-team`);
+      const response = await fetchWithTimeout(`${this.baseUrl}/get-team`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -377,7 +378,7 @@ async fetchEvents(params: {
 
     try {
       console.log(`API Service: Fetching team details for ID: ${teamId} from /get-team/${teamId}`);
-      const response = await fetch(`${this.baseUrl}/get-team/${teamId}`);
+      const response = await fetchWithTimeout(`${this.baseUrl}/get-team/${teamId}`);
       if (!response.ok) {
         console.error(`API Service: Team fetch failed for ID ${teamId}, status: ${response.status}`);
         // Возвращаем fallback, чтобы приложение не ломалось
@@ -538,7 +539,7 @@ async fetchEvents(params: {
     const startTime = Date.now();
 
     // --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ --- 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
@@ -566,7 +567,7 @@ async fetchEvents(params: {
  /* async get<T = any>(endpoint: string): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
     console.log('API Service: GET request to', url);
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url);
     console.log("Получили параметры конфигурации через Универсальный GET-метод");
 
     if (!response.ok) {
