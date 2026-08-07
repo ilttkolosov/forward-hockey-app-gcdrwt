@@ -2,15 +2,44 @@
 import { dataAvailability } from './dataAvailability';
 import { readPersistentCache, writePersistentCache } from './persistentCache';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
+import { getMetadata } from '../database/repository';
 
 
 export interface StartupConfig {
-  teams_version: number;   // "true" или "false" (как в WordPress)
-  players_version: number; // "true" или "false"
+  config_schema_version?: number;
+  config_revision?: number;
+  generated_at?: string;
+  teams_version: number;
+  players_version: number;
+  venues_version?: number;
+  leagues_version?: number;
+  seasons_version?: number;
+  reference_version?: number;
+  tournaments_version?: number;
+  data_versions?: Partial<Record<'teams' | 'players' | 'venues' | 'leagues' | 'seasons' | 'tournaments', number>>;
   league_id: string | number;
   season_id: string | number;
   tournamentsNow: { tournament_ID: string; tournament_Name: string }[];
   tournamentsPast: { tournament_ID: string; tournament_Name: string }[];
+  app?: {
+    latest_version?: { ios?: string; android?: string };
+    minimum_supported_version?: { ios?: string; android?: string };
+    update_message?: string;
+    app_store_url?: string;
+    google_play_url?: string;
+    android_download_url?: string;
+  };
+  api?: { base_url?: string; request_timeout_seconds?: number };
+  sync?: {
+    historical_start_date?: string;
+    historical_delay_days?: number;
+    event_chunk_days?: number;
+    player_photo_archive_url_template?: string;
+  };
+  features?: Record<string, boolean>;
+  maintenance?: { enabled?: boolean; message?: string; retry_after_seconds?: number };
+  announcement?: { enabled?: boolean; id?: string; title?: string; message?: string; url?: string };
 }
 
 export interface StartupConfigResult {
@@ -141,18 +170,31 @@ export const loadStartupConfig = async (): Promise<StartupConfigResult> => {
     const migrated = await migrateLegacyStartupConfig();
     if (migrated) cached = { data: migrated, savedAt: Date.now(), schemaVersion: 1 };
   }
-  if (cached) {
-    dataAvailability.markCachedDataUsed();
-    void fetchStartupConfig().catch(error => {
-      console.warn('Фоновое обновление стартовой конфигурации не выполнено:', error);
-    });
-    return { data: validateStartupConfig(cached.data), source: 'cache', savedAt: cached.savedAt };
+  if (!cached) {
+    const bundled = await getMetadata('startup_config');
+    if (bundled) {
+      const data = validateStartupConfig(JSON.parse(bundled));
+      await writePersistentCache(STARTUP_CONFIG_CACHE_KEY, data);
+      cached = { data, savedAt: Date.now(), schemaVersion: 1 };
+    }
   }
 
-  try {
-    const data = await fetchStartupConfig();
-    return { data, source: 'network', savedAt: Date.now() };
-  } catch (error) {
-    throw new Error('Для первого запуска требуется подключение к интернету. Проверьте соединение и повторите попытку.', { cause: error });
+  const network = await NetInfo.fetch();
+  const canUseNetwork = network.isConnected !== false && network.isInternetReachable !== false;
+  if (canUseNetwork) {
+    try {
+      const data = await fetchStartupConfig();
+      return { data, source: 'network', savedAt: Date.now() };
+    } catch (error) {
+      console.warn('Стартовая конфигурация не обновлена, используется локальная:', error);
+    }
   }
+
+  if (cached) {
+    dataAvailability.markCachedDataUsed();
+    return { data: validateStartupConfig(cached.data), source: 'cache', savedAt: cached.savedAt };
+  }
+  throw new Error('Не удалось открыть встроенную конфигурацию приложения. Переустановите приложение или повторите попытку.', {
+    cause: new Error('Startup config is absent in cache and bundled database'),
+  });
 };

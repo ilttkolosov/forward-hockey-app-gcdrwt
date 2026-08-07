@@ -16,6 +16,7 @@ export interface ApiEvent {
   venues: number[];
   teams: string[];
   results: any[] | { [teamId: string]: any };
+  sp_video?: string;
   protocol?: any;    
   player_stats?: any;
 }

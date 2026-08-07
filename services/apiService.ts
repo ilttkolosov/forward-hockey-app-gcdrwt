@@ -240,6 +240,19 @@ async fetchEvents(params: {
   }
 
   // --- МЕТОДЫ для получения данных из кэша ---
+  hydrateReferenceCaches(data: {
+    teams: ApiTeam[];
+    leagues: ApiLeague[];
+    seasons: ApiSeason[];
+    venues: ApiVenue[];
+  }): void {
+    this.teamListCache = data.teams;
+    this.teamCache = Object.fromEntries(data.teams.map(item => [String(item.id), item]));
+    this.leagueCache = Object.fromEntries(data.leagues.map(item => [String(item.id), item]));
+    this.seasonCache = Object.fromEntries(data.seasons.map(item => [String(item.id), item]));
+    this.venueCache = Object.fromEntries(data.venues.map(item => [String(item.id), item]));
+  }
+
   getLeagueById(id: string): ApiLeague | undefined {
     return this.leagueCache[id];
   }

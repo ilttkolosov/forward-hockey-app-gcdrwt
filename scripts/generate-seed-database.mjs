@@ -6,6 +6,7 @@ import initSqlJs from 'sql.js';
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, '..');
 const API_BASE_URL = 'https://www.hc-forward.com/wp-json/app/v1';
+const STARTUP_CONFIG_URL = 'https://www.hc-forward.com/wp-content/themes/marquee/inc/MobileAppConfig.txt';
 const DEFAULT_FROM = '2023-01-01';
 const DEFAULT_TO = '2026-08-07';
 const DEFAULT_OUTPUT = path.join(projectRoot, 'assets', 'database', 'forward_seed.db');
@@ -95,6 +96,16 @@ async function loadEvents(from, to, chunkMonths) {
   return [...eventsById.values()];
 }
 
+async function loadStartupConfig() {
+  const response = await fetch(`${STARTUP_CONFIG_URL}?_t=${Date.now()}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}: MobileAppConfig.txt`);
+  const payload = await response.json();
+  if (payload?.status !== 'success' || !payload.data) {
+    throw new Error('Некорректный MobileAppConfig.txt');
+  }
+  return payload.data;
+}
+
 function insertRows(db, sql, rows) {
   const statement = db.prepare(sql);
   try {
@@ -114,13 +125,14 @@ async function main() {
   const migrationConfig = JSON.parse(await fs.readFile(migrationPath, 'utf8'));
 
   console.log('[Seed] Загрузка справочников...');
-  const [teamsResponse, venuesResponse, playersResponse, leaguesResponse, seasonsResponse] =
+  const [teamsResponse, venuesResponse, playersResponse, leaguesResponse, seasonsResponse, startupConfig] =
     await Promise.all([
       fetchApi('get-team'),
       fetchApi('get-venue'),
       fetchApi('get-players-full'),
       fetchApi('get-league'),
       fetchApi('get-season'),
+      loadStartupConfig(),
     ]);
   const events = await loadEvents(options.from, options.to, options.chunkMonths);
   const generatedAt = new Date().toISOString();
@@ -140,6 +152,16 @@ async function main() {
       ['seed_generated_at', generatedAt],
       ['events_from', options.from],
       ['events_to', options.to],
+      ['startup_config', JSON.stringify(startupConfig)],
+      ['config_revision', String(startupConfig.config_revision || 0)],
+    ]);
+    const dataVersions = startupConfig.data_versions || {};
+    insertRows(db, 'INSERT OR REPLACE INTO sync_versions (entity, version, synced_at) VALUES (?, ?, ?)', [
+      ['teams', Number(dataVersions.teams ?? startupConfig.teams_version ?? 0), generatedAt],
+      ['venues', Number(dataVersions.venues ?? startupConfig.venues_version ?? startupConfig.teams_version ?? 0), generatedAt],
+      ['leagues', Number(dataVersions.leagues ?? startupConfig.leagues_version ?? startupConfig.teams_version ?? 0), generatedAt],
+      ['seasons', Number(dataVersions.seasons ?? startupConfig.seasons_version ?? startupConfig.teams_version ?? 0), generatedAt],
+      ['players', Number(dataVersions.players ?? startupConfig.players_version ?? 0), generatedAt],
     ]);
 
     insertRows(

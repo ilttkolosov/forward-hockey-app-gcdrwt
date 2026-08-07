@@ -1,23 +1,22 @@
 // data/gameData.ts
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Game, Team } from '../types'; // Импортируем основные типы из существующего types/index.ts
 import { apiService } from '../services/apiService';
 import { ApiEvent, ApiGameDetailsResponse, ApiVenue} from '../types/apiTypes'; // Импортируем новые типы
-import { loadTeamLogo, loadTeamList, saveTeamList } from '../services/teamStorage';
+import { loadTeamLogo } from '../services/teamStorage';
 import { dataAvailability } from '../services/dataAvailability';
 import { readPersistentCache, writePersistentCache } from '../services/persistentCache';
 import NetInfo from '@react-native-community/netinfo';
+import {
+  getEventFromDatabase,
+  getMetadata,
+  loadLeaguesFromDatabase,
+  loadSeasonsFromDatabase,
+  loadTeamsFromDatabase,
+  loadVenuesFromDatabase,
+  queryEvents,
+} from '../database/repository';
 // --- Локальное хранилище и флаги обновления ---
-
-const LEAGUES_CACHE_KEY = 'leagues_cache';
-const SEASONS_CACHE_KEY = 'seasons_cache';
-const VENUES_CACHE_KEY = 'venues_cache';
-
-// УДАЛЯЕМ: TEAMS_CACHE_KEY — больше не нужен
-//const TEAMS_CACHE_KEY = 'teams_cache'; // Для кэширования команд, полученных через старый API
-
-
 
 // --- КЭШ ДЛЯ getGames ---
 let gamesCache: { [key: string]: { data: Game[]; timestamp: number } } = {};
@@ -76,28 +75,14 @@ const safeInt = (value: any): number => {
  */
 export const loadLeagues = async (): Promise<void> => {
   if (leaguesLoaded) return;
-
   try {
-    const cachedData = await AsyncStorage.getItem(LEAGUES_CACHE_KEY);
-    if (cachedData) {
-      const parsed = JSON.parse(cachedData);
-      cachedLeagues = parsed.data.reduce((acc: Record<string, any>, league: any) => {
-        acc[league.id] = league;
-        return acc;
-      }, {});
-      leaguesLoaded = true;
-      console.log('✅ Leagues loaded from cache');
-      return;
-    }
-
-    const response = await apiService.fetchLeagues();
-    cachedLeagues = response.data.reduce((acc: Record<string, any>, league: any) => {
+    const leagues = await loadLeaguesFromDatabase();
+    cachedLeagues = leagues.reduce((acc: Record<string, any>, league: any) => {
       acc[league.id] = league;
       return acc;
     }, {});
-    await AsyncStorage.setItem(LEAGUES_CACHE_KEY, JSON.stringify({ data: response.data, timestamp: Date.now() }));
     leaguesLoaded = true;
-    console.log('✅ Leagues loaded and cached');
+    console.log('✅ Leagues loaded from SQLite');
   } catch (error) {
     console.error('❌ Failed to load leagues:', error);
   }
@@ -110,26 +95,13 @@ export const loadSeasons = async (): Promise<void> => {
   if (seasonsLoaded) return;
 
   try {
-    const cachedData = await AsyncStorage.getItem(SEASONS_CACHE_KEY);
-    if (cachedData) {
-      const parsed = JSON.parse(cachedData);
-      cachedSeasons = parsed.data.reduce((acc: Record<string, any>, season: any) => {
-        acc[season.id] = season;
-        return acc;
-      }, {});
-      seasonsLoaded = true;
-      console.log('✅ Seasons loaded from cache');
-      return;
-    }
-
-    const response = await apiService.fetchSeasons();
-    cachedSeasons = response.data.reduce((acc: Record<string, any>, season: any) => {
+    const seasons = await loadSeasonsFromDatabase();
+    cachedSeasons = seasons.reduce((acc: Record<string, any>, season: any) => {
       acc[season.id] = season;
       return acc;
     }, {});
-    await AsyncStorage.setItem(SEASONS_CACHE_KEY, JSON.stringify({ data: response.data, timestamp: Date.now() }));
     seasonsLoaded = true;
-    console.log('✅ Seasons loaded and cached');
+    console.log('✅ Seasons loaded from SQLite');
   } catch (error) {
     console.error('❌ Failed to load seasons:', error);
   }
@@ -142,26 +114,13 @@ export const loadVenues = async (): Promise<void> => {
   if (venuesLoaded) return;
 
   try {
-    const cachedData = await AsyncStorage.getItem(VENUES_CACHE_KEY);
-    if (cachedData) {
-      const parsed = JSON.parse(cachedData);
-      cachedVenues = parsed.data.reduce((acc: Record<string, any>, venue: any) => {
-        acc[venue.id] = venue;
-        return acc;
-      }, {});
-      venuesLoaded = true;
-      console.log('✅ Venues loaded from cache');
-      return;
-    }
-
-    const response = await apiService.fetchVenues();
-    cachedVenues = response.data.reduce((acc: Record<string, any>, venue: any) => {
+    const venues = await loadVenuesFromDatabase();
+    cachedVenues = venues.reduce((acc: Record<string, any>, venue: any) => {
       acc[venue.id] = venue;
       return acc;
     }, {});
-    await AsyncStorage.setItem(VENUES_CACHE_KEY, JSON.stringify({ data: response.data, timestamp: Date.now() }));
     venuesLoaded = true;
-    console.log('✅ Venues loaded and cached');
+    console.log('✅ Venues loaded from SQLite');
   } catch (error) {
     console.error('❌ Failed to load venues:', error);
   }
@@ -172,37 +131,15 @@ export const loadTeams = async (): Promise<void> => {
   if (teamsLoaded) return;
 
   try {
-    // ← Используем teamStorage.ts для загрузки
-    let teams = await loadTeamList();
-
-    if (teams && teams.length > 0) {
-      cachedTeams = teams.reduce((acc, team) => {
-        acc[team.id] = team;
-        return acc;
-      }, {} as Record<string, Team>);
-      teamsLoaded = true;
-      console.log('✅ Teams loaded from teamStorage');
-      return;
-    }
-
-    // Если команд нет — загружаем из API и сохраняем через teamStorage
-    console.log('📥 Fetching team list from API (not in storage)...');
-    const response = await apiService.fetchTeamList();
-    console.log(`✅ Fetched ${response.length} teams from API`);
-
-    // Сохраняем через teamStorage
-    await saveTeamList(response);
-
-    cachedTeams = response.reduce((acc, team) => {
+    const teams = await loadTeamsFromDatabase();
+    cachedTeams = teams.reduce((acc, team) => {
       acc[team.id] = team;
       return acc;
     }, {} as Record<string, Team>);
-
     teamsLoaded = true;
-    console.log('✅ Teams loaded from API and saved via teamStorage');
+    console.log('✅ Teams loaded from SQLite');
   } catch (error) {
     console.error('❌ Failed to load teams:', error);
-    teamsLoaded = true; // ← предотвращаем повторные попытки
   }
 };
 
@@ -510,24 +447,52 @@ const fetchAndCacheGames = async (
   await loadVenues();
   await loadTeams();
 
-  const apiParams: Record<string, string> = {};
-  for (const key in params) {
-    if (key !== 'teams' && key !== 'useCache' && key !== 'f2f' && params[key as keyof typeof params] !== undefined) {
-      apiParams[key] = String(params[key as keyof typeof params]);
+  const archiveThrough = await getMetadata('historical_events_through') || '2026-07-31';
+  const localNeeded = !params.date_from || params.date_from <= archiveThrough;
+  const remoteNeeded = !params.date_to || params.date_to > archiveThrough;
+  const localEvents = localNeeded ? await queryEvents({
+    ...params,
+    date_to: !params.date_to || params.date_to > archiveThrough ? archiveThrough : params.date_to,
+  }) : [];
+  let remoteEvents: ApiEvent[] = [];
+
+  if (remoteNeeded) {
+    const nextDay = new Date(`${archiveThrough}T00:00:00.000Z`);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+    const remoteFrom = nextDay.toISOString().slice(0, 10);
+    const apiParams: Record<string, string> = {};
+    if (params.date_from) apiParams.date_from = params.date_from > remoteFrom ? params.date_from : remoteFrom;
+    else apiParams.date_from = remoteFrom;
+    if (params.date_to) apiParams.date_to = params.date_to;
+    if (params.league) apiParams.league = params.league;
+    if (params.season) apiParams.season = params.season;
+    if (params.teams) {
+      const teamList = params.teams.split(/[,| ]+/).filter(Boolean);
+      apiParams.teams = teamList.join(params.f2f ? '|' : ',');
+    }
+    const network = await NetInfo.fetch();
+    const canUseNetwork = network.isConnected !== false && network.isInternetReachable !== false;
+    if (canUseNetwork) {
+      try {
+        remoteEvents = (await apiService.fetchEvents(apiParams)).data;
+        dataAvailability.markNetworkSuccess();
+      } catch (error) {
+        if (localEvents.length === 0) throw error;
+        dataAvailability.markCachedDataUsed('Текущие матчи не удалось обновить');
+        console.warn('Текущая часть списка матчей недоступна, используется SQLite:', error);
+      }
+    } else if (localEvents.length === 0) {
+      throw new Error('Нет подключения к интернету и локальных матчей для этого раздела.');
     }
   }
-  if (params.teams) {
-    const teamList = params.teams.split(/[,| ]+/).filter(id => id.trim() !== '');
-    apiParams.teams = teamList.join(params.f2f ? '|' : ',');
-  }
 
-  const response = await apiService.fetchEvents(apiParams);
-  const games = await Promise.all(response.data.map(convertApiEventToGame));
+  const eventsById = new Map<string, ApiEvent>();
+  [...localEvents, ...remoteEvents].forEach(event => eventsById.set(String(event.id), event));
+  const games = await Promise.all([...eventsById.values()].map(convertApiEventToGame));
   const sortedGames = sortUpcomingGames(games);
   const entry = { data: sortedGames, timestamp: Date.now() };
   gamesCache[cacheKey] = entry;
   await writePersistentCache(getPersistentGamesKey(cacheKey), sortedGames);
-  dataAvailability.markNetworkSuccess();
   return sortedGames;
 };
 // --- Экспортируемые функции ---
@@ -552,34 +517,6 @@ export async function getGames(params: GetGamesParams): Promise<Game[]> {
       console.log('✅ Returning games from memory cache for key:', cacheKey);
       return cachedEntry.data;
     }
-  }
-
-  // Постоянный кэш переживает перезапуск приложения. Возвращаем его сразу,
-  // а актуализацию выполняем в фоне (stale-while-revalidate).
-  if (params.useCache !== false) {
-    const persistent = await readPersistentCache<Game[]>(getPersistentGamesKey(cacheKey));
-    if (persistent) {
-      gamesCache[cacheKey] = { data: persistent.data, timestamp: persistent.savedAt };
-      dataAvailability.markCachedDataUsed();
-      const network = await NetInfo.fetch();
-      const canRefresh = network.isConnected !== false && network.isInternetReachable !== false;
-      if (canRefresh && !ongoingRequests.has(cacheKey)) {
-        const refresh = fetchAndCacheGames(params, cacheKey)
-          .catch(error => {
-            console.warn('Не удалось обновить сохранённые матчи:', error);
-            dataAvailability.markCachedDataUsed('Не удалось обновить матчи');
-            return persistent.data;
-          })
-          .finally(() => ongoingRequests.delete(cacheKey));
-        ongoingRequests.set(cacheKey, refresh);
-      }
-      return persistent.data;
-    }
-  }
-
-  const network = await NetInfo.fetch();
-  if (network.isConnected === false || network.isInternetReachable === false) {
-    throw new Error('Нет подключения к интернету и сохранённых матчей для этого раздела.');
   }
 
   // 2. Проверяем, не идёт ли уже такой запрос
@@ -671,6 +608,15 @@ export async function getPastGamesForTeam74(): Promise<Game[]> {
 export const getGameById = async (id: string, useCache = true): Promise<Game | null> => {
   const now = Date.now();
   console.log(`🔍 getGameById called for ID ${id}, useCache=${useCache}`);
+
+  const localEvent = await getEventFromDatabase(id);
+  if (localEvent) {
+    await Promise.all([loadLeagues(), loadSeasons(), loadVenues(), loadTeams()]);
+    const localGame = await convertApiEventToGame(localEvent);
+    gameDetailsCache[id] = { data: localGame, timestamp: now };
+    console.log(`✅ Game ID ${id} loaded from SQLite`);
+    return localGame;
+  }
 
   // 🔥 Если useCache = false — пропускаем ВСЕ кэши и идём сразу в API
   if (!useCache) {
@@ -1007,10 +953,8 @@ export async function getPastGamesCount(): Promise<number> {
     const pastDateString = pastDate.toISOString().split('T')[0];
     const todayString = now.toISOString().split('T')[0];
 
-    // Получаем только count, не загружая все данные
-    const response = await apiService.fetchEvents({ date_from: pastDateString, date_to: todayString });
-    const count = response.count || 0;
-    console.log('Past games count:', count);
+    const count = (await getGames({ date_from: pastDateString, date_to: todayString })).length;
+    console.log('Past games count (SQLite + recent API):', count);
     return count;
   } catch (error) {
     console.error('Error getting past games count:', error);

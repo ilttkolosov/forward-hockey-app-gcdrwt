@@ -14,16 +14,12 @@ import {
 import { colors } from '../styles/commonStyles';
 import { playerDownloadService } from '../services/playerDataService';
 import PlayerDataLoadingScreen from '../components/PlayerDataLoadingScreen';
-import { apiService } from '../services/apiService';
-import { loadTeamList, saveTeamList, saveTeamLogo } from '../services/teamStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system/legacy';
 import { getUpcomingGamesMasterData } from '../data/gameData';
 //import SplashScreen from '../components/SplashScreen';
 import { loadStartupConfig, StartupConfig } from '../services/startupApi';
 import { fetchTournamentTable, getCachedTournamentConfig } from '../services/tournamentsApi';
-import { getGames, getPastGamesForTeam74 } from '../data/gameData';
-import Constants from 'expo-constants';
+import { getGames } from '../data/gameData';
 import type { Player } from '../types';
 import { initAnalytics, trackEvent } from '../services/analyticsService';
 import * as Notifications from 'expo-notifications';
@@ -34,19 +30,16 @@ import { dataAvailability } from '../services/dataAvailability';
 import { NetworkStatusProvider } from '../contexts/NetworkStatusContext';
 import { SQLiteProvider } from 'expo-sqlite';
 import { DATABASE_ASSET_SOURCE, DATABASE_NAME, migrateDatabase } from '../database';
+import { initializeReferenceData } from '../services/referenceDataService';
+import { syncCompletedHistoricalGames } from '../services/historicalSync';
+import { showAppUpdateNotice } from '../services/appUpdateService';
 global.Buffer = Buffer;
 
 // === КОНСТАНТЫ ===
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 const TOURNAMENTS_PAST_KEY = 'tournaments_past';
 const CURRENT_TOURNAMENT_ID_KEY = 'current_tournament_id';
-const TEAMS_VERSION_KEY = 'teams_version';
 const PLAYERS_VERSION_KEY = 'players_version';
-const APP_VERSION_KEY = 'app_version';
-// === КОНСТАНТЫ ДЛЯ СПРАВОЧНИКОВ ===
-const LEAGUES_CACHE_KEY = 'api_leagues_cache';
-const SEASONS_CACHE_KEY = 'api_seasons_cache';
-const VENUES_CACHE_KEY = 'api_venues_cache';
 
 // --- ФОНОВЫЕ ФУНКЦИИ ---
 const initializeTournamentsInBackground = async (config: StartupConfig) => {
@@ -72,26 +65,6 @@ const initializeTournamentsInBackground = async (config: StartupConfig) => {
   }
 };
 
-const preloadPastGamesInBackground = async () => {
-  try {
-    console.log('[Preload] 🕰️ Запуск фоновой загрузки архивных игр (последний год)...');
-    const now = new Date();
-    const startDate = new Date(now);
-    startDate.setFullYear(startDate.getFullYear() - 1);
-    const startDateStr = startDate.toISOString().split('T')[0];
-    const endDateStr = now.toISOString().split('T')[0];
-    await getGames({
-      date_from: startDateStr,
-      date_to: endDateStr,
-      teams: '74',
-      useCache: true,
-    });
-    console.log('[Preload] ✅ Архивные игры (последний год) загружены и закэшированы');
-  } catch (error) {
-    console.warn('[Preload] ❌ Ошибка фоновой загрузки архивных игр:', error);
-  }
-};
-
 const preloadCurrentTournamentGames = async (config: StartupConfig) => {
   try {
     const currentTournament = config.tournamentsNow?.[0];
@@ -111,108 +84,6 @@ const preloadCurrentTournamentGames = async (config: StartupConfig) => {
   } catch (error) {
     console.warn('[Preload] Ошибка предзагрузки игр текущего турнира:', error);
   }
-};
-
-// === УЛУЧШЕННАЯ ФУНКЦИЯ ЗАГРУЗКИ КОМАНД С ПРОГРЕССОМ ===
-const initializeTeams = async (onTeamLoaded: (loaded: number, total: number) => void): Promise<number> => {
-  try {
-    const teams = await apiService.fetchTeamList();
-    const total = teams.length;
-    onTeamLoaded(0, total);
-    await saveTeamList(teams);
-
-    let documentDir = FileSystem.documentDirectory;
-    if (!documentDir) {
-      await new Promise(resolve => setTimeout(resolve, 150));
-      documentDir = FileSystem.documentDirectory;
-    }
-    if (!documentDir) return 0;
-
-    const logoDirPath = `${documentDir}team_logos`;
-    const dirInfo = await FileSystem.getInfoAsync(logoDirPath);
-    if (!dirInfo.exists) {
-      await FileSystem.makeDirectoryAsync(logoDirPath, { intermediates: true });
-    } else {
-      const files = await FileSystem.readDirectoryAsync(logoDirPath);
-      await Promise.all(
-        files.map(file => FileSystem.deleteAsync(`${logoDirPath}/${file}`, { idempotent: true }))
-      );
-    }
-
-    const logoKeys = teams.map(team => `team_logo_${team.id}`);
-    await AsyncStorage.multiRemove(logoKeys);
-
-    let loadedCount = 0;
-    const downloadPromises = teams.map(async (team) => {
-      if (team.logo_url) {
-        const fileName = `team_${team.id}.jpg`;
-        const fileUri = `${logoDirPath}/${fileName}`;
-        try {
-          const result = await FileSystem.downloadAsync(team.logo_url, fileUri);
-          if (result.status === 200) {
-            await saveTeamLogo(team.id, result.uri);
-          }
-        } catch (err) {
-          console.warn(`Failed to download logo for team ${team.id}:`, err);
-        }
-      }
-      loadedCount++;
-      onTeamLoaded(loadedCount, total);
-      return true;
-    });
-
-    await Promise.all(downloadPromises);
-    return teams.length;
-  } catch (error) {
-    console.error('💥 Failed to initialize teams:', error);
-    throw error;
-  }
-};
-
-const restoreReferenceDataFromStorage = async (): Promise<boolean> => {
-  try {
-    const [leaguesJson, seasonsJson, venuesJson] = await Promise.all([
-      AsyncStorage.getItem(LEAGUES_CACHE_KEY),
-      AsyncStorage.getItem(SEASONS_CACHE_KEY),
-      AsyncStorage.getItem(VENUES_CACHE_KEY),
-    ]);
-    let hasAll = true;
-    if (leaguesJson) {
-      const leagues = JSON.parse(leaguesJson);
-      leagues.forEach((league: any) => {
-        apiService['leagueCache'][league.id] = league;
-      });
-    } else hasAll = false;
-    if (seasonsJson) {
-      const seasons = JSON.parse(seasonsJson);
-      seasons.forEach((season: any) => {
-        apiService['seasonCache'][season.id] = season;
-      });
-    } else hasAll = false;
-    if (venuesJson) {
-      const venues = JSON.parse(venuesJson);
-      venues.forEach((venue: any) => {
-        apiService['venueCache'][venue.id] = venue;
-      });
-    } else hasAll = false;
-    return hasAll;
-  } catch (error) {
-    console.warn('Failed to restore reference data from storage:', error);
-    return false;
-  }
-};
-
-const forceReloadReferenceData = async () => {
-  const [leaguesRes, seasonsRes, venuesRes] = await Promise.all([
-    apiService.fetchLeagues(),
-    apiService.fetchSeasons(),
-    apiService.fetchVenues(),
-  ]);
-  await Promise.all([
-    AsyncStorage.setItem(LEAGUES_CACHE_KEY, JSON.stringify(leaguesRes.data)),
-    AsyncStorage.setItem(SEASONS_CACHE_KEY, JSON.stringify(seasonsRes.data)),
-    AsyncStorage.setItem(VENUES_CACHE_KEY, JSON.stringify(venuesRes.data)),
-  ]);
 };
 
 // --- СПЛАШ-СКРИН С ДИНАМИЧЕСКИМ СТАТУСОМ ПРОГРЕССА ---
@@ -366,67 +237,18 @@ function RootLayoutContent() {
       console.log("Начали инициализацию приложения");
       const configResult = await loadStartupConfig();
       const config = configResult.data;
+      void showAppUpdateNotice(config);
       const networkState = await NetInfo.fetch();
       const canUseNetwork = networkState.isConnected !== false && networkState.isInternetReachable !== false;
       if (configResult.source === 'cache') {
         setDynamicStatus('Используется последняя сохранённая конфигурация');
       }
-      const currentAppVersion = Constants.expoConfig?.version || '1.0.0';
-      const lastAppVersion = await AsyncStorage.getItem(APP_VERSION_KEY);
-      const appWasUpdated = currentAppVersion !== lastAppVersion;
-      const localTeamsVersion = parseInt(await AsyncStorage.getItem(TEAMS_VERSION_KEY) || '0');
-      const shouldUpdateTeams = canUseNetwork && (config.teams_version > localTeamsVersion || appWasUpdated);
-      
-      console.log("Начали Восстановление справочников из AsyncStorage");
-      // === 2. Восстановление справочников из AsyncStorage ===
-      let referenceDataRestored = false;
-      if (!shouldUpdateTeams) {
-        referenceDataRestored = await restoreReferenceDataFromStorage();
-        setProgress(15);
-      }
-
-      // === 3. Команды и справочники ===
-      console.log("Начали загрузку списка команд");
-      const existingTeams = await loadTeamList();
-      const hasCachedTeams = existingTeams && existingTeams.length > 0;
-      let teamsCount = existingTeams?.length || 0;
-
-      if (shouldUpdateTeams || !hasCachedTeams) {
-        if (!canUseNetwork && !hasCachedTeams) {
-          throw new Error('Нет сохранённых данных команд. Для первого запуска требуется интернет.');
-        }
-        try {
-          setInitializationMessage('Обновление команд...');
-          setProgress(20);
-          teamsCount = await initializeTeams((loaded, total) => {
-            setDynamicStatus(`Загружено команд ${loaded} из ${total}`);
-          });
-          await forceReloadReferenceData();
-          await AsyncStorage.setItem(TEAMS_VERSION_KEY, String(config.teams_version));
-          await AsyncStorage.setItem(APP_VERSION_KEY, currentAppVersion);
-        } catch (error) {
-          if (!hasCachedTeams) throw error;
-          dataAvailability.markCachedDataUsed('Не удалось обновить команды и справочники');
-          teamsCount = existingTeams?.length || 0;
-          await restoreReferenceDataFromStorage();
-        }
-      } else {
-        if (!referenceDataRestored) {
-          if (canUseNetwork) {
-            setInitializationMessage('Восстановление справочников...');
-            setProgress(25);
-            try {
-              await forceReloadReferenceData();
-            } catch {
-              dataAvailability.markCachedDataUsed('Справочники не удалось обновить');
-            }
-          } else {
-            dataAvailability.markCachedDataUsed();
-          }
-        }
-        setDynamicStatus(`Загружено команд ${teamsCount}`);
-        setProgress(30);
-      }
+      console.log('Начали загрузку справочников из SQLite');
+      setInitializationMessage('Подготовка локальных справочников...');
+      setProgress(15);
+      const { teamsCount } = await initializeReferenceData(config, canUseNetwork);
+      setDynamicStatus(`Загружено команд ${teamsCount}`);
+      setProgress(30);
 
 
       // === 3.1 ЗАПУСКАЕМ загрузку предстоящих игр в фоне (не ждём) ===
@@ -441,76 +263,30 @@ function RootLayoutContent() {
         console.warn('⚠️ Ошибка фоновой загрузки предстоящих игр:', err);
       });
 
-      // === 4.  Фоновая предзагрузка прошедших игр для команды 74
-      setDynamicStatus(`Загрузка основных данных программы`);
-      setInitializationMessage('Фоновая загрузка прошедших игр...');
-      setProgress(40);
-      getPastGamesForTeam74()
-        .then(games => {
-          console.log(`✅ Preloaded ${games.length} past games for team 74 in background`);
-        })
-        .catch(err => {
-          console.warn('⚠️ Failed to preload past games for team 74:', err);
-        });
-
       // === 5. Игроки ===
-      const localPlayersVersion = parseInt(await AsyncStorage.getItem(PLAYERS_VERSION_KEY) || '0');
-      const shouldUpdatePlayers = canUseNetwork && config.players_version > localPlayersVersion;
-      console.log('🔍 Players version check:', {
-        configVersion: config.players_version,
-        localVersion: localPlayersVersion,
-        shouldUpdate: shouldUpdatePlayers
-      });
-      const playersDataLoaded = await playerDownloadService.isDataLoaded();
+      setInitializationMessage('Подготовка игроков и фотографий...');
+      setProgress(55);
       let playersList: Player[] = [];
-      if (shouldUpdatePlayers || !playersDataLoaded) {
-        if (!canUseNetwork && !playersDataLoaded) {
-          throw new Error('Нет сохранённых данных игроков. Для первого запуска требуется интернет.');
-        }
-        console.log('🔄 Запуск ПРИНУДИТЕЛЬНОЙ перезагрузки игроков (версия обновлена)');
-        setInitializationMessage('Загрузка данных игроков...');
-        setProgress(55);
-        try {
-          playersList = await playerDownloadService.refreshPlayersData(config.players_version, (stage, message) => {
-            setDynamicStatus(message || stage);
-          });
-          await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(config.players_version));
-          console.log('✅ Версия игроков сохранена:', config.players_version);
-        } catch (error) {
-          playersList = await playerDownloadService.getPlayersFromStorage();
-          if (playersList.length === 0) throw error;
-          await playerDownloadService.setDataLoaded(true);
-          dataAvailability.markCachedDataUsed('Не удалось обновить данные игроков');
-        }
-      } else {
+      try {
+        playersList = await playerDownloadService.initializeFromDatabase(
+          config.players_version,
+          canUseNetwork,
+          config.sync?.player_photo_archive_url_template,
+          (stage, message) => setDynamicStatus(message || stage)
+        );
+        await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(config.players_version));
+      } catch (error) {
         playersList = await playerDownloadService.getPlayersFromStorage();
-        setDynamicStatus(`Загружено игроков ${playersList.length}`);
-        console.log('📦 Игроки загружены из кэша');
+        if (playersList.length === 0) throw error;
+        dataAvailability.markCachedDataUsed('Не удалось обновить данные игроков');
       }
+      setDynamicStatus(`Загружено игроков ${playersList.length}`);
+      setProgress(70);
 
-      // ✅ Проверяем фото ТОЛЬКО если игроки были загружены из кэша (не при полной перезагрузке)
-      if (canUseNetwork && playersList.length > 0 && !(shouldUpdatePlayers || !playersDataLoaded)) {
-        setInitializationMessage('Проверка фото игроков...');
-        setProgress(70);
-        setDynamicStatus('Анализ целостности фото...');
-
-        try {
-          await playerDownloadService.verifyAndRestorePlayerPhotosFromApi(
-            playersList,
-            (current, total) => {
-              if (total === 0) {
-                setDynamicStatus('Все фото на месте — восстановление не требуется');
-              } else if (current < total) {
-                setDynamicStatus(`Восстанавливаем фото: ${current} из ${total}`);
-              } else {
-                setDynamicStatus(`✅ Восстановлено ${total} фото`);
-              }
-            }
-          );
-        } catch (err) {
-          console.warn('⚠️ Ошибка при проверке фото игроков:', err);
-          setDynamicStatus('Ошибка при восстановлении фото');
-        }
+      if (canUseNetwork) {
+        void syncCompletedHistoricalGames(config.sync).catch(error => {
+          console.warn('[HistoricalSync] Фоновая синхронизация не выполнена:', error);
+        });
       }
 
       // === 7. Фоновые задачи (запускаем после основного прогресса) ===
@@ -519,7 +295,6 @@ function RootLayoutContent() {
       setProgress(80);
       initializeTournamentsInBackground(config);
       preloadCurrentTournamentGames(config);
-      preloadPastGamesInBackground();
 
       // === Ожидаем завершения загрузки предстоящих игр, если ещё не готово ===
       if (!upcomingGamesFinished && upcomingGamesPromise) {
