@@ -16,7 +16,6 @@ import { getCurrentGame, getFutureGames, getUpcomingGamesCount, getGameById, get
 import { getPlayers } from '../data/playerData';
 import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
-import ErrorMessage from '../components/ErrorMessage';
 import Icon from '../components/Icon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDeclension } from './tournaments/index'; // ← импортируем склонение
@@ -84,6 +83,29 @@ const headerStyles = StyleSheet.create({
   },
 });
 
+const warningStyles = StyleSheet.create({
+  container: {
+    backgroundColor: '#FFF4E5',
+    borderColor: colors.warning,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+  },
+  text: {
+    color: colors.text,
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  retry: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+});
+
 export default function HomeScreen() {
   const [currentGames, setCurrentGames] = useState<Game[]>([]);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
@@ -138,7 +160,7 @@ export default function HomeScreen() {
       setPlayersCount(players.length);
     } catch (err) {
       console.error('Error loading home screen data:', err);
-      setError('Не удалось загрузить данные. Попробуйте еще раз.');
+      setError(err instanceof Error ? err.message : 'Не удалось обновить данные. Показаны сохранённые значения.');
     } finally {
       if (!force) setLoading(false);
       setRefreshing(false);
@@ -166,17 +188,6 @@ export default function HomeScreen() {
     );
   }
 
-  if (error) {
-    return (
-      <SafeAreaView edges={['top']} style={commonStyles.container}>
-        <ErrorMessage message={error} onRetry={loadData} />
-      </SafeAreaView>
-    );
-  }
-
-
-
-
   return (
     <SafeAreaView edges={['top']} style={commonStyles.container}>
       <ScrollView
@@ -185,6 +196,14 @@ export default function HomeScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >
+        {error && (
+          <View accessibilityRole="alert" style={warningStyles.container}>
+            <Text style={warningStyles.text}>{error}</Text>
+            <TouchableOpacity onPress={() => loadData()}>
+              <Text style={warningStyles.retry}>Повторить обновление</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {/* Header */}
         <View style={headerStyles.headerContainer}>
           <View style={headerStyles.headerRow}>
