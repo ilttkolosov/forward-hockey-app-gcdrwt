@@ -1,6 +1,7 @@
 // services/tournamentsApi.ts
 import { apiService } from './apiService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { fetchWithTimeout } from './httpClient';
 
 export type TournamentTable = {
   position: string;
@@ -40,7 +41,7 @@ const CURRENT_TOURNAMENT_CONFIG_KEY = 'current_tournament_config'; // Для в�
  */
 export const fetchTournamentConfig = async (tournamentId: string): Promise<TournamentConfig> => {
   try {
-    const response = await fetch(`https://www.hc-forward.com/wp-json/app/v1/get-table/${tournamentId}`);
+    const response = await fetchWithTimeout(`https://www.hc-forward.com/wp-json/app/v1/get-table/${tournamentId}`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
