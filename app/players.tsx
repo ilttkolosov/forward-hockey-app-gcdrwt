@@ -243,6 +243,7 @@ export default function PlayersScreen() {
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [index, setIndex] = useState(0);
   const [playersReady, setPlayersReady] = useState(false); // ← флаг готовности
+  const [retryKey, setRetryKey] = useState(0);
 
   const positions = ['Вратарь', 'Защитник', 'Нападающий'];
 
@@ -255,32 +256,40 @@ export default function PlayersScreen() {
     }
   };
 
-  // Проверяем, готовы ли данные
-  const checkPlayersReady = async () => {
-    const ready = await playerDownloadService.isDataLoaded();
-    setPlayersReady(ready);
-    if (ready) {
-      // Данные есть — загружаем их
-      try {
-        const playersData = await getPlayers(); // теперь getPlayers() вернёт кэш
-        setPlayers(playersData);
-        setLoading(false);
-      } catch (err) {
-        console.error('Error loading players from storage:', err);
-        setError('Не удалось загрузить данные игроков.');
-        setLoading(false);
-      }
-    } else {
-      // Данных нет — продолжаем ждать
-      setLoading(true);
-      // Повторная проверка через 1 секунду
-      setTimeout(checkPlayersReady, 1000);
-    }
-  };
-
   useEffect(() => {
+    let isActive = true;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const checkPlayersReady = async () => {
+      const ready = await playerDownloadService.isDataLoaded();
+      if (!isActive) return;
+
+      setPlayersReady(ready);
+      if (ready) {
+        try {
+          const playersData = await getPlayers();
+          if (!isActive) return;
+          setPlayers(playersData);
+          setLoading(false);
+        } catch (err) {
+          if (!isActive) return;
+          console.error('Error loading players from storage:', err);
+          setError('Не удалось загрузить данные игроков.');
+          setLoading(false);
+        }
+      } else {
+        setLoading(true);
+        retryTimer = setTimeout(checkPlayersReady, 1000);
+      }
+    };
+
     checkPlayersReady();
-  }, []);
+
+    return () => {
+      isActive = false;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [retryKey]);
 
   const handlePlayerPress = (player: Player) => {
     if (showSearchModal) {
@@ -326,7 +335,14 @@ export default function PlayersScreen() {
   if (error) {
     return (
       <SafeAreaView style={commonStyles.container}>
-        <ErrorMessage message={error} onRetry={() => checkPlayersReady()} />
+        <ErrorMessage
+          message={error}
+          onRetry={() => {
+            setError(null);
+            setLoading(true);
+            setRetryKey((key) => key + 1);
+          }}
+        />
       </SafeAreaView>
     );
   }

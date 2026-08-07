@@ -1,5 +1,5 @@
 // app/season/[id].tsx
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -43,7 +43,7 @@ export default function SeasonGamesScreen() {
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const loadData = async (bypassCache = false) => {
+  const loadData = useCallback(async (bypassCache = false) => {
     if (!date_from || !date_to) {
       setError('Не указан диапазон дат');
       setLoading(false);
@@ -119,11 +119,11 @@ export default function SeasonGamesScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [date_from, date_to, id]);
 
   useEffect(() => {
     loadData();
-  }, [date_from, date_to]);
+  }, [loadData]);
 
   useEffect(() => {
     if (!searchQuery.trim()) {

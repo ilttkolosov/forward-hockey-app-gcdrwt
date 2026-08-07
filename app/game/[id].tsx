@@ -760,13 +760,16 @@ export default function GameDetailsScreen() {
 
 
   // === ФОНОВОЕ ОБНОВЛЕНИЕ СЧЁТА ВО ВРЕМЯ ИГРЫ ===
+  const liveGameId = gameDetails?.id;
+  const liveGameDate = gameDetails?.event_date;
+
   useEffect(() => {
-    if (!gameDetails) return;
+    if (!liveGameId || !liveGameDate) return;
 
     // Функция обновления счёта
     const updateLiveScore = async () => {
       // --- ПЕРЕНОСИМ ПРОВЕРКУ СЮДА ---
-      const gameStart = new Date(gameDetails.event_date);
+      const gameStart = new Date(liveGameDate);
       const gameEnd = new Date(gameStart.getTime() + 100 * 60 * 1000); // +100 минут
       const now = new Date();
       const isGameLive = isGameStarted && now <= gameEnd;
@@ -777,14 +780,11 @@ export default function GameDetailsScreen() {
       // --- КОНЕЦ ПЕРЕНОСА ---
 
       try {
-        const freshGame = await getGameById(gameDetails.id, false);
+        const freshGame = await getGameById(liveGameId, false);
         if (!freshGame) return;
 
         const newHome = String(freshGame.homeScore ?? '0');
         const newAway = String(freshGame.awayScore ?? '0');
-        const currentHome = liveScore.home;
-        const currentAway = liveScore.away;
-
         const newPeriods = {
           team1_first: String(freshGame.team1_first ?? '0'),
           team1_second: String(freshGame.team1_second ?? '0'),
@@ -794,19 +794,27 @@ export default function GameDetailsScreen() {
           team2_third: String(freshGame.team2_third ?? '0'),
         };
 
-        const periodsChanged =
-          newPeriods.team1_first !== periodScores.team1_first ||
-          newPeriods.team1_second !== periodScores.team1_second ||
-          newPeriods.team1_third !== periodScores.team1_third ||
-          newPeriods.team2_first !== periodScores.team2_first ||
-          newPeriods.team2_second !== periodScores.team2_second ||
-          newPeriods.team2_third !== periodScores.team2_third;
+        setLiveScore((currentScore) => {
+          if (newHome === currentScore.home && newAway === currentScore.away) {
+            return currentScore;
+          }
+          console.log('🔄 Live score updated');
+          return { home: newHome, away: newAway };
+        });
 
-        if (newHome !== currentHome || newAway !== currentAway || periodsChanged) {
-          console.log(`🔄 Live data updated`);
-          setLiveScore({ home: newHome, away: newAway });
-          setPeriodScores(newPeriods);
-        }
+        setPeriodScores((currentPeriods) => {
+          const periodsChanged =
+            newPeriods.team1_first !== currentPeriods.team1_first ||
+            newPeriods.team1_second !== currentPeriods.team1_second ||
+            newPeriods.team1_third !== currentPeriods.team1_third ||
+            newPeriods.team2_first !== currentPeriods.team2_first ||
+            newPeriods.team2_second !== currentPeriods.team2_second ||
+            newPeriods.team2_third !== currentPeriods.team2_third;
+
+          if (!periodsChanged) return currentPeriods;
+          console.log('🔄 Live period scores updated');
+          return newPeriods;
+        });
       } catch (err) {
         console.warn('⚠️ Failed to update live score:', err);
       }
@@ -820,7 +828,7 @@ export default function GameDetailsScreen() {
 
     // Очистка при размонтировании
     return () => clearInterval(intervalId);
-  }, [gameDetails?.id, isGameStarted]); // <-- Упрощаем зависимости
+  }, [isGameStarted, liveGameDate, liveGameId]);
 
 
   // === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ОТОБРАЖЕНИЯ ===

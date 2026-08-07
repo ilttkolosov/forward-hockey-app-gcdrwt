@@ -1,5 +1,5 @@
 // app/tournaments/index.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -52,6 +52,31 @@ type TournamentTableWithLogos = TournamentTableRowWithLogo[];
 // === ГЛОБАЛЬНЫЙ ФЛАГ ЗАГРУЗКИ ===
 const ongoingPreloads = new Set<string>();
 
+const addLogosToTable = async (table: TournamentTable[]): Promise<TournamentTableWithLogos> => {
+  return Promise.all(
+    table.map(async (row) => {
+      const logo_uri = await loadTeamLogo(row.team_id.toString()).catch((error) => {
+        console.error(`❌ [Tournaments] Ошибка загрузки логотипа для команды ${row.team_id}:`, error);
+        return null;
+      });
+      return {
+        team_id: row.team_id,
+        position: row.position,
+        team_name: row.team_name,
+        games: row.games,
+        wins: row.wins,
+        losses: row.losses,
+        draws: row.draws,
+        overtime_wins: row.overtime_wins,
+        overtime_losses: row.overtime_losses,
+        points_2x: row.points_2x,
+        pkpercent: row.pkpercent,
+        logo_uri,
+      };
+    })
+  );
+};
+
 export default function TournamentsScreen() {
   const [activeTab, setActiveTab] = useState<number>(0);
   const [tables, setTables] = useState<{
@@ -63,7 +88,7 @@ export default function TournamentsScreen() {
   const router = useRouter();
 
   // === ФОНОВАЯ ЗАГРУЗКА ИГР ТЕКУЩЕГО ТУРНИРА ===
-  const preloadCurrentTournamentGames = async (tournamentId: string, leagueId: string, seasonId: string) => {
+  const preloadCurrentTournamentGames = useCallback(async (tournamentId: string, leagueId: string, seasonId: string) => {
     const cacheKey = `t_${tournamentId}`;
     if (ongoingPreloads.has(cacheKey)) return;
 
@@ -82,9 +107,9 @@ export default function TournamentsScreen() {
     } finally {
       ongoingPreloads.delete(cacheKey);
     }
-  };
+  }, []);
 
-  const loadTournamentsFromCache = async () => {
+  const loadTournamentsFromCache = useCallback(async () => {
     try {
       const cachedTournamentsNow = await AsyncStorage.getItem(TOURNAMENTS_NOW_KEY);
       const cachedTournamentsPast = await AsyncStorage.getItem(TOURNAMENTS_PAST_KEY);
@@ -154,11 +179,11 @@ export default function TournamentsScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [preloadCurrentTournamentGames]);
 
   useEffect(() => {
     loadTournamentsFromCache();
-  }, []);
+  }, [loadTournamentsFromCache]);
 
   useTrackScreenView('Экран турнирной таблицы');
 
@@ -186,32 +211,6 @@ export default function TournamentsScreen() {
     } finally {
       setRefreshing(false);
     }
-  };
-
-  const addLogosToTable = async (table: TournamentTable[]): Promise<TournamentTableWithLogos> => {
-    const tableWithLogos = await Promise.all(
-      table.map(async (row) => {
-        const logo_uri = await loadTeamLogo(row.team_id.toString()).catch((error) => {
-          console.error(`❌ [Tournaments] Ошибка загрузки логотипа для команды ${row.team_id}:`, error);
-          return null;
-        });
-        return {
-          team_id: row.team_id,
-          position: row.position,
-          team_name: row.team_name,
-          games: row.games,
-          wins: row.wins,
-          losses: row.losses,
-          draws: row.draws,
-          overtime_wins: row.overtime_wins,
-          overtime_losses: row.overtime_losses,
-          points_2x: row.points_2x,
-          pkpercent: row.pkpercent,
-          logo_uri,
-        };
-      })
-    );
-    return tableWithLogos;
   };
 
   const handleBackPress = () => router.back();

@@ -1,5 +1,5 @@
 // app/mobilegames/hockey/index.tsx
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useCallback, useRef, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -49,15 +49,17 @@ export default function HockeyGameScreen() {
   const router = useRouter();
   const [puck, setPuck] = useState(INITIAL_PUCK);
   const [paddleX, setPaddleX] = useState(PADDING + (FIELD_WIDTH - PADDLE_WIDTH) / 2);
+  const paddleXRef = useRef(paddleX);
   const [score, setScore] = useState(0);
   const [penalties, setPenalties] = useState(0);
   const lastTimeRef = useRef<number | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
   const handleBackPress = () => {
     router.back();
   };
 
-  const updatePuck = (deltaTime: number) => {
+  const updatePuck = useCallback((deltaTime: number) => {
     setPuck((prev) => {
       let { x, y, vx, vy } = prev;
       const dt = deltaTime / 1000;
@@ -179,7 +181,8 @@ export default function HockeyGameScreen() {
 
       // === ОСТРОВОК (ракетка) с ВЫПУКЛОЙ ГРАНЬЮ ===
       const paddleTopY = PADDING + FIELD_HEIGHT - PADDLE_HEIGHT;
-      const paddleCenterX = paddleX + PADDLE_WIDTH / 2;
+      const currentPaddleX = paddleXRef.current;
+      const paddleCenterX = currentPaddleX + PADDLE_WIDTH / 2;
 
       // Проверяем, попала ли шайба в зону действия выпуклости
       const dxPaddle = x - paddleCenterX;
@@ -188,8 +191,8 @@ export default function HockeyGameScreen() {
 
       if (
         y > paddleTopY &&
-        x >= paddleX &&
-        x <= paddleX + PADDLE_WIDTH &&
+        x >= currentPaddleX &&
+        x <= currentPaddleX + PADDLE_WIDTH &&
         distToPaddleArc <= PUCK_RADIUS + PADDLE_CURVATURE_RADIUS
       ) {
         // Нормаль от центра дуги к шайбе
@@ -212,7 +215,7 @@ export default function HockeyGameScreen() {
 
       return { x, y, vx, vy };
     });
-  };
+  }, []);
 
   useEffect(() => {
     const loop = (timestamp: number) => {
@@ -221,16 +224,21 @@ export default function HockeyGameScreen() {
         updatePuck(delta);
       }
       lastTimeRef.current = timestamp;
-      requestAnimationFrame(loop);
+      animationFrameRef.current = requestAnimationFrame(loop);
     };
-    const id = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(id);
-  }, []);
+    animationFrameRef.current = requestAnimationFrame(loop);
+    return () => {
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [updatePuck]);
 
   const onGestureEvent = (event: any) => {
     if (event.nativeEvent.state === State.ACTIVE) {
       const newX = event.nativeEvent.x - PADDLE_WIDTH / 2;
       const clampedX = Math.max(PADDING, Math.min(newX, PADDING + FIELD_WIDTH - PADDLE_WIDTH));
+      paddleXRef.current = clampedX;
       setPaddleX(clampedX);
     }
   };

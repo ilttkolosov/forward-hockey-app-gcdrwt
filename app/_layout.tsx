@@ -1,5 +1,5 @@
 // _layout.tsx
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
@@ -331,20 +331,16 @@ export default function RootLayout() {
   const [dynamicStatus, setDynamicStatus] = useState<string>('Подготовка данных...');
   const progressAnimated = useRef(new Animated.Value(0)).current;
 
-  const setProgress = (value: number) => {
+  const setProgress = useCallback((value: number) => {
     Animated.timing(progressAnimated, {
       toValue: value,
       duration: 300,
       easing: Easing.out(Easing.ease),
       useNativeDriver: false,
     }).start();
-  };
+  }, [progressAnimated]);
 
-  useEffect(() => {
-    initializeApp();
-  }, []);
-
-  const initializeApp = async () => {
+  const initializeApp = useCallback(async () => {
 
     // Инициализация аналитики — делаем ДО загрузки конфига
     await initAnalytics();
@@ -502,7 +498,11 @@ export default function RootLayout() {
       setInitializationError('Ошибка инициализации приложения');
       setIsInitializing(false);
     }
-  };
+  }, [setProgress]);
+
+  useEffect(() => {
+    initializeApp();
+  }, [initializeApp]);
 
   if (isInitializing) {
     return <SplashScreenWithProgress 

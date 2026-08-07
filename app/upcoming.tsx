@@ -1,5 +1,5 @@
 // app/upcoming.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -45,7 +45,7 @@ export default function TeamGamesScreen() {
     router.back();
   };
 
-  const loadUpcoming = async () => {
+  const loadUpcoming = useCallback(async () => {
     try {
       const games = await getUpcomingGamesMasterData();
       setUpcomingGames(games);
@@ -55,9 +55,9 @@ export default function TeamGamesScreen() {
       setError('Не удалось загрузить предстоящие игры.');
       return [];
     }
-  };
+  }, []);
 
-  const loadPast = async () => {
+  const loadPast = useCallback(async () => {
     try {
       const games = await getPastGamesForTeam74();
       setPastGames(games);
@@ -67,9 +67,9 @@ export default function TeamGamesScreen() {
       setError('Не удалось загрузить прошедшие игры.');
       return [];
     }
-  };
+  }, []);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setError(null);
     try {
       const [upcoming, past] = await Promise.all([loadUpcoming(), loadPast()]);
@@ -83,11 +83,11 @@ export default function TeamGamesScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [loadPast, loadUpcoming]);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
   const onRefresh = () => {
     setRefreshing(true);

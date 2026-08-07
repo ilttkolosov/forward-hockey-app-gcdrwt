@@ -32,6 +32,7 @@
     }
   },
   "cli": {
+    "version": ">=21.7.0 <22.0.0",
     "appVersionSource": "remote"
   }
 }

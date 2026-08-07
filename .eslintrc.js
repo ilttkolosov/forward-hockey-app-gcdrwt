@@ -38,9 +38,17 @@ module.exports = {
   },
   overrides: [
     {
-      files: ['metro.config.js'],
+      files: [
+        'app.config.js',
+        'babel.config.js',
+        'metro.config.js',
+        'workbox-config.js',
+        'plugins/**/*.js',
+        'scripts/**/*.js',
+      ],
       rules: {
-        '@typescript-eslint/no-var-requires': 'off'
+        '@typescript-eslint/no-var-requires': 'off',
+        '@typescript-eslint/no-require-imports': 'off',
       }
     }
   ]
