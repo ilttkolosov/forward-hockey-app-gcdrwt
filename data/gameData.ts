@@ -5,6 +5,9 @@ import { Game, Team } from '../types'; // Импортируем основны�
 import { apiService } from '../services/apiService';
 import { ApiEvent, ApiGameDetailsResponse, ApiVenue} from '../types/apiTypes'; // Импортируем новые типы
 import { loadTeamLogo, loadTeamList, saveTeamList } from '../services/teamStorage';
+import { dataAvailability } from '../services/dataAvailability';
+import { readPersistentCache, writePersistentCache } from '../services/persistentCache';
+import NetInfo from '@react-native-community/netinfo';
 // --- Локальное хранилище и флаги обновления ---
 
 const LEAGUES_CACHE_KEY = 'leagues_cache';
@@ -19,11 +22,13 @@ const VENUES_CACHE_KEY = 'venues_cache';
 // --- КЭШ ДЛЯ getGames ---
 let gamesCache: { [key: string]: { data: Game[]; timestamp: number } } = {};
 const GAMES_CACHE_DURATION = 5 * 60 * 1000; // 5 минут
+const GAMES_STORAGE_PREFIX = '@offline/games/v1/';
 // --- КОНЕЦ КЭША ---
 
 // --- КЭШ ДЛЯ ДЕТАЛЕЙ ИГР ---
 let gameDetailsCache: { [gameId: string]: { data: Game; timestamp: number } } = {};
 const GAME_DETAILS_CACHE_DURATION = 10 * 60 * 1000; // 10 минут
+const GAME_DETAIL_STORAGE_PREFIX = '@offline/game-detail/v1/';
 // --- КОНЕЦ КЭША ---
 
 // --- КЭШ ДЛЯ МАСТЕР-ДАННЫХ ПРЕДСТОЯЩИХ ИГР ---
@@ -481,15 +486,50 @@ const sortUpcomingGames = (games: Game[]): Game[] => {
 /**
  * Возвращает фолбэк список предстоящих игр (пустой массив)
  */
-const getFallbackUpcomingGames = (): Game[] => {
-  console.warn('Using fallback upcoming games (empty array)');
-  return [];
-};
-
-// --- КОНЕЦ ВСПОМОГАТЕЛЬНЫХ ФУНКЦИЙ ---
-
 // Глобальный Map для дедупликации запросов
 const ongoingRequests = new Map<string, Promise<Game[]>>();
+
+interface GetGamesParams {
+  date_from?: string;
+  date_to?: string;
+  league?: string;
+  season?: string;
+  teams?: string;
+  useCache?: boolean;
+  f2f?: boolean;
+}
+
+const getPersistentGamesKey = (cacheKey: string) => `${GAMES_STORAGE_PREFIX}${cacheKey}`;
+
+const fetchAndCacheGames = async (
+  params: GetGamesParams,
+  cacheKey: string
+): Promise<Game[]> => {
+  await loadLeagues();
+  await loadSeasons();
+  await loadVenues();
+  await loadTeams();
+
+  const apiParams: Record<string, string> = {};
+  for (const key in params) {
+    if (key !== 'teams' && key !== 'useCache' && key !== 'f2f' && params[key as keyof typeof params] !== undefined) {
+      apiParams[key] = String(params[key as keyof typeof params]);
+    }
+  }
+  if (params.teams) {
+    const teamList = params.teams.split(/[,| ]+/).filter(id => id.trim() !== '');
+    apiParams.teams = teamList.join(params.f2f ? '|' : ',');
+  }
+
+  const response = await apiService.fetchEvents(apiParams);
+  const games = await Promise.all(response.data.map(convertApiEventToGame));
+  const sortedGames = sortUpcomingGames(games);
+  const entry = { data: sortedGames, timestamp: Date.now() };
+  gamesCache[cacheKey] = entry;
+  await writePersistentCache(getPersistentGamesKey(cacheKey), sortedGames);
+  dataAvailability.markNetworkSuccess();
+  return sortedGames;
+};
 // --- Экспортируемые функции ---
 
 /**
@@ -500,16 +540,9 @@ const ongoingRequests = new Map<string, Promise<Game[]>>();
  * Универсальная функция для получения списка игр с фильтрацией
  * --- ОБНОВЛЕНО: Добавлено кэширование ---
  */
-export async function getGames(params: {
-  date_from?: string;
-  date_to?: string;
-  league?: string;
-  season?: string;
-  teams?: string;
-  useCache?: boolean;
-  f2f?: boolean;
-}): Promise<Game[]> {
-  const cacheKey = JSON.stringify(params);
+export async function getGames(params: GetGamesParams): Promise<Game[]> {
+  const { useCache: _useCache, ...cacheParams } = params;
+  const cacheKey = JSON.stringify(cacheParams);
   const now = Date.now();
 
   // 1. Проверяем кэш, если useCache !== false
@@ -521,6 +554,34 @@ export async function getGames(params: {
     }
   }
 
+  // Постоянный кэш переживает перезапуск приложения. Возвращаем его сразу,
+  // а актуализацию выполняем в фоне (stale-while-revalidate).
+  if (params.useCache !== false) {
+    const persistent = await readPersistentCache<Game[]>(getPersistentGamesKey(cacheKey));
+    if (persistent) {
+      gamesCache[cacheKey] = { data: persistent.data, timestamp: persistent.savedAt };
+      dataAvailability.markCachedDataUsed();
+      const network = await NetInfo.fetch();
+      const canRefresh = network.isConnected !== false && network.isInternetReachable !== false;
+      if (canRefresh && !ongoingRequests.has(cacheKey)) {
+        const refresh = fetchAndCacheGames(params, cacheKey)
+          .catch(error => {
+            console.warn('Не удалось обновить сохранённые матчи:', error);
+            dataAvailability.markCachedDataUsed('Не удалось обновить матчи');
+            return persistent.data;
+          })
+          .finally(() => ongoingRequests.delete(cacheKey));
+        ongoingRequests.set(cacheKey, refresh);
+      }
+      return persistent.data;
+    }
+  }
+
+  const network = await NetInfo.fetch();
+  if (network.isConnected === false || network.isInternetReachable === false) {
+    throw new Error('Нет подключения к интернету и сохранённых матчей для этого раздела.');
+  }
+
   // 2. Проверяем, не идёт ли уже такой запрос
   if (ongoingRequests.has(cacheKey)) {
     console.log('⏳ Waiting for ongoing request for key:', cacheKey);
@@ -530,54 +591,16 @@ export async function getGames(params: {
   // 3. Создаём новый запрос
   const requestPromise = (async (): Promise<Game[]> => {
     try {
-      // Загружаем справочники
-      await loadLeagues();
-      await loadSeasons();
-      await loadVenues();
-      await loadTeams();
-
-      // Формируем параметры для API
-      const apiParams: Record<string, string> = {};
-      for (const key in params) {
-        if (key !== 'teams' && params[key as keyof typeof params]) {
-          apiParams[key] = String(params[key as keyof typeof params]);
-        }
-      }
-      if (params.teams) {
-        const teamList = params.teams
-          .split(/[,| ]+/)
-          .filter(id => id.trim() !== '');
-        const separator = params.f2f ? '|' : ',';
-        apiParams.teams = teamList.join(separator);
-      }
-
-      // Запрос к API
-      const response = await apiService.fetchEvents(apiParams);
-      const apiEvents = response.data;
-
-      // Преобразуем в Game[]
-      const games: Game[] = [];
-      for (const apiEvent of apiEvents) {
-        const game = await convertApiEventToGame(apiEvent);
-        games.push(game);
-      }
-
-      const sortedGames = sortUpcomingGames(games);
-      console.log(`✅ Loaded ${sortedGames.length} games with params:`, params);
-
-      // Сохраняем в кэш, если разрешено
-      if (params.useCache !== false) {
-        gamesCache[cacheKey] = {
-          data: sortedGames,
-          timestamp: now,
-        };
-        console.log('💾 Saved to memory cache for key:', cacheKey);
-      }
-
-      return sortedGames;
+      return await fetchAndCacheGames(params, cacheKey);
     } catch (error) {
       console.error('❌ Error in getGames:', error);
-      return getFallbackUpcomingGames();
+      const persistent = await readPersistentCache<Game[]>(getPersistentGamesKey(cacheKey));
+      if (persistent) {
+        gamesCache[cacheKey] = { data: persistent.data, timestamp: persistent.savedAt };
+        dataAvailability.markCachedDataUsed('Не удалось обновить матчи');
+        return persistent.data;
+      }
+      throw new Error('Не удалось загрузить матчи: проверьте подключение к интернету.', { cause: error });
     } finally {
       // Удаляем промис из ongoingRequests
       ongoingRequests.delete(cacheKey);
@@ -618,7 +641,7 @@ export async function getPastGamesForTeam74(): Promise<Game[]> {
       date_from: pastDateString,
       date_to: todayString,
       teams: '74',
-      useCache: false, // ← отключаем стандартный кэш, чтобы не загрязнять gamesCache
+      useCache: true,
     });
 
     // Сортируем по убыванию даты (сначала самые свежие)
@@ -662,6 +685,13 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
       }
     }
 
+    const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
+    if (persistent) {
+      gameDetailsCache[id] = { data: persistent.data, timestamp: persistent.savedAt };
+      dataAvailability.markCachedDataUsed();
+      return persistent.data;
+    }
+
     // 2. Ищем игру в ОБЩЕМ кэше игр (gamesCache)
     for (const cacheKey in gamesCache) {
       const entry = gamesCache[cacheKey];
@@ -695,13 +725,15 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
 
     const apiGameDetails = await apiService.fetchEventById(id);
     if (!apiGameDetails) {
-      return null;
+      const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
+      return persistent?.data || null;
     }
     const game = await convertApiEventToGame(apiGameDetails);
 
     // Сохраняем в кэш только если useCache !== false
     if (useCache) {
       gameDetailsCache[id] = { data: game, timestamp: now };
+      await writePersistentCache(`${GAME_DETAIL_STORAGE_PREFIX}${id}`, game);
       console.log(`💾 Game details for ID ${id} saved to memory cache (from API)`);
     } else {
       console.log(`💾 Game details for ID ${id} loaded from API (not cached due to useCache=false)`);
@@ -709,7 +741,12 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
     return game;
   } catch (error) {
     console.error(`❌ Failed to get game by ID ${id} from API:`, error);
-    return null;
+    const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
+    if (persistent) {
+      dataAvailability.markCachedDataUsed('Не удалось обновить данные матча');
+      return persistent.data;
+    }
+    throw error;
   }
 };
 
@@ -780,7 +817,11 @@ export async function getUpcomingGamesMasterData(forceRefresh = false): Promise<
       return sortedGames;
     } catch (error) {
       console.error('❌ Failed to load master upcoming games:', error);
-      return getFallbackUpcomingGames();
+      if (upcomingGamesMasterCache) {
+        dataAvailability.markCachedDataUsed('Не удалось обновить предстоящие матчи');
+        return upcomingGamesMasterCache.data;
+      }
+      throw error;
     } finally {
       isMasterDataLoading = false;
       masterDataLoadPromise = null;
