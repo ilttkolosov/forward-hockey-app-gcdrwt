@@ -1,0 +1,678 @@
+{
+  "api_url": "https://www.hc-forward.com/wp-json/app/v1/get-team",
+  "downloaded_at": "2026-08-08T09:41:46.907Z",
+  "teams": [
+    {
+      "id": "73",
+      "name": "Колпино 14",
+      "logo_url": "http://hc-forward.com/wp-content/uploads/2023/09/kolpino_max.png",
+      "filename": "team_73.png",
+      "bytes": 31682
+    },
+    {
+      "id": "74",
+      "name": "Динамо-Форвард 14",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2021/09/forward_logo_200.png",
+      "filename": "team_74.png",
+      "bytes": 5400
+    },
+    {
+      "id": "133",
+      "name": "Рязань ВДВ",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ryazan-vdv_200.png",
+      "filename": "team_133.png",
+      "bytes": 19739
+    },
+    {
+      "id": "137",
+      "name": "Балашиха",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/balashiha_200.png",
+      "filename": "team_137.png",
+      "bytes": 14589
+    },
+    {
+      "id": "150",
+      "name": "СКА Петергоф 14",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska_petergof_200.png",
+      "filename": "team_150.png",
+      "bytes": 14863
+    },
+    {
+      "id": "160",
+      "name": "СКА 14",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska_200-1.png",
+      "filename": "team_160.png",
+      "bytes": 23846
+    },
+    {
+      "id": "163",
+      "name": "СШОР №1",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/sshor-№1_200.png",
+      "filename": "team_163.png",
+      "bytes": 17233
+    },
+    {
+      "id": "194",
+      "name": "Динамо Москва 2",
+      "logo_url": "http://hc-forward.com/wp-content/uploads/2023/09/dinamo.png",
+      "filename": "team_194.png",
+      "bytes": 1716
+    },
+    {
+      "id": "197",
+      "name": "Локомотив 2004",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/hc_lokomotiv_logo.png",
+      "filename": "team_197.png",
+      "bytes": 13877
+    },
+    {
+      "id": "200",
+      "name": "СКА Серебряные львы 14",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska_serebryannyelvy_200.png",
+      "filename": "team_200.png",
+      "bytes": 20456
+    },
+    {
+      "id": "203",
+      "name": "СКА Звезда 14",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska_zvezda_200.png",
+      "filename": "team_203.png",
+      "bytes": 10407
+    },
+    {
+      "id": "206",
+      "name": "Динамо Юниор 14",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/dinamo_yunior_200.png",
+      "filename": "team_206.png",
+      "bytes": 16361
+    },
+    {
+      "id": "238",
+      "name": "Шайба 14",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/shajba_200-2.png",
+      "filename": "team_238.png",
+      "bytes": 9071
+    },
+    {
+      "id": "241",
+      "name": "Альфа 14",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/09/alfa.png",
+      "filename": "team_241.png",
+      "bytes": 40457
+    },
+    {
+      "id": "246",
+      "name": "СКА ХКД 14",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/09/ska_hkd.png",
+      "filename": "team_246.png",
+      "bytes": 21788
+    },
+    {
+      "id": "249",
+      "name": "Варяги 14",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/varyagi.png",
+      "filename": "team_249.png",
+      "bytes": 20789
+    },
+    {
+      "id": "252",
+      "name": "Невский 14",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/nevskij_200-1.png",
+      "filename": "team_252.png",
+      "bytes": 14187
+    },
+    {
+      "id": "254",
+      "name": "Динамо 14",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/dinamo_200.png",
+      "filename": "team_254.png",
+      "bytes": 11269
+    },
+    {
+      "id": "257",
+      "name": "Викинги 14",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/09/vikingi.png",
+      "filename": "team_257.png",
+      "bytes": 43975
+    },
+    {
+      "id": "260",
+      "name": "СКА Стрельна",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska_strelna_200.png",
+      "filename": "team_260.png",
+      "bytes": 14720
+    },
+    {
+      "id": "263",
+      "name": "Армия СКА 14",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/11270272.png",
+      "filename": "team_263.png",
+      "bytes": 19572
+    },
+    {
+      "id": "268",
+      "name": "Динамо Питер 14",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/dinamo_piter_200.png",
+      "filename": "team_268.png",
+      "bytes": 12504
+    },
+    {
+      "id": "502",
+      "name": "Академия Михайлова-2",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/09/akm.png",
+      "filename": "team_502.png",
+      "bytes": 5058
+    },
+    {
+      "id": "505",
+      "name": "Крылья Советов-2",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/09/krylyasovetov.png",
+      "filename": "team_505.png",
+      "bytes": 2328
+    },
+    {
+      "id": "709",
+      "name": "Барс",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/09/bars_berezniki.png",
+      "filename": "team_709.png",
+      "bytes": 17035
+    },
+    {
+      "id": "712",
+      "name": "Титан",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/09/titanarhangelsk.png",
+      "filename": "team_712.png",
+      "bytes": 4993
+    },
+    {
+      "id": "714",
+      "name": "Тверичи",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/09/tverichi.png",
+      "filename": "team_714.png",
+      "bytes": 27570
+    },
+    {
+      "id": "719",
+      "name": "Клин спортивный",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/09/klinsportivnyj.png",
+      "filename": "team_719.png",
+      "bytes": 62740
+    },
+    {
+      "id": "720",
+      "name": "Орбита",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/09/orbita.png",
+      "filename": "team_720.png",
+      "bytes": 21357
+    },
+    {
+      "id": "721",
+      "name": "Феникс",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/09/feniks.png",
+      "filename": "team_721.png",
+      "bytes": 18803
+    },
+    {
+      "id": "840",
+      "name": "Балтийские Крылья",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/09/baltijskiekrylya.png",
+      "filename": "team_840.png",
+      "bytes": 8660
+    },
+    {
+      "id": "853",
+      "name": "Hockey Frends",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/10/hockeyfrends.png",
+      "filename": "team_853.png",
+      "bytes": 11992
+    },
+    {
+      "id": "856",
+      "name": "Добрыня",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/10/dobrynya.png",
+      "filename": "team_856.png",
+      "bytes": 28605
+    },
+    {
+      "id": "865",
+      "name": "Динамо 15",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/09/dinamo_.png",
+      "filename": "team_865.png",
+      "bytes": 15609
+    },
+    {
+      "id": "868",
+      "name": "Йети",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/10/jeti.png",
+      "filename": "team_868.png",
+      "bytes": 8589
+    },
+    {
+      "id": "922",
+      "name": "Легион",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/10/legion.png",
+      "filename": "team_922.png",
+      "bytes": 34726
+    },
+    {
+      "id": "925",
+      "name": "Беркут",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/10/berkut.png",
+      "filename": "team_925.png",
+      "bytes": 17944
+    },
+    {
+      "id": "932",
+      "name": "Юпитер",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/10/yupiter.png",
+      "filename": "team_932.png",
+      "bytes": 24938
+    },
+    {
+      "id": "935",
+      "name": "ГудГол",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/10/gudgol_.png",
+      "filename": "team_935.png",
+      "bytes": 62991
+    },
+    {
+      "id": "938",
+      "name": "Красные медведи",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/10/krasnyemedvedi.png",
+      "filename": "team_938.png",
+      "bytes": 32768
+    },
+    {
+      "id": "1223",
+      "name": "Академия Михайлова СЗ",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/09/akm.png",
+      "filename": "team_1223.png",
+      "bytes": 5058
+    },
+    {
+      "id": "1614",
+      "name": "Торнадо Псков",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/12/tornado.png",
+      "filename": "team_1614.png",
+      "bytes": 23854
+    },
+    {
+      "id": "1616",
+      "name": "Select",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/12/select.png",
+      "filename": "team_1616.png",
+      "bytes": 9347
+    },
+    {
+      "id": "1658",
+      "name": "Северсталь",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/01/hc_severstal_logo.png",
+      "filename": "team_1658.png",
+      "bytes": 6552
+    },
+    {
+      "id": "2560",
+      "name": "Снежные Барсы",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/04/snezhnyebarsy.png",
+      "filename": "team_2560.png",
+      "bytes": 38348
+    },
+    {
+      "id": "2562",
+      "name": "Школа Руслана Салея",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/04/ruslanasaleya.png",
+      "filename": "team_2562.png",
+      "bytes": 5367
+    },
+    {
+      "id": "2564",
+      "name": "Молот",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/04/molotperm.png",
+      "filename": "team_2564.png",
+      "bytes": 10634
+    },
+    {
+      "id": "2574",
+      "name": "Спарта",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/04/sparta.png",
+      "filename": "team_2574.png",
+      "bytes": 23399
+    },
+    {
+      "id": "2715",
+      "name": "Академия Петрова",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/05/logopetrov.png",
+      "filename": "team_2715.png",
+      "bytes": 17276
+    },
+    {
+      "id": "2717",
+      "name": "Витязь",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/05/vityaz.png",
+      "filename": "team_2717.png",
+      "bytes": 31478
+    },
+    {
+      "id": "2719",
+      "name": "Метеор",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/05/meteor.png",
+      "filename": "team_2719.png",
+      "bytes": 23948
+    },
+    {
+      "id": "2721",
+      "name": "Сочи",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/05/sochi.png",
+      "filename": "team_2721.png",
+      "bytes": 27849
+    },
+    {
+      "id": "2723",
+      "name": "Локомотив 2",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/05/loko_1.png",
+      "filename": "team_2723.png",
+      "bytes": 33161
+    },
+    {
+      "id": "2725",
+      "name": "Белые Медведи",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/05/belyemedvedi.png",
+      "filename": "team_2725.png",
+      "bytes": 27108
+    },
+    {
+      "id": "2727",
+      "name": "Пингвины",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/05/pingviny.png",
+      "filename": "team_2727.png",
+      "bytes": 26691
+    },
+    {
+      "id": "2729",
+      "name": "Атлант",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/05/atlant.png",
+      "filename": "team_2729.png",
+      "bytes": 12878
+    },
+    {
+      "id": "2967",
+      "name": "Красная машина юниор",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/08/krasnaya-mashina.png",
+      "filename": "team_2967.png",
+      "bytes": 29389
+    },
+    {
+      "id": "3026",
+      "name": "Витязь 2",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/05/vityaz.png",
+      "filename": "team_3026.png",
+      "bytes": 31478
+    },
+    {
+      "id": "3138",
+      "name": "Торпедо",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/09/torpedo.png",
+      "filename": "team_3138.png",
+      "bytes": 21512
+    },
+    {
+      "id": "3139",
+      "name": "Тулпар",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/09/tulpar.png",
+      "filename": "team_3139.png",
+      "bytes": 26750
+    },
+    {
+      "id": "3140",
+      "name": "Юность",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/09/yunost.png",
+      "filename": "team_3140.png",
+      "bytes": 26971
+    },
+    {
+      "id": "3141",
+      "name": "Львы",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/09/lvy.png",
+      "filename": "team_3141.png",
+      "bytes": 23660
+    },
+    {
+      "id": "3142",
+      "name": "Мотор",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/09/motor.png",
+      "filename": "team_3142.png",
+      "bytes": 30880
+    },
+    {
+      "id": "3329",
+      "name": "СКА Звезда 14 - 2",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska_zvezda_200.png",
+      "filename": "team_3329.png",
+      "bytes": 10407
+    },
+    {
+      "id": "3685",
+      "name": "Метеор МСК",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/12/meteormoskva.png",
+      "filename": "team_3685.png",
+      "bytes": 22470
+    },
+    {
+      "id": "3687",
+      "name": "Ямал",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/12/yamalsalehard.png",
+      "filename": "team_3687.png",
+      "bytes": 11404
+    },
+    {
+      "id": "3715",
+      "name": "Лицей 369",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/01/liczej_369.png",
+      "filename": "team_3715.png",
+      "bytes": 35092
+    },
+    {
+      "id": "3722",
+      "name": "Сестрорецк",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/01/sestroreczk.png",
+      "filename": "team_3722.png",
+      "bytes": 8709
+    },
+    {
+      "id": "3937",
+      "name": "Неман",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/04/neman.png",
+      "filename": "team_3937.png",
+      "bytes": 3900
+    },
+    {
+      "id": "3939",
+      "name": "Рубин",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/04/1053.jpg.png",
+      "filename": "team_3939.png",
+      "bytes": 31217
+    },
+    {
+      "id": "3988",
+      "name": "Сокол",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/04/sokol.png",
+      "filename": "team_3988.png",
+      "bytes": 20125
+    },
+    {
+      "id": "3990",
+      "name": "Динамо Джуниверс 1",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/04/dinamo_minsk.png",
+      "filename": "team_3990.png",
+      "bytes": 22109
+    },
+    {
+      "id": "3992",
+      "name": "Радий",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/04/radij.png",
+      "filename": "team_3992.png",
+      "bytes": 10904
+    },
+    {
+      "id": "3994",
+      "name": "ЦСКА 2",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/04/czska.png",
+      "filename": "team_3994.png",
+      "bytes": 10786
+    },
+    {
+      "id": "4209",
+      "name": "Легион 13",
+      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/10/legion.png",
+      "filename": "team_4209.png",
+      "bytes": 34726
+    },
+    {
+      "id": "4234",
+      "name": "Динамо Звезда",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/08/dinamozvezda.png",
+      "filename": "team_4234.png",
+      "bytes": 37233
+    },
+    {
+      "id": "4237",
+      "name": "Созвездие",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/08/sozvezdie.png",
+      "filename": "team_4237.png",
+      "bytes": 7976
+    },
+    {
+      "id": "4239",
+      "name": "Северная звезда",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/08/severnayazvezda.png",
+      "filename": "team_4239.png",
+      "bytes": 13894
+    },
+    {
+      "id": "4295",
+      "name": "Динамо Джуниверс 2",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/04/dinamo_minsk.png",
+      "filename": "team_4295.png",
+      "bytes": 22109
+    },
+    {
+      "id": "4297",
+      "name": "Динамо-Форвард 14 2",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2021/09/forvard_logo_200.png",
+      "filename": "team_4297.png",
+      "bytes": 6564
+    },
+    {
+      "id": "4349",
+      "name": "Юность 1",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/08/junactwa-miensk.png",
+      "filename": "team_4349.png",
+      "bytes": 14651
+    },
+    {
+      "id": "4351",
+      "name": "Юность 2",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/08/junactwa-miensk.png",
+      "filename": "team_4351.png",
+      "bytes": 14651
+    },
+    {
+      "id": "4354",
+      "name": "ЦСКА 2015-1",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/04/czska.png",
+      "filename": "team_4354.png",
+      "bytes": 10786
+    },
+    {
+      "id": "4355",
+      "name": "ЦСКА 2015-2",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/04/czska.png",
+      "filename": "team_4355.png",
+      "bytes": 10786
+    },
+    {
+      "id": "4356",
+      "name": "Витязь Подольск",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/08/vityaz_podolsk.png",
+      "filename": "team_4356.png",
+      "bytes": 27070
+    },
+    {
+      "id": "4553",
+      "name": "Смена",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/09/smena.png",
+      "filename": "team_4553.png",
+      "bytes": 7366
+    },
+    {
+      "id": "4554",
+      "name": "Красная машина юниор 2",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2024/08/krasnaya-mashina.png",
+      "filename": "team_4554.png",
+      "bytes": 29389
+    },
+    {
+      "id": "5666",
+      "name": "Армия СКА 15",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/11270272.png",
+      "filename": "team_5666.png",
+      "bytes": 19572
+    },
+    {
+      "id": "5667",
+      "name": "Динамо Юность",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2025/12/dinamo_yunost_200.png",
+      "filename": "team_5667.png",
+      "bytes": 13880
+    },
+    {
+      "id": "5818",
+      "name": "Молния",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2026/04/43891_4_731x731_color_ver1.png",
+      "filename": "team_5818.png",
+      "bytes": 12620
+    },
+    {
+      "id": "5859",
+      "name": "Адмирал",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2026/04/hc_admiral_logo.png",
+      "filename": "team_5859.png",
+      "bytes": 12750
+    },
+    {
+      "id": "5910",
+      "name": "Арена Плей Трактор Север",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2026/05/arenaplejtraktor.png",
+      "filename": "team_5910.png",
+      "bytes": 8642
+    },
+    {
+      "id": "5912",
+      "name": "Русь",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2026/05/rus.png",
+      "filename": "team_5912.png",
+      "bytes": 30994
+    },
+    {
+      "id": "5915",
+      "name": "Сокол",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2026/05/sokol.png",
+      "filename": "team_5915.png",
+      "bytes": 24260
+    }
+  ],
+  "teams_without_logo": [
+    {
+      "id": "3742",
+      "name": "А1"
+    },
+    {
+      "id": "3743",
+      "name": "Б1"
+    },
+    {
+      "id": "1655",
+      "name": "Динамо-Форвард 13"
+    }
+  ]
+}

@@ -156,6 +156,25 @@ const getTeamFromCache = (teamId: string): Team | undefined => {
   return team;
 };
 
+/** Заменяет сохранённые URI актуальными встроенными/локальными логотипами. */
+const hydrateGameLogos = async (game: Game): Promise<Game> => {
+  const homeTeamId = game.homeTeamId || game.homeTeam?.id || '';
+  const awayTeamId = game.awayTeamId || game.awayTeam?.id || '';
+  const [homeTeamLogo, awayTeamLogo] = await Promise.all([
+    homeTeamId ? loadTeamLogo(homeTeamId) : Promise.resolve(null),
+    awayTeamId ? loadTeamLogo(awayTeamId) : Promise.resolve(null),
+  ]);
+  return {
+    ...game,
+    homeTeamLogo: homeTeamLogo || game.homeTeamLogo || '',
+    awayTeamLogo: awayTeamLogo || game.awayTeamLogo || '',
+  };
+};
+
+const hydrateGamesLogos = async (games: Game[]): Promise<Game[]> => (
+  Promise.all(games.map(hydrateGameLogos))
+);
+
 
 // Служебная
 // Извлекает число из строки вида "3", "3Б", "10П" → 3, 3, 10
@@ -541,10 +560,11 @@ export async function getGames(params: GetGamesParams): Promise<Game[]> {
       console.error('❌ Error in getGames:', error);
       const persistent = await readPersistentCache<Game[]>(getPersistentGamesKey(cacheKey));
       if (persistent) {
-        gamesCache[cacheKey] = { data: persistent.data, timestamp: persistent.savedAt };
+        const hydratedGames = await hydrateGamesLogos(persistent.data);
+        gamesCache[cacheKey] = { data: hydratedGames, timestamp: persistent.savedAt };
         gamesRequestSources.set(cacheKey, 'persistent-fallback');
         dataAvailability.markCachedDataUsed('Не удалось обновить матчи');
-        return persistent.data;
+        return hydratedGames;
       }
       throw new Error('Не удалось получить данные матчей с сервера.', { cause: error });
     } finally {
@@ -642,9 +662,10 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
 
     const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
     if (persistent) {
-      gameDetailsCache[id] = { data: persistent.data, timestamp: persistent.savedAt };
+      const hydratedGame = await hydrateGameLogos(persistent.data);
+      gameDetailsCache[id] = { data: hydratedGame, timestamp: persistent.savedAt };
       dataAvailability.markCachedDataUsed();
-      return persistent.data;
+      return hydratedGame;
     }
 
     // 2. Ищем игру в ОБЩЕМ кэше игр (gamesCache)
@@ -681,7 +702,7 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
     const apiGameDetails = await apiService.fetchEventById(id);
     if (!apiGameDetails) {
       const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
-      return persistent?.data || null;
+      return persistent ? await hydrateGameLogos(persistent.data) : null;
     }
     const game = await convertApiEventToGame(apiGameDetails);
 
@@ -699,7 +720,7 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
     const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
     if (persistent) {
       dataAvailability.markCachedDataUsed('Не удалось обновить данные матча');
-      return persistent.data;
+      return await hydrateGameLogos(persistent.data);
     }
     throw error;
   }
@@ -769,7 +790,7 @@ export async function restoreUpcomingGamesMasterData(): Promise<Game[]> {
     || await readPersistentCache<Game[]>(getPersistentGamesKey(cacheKey));
 
   if (persistent) {
-    const data = sortUpcomingGames(persistent.data);
+    const data = sortUpcomingGames(await hydrateGamesLogos(persistent.data));
     upcomingGamesMasterCache = { data, timestamp: persistent.savedAt };
     gamesCache[cacheKey] = { data, timestamp: persistent.savedAt };
     console.log(

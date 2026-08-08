@@ -13,7 +13,7 @@ import {
 } from '../database/repository';
 import type { StartupConfig } from './startupApi';
 import { apiService } from './apiService';
-import { saveTeamList } from './teamStorage';
+import { saveTeamList, verifyAndRestoreTeamLogos } from './teamStorage';
 import { dataAvailability } from './dataAvailability';
 
 const versionFor = (config: StartupConfig, entity: ReferenceEntity): number => {
@@ -126,5 +126,6 @@ export const initializeReferenceData = async (
     AsyncStorage.setItem('api_leagues_cache', JSON.stringify(leagues)),
     AsyncStorage.setItem('api_seasons_cache', JSON.stringify(seasons)),
   ]);
+  await verifyAndRestoreTeamLogos(teams);
   return { teamsCount: teams.length };
 };

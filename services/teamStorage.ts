@@ -2,6 +2,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ApiTeam } from '../types';
 import * as FileSystem from 'expo-file-system/legacy';
+import { getBundledTeamLogoUri, hasBundledTeamLogo } from '../utils/teamLogos';
 
 const TEAM_LIST_KEY = '@team_list';
 const TEAM_LOGO_PREFIX = '@team_logo_';
@@ -38,13 +39,26 @@ export const saveTeamLogo = async (teamId: string, logoUri: string): Promise<voi
 // Загрузить логотип команды (URI файла)
 export const loadTeamLogo = async (teamId: string): Promise<string | null> => {
   try {
-    const uri = await AsyncStorage.getItem(`${TEAM_LOGO_PREFIX}${teamId}`);
-    return uri;
+    // Встроенный asset всегда имеет приоритет и доступен сразу после установки.
+    const bundledUri = getBundledTeamLogoUri(teamId);
+    if (bundledUri) return bundledUri;
+    return await AsyncStorage.getItem(`${TEAM_LOGO_PREFIX}${teamId}`);
   } catch (error) {
     console.error(`Failed to load logo for team ${teamId}`, error);
     return null;
   }
 };
+
+const getLogoExtension = (url: string): string => {
+  const cleanUrl = url.split(/[?#]/, 1)[0];
+  const match = cleanUrl.match(/\.([a-zA-Z0-9]+)$/);
+  const extension = match?.[1]?.toLowerCase();
+  return extension && ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(extension)
+    ? extension
+    : 'jpg';
+};
+
+const toSecureLogoUrl = (url: string): string => url.replace(/^http:\/\//i, 'https://');
 
 /**
  * Проверяет наличие логотипов для всех команд и восстанавливает отсутствующие.
@@ -62,44 +76,63 @@ export const verifyAndRestoreTeamLogos = async (
   }
 
   const logoDirPath = `${documentDir}team_logos/`;
-  const total = teams.length;
-  const missingTeams: ApiTeam[] = [];
+  const teamsWithLogos = teams.filter(team => Boolean(team.logo_url?.trim()));
+  const bundledCount = teamsWithLogos.filter(team => hasBundledTeamLogo(team.id)).length;
+  const downloadableTeams = teamsWithLogos.filter(team => !hasBundledTeamLogo(team.id));
+  const total = teamsWithLogos.length;
+  const missingTeams: { team: ApiTeam; fileUri: string }[] = [];
 
-  // 1. Проверяем наличие файла для каждой команды
-  for (const team of teams) {
-    if (!team.logo_url) continue;
+  if (downloadableTeams.length === 0) {
+    onProgress?.(total, total);
+    console.log(`✅ Подключено ${bundledCount} встроенных логотипов команд`);
+    return;
+  }
 
-    const fileName = `team_${team.id}.jpg`;
-    const fileUri = `${logoDirPath}${fileName}`;
+  try {
+    const directoryInfo = await FileSystem.getInfoAsync(logoDirPath);
+    if (!directoryInfo.exists) {
+      await FileSystem.makeDirectoryAsync(logoDirPath, { intermediates: true });
+    }
+  } catch (error) {
+    console.warn('⚠️ Не удалось подготовить папку загружаемых логотипов:', error);
+    onProgress?.(bundledCount, total);
+    return;
+  }
+
+  // Проверяем только новые команды, для которых пока нет встроенного asset.
+  for (const team of downloadableTeams) {
+    const storedUri = await AsyncStorage.getItem(`${TEAM_LOGO_PREFIX}${team.id}`);
+    const fileName = `team_${team.id}.${getLogoExtension(team.logo_url)}`;
+    const fileUri = storedUri || `${logoDirPath}${fileName}`;
 
     try {
       const fileInfo = await FileSystem.getInfoAsync(fileUri);
       if (!fileInfo.exists) {
-        missingTeams.push(team);
+        missingTeams.push({ team, fileUri: `${logoDirPath}${fileName}` });
+      } else if (!storedUri) {
+        await saveTeamLogo(team.id, fileUri);
       }
     } catch (e) {
       console.warn(`Ошибка проверки логотипа команды ${team.id}:`, e);
-      missingTeams.push(team);
+      missingTeams.push({ team, fileUri: `${logoDirPath}${fileName}` });
     }
   }
 
   if (missingTeams.length === 0) {
     onProgress?.(total, total);
-    console.log('✅ Все логотипы команд на месте');
+    console.log(`✅ Логотипы команд готовы: встроено ${bundledCount}, загружено ${downloadableTeams.length}`);
     return;
   }
 
   console.log(`🖼️ Найдено ${missingTeams.length} отсутствующих логотипов`);
-  onProgress?.(0, missingTeams.length);
+  onProgress?.(bundledCount + downloadableTeams.length - missingTeams.length, total);
 
-  // 2. Восстанавливаем отсутствующие
+  // Загружаем только логотипы команд, которых ещё не было при сборке приложения.
   for (let i = 0; i < missingTeams.length; i++) {
-    const team = missingTeams[i];
-    const fileName = `team_${team.id}.jpg`;
-    const fileUri = `${logoDirPath}${fileName}`;
+    const { team, fileUri } = missingTeams[i];
 
     try {
-      const result = await FileSystem.downloadAsync(team.logo_url, fileUri);
+      const result = await FileSystem.downloadAsync(toSecureLogoUrl(team.logo_url), fileUri);
       if (result.status === 200) {
         await saveTeamLogo(team.id, result.uri);
         console.log(`✅ Логотип команды ${team.id} восстановлен`);
@@ -108,6 +141,6 @@ export const verifyAndRestoreTeamLogos = async (
       console.warn(`❌ Не удалось восстановить логотип команды ${team.id}:`, err);
     }
 
-    onProgress?.(i + 1, missingTeams.length);
+    onProgress?.(total - missingTeams.length + i + 1, total);
   }
 };
