@@ -113,7 +113,7 @@ export default function FiveInRowGameScreen() {
   const panCellSizeRef = useRef<number>(CONFIG.DEFAULT_CELL_SIZE);
   const zoomStartRef = useRef<number>(CONFIG.DEFAULT_CELL_SIZE);
 
-  useTrackScreenView('Мобильная игра — Крестики-нолики, 5 в ряд');
+  useTrackScreenView('Мобильная игра — Х - О, 5 в ряд');
 
   const updateViewCenter = useCallback((center: GridPoint) => {
     viewCenterRef.current = center;
@@ -454,7 +454,7 @@ export default function FiveInRowGameScreen() {
         </TouchableOpacity>
         <View style={styles.headerTextContainer}>
           <Text style={styles.headerTitle} numberOfLines={1} adjustsFontSizeToFit>
-            Крестики-нолики, 5 в ряд
+            Х - О, 5 в ряд
           </Text>
           <Text style={styles.headerSubtitle}>
             бесконечное поле · {settings.mode === 'computer' ? 'против компьютера' : '2 игрока'}
@@ -816,8 +816,7 @@ export default function FiveInRowGameScreen() {
             <Text style={styles.resultEyebrow}>ПЯТЬ В РЯД</Text>
             <Text style={styles.resultTitle}>{winnerName} победил!</Text>
             <Text style={styles.resultDescription}>
-              Непрерывная линия из {winningLine?.cells.length ?? 5} знаков · ходов{' '}
-              {moves.length}
+              Ходов в партии: {moves.length}
             </Text>
             <TouchableOpacity
               onPress={() => resetGame()}

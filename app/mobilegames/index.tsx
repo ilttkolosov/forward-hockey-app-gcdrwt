@@ -17,7 +17,7 @@ interface MobileGameCard {
   name: string;
   description: string;
   href: Href;
-  icon: 'grid-outline' | 'snow-outline' | 'create-outline';
+  icon: 'grid-outline' | 'snow-outline' | 'close-circle-outline';
   accent: string;
   isNew?: boolean;
 }
@@ -41,10 +41,10 @@ const games: MobileGameCard[] = [
   },
   {
     id: 'five-in-row',
-    name: 'Крестики-нолики, 5 в ряд',
+    name: 'Х - О, 5 в ряд',
     description: 'Бесконечное поле, компьютер или два игрока',
     href: '/mobilegames/five-in-row',
-    icon: 'create-outline',
+    icon: 'close-circle-outline',
     accent: '#C4543D',
     isNew: true,
   },
