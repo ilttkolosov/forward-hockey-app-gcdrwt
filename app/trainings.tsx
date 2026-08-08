@@ -27,6 +27,12 @@ interface TrainingSection {
   items: Training[];
 }
 
+interface CurrentWeekRange {
+  startDate: string;
+  endDate: string;
+  label: string;
+}
+
 const formatCalendarDate = (date: string): string => {
   const parsed = new Date(`${date}T12:00:00`);
   return parsed.toLocaleDateString('ru-RU', {
@@ -54,7 +60,14 @@ const formatWeekDate = (date: Date): string => date.toLocaleDateString('ru-RU', 
   month: 'long',
 });
 
-const getCurrentWeekLabel = (today = new Date()): string => {
+const formatIsoDate = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getCurrentWeekRange = (today = new Date()): CurrentWeekRange => {
   const monday = new Date(today);
   monday.setHours(12, 0, 0, 0);
   const daysSinceMonday = (monday.getDay() + 6) % 7;
@@ -63,7 +76,11 @@ const getCurrentWeekLabel = (today = new Date()): string => {
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
 
-  return `Неделя с ${formatWeekDate(monday)} по ${formatWeekDate(sunday)}`;
+  return {
+    startDate: formatIsoDate(monday),
+    endDate: formatIsoDate(sunday),
+    label: `Неделя с ${formatWeekDate(monday)} по ${formatWeekDate(sunday)}`,
+  };
 };
 
 const getRussianForm = (
@@ -115,7 +132,8 @@ export default function TrainingsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [networkError, setNetworkError] = useState<string | null>(null);
-  const currentWeekLabel = useMemo(() => getCurrentWeekLabel(), []);
+  const [showPastTrainings, setShowPastTrainings] = useState(false);
+  const currentWeek = useMemo(() => getCurrentWeekRange(), []);
 
   useTrackScreenView('Расписание тренировок');
 
@@ -150,14 +168,29 @@ export default function TrainingsScreen() {
 
   const sections = useMemo<TrainingSection[]>(() => {
     const grouped = new Map<string, Training[]>();
-    trainings.filter(isCurrentOrFuture).forEach(training => {
+    trainings.filter(training => {
+      if (isCurrentOrFuture(training)) return true;
+      if (!showPastTrainings) return false;
+      const date = training.start_at.slice(0, 10);
+      return date >= currentWeek.startDate && date <= currentWeek.endDate;
+    }).forEach(training => {
       const date = training.start_at.slice(0, 10);
       const existing = grouped.get(date) || [];
       existing.push(training);
       grouped.set(date, existing);
     });
     return [...grouped.entries()].map(([date, items]) => ({ date, items }));
-  }, [trainings]);
+  }, [currentWeek.endDate, currentWeek.startDate, showPastTrainings, trainings]);
+
+  const togglePastTrainings = () => {
+    setShowPastTrainings(currentValue => {
+      const nextValue = !currentValue;
+      console.log(
+        `[Тренировки] Прошедшие занятия текущей недели ${nextValue ? 'показаны' : 'скрыты'}`
+      );
+      return nextValue;
+    });
+  };
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -176,8 +209,25 @@ export default function TrainingsScreen() {
         </TouchableOpacity>
         <View style={styles.headerText}>
           <Text style={styles.title}>Тренировки</Text>
-          <Text style={styles.subtitle}>{currentWeekLabel}</Text>
+          <Text style={styles.subtitle}>{currentWeek.label}</Text>
         </View>
+        <TouchableOpacity
+          accessibilityHint="Переключает отображение уже прошедших занятий с понедельника текущей недели"
+          accessibilityLabel={showPastTrainings
+            ? 'Скрыть прошедшие тренировки'
+            : 'Показать прошедшие тренировки текущей недели'}
+          accessibilityRole="button"
+          accessibilityState={{ selected: showPastTrainings }}
+          hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+          onPress={togglePastTrainings}
+          style={[styles.pastToggle, showPastTrainings && styles.pastToggleActive]}
+        >
+          <Icon
+            name={showPastTrainings ? 'time' : 'time-outline'}
+            size={24}
+            color={showPastTrainings ? colors.primary : colors.textSecondary}
+          />
+        </TouchableOpacity>
       </View>
 
       {loading ? (
@@ -278,6 +328,15 @@ const styles = StyleSheet.create({
   },
   backButton: { padding: 4, marginRight: 8 },
   headerText: { flex: 1 },
+  pastToggle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  pastToggleActive: { backgroundColor: '#E9F3FF' },
   title: { fontSize: 24, fontWeight: '800', color: colors.text },
   subtitle: { marginTop: 2, fontSize: 13, color: colors.textSecondary },
   content: { padding: 16, paddingBottom: 40 },
