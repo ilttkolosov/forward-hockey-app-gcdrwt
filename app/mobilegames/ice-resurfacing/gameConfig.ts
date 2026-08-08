@@ -22,7 +22,21 @@ export const ICE_RESURFACING_CONFIG = {
   CONDITIONER_DEPTH: 8,
   CONDITIONER_REAR_OFFSET: 22,
   FRONT_AXLE_OFFSET: 14,
+  REAR_AXLE_OFFSET: 13,
   WHEELBASE: 32,
+
+  // Круглая щётка автоматически выходит слева спереди, когда машина идёт
+  // параллельно борту. Все расстояния заданы в единицах игрового мира, которые
+  // на типичном iPhone почти совпадают с экранными точками.
+  SIDE_BRUSH_FORWARD_OFFSET: 17,
+  SIDE_BRUSH_DEPLOY_DISTANCE: 7,
+  SIDE_BRUSH_RETRACT_DISTANCE: 8.5,
+  SIDE_BRUSH_FULL_EXTENSION_DISTANCE: 3,
+  SIDE_BRUSH_FULL_PRESS_DISTANCE: 1.1,
+  SIDE_BRUSH_MIN_FORWARD_SPEED: 3,
+  SIDE_BRUSH_BOARD_ALIGNMENT: 0.58,
+  SIDE_BRUSH_ANIMATION_PER_SECOND: 4.8,
+  SIDE_BRUSH_ASSIST_SPEED_RATIO: 0.9,
 
   // Динамика движения (единицы игрового мира и секунды). Удержание кнопки
   // разгоняет машину, отпускание включает плавное торможение по инерции.
@@ -35,6 +49,8 @@ export const ICE_RESURFACING_CONFIG = {
   // считается от внешних точек корпуса и кондиционера, а не от центра машины.
   BOARD_SLOWDOWN_DISTANCE: 34,
   BOARD_MIN_SPEED_RATIO: 0.75,
+  SIDE_BRUSH_COLLISION_RETENTION: 0.97,
+  BOARD_COLLISION_SLIDE_RETENTION: 0.88,
 
   // Передние колёса поворачиваются независимо от газа. Угол и скорость их
   // перекладки вынесены отдельно, чтобы быстро настраивать управление.
@@ -44,6 +60,11 @@ export const ICE_RESURFACING_CONFIG = {
   MIN_STEERING_SPEED: 2,
   MAX_BODY_YAW_RATE: 2.08,
   HIGH_SPEED_STEERING_LOSS: 0.22,
+
+  // В скруглённых углах повёрнутые передние колёса частично скользят, поэтому
+  // корпус продолжает движение вдоль борта и не заклинивается на месте.
+  CORNER_WHEEL_SLIP_DISTANCE: 10,
+  CORNER_WHEEL_STEERING_LOSS: 0.78,
 
   // При полном вывороте занос начинается примерно с 60% скорости. Чем меньше
   // угол колёс, тем выше порог — по прямой машина остаётся устойчивой.
@@ -64,17 +85,21 @@ export const ICE_RESURFACING_CONFIG = {
   COVERAGE_ROWS: 70,
   COMPLETION_REMAINING_PERCENT: 1,
 
-  // Частота обновления React-интерфейса ниже частоты физики, чтобы SVG не
-  // создавал лишнюю нагрузку. Физика всё равно считается через каждый кадр.
+  // Фиксированный шаг не даёт ProMotion-экрану считать физику 120 раз/с.
+  // SVG-маска льда обновляется ещё реже, без заметной потери плавности машины.
+  PHYSICS_STEP_MS: 1000 / 30,
+  MAX_PHYSICS_STEPS_PER_FRAME: 3,
   UI_FRAME_INTERVAL_MS: 1000 / 30,
-  COVERAGE_PATH_INTERVAL_MS: 90,
-  DEBUG_PHYSICS_INTERVAL_MS: 1000,
+  COVERAGE_PATH_INTERVAL_MS: 120,
+  DEBUG_PHYSICS_INTERVAL_MS: 3000,
+  COLLISION_LOG_INTERVAL_MS: 1000,
 
   /**
-   * Подробные отладочные логи. Перед production-релизом достаточно заменить
-   * значение на false — вызовы останутся в коде, но ничего печатать не будут.
+   * Событийные логи доступны в development, но автоматически выключены в
+   * preview/production. Непрерывная телеметрия физики отключена отдельно.
    */
-  DEBUG_LOGS: true,
+  DEBUG_LOGS: __DEV__,
+  DEBUG_PHYSICS_LOGS: false,
 } as const;
 
 export const RINK_GATE_LEFT =

@@ -50,6 +50,12 @@ export interface IceGameEngineState {
   /** Текущий адаптивный предел скорости рядом с бортом: 0.75–1. */
   boardSpeedLimitRatio: number;
   boardClearance: number;
+  /** Положение автоматической левой щётки: 0 — убрана, 1 — выдвинута. */
+  sideBrushExtension: number;
+  sideBrushActive: boolean;
+  sideBrushClearance: number;
+  /** Доля проскальзывания передних колёс в скруглённом углу. */
+  frontWheelBoardSlip: number;
   remainingPercent: number;
   crashImpactSpeed: number | null;
   coverage: Uint8Array;
@@ -77,6 +83,9 @@ export interface IceGameSnapshot {
   timerStarted: boolean;
   boardSpeedLimitRatio: number;
   boardClearance: number;
+  sideBrushExtension: number;
+  sideBrushActive: boolean;
+  frontWheelBoardSlip: number;
   remainingPercent: number;
   crashImpactSpeed: number | null;
   coverageRevision: number;
@@ -126,7 +135,7 @@ const isPointInsideRoundedRink = (x: number, y: number) => {
  * Точное расстояние от внутренней точки до контура скруглённой площадки.
  * Формула одинаково работает на прямом участке борта и в круглом углу.
  */
-const getRoundedRinkClearance = (point: Point) => {
+const getRoundedRinkSignedClearance = (point: Point) => {
   const radius = CONFIG.RINK_CORNER_RADIUS;
   const halfWidth = CONFIG.RINK_WIDTH / 2;
   const halfHeight = CONFIG.RINK_HEIGHT / 2;
@@ -135,7 +144,24 @@ const getRoundedRinkClearance = (point: Point) => {
   const outsideDistance = Math.hypot(Math.max(qx, 0), Math.max(qy, 0));
   const insideDistance = Math.min(Math.max(qx, qy), 0);
   const signedDistance = outsideDistance + insideDistance - radius;
-  return Math.max(0, -signedDistance);
+  return -signedDistance;
+};
+
+const getRoundedRinkClearance = (point: Point) =>
+  Math.max(0, getRoundedRinkSignedClearance(point));
+
+/** Единичная нормаль, направленная от ближайшего борта внутрь площадки. */
+const getRoundedRinkInwardNormal = (point: Point): Point => {
+  const epsilon = 0.25;
+  const dx =
+    getRoundedRinkSignedClearance({ x: point.x + epsilon, y: point.y }) -
+    getRoundedRinkSignedClearance({ x: point.x - epsilon, y: point.y });
+  const dy =
+    getRoundedRinkSignedClearance({ x: point.x, y: point.y + epsilon }) -
+    getRoundedRinkSignedClearance({ x: point.x, y: point.y - epsilon });
+  const length = Math.hypot(dx, dy);
+  if (length < 0.0001) return { x: 0, y: 1 };
+  return { x: dx / length, y: dy / length };
 };
 
 const createCoverageGrid = () => {
@@ -182,6 +208,10 @@ export const createInitialIceGameState = (): IceGameEngineState => {
     initialExitCompleted: false,
     boardSpeedLimitRatio: 1,
     boardClearance: CONFIG.BOARD_SLOWDOWN_DISTANCE,
+    sideBrushExtension: 0,
+    sideBrushActive: false,
+    sideBrushClearance: CONFIG.SIDE_BRUSH_DEPLOY_DISTANCE,
+    frontWheelBoardSlip: 0,
     remainingPercent: 100,
     crashImpactSpeed: null,
     ...coverageGrid,
@@ -329,6 +359,105 @@ const getVehicleBoardClearance = (state: IceGameEngineState) => {
     : CONFIG.BOARD_SLOWDOWN_DISTANCE;
 };
 
+interface BoardSurfaceInfo {
+  point: Point;
+  clearance: number;
+  inwardNormal: Point;
+}
+
+/**
+ * Проверяет именно левую переднюю рабочую зону машины. Щётка не появляется,
+ * когда Zamboni смотрит в борт: она предназначена только для прохода вдоль него.
+ */
+const getSideBrushBoardInfo = (
+  state: IceGameEngineState
+): (BoardSurfaceInfo & { alignedAlongLeftBoard: boolean }) | null => {
+  const point = localPointToWorld(
+    state.x,
+    state.y,
+    state.angle,
+    -CONFIG.CONDITIONER_WIDTH / 2,
+    CONFIG.SIDE_BRUSH_FORWARD_OFFSET
+  );
+  if (point.y < 0) return null;
+
+  const inwardNormal = getRoundedRinkInwardNormal(point);
+  const basis = getBasis(state.angle);
+  const boardIsOnLeft =
+    inwardNormal.x * basis.rightX + inwardNormal.y * basis.rightY >=
+    CONFIG.SIDE_BRUSH_BOARD_ALIGNMENT;
+  const forwardIntoBoard = Math.abs(
+    inwardNormal.x * basis.forwardX + inwardNormal.y * basis.forwardY
+  );
+
+  return {
+    point,
+    clearance: getRoundedRinkClearance(point),
+    inwardNormal,
+    alignedAlongLeftBoard:
+      boardIsOnLeft &&
+      forwardIntoBoard <= 1 - CONFIG.SIDE_BRUSH_BOARD_ALIGNMENT,
+  };
+};
+
+const isPointInRoundedCorner = (point: Point) => {
+  const radius = CONFIG.RINK_CORNER_RADIUS;
+  const inHorizontalCorner =
+    point.x < radius || point.x > CONFIG.RINK_WIDTH - radius;
+  const inVerticalCorner =
+    point.y < radius || point.y > CONFIG.RINK_HEIGHT - radius;
+  return inHorizontalCorner && inVerticalCorner;
+};
+
+/** Определяет, насколько передние колёса должны проскальзывать у круглого борта. */
+const getFrontWheelBoardSlip = (
+  state: IceGameEngineState,
+  steeringLockRatio: number
+) => {
+  if (steeringLockRatio <= 0.01) return 0;
+
+  const halfBodyWidth = CONFIG.VEHICLE_WIDTH / 2;
+  const frontPoints = [
+    localPointToWorld(
+      state.x,
+      state.y,
+      state.angle,
+      -halfBodyWidth,
+      CONFIG.FRONT_AXLE_OFFSET
+    ),
+    localPointToWorld(
+      state.x,
+      state.y,
+      state.angle,
+      halfBodyWidth,
+      CONFIG.FRONT_AXLE_OFFSET
+    ),
+  ];
+  const closestPoint = frontPoints.reduce((closest, point) =>
+    getRoundedRinkClearance(point) < getRoundedRinkClearance(closest)
+      ? point
+      : closest
+  );
+  if (!isPointInRoundedCorner(closestPoint)) return 0;
+
+  const clearance = getRoundedRinkClearance(closestPoint);
+  if (clearance >= CONFIG.CORNER_WHEEL_SLIP_DISTANCE) return 0;
+  const inwardNormal = getRoundedRinkInwardNormal(closestPoint);
+  const basis = getBasis(state.angle);
+  const boardSide =
+    inwardNormal.x * basis.rightX + inwardNormal.y * basis.rightY;
+  const steeringIntoBoard = state.steeringAngle * boardSide < 0;
+  if (!steeringIntoBoard) return 0;
+
+  return (
+    clamp(
+      1 - clearance / CONFIG.CORNER_WHEEL_SLIP_DISTANCE,
+      0,
+      1
+    ) * steeringLockRatio
+  );
+};
+
 const isPointAllowed = (point: Point, gateProgress: number) => {
   if (point.y >= 0) return isPointInsideRoundedRink(point.x, point.y);
 
@@ -347,6 +476,36 @@ const isVehiclePlacementAllowed = (
   angle: number,
   gateProgress: number
 ) => getVehicleHullPoints(x, y, angle).every(point => isPointAllowed(point, gateProgress));
+
+/** Нормаль берётся по самой глубоко вышедшей за контур точке корпуса. */
+const getVehicleCollisionSurface = (
+  x: number,
+  y: number,
+  angle: number,
+  gateProgress: number
+): BoardSurfaceInfo | null => {
+  let collision: BoardSurfaceInfo | null = null;
+
+  getVehicleHullPoints(x, y, angle).forEach(point => {
+    if (isPointAllowed(point, gateProgress)) return;
+    const signedClearance =
+      point.y >= 0 ? getRoundedRinkSignedClearance(point) : point.y;
+    if (collision && signedClearance >= collision.clearance) return;
+
+    collision = {
+      point,
+      clearance: signedClearance,
+      // Над верхним бортом нормаль направлена вниз, внутрь площадки.
+      inwardNormal:
+        point.y >= 0 ? getRoundedRinkInwardNormal(point) : { x: 0, y: 1 },
+    };
+  });
+
+  return collision;
+};
+
+const interpolateAngle = (from: number, to: number, ratio: number) =>
+  normalizeAngle(from + normalizeAngle(to - from) * ratio);
 
 const getConditionerCenter = (x: number, y: number, angle: number) =>
   localPointToWorld(x, y, angle, 0, -CONFIG.CONDITIONER_REAR_OFFSET);
@@ -521,6 +680,52 @@ export const stepIceGame = (
     CONFIG.BOARD_MIN_SPEED_RATIO +
     (1 - CONFIG.BOARD_MIN_SPEED_RATIO) * boardProximityRatio;
 
+  const sideBrushInfo = getSideBrushBoardInfo(state);
+  const brushDistanceLimit = state.sideBrushActive
+    ? CONFIG.SIDE_BRUSH_RETRACT_DISTANCE
+    : CONFIG.SIDE_BRUSH_DEPLOY_DISTANCE;
+  const brushMinimumSpeed = state.sideBrushActive
+    ? CONFIG.SIDE_BRUSH_MIN_FORWARD_SPEED * 0.5
+    : CONFIG.SIDE_BRUSH_MIN_FORWARD_SPEED;
+  const shouldDeploySideBrush = Boolean(
+    sideBrushInfo?.alignedAlongLeftBoard &&
+      sideBrushInfo.clearance <= brushDistanceLimit &&
+      state.speed >= brushMinimumSpeed
+  );
+  state.sideBrushClearance =
+    sideBrushInfo?.clearance ?? CONFIG.SIDE_BRUSH_DEPLOY_DISTANCE;
+  state.sideBrushExtension = moveTowards(
+    state.sideBrushExtension,
+    shouldDeploySideBrush ? 1 : 0,
+    CONFIG.SIDE_BRUSH_ANIMATION_PER_SECOND * deltaSeconds
+  );
+  if (state.sideBrushActive !== shouldDeploySideBrush) {
+    state.sideBrushActive = shouldDeploySideBrush;
+    logIceGame(`Бортовая щётка: ${shouldDeploySideBrush ? 'выдвигается' : 'убирается'}`, {
+      clearance: Number(state.sideBrushClearance.toFixed(1)),
+      speed: Number(state.speed.toFixed(1)),
+    });
+  }
+
+  if (shouldDeploySideBrush) {
+    // В рабочем зазоре 3–7 единиц щётка помогает держать ход вдоль борта.
+    // При полном прижатии помощь плавно исчезает и остаётся прежний лимит 75%.
+    const fullPressRelease = clamp(
+      (state.boardClearance - CONFIG.SIDE_BRUSH_FULL_PRESS_DISTANCE) /
+        (CONFIG.SIDE_BRUSH_FULL_EXTENSION_DISTANCE -
+          CONFIG.SIDE_BRUSH_FULL_PRESS_DISTANCE),
+      0,
+      1
+    );
+    const brushAssistStrength = state.sideBrushExtension * fullPressRelease;
+    state.boardSpeedLimitRatio = Math.max(
+      state.boardSpeedLimitRatio,
+      state.boardSpeedLimitRatio +
+        (CONFIG.SIDE_BRUSH_ASSIST_SPEED_RATIO - state.boardSpeedLimitRatio) *
+          brushAssistStrength
+    );
+  }
+
   const requestedSpeedRatio = controls.drivePressed
     ? state.boardSpeedLimitRatio
     : 0;
@@ -569,6 +774,10 @@ export const stepIceGame = (
     0,
     1
   );
+  state.frontWheelBoardSlip = getFrontWheelBoardSlip(
+    state,
+    steeringLockRatio
+  );
   const slipStartSpeedRatio = clamp(
     CONFIG.SLIP_START_FULL_LOCK_SPEED_RATIO +
       (1 - steeringLockRatio) * CONFIG.SLIP_START_STRAIGHT_BONUS,
@@ -594,7 +803,10 @@ export const stepIceGame = (
   if (absoluteSpeed >= CONFIG.MIN_STEERING_SPEED) {
     const rawYawRate =
       (state.speed / CONFIG.WHEELBASE) * Math.tan(state.steeringAngle);
-    const steeringAuthority = 1 - highSpeedSlip * CONFIG.HIGH_SPEED_STEERING_LOSS;
+    const steeringAuthority =
+      (1 - highSpeedSlip * CONFIG.HIGH_SPEED_STEERING_LOSS) *
+      (1 -
+        state.frontWheelBoardSlip * CONFIG.CORNER_WHEEL_STEERING_LOSS);
     const yawRate =
       clamp(rawYawRate, -CONFIG.MAX_BODY_YAW_RATE, CONFIG.MAX_BODY_YAW_RATE) *
       steeringAuthority;
@@ -625,18 +837,31 @@ export const stepIceGame = (
   const basis = getBasis(state.angle);
   const velocityX = basis.forwardX * state.speed + basis.rightX * state.lateralSpeed;
   const velocityY = basis.forwardY * state.speed + basis.rightY * state.lateralSpeed;
-  const proposedX = state.x + velocityX * deltaSeconds;
-  const proposedY = state.y + velocityY * deltaSeconds;
+  let proposedX = state.x + velocityX * deltaSeconds;
+  let proposedY = state.y + velocityY * deltaSeconds;
 
   if (!isVehiclePlacementAllowed(proposedX, proposedY, state.angle, state.gateProgress)) {
-    const impactSpeed = Math.hypot(state.speed, state.lateralSpeed);
     const collisionAngle = state.angle;
-    // Не оставляем корпус в геометрически запрещённом повороте внутри борта.
-    state.angle = previousAngle;
-    if (state.runtimeMs - state.lastCollisionLogMs > 350) {
+    const collisionSurface = getVehicleCollisionSurface(
+      proposedX,
+      proposedY,
+      collisionAngle,
+      state.gateProgress
+    );
+    const inwardNormal = collisionSurface?.inwardNormal ?? { x: 0, y: 1 };
+    const velocityIntoRink =
+      velocityX * inwardNormal.x + velocityY * inwardNormal.y;
+    const normalImpactSpeed = Math.max(0, -velocityIntoRink);
+    const totalSpeed = Math.hypot(velocityX, velocityY);
+
+    if (
+      state.runtimeMs - state.lastCollisionLogMs >
+      CONFIG.COLLISION_LOG_INTERVAL_MS
+    ) {
       state.lastCollisionLogMs = state.runtimeMs;
       logIceGame('Контакт с бортом', {
-        impactSpeed: Number(impactSpeed.toFixed(1)),
+        normalImpactSpeed: Number(normalImpactSpeed.toFixed(1)),
+        totalSpeed: Number(totalSpeed.toFixed(1)),
         crashThreshold: CONFIG.CRASH_SPEED,
         x: Number(proposedX.toFixed(1)),
         y: Number(proposedY.toFixed(1)),
@@ -645,21 +870,85 @@ export const stepIceGame = (
       });
     }
 
-    if (impactSpeed >= CONFIG.CRASH_SPEED) {
-      state.crashImpactSpeed = impactSpeed;
+    // Ломает машину только скорость, направленная поперёк борта. Быстрый ход
+    // вдоль борта теперь считается скольжением, а не лобовым ударом.
+    if (normalImpactSpeed >= CONFIG.CRASH_SPEED) {
+      state.crashImpactSpeed = normalImpactSpeed;
       state.speed = 0;
       state.lateralSpeed = 0;
       setPhase(state, 'crashed');
       logIceGame('Авария: превышен порог безопасного удара', {
-        impactSpeed: Number(impactSpeed.toFixed(1)),
+        normalImpactSpeed: Number(normalImpactSpeed.toFixed(1)),
+        totalSpeed: Number(totalSpeed.toFixed(1)),
       });
       return;
     }
 
-    // На малой скорости машина упирается в борт и почти останавливается.
-    state.speed *= CONFIG.LOW_SPEED_COLLISION_RETAINED_SPEED;
-    state.lateralSpeed = 0;
-    return;
+    // Удаляем только составляющую скорости, направленную наружу. Оставшаяся
+    // касательная позволяет передним колёсам проскользнуть вдоль круглого угла.
+    const projectedVelocityX =
+      velocityX - inwardNormal.x * Math.min(0, velocityIntoRink);
+    const projectedVelocityY =
+      velocityY - inwardNormal.y * Math.min(0, velocityIntoRink);
+    const slideRetention = shouldDeploySideBrush
+      ? CONFIG.SIDE_BRUSH_COLLISION_RETENTION
+      : CONFIG.BOARD_COLLISION_SLIDE_RETENTION;
+    const slideVelocityX = projectedVelocityX * slideRetention;
+    const slideVelocityY = projectedVelocityY * slideRetention;
+    const angleCandidates = [
+      collisionAngle,
+      interpolateAngle(previousAngle, collisionAngle, 0.35),
+      previousAngle,
+    ];
+    const movementScales = [1, 0.6, 0.25, 0];
+    let placementResolved = false;
+    let resolvedMovementScale = 0;
+
+    for (const candidateAngle of angleCandidates) {
+      for (const movementScale of movementScales) {
+        const candidateX =
+          state.x + slideVelocityX * deltaSeconds * movementScale;
+        const candidateY =
+          state.y + slideVelocityY * deltaSeconds * movementScale;
+        if (
+          !isVehiclePlacementAllowed(
+            candidateX,
+            candidateY,
+            candidateAngle,
+            state.gateProgress
+          )
+        ) {
+          continue;
+        }
+
+        state.angle = candidateAngle;
+        proposedX = candidateX;
+        proposedY = candidateY;
+        resolvedMovementScale = movementScale;
+        placementResolved = true;
+        break;
+      }
+      if (placementResolved) break;
+    }
+
+    if (!placementResolved) {
+      // Защитный сценарий для численной погрешности: сохраняем последнюю
+      // корректную позицию и гасим скорость, не проталкивая корпус сквозь борт.
+      state.angle = previousAngle;
+      state.speed *= CONFIG.LOW_SPEED_COLLISION_RETAINED_SPEED;
+      state.lateralSpeed = 0;
+      return;
+    }
+
+    const resolvedBasis = getBasis(state.angle);
+    const resolvedVelocityX = slideVelocityX * resolvedMovementScale;
+    const resolvedVelocityY = slideVelocityY * resolvedMovementScale;
+    state.speed =
+      resolvedVelocityX * resolvedBasis.forwardX +
+      resolvedVelocityY * resolvedBasis.forwardY;
+    state.lateralSpeed =
+      resolvedVelocityX * resolvedBasis.rightX +
+      resolvedVelocityY * resolvedBasis.rightY;
   }
 
   state.x = proposedX;
@@ -713,7 +1002,10 @@ export const stepIceGame = (
     logIceGame('Машина полностью покинула лёд — закрываем ворота');
   }
 
-  if (state.runtimeMs - state.lastDebugLogMs >= CONFIG.DEBUG_PHYSICS_INTERVAL_MS) {
+  if (
+    CONFIG.DEBUG_PHYSICS_LOGS &&
+    state.runtimeMs - state.lastDebugLogMs >= CONFIG.DEBUG_PHYSICS_INTERVAL_MS
+  ) {
     state.lastDebugLogMs = state.runtimeMs;
     logIceGame('Физика', {
       phase: state.phase,
@@ -729,6 +1021,9 @@ export const stepIceGame = (
       frontWheelDegrees: Number(((state.steeringAngle * 180) / Math.PI).toFixed(1)),
       boardClearance: Number(state.boardClearance.toFixed(1)),
       boardSpeedLimitPercent: Math.round(state.boardSpeedLimitRatio * 100),
+      sideBrushExtension: Number(state.sideBrushExtension.toFixed(2)),
+      sideBrushClearance: Number(state.sideBrushClearance.toFixed(1)),
+      frontWheelBoardSlip: Number(state.frontWheelBoardSlip.toFixed(2)),
       remainingPercent: Number(state.remainingPercent.toFixed(2)),
     });
   }
@@ -790,6 +1085,9 @@ export const createIceGameSnapshot = (
   timerStarted: state.timerStarted,
   boardSpeedLimitRatio: state.boardSpeedLimitRatio,
   boardClearance: state.boardClearance,
+  sideBrushExtension: state.sideBrushExtension,
+  sideBrushActive: state.sideBrushActive,
+  frontWheelBoardSlip: state.frontWheelBoardSlip,
   remainingPercent: state.remainingPercent,
   crashImpactSpeed: state.crashImpactSpeed,
   coverageRevision: state.coverageRevision,

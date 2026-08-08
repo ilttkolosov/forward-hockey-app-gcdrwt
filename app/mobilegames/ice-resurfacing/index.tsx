@@ -1,9 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
-  GestureResponderEvent,
   Modal,
   Pressable,
   StyleProp,
@@ -13,6 +12,7 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from '../../../components/Icon';
 import { useTrackScreenView } from '../../../hooks/useTrackScreenView';
@@ -59,8 +59,9 @@ interface HoldControlButtonProps {
 }
 
 /**
- * Не захватывает единый JS-responder, а отслеживает идентификаторы касаний.
- * Благодаря этому левый палец продолжает держать руль, пока правый нажимает газ.
+ * Нативный Pan-жест начинается сразу при касании и ОБЯЗАТЕЛЬНО вызывает
+ * onFinalize при отпускании, отмене системой или уходе пальца за пределы кнопки.
+ * Отдельные gesture-handler'ы поддерживают два пальца: руль слева и ход справа.
  */
 function HoldControlButton({
   active,
@@ -71,22 +72,42 @@ function HoldControlButton({
   activeStyle,
   children,
 }: HoldControlButtonProps) {
-  const activeTouchIdsRef = useRef(new Set<string>());
+  const onActiveChangeRef = useRef(onActiveChange);
   const accessibilityReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
 
   useEffect(() => {
-    if (!disabled) return;
-    activeTouchIdsRef.current.clear();
-    onActiveChange(false);
-  }, [disabled, onActiveChange]);
+    onActiveChangeRef.current = onActiveChange;
+  }, [onActiveChange]);
 
-  // Сброс экрана/фонового режима приходит извне и должен удалить оставшиеся
-  // идентификаторы пальцев, иначе следующее нажатие могло бы «залипнуть».
+  const activateGesture = useCallback(() => {
+    onActiveChangeRef.current(true);
+  }, []);
+
+  const finalizeGesture = useCallback(() => {
+    // Этот путь срабатывает и для END, и для CANCELLED/FAILED — кнопка не
+    // может остаться нажатой после того, как iOS забрала касание себе.
+    onActiveChangeRef.current(false);
+  }, []);
+
+  const holdGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(!disabled)
+        .minDistance(0)
+        .maxPointers(1)
+        .shouldCancelWhenOutside(false)
+        .onBegin(activateGesture)
+        .onFinalize(finalizeGesture)
+        .runOnJS(true),
+    [activateGesture, disabled, finalizeGesture]
+  );
+
   useEffect(() => {
-    if (!active) activeTouchIdsRef.current.clear();
-  }, [active]);
+    if (!disabled) return;
+    onActiveChangeRef.current(false);
+  }, [disabled]);
 
   useEffect(
     () => () => {
@@ -97,47 +118,31 @@ function HoldControlButton({
     []
   );
 
-  const handleTouchStart = (event: GestureResponderEvent) => {
-    if (disabled) return;
-    event.nativeEvent.changedTouches.forEach(touch => {
-      activeTouchIdsRef.current.add(touch.identifier);
-    });
-    if (activeTouchIdsRef.current.size > 0) onActiveChange(true);
-  };
-
-  const handleTouchFinish = (event: GestureResponderEvent) => {
-    event.nativeEvent.changedTouches.forEach(touch => {
-      activeTouchIdsRef.current.delete(touch.identifier);
-    });
-    if (activeTouchIdsRef.current.size === 0) onActiveChange(false);
-  };
-
   const handleAccessibilityTap = () => {
     if (disabled) return;
-    onActiveChange(true);
+    onActiveChangeRef.current(true);
     if (accessibilityReleaseTimerRef.current) {
       clearTimeout(accessibilityReleaseTimerRef.current);
     }
     accessibilityReleaseTimerRef.current = setTimeout(
-      () => onActiveChange(false),
+      () => onActiveChangeRef.current(false),
       450
     );
   };
 
   return (
-    <View
-      style={[style, active && activeStyle, disabled && styles.controlButtonDisabled]}
-      accessible
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ disabled, selected: active }}
-      onAccessibilityTap={handleAccessibilityTap}
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchFinish}
-      onTouchCancel={handleTouchFinish}
-    >
-      {children}
-    </View>
+    <GestureDetector gesture={holdGesture}>
+      <View
+        style={[style, active && activeStyle, disabled && styles.controlButtonDisabled]}
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        accessibilityState={{ disabled, selected: active }}
+        onAccessibilityTap={handleAccessibilityTap}
+      >
+        {children}
+      </View>
+    </GestureDetector>
   );
 }
 
@@ -149,9 +154,11 @@ export default function IceResurfacingGameScreen() {
   const coveragePathRef = useRef(buildCoveragePath(initialEngine));
   const lastCoverageRevisionRef = useRef(initialEngine.coverageRevision);
   const lastFrameTimestampRef = useRef<number | null>(null);
+  const physicsAccumulatorRef = useRef(0);
   const uiAccumulatorRef = useRef(0);
   const coveragePathAccumulatorRef = useRef(0);
   const animationFrameRef = useRef<number | null>(null);
+  const resumeAnimationLoopRef = useRef<() => void>(() => undefined);
   const victoryStoredRef = useRef(false);
   const isAppActiveRef = useRef(AppState.currentState === 'active');
 
@@ -193,28 +200,71 @@ export default function IceResurfacingGameScreen() {
   }, []);
 
   /**
-   * Движок работает через requestAnimationFrame, но React получает снимок
-   * только 30 раз в секунду. Это сохраняет плавность и не перегружает iPhone.
+   * requestAnimationFrame на ProMotion-экране может приходить 120 раз/с.
+   * Физика здесь работает фиксированно 30 раз/с, React не обновляется чаще,
+   * а после победы/аварии и в фоне цикл полностью останавливается.
    */
   useEffect(() => {
-    const frame = (timestamp: number) => {
-      if (!isAppActiveRef.current) {
-        // На паузе не движем машину и не прибавляем время даже в окружениях,
-        // где requestAnimationFrame продолжает вызываться в фоне.
-        lastFrameTimestampRef.current = null;
-        animationFrameRef.current = requestAnimationFrame(frame);
+    let disposed = false;
+
+    const isTerminalPhase = () =>
+      engineRef.current.phase === 'won' || engineRef.current.phase === 'crashed';
+
+    function scheduleFrame() {
+      if (
+        disposed ||
+        !isAppActiveRef.current ||
+        isTerminalPhase() ||
+        animationFrameRef.current !== null
+      ) {
         return;
       }
+      animationFrameRef.current = requestAnimationFrame(frame);
+    }
+
+    function frame(timestamp: number) {
+      animationFrameRef.current = null;
+      if (disposed || !isAppActiveRef.current || isTerminalPhase()) return;
 
       if (lastFrameTimestampRef.current === null) {
         lastFrameTimestampRef.current = timestamp;
+        scheduleFrame();
+        return;
       }
 
-      const deltaMs = timestamp - lastFrameTimestampRef.current;
+      const maximumFrameDelta =
+        CONFIG.PHYSICS_STEP_MS * CONFIG.MAX_PHYSICS_STEPS_PER_FRAME;
+      const deltaMs = Math.min(
+        Math.max(0, timestamp - lastFrameTimestampRef.current),
+        maximumFrameDelta
+      );
       lastFrameTimestampRef.current = timestamp;
-      stepIceGame(engineRef.current, controlsRef.current, deltaMs / 1000);
-      uiAccumulatorRef.current += deltaMs;
-      coveragePathAccumulatorRef.current += deltaMs;
+      physicsAccumulatorRef.current += deltaMs;
+
+      let physicsSteps = 0;
+      while (
+        physicsAccumulatorRef.current >= CONFIG.PHYSICS_STEP_MS &&
+        physicsSteps < CONFIG.MAX_PHYSICS_STEPS_PER_FRAME &&
+        !isTerminalPhase()
+      ) {
+        stepIceGame(
+          engineRef.current,
+          controlsRef.current,
+          CONFIG.PHYSICS_STEP_MS / 1000
+        );
+        physicsAccumulatorRef.current -= CONFIG.PHYSICS_STEP_MS;
+        uiAccumulatorRef.current += CONFIG.PHYSICS_STEP_MS;
+        coveragePathAccumulatorRef.current += CONFIG.PHYSICS_STEP_MS;
+        physicsSteps += 1;
+      }
+
+      // После большой паузы не пытаемся проиграть сотни пропущенных кадров.
+      if (physicsSteps >= CONFIG.MAX_PHYSICS_STEPS_PER_FRAME) {
+        physicsAccumulatorRef.current = Math.min(
+          physicsAccumulatorRef.current,
+          CONFIG.PHYSICS_STEP_MS
+        );
+      }
 
       const coverageChanged =
         engineRef.current.coverageRevision !== lastCoverageRevisionRef.current;
@@ -227,18 +277,35 @@ export default function IceResurfacingGameScreen() {
         coveragePathAccumulatorRef.current = 0;
       }
 
-      if (uiAccumulatorRef.current >= CONFIG.UI_FRAME_INTERVAL_MS) {
+      if (
+        physicsSteps > 0 &&
+        (uiAccumulatorRef.current >= CONFIG.UI_FRAME_INTERVAL_MS ||
+          isTerminalPhase())
+      ) {
         uiAccumulatorRef.current = 0;
         setSnapshot(createIceGameSnapshot(engineRef.current, coveragePathRef.current));
       }
 
-      animationFrameRef.current = requestAnimationFrame(frame);
-    };
+      if (isTerminalPhase()) {
+        releaseAllControls('игра завершена');
+        return;
+      }
+      scheduleFrame();
+    }
 
-    animationFrameRef.current = requestAnimationFrame(frame);
+    resumeAnimationLoopRef.current = () => {
+      lastFrameTimestampRef.current = null;
+      physicsAccumulatorRef.current = 0;
+      scheduleFrame();
+    };
+    scheduleFrame();
+
     return () => {
+      disposed = true;
+      resumeAnimationLoopRef.current = () => undefined;
       if (animationFrameRef.current !== null) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
       releaseAllControls('экран закрыт');
     };
@@ -253,9 +320,14 @@ export default function IceResurfacingGameScreen() {
         setDriveDirection('forward');
         setSteeringCommand(0);
         setDriveButtonPressed(false);
+        if (animationFrameRef.current !== null) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
+        }
         lastFrameTimestampRef.current = null;
+        physicsAccumulatorRef.current = 0;
       } else {
-        lastFrameTimestampRef.current = null;
+        resumeAnimationLoopRef.current();
         logIceGame('Приложение снова активно, отсчёт кадров восстановлен');
       }
     });
@@ -288,11 +360,13 @@ export default function IceResurfacingGameScreen() {
     coveragePathRef.current = buildCoveragePath(newEngine);
     lastCoverageRevisionRef.current = newEngine.coverageRevision;
     lastFrameTimestampRef.current = null;
+    physicsAccumulatorRef.current = 0;
     uiAccumulatorRef.current = 0;
     coveragePathAccumulatorRef.current = 0;
     victoryStoredRef.current = false;
     setIsNewRecord(false);
     setSnapshot(createIceGameSnapshot(newEngine, coveragePathRef.current));
+    resumeAnimationLoopRef.current();
     logIceGame('Игра перезапущена пользователем');
   }, [releaseAllControls]);
 
@@ -558,8 +632,7 @@ export default function IceResurfacingGameScreen() {
                 style={styles.steerButton}
                 activeStyle={styles.controlButtonPressed}
               >
-                <Icon name="arrow-back" size={29} color={colors.primary} />
-                <Text style={styles.steerButtonText}>ВЛЕВО</Text>
+                <Icon name="arrow-back" size={38} color={colors.primary} />
               </HoldControlButton>
 
               <HoldControlButton
@@ -570,8 +643,7 @@ export default function IceResurfacingGameScreen() {
                 style={styles.steerButton}
                 activeStyle={styles.controlButtonPressed}
               >
-                <Icon name="arrow-forward" size={29} color={colors.primary} />
-                <Text style={styles.steerButtonText}>ВПРАВО</Text>
+                <Icon name="arrow-forward" size={38} color={colors.primary} />
               </HoldControlButton>
             </View>
           </View>
@@ -920,30 +992,23 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   steeringGroup: {
-    width: 158,
+    width: 168,
   },
   steeringButtonsRow: {
-    height: 59,
+    height: 66,
     flexDirection: 'row',
     gap: 6,
     marginTop: 3,
   },
   steerButton: {
     flex: 1,
-    height: 59,
+    height: 66,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
     borderColor: '#B7C8D5',
-    borderRadius: 18,
+    borderRadius: 20,
     backgroundColor: '#F5F8FA',
-  },
-  steerButtonText: {
-    marginTop: -2,
-    color: colors.primary,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.5,
   },
   wheelStatus: {
     flex: 1,

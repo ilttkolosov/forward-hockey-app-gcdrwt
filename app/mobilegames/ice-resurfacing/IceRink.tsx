@@ -59,6 +59,11 @@ export default function IceRink({ snapshot }: IceRinkProps) {
   const frontWheelAngleDegrees = (snapshot.steeringAngle * 180) / Math.PI;
   const gateAngle = snapshot.gateProgress * 84;
   const hasSkid = Math.abs(snapshot.lateralSpeed) > 5;
+  const sideBrushCenterX =
+    -CONFIG.VEHICLE_WIDTH / 2 - 1.5 - snapshot.sideBrushExtension * 7.5;
+  const sideBrushCenterY = -CONFIG.SIDE_BRUSH_FORWARD_OFFSET;
+  const sideBrushRotation =
+    ((snapshot.elapsedMs / 7) * Math.max(0.25, snapshot.sideBrushExtension)) % 360;
   const boardPath = [
     `M${RINK_GATE_LEFT} 0`,
     `H${CONFIG.RINK_CORNER_RADIUS}`,
@@ -376,6 +381,55 @@ export default function IceRink({ snapshot }: IceRinkProps) {
           opacity="0.2"
           transform="translate(1.8 2.4)"
         />
+        {/* Передняя левая круглая щётка автоматически выходит к борту.
+            Рычаг находится под кузовом, а щетина остаётся видимой снаружи. */}
+        {snapshot.sideBrushExtension > 0.01 && (
+          <G opacity={0.2 + snapshot.sideBrushExtension * 0.8}>
+            <Line
+              x1={-CONFIG.VEHICLE_WIDTH / 2 + 2}
+              y1={-CONFIG.SIDE_BRUSH_FORWARD_OFFSET + 3}
+              x2={sideBrushCenterX}
+              y2={sideBrushCenterY}
+              stroke="#526A78"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+            />
+            <G
+              transform={`rotate(${sideBrushRotation} ${sideBrushCenterX} ${sideBrushCenterY})`}
+            >
+              <Circle
+                cx={sideBrushCenterX}
+                cy={sideBrushCenterY}
+                r="5.7"
+                fill="#F18A2B"
+                stroke="#8B4C18"
+                strokeWidth="1"
+              />
+              <Line
+                x1={sideBrushCenterX - 5}
+                y1={sideBrushCenterY}
+                x2={sideBrushCenterX + 5}
+                y2={sideBrushCenterY}
+                stroke="#FFE1AD"
+                strokeWidth="1"
+              />
+              <Line
+                x1={sideBrushCenterX}
+                y1={sideBrushCenterY - 5}
+                x2={sideBrushCenterX}
+                y2={sideBrushCenterY + 5}
+                stroke="#FFE1AD"
+                strokeWidth="1"
+              />
+              <Circle
+                cx={sideBrushCenterX}
+                cy={sideBrushCenterY}
+                r="1.7"
+                fill="#435865"
+              />
+            </G>
+          </G>
+        )}
         <SvgImage
           href={RESURFACER_IMAGE}
           x={-CONFIG.VEHICLE_WIDTH / 2}
@@ -407,6 +461,28 @@ export default function IceRink({ snapshot }: IceRinkProps) {
           stroke="#80909A"
           strokeWidth="0.7"
           transform={`rotate(${frontWheelAngleDegrees} 14.8 ${-CONFIG.FRONT_AXLE_OFFSET})`}
+        />
+        {/* Задняя ось неподвижна относительно корпуса и находится возле
+            рабочего места оператора и заднего кондиционера. */}
+        <Rect
+          x="-17"
+          y={CONFIG.REAR_AXLE_OFFSET - 4.8}
+          width="4.4"
+          height="9.6"
+          rx="2"
+          fill="#17232C"
+          stroke="#80909A"
+          strokeWidth="0.7"
+        />
+        <Rect
+          x="12.6"
+          y={CONFIG.REAR_AXLE_OFFSET - 4.8}
+          width="4.4"
+          height="9.6"
+          rx="2"
+          fill="#17232C"
+          stroke="#80909A"
+          strokeWidth="0.7"
         />
         {snapshot.phase === 'crashed' && (
           <Circle cx="0" cy="0" r="24" fill="none" stroke="#E74C3C" strokeWidth="4" opacity="0.82" />
