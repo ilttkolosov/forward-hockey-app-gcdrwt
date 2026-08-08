@@ -22,17 +22,30 @@ export const ICE_RESURFACING_CONFIG = {
   CONDITIONER_WIDTH: 36,
   CONDITIONER_DEPTH: 8,
   CONDITIONER_REAR_OFFSET: 22,
+  FRONT_AXLE_OFFSET: 14,
+  WHEELBASE: 32,
 
-  // Динамика движения (единицы игрового мира и секунды).
+  // Динамика движения (единицы игрового мира и секунды). Ползунок задаёт
+  // целевую скорость, а машина достигает её с инерцией — без мгновенных скачков.
   MAX_FORWARD_SPEED: 98,
-  FORWARD_ACCELERATION: 57,
-  COAST_BRAKING: 45,
-  MIN_STEERING_SPEED: 3,
-  MAX_STEERING_RATE: 1.52,
-  HIGH_SPEED_STEERING_LOSS: 0.32,
+  DRIVE_ACCELERATION: 57,
+  SPEED_REDUCTION: 64,
+  DIRECTION_CHANGE_BRAKING: 78,
 
-  // Занос. Он начинается только после указанной доли максимальной скорости.
-  SLIP_START_SPEED_RATIO: 0.66,
+  // Передние колёса поворачиваются независимо от газа. Угол и скорость их
+  // перекладки вынесены отдельно, чтобы быстро настраивать управление.
+  MAX_FRONT_WHEEL_ANGLE_DEGREES: 44,
+  FRONT_WHEEL_TURN_DEGREES_PER_SECOND: 190,
+  FRONT_WHEEL_RETURN_DEGREES_PER_SECOND: 220,
+  MIN_STEERING_SPEED: 2,
+  MAX_BODY_YAW_RATE: 2.08,
+  HIGH_SPEED_STEERING_LOSS: 0.22,
+
+  // При полном вывороте занос начинается примерно с 60% скорости. Чем меньше
+  // угол колёс, тем выше порог — по прямой машина остаётся устойчивой.
+  SLIP_START_FULL_LOCK_SPEED_RATIO: 0.6,
+  SLIP_START_STRAIGHT_BONUS: 0.36,
+  SLIP_MIN_STEERING_RATIO: 0.18,
   SLIP_LATERAL_ACCELERATION: 88,
   MAX_LATERAL_SPEED: 32,
   NORMAL_LATERAL_GRIP: 4.2,
@@ -65,4 +78,3 @@ export const RINK_GATE_LEFT =
 
 export const RINK_GATE_RIGHT =
   RINK_GATE_LEFT + ICE_RESURFACING_CONFIG.GATE_WIDTH;
-

@@ -20,6 +20,7 @@ import {
 } from './gameConfig';
 
 const RESURFACER_IMAGE = require('../../../assets/games/ice-resurfacing/resurfacer.png');
+const CENTER_ICE_LOGO = require('../../../assets/games/ice-resurfacing/forward-center-ice-logo.png');
 
 const VIEWBOX_X = -34;
 const VIEWBOX_Y = -76;
@@ -55,6 +56,7 @@ interface IceRinkProps {
  */
 export default function IceRink({ snapshot }: IceRinkProps) {
   const vehicleAngleDegrees = (snapshot.angle * 180) / Math.PI;
+  const frontWheelAngleDegrees = (snapshot.steeringAngle * 180) / Math.PI;
   const gateAngle = snapshot.gateProgress * 84;
   const hasSkid = Math.abs(snapshot.lateralSpeed) > 5;
   const boardPath = [
@@ -214,6 +216,18 @@ export default function IceRink({ snapshot }: IceRinkProps) {
           />
         </G>
 
+        {/* Как на настоящей арене, клубный знак лежит под верхним слоем льда:
+            по центру круга, горизонтально, а красная линия проходит поверх. */}
+        <SvgImage
+          href={CENTER_ICE_LOGO}
+          x={105}
+          y={259.7}
+          width={110}
+          height={40.6}
+          opacity={0.5}
+          preserveAspectRatio="xMidYMid meet"
+        />
+
         {/* Разметка остаётся под тонким слоем льда и видна в обоих состояниях. */}
         <Line
           x1="0"
@@ -229,7 +243,7 @@ export default function IceRink({ snapshot }: IceRinkProps) {
         <Circle
           cx={CONFIG.RINK_WIDTH / 2}
           cy={CONFIG.RINK_HEIGHT / 2}
-          r="32"
+          r="48"
           fill="none"
           stroke="#B54C58"
           strokeWidth="2"
@@ -340,6 +354,30 @@ export default function IceRink({ snapshot }: IceRinkProps) {
           height={CONFIG.VEHICLE_LENGTH}
           preserveAspectRatio="xMidYMid meet"
         />
+        {/* Визуальные колёса совпадают с механикой: поворачивается передняя ось,
+            расположенная ближе к носу машины (отрицательный local Y). */}
+        <Rect
+          x="-17"
+          y={-CONFIG.FRONT_AXLE_OFFSET - 4.8}
+          width="4.4"
+          height="9.6"
+          rx="2"
+          fill="#17232C"
+          stroke="#80909A"
+          strokeWidth="0.7"
+          transform={`rotate(${frontWheelAngleDegrees} -14.8 ${-CONFIG.FRONT_AXLE_OFFSET})`}
+        />
+        <Rect
+          x="12.6"
+          y={-CONFIG.FRONT_AXLE_OFFSET - 4.8}
+          width="4.4"
+          height="9.6"
+          rx="2"
+          fill="#17232C"
+          stroke="#80909A"
+          strokeWidth="0.7"
+          transform={`rotate(${frontWheelAngleDegrees} 14.8 ${-CONFIG.FRONT_AXLE_OFFSET})`}
+        />
         {snapshot.phase === 'crashed' && (
           <Circle cx="0" cy="0" r="24" fill="none" stroke="#E74C3C" strokeWidth="4" opacity="0.82" />
         )}
@@ -347,4 +385,3 @@ export default function IceRink({ snapshot }: IceRinkProps) {
     </Svg>
   );
 }
-

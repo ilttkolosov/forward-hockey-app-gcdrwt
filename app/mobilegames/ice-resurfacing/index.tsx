@@ -15,12 +15,14 @@ import Icon from '../../../components/Icon';
 import { useTrackScreenView } from '../../../hooks/useTrackScreenView';
 import { colors } from '../../../styles/commonStyles';
 import IceRink from './IceRink';
+import SpeedSlider from './SpeedSlider';
 import {
   buildCoveragePath,
   createIceGameSnapshot,
   createInitialIceGameState,
   formatIceGameTime,
   IceGameControls,
+  IceDriveDirection,
   IceGamePhase,
   logIceGame,
   stepIceGame,
@@ -30,9 +32,9 @@ import { ICE_RESURFACING_CONFIG as CONFIG } from './gameConfig';
 const BEST_TIME_STORAGE_KEY = 'ice_resurfacing_best_time_ms_v1';
 
 const EMPTY_CONTROLS: IceGameControls = {
-  forward: false,
-  left: false,
-  right: false,
+  speedRatio: 0,
+  steering: 0,
+  direction: 'forward',
 };
 
 const PHASE_TEXT: Record<IceGamePhase, string> = {
@@ -43,8 +45,6 @@ const PHASE_TEXT: Record<IceGamePhase, string> = {
   won: 'Площадка готова!',
   crashed: 'Машина повреждена',
 };
-
-type ControlName = keyof IceGameControls;
 
 export default function IceResurfacingGameScreen() {
   const router = useRouter();
@@ -65,11 +65,16 @@ export default function IceResurfacingGameScreen() {
   );
   const [bestTimeMs, setBestTimeMs] = useState<number | null>(null);
   const [isNewRecord, setIsNewRecord] = useState(false);
+  const [speedSetting, setSpeedSetting] = useState(0);
+  const [driveDirection, setDriveDirection] =
+    useState<IceDriveDirection>('forward');
+  const [steeringCommand, setSteeringCommand] = useState(0);
 
   useTrackScreenView('Мобильная игра — Заливка льда');
 
   const releaseAllControls = useCallback((reason: string) => {
-    const hadActiveControl = Object.values(controlsRef.current).some(Boolean);
+    const hadActiveControl =
+      controlsRef.current.speedRatio > 0 || controlsRef.current.steering !== 0;
     controlsRef.current = { ...EMPTY_CONTROLS };
     if (hadActiveControl) logIceGame(`Управление отпущено: ${reason}`);
   }, []);
@@ -150,6 +155,9 @@ export default function IceResurfacingGameScreen() {
       isAppActiveRef.current = nextState === 'active';
       if (!isAppActiveRef.current) {
         releaseAllControls('приложение свёрнуто');
+        setSpeedSetting(0);
+        setDriveDirection('forward');
+        setSteeringCommand(0);
         lastFrameTimestampRef.current = null;
       } else {
         lastFrameTimestampRef.current = null;
@@ -177,6 +185,9 @@ export default function IceResurfacingGameScreen() {
 
   const restartGame = useCallback(() => {
     releaseAllControls('перезапуск');
+    setSpeedSetting(0);
+    setDriveDirection('forward');
+    setSteeringCommand(0);
     const newEngine = createInitialIceGameState();
     engineRef.current = newEngine;
     coveragePathRef.current = buildCoveragePath(newEngine);
@@ -197,19 +208,79 @@ export default function IceResurfacingGameScreen() {
 
   const canControl = snapshot.phase === 'playing' || snapshot.phase === 'returning';
 
-  const setControl = useCallback((control: ControlName, active: boolean) => {
+  const setSteering = useCallback((direction: -1 | 1, active: boolean) => {
     const state = engineRef.current;
     const allowed = state.phase === 'playing' || state.phase === 'returning';
-    const nextValue = active && allowed;
-    if (controlsRef.current[control] === nextValue) return;
-    controlsRef.current[control] = nextValue;
-    logIceGame(`Кнопка ${control}: ${nextValue ? 'нажата' : 'отпущена'}`, {
+    if (active && !allowed) return;
+
+    // onPressOut от старой кнопки не должен сбросить новую команду, если
+    // пользователь успел перенести палец с левой стрелки на правую.
+    const currentSteering = controlsRef.current.steering;
+    const nextSteering = active
+      ? direction
+      : currentSteering === direction
+        ? 0
+        : currentSteering;
+    if (currentSteering === nextSteering) return;
+
+    controlsRef.current.steering = nextSteering;
+    setSteeringCommand(nextSteering);
+    logIceGame(
+      `Руль ${direction < 0 ? 'влево' : 'вправо'}: ${active ? 'нажат' : 'отпущен'}`,
+      {
+        requestedSteering: nextSteering,
+        wheelAngleDegrees: Number(
+          ((state.steeringAngle * 180) / Math.PI).toFixed(1)
+        ),
+        speed: Number(state.speed.toFixed(1)),
+        phase: state.phase,
+      }
+    );
+  }, []);
+
+  const setRequestedSpeed = useCallback((value: number) => {
+    const state = engineRef.current;
+    const allowed = state.phase === 'playing' || state.phase === 'returning';
+    if (!allowed) return;
+    const nextPercent = Math.max(0, Math.min(100, Math.round(value)));
+    controlsRef.current.speedRatio = nextPercent / 100;
+    setSpeedSetting(nextPercent);
+  }, []);
+
+  const finishSpeedChange = useCallback((value: number) => {
+    const state = engineRef.current;
+    logIceGame('Ползунок скорости установлен', {
+      targetSpeedPercent: Math.round(value),
+      actualSpeedPercent: Math.round(
+        (Math.abs(state.speed) / CONFIG.MAX_FORWARD_SPEED) * 100
+      ),
+      direction: controlsRef.current.direction,
+    });
+  }, []);
+
+  const selectDirection = useCallback((direction: IceDriveDirection) => {
+    const state = engineRef.current;
+    const allowed = state.phase === 'playing' || state.phase === 'returning';
+    if (!allowed || controlsRef.current.direction === direction) return;
+    controlsRef.current.direction = direction;
+    setDriveDirection(direction);
+    logIceGame(`Рычаг: ${direction === 'forward' ? 'вперёд' : 'назад'}`, {
       speed: Number(state.speed.toFixed(1)),
+      targetSpeedPercent: Math.round(controlsRef.current.speedRatio * 100),
       phase: state.phase,
     });
   }, []);
 
-  const speedPercent = Math.round((snapshot.speed / CONFIG.MAX_FORWARD_SPEED) * 100);
+  const speedPercent = Math.round(
+    (Math.abs(snapshot.speed) / CONFIG.MAX_FORWARD_SPEED) * 100
+  );
+  const wheelAngleDegrees = Math.round((snapshot.steeringAngle * 180) / Math.PI);
+  const actualDirectionText =
+    Math.abs(snapshot.speed) < 0.5
+      ? 'стоп'
+      : snapshot.speed > 0
+        ? 'вперёд'
+        : 'назад';
   const displayedRemainingPercent = Math.max(0, snapshot.remainingPercent).toFixed(1);
   const isResultVisible = snapshot.phase === 'won' || snapshot.phase === 'crashed';
   const didWin = snapshot.phase === 'won';
@@ -277,8 +348,8 @@ export default function IceResurfacingGameScreen() {
           numberOfLines={1}
           adjustsFontSizeToFit
         >
-          {snapshot.phase === 'playing' && snapshot.y < 0
-            ? 'Зажмите газ и выезжайте на лёд'
+          {snapshot.phase === 'playing' && !snapshot.timerStarted
+            ? 'Установите скорость и выезжайте на лёд'
             : PHASE_TEXT[snapshot.phase]}
         </Text>
       </View>
@@ -287,28 +358,101 @@ export default function IceResurfacingGameScreen() {
         <IceRink snapshot={snapshot} />
       </View>
 
-      {/* Нижняя часть экрана полностью отдана под удерживаемые кнопки. */}
+      {/* Скорость фиксируется ползунком, а руль остаётся удерживаемым. Поэтому
+          изменение тяги больше не может распрямить уже повёрнутые колёса. */}
       <View style={styles.controlsPanel}>
-        <View style={styles.speedRow}>
-          <Text style={styles.speedLabel}>СКОРОСТЬ</Text>
-          <View style={styles.speedTrack}>
-            <View style={[styles.speedFill, { width: `${speedPercent}%` }]} />
-            <View style={styles.crashThresholdMarker} />
+        <View style={styles.driveControlsRow}>
+          <View style={styles.directionBlock}>
+            <Text style={styles.controlSectionLabel}>РЫЧАГ</Text>
+            <View style={styles.directionSwitch}>
+              <Pressable
+                disabled={!canControl}
+                onPress={() => selectDirection('forward')}
+                accessibilityRole="button"
+                accessibilityState={{ selected: driveDirection === 'forward' }}
+                accessibilityLabel="Рычаг вперёд"
+                style={[
+                  styles.directionButton,
+                  driveDirection === 'forward' && styles.directionButtonActive,
+                  !canControl && styles.controlButtonDisabled,
+                ]}
+              >
+                <Icon
+                  name="chevron-up"
+                  size={14}
+                  color={driveDirection === 'forward' ? colors.white : colors.primary}
+                />
+                <Text
+                  style={[
+                    styles.directionButtonText,
+                    driveDirection === 'forward' && styles.directionButtonTextActive,
+                  ]}
+                >
+                  ВПЕРЁД
+                </Text>
+              </Pressable>
+              <Pressable
+                disabled={!canControl}
+                onPress={() => selectDirection('reverse')}
+                accessibilityRole="button"
+                accessibilityState={{ selected: driveDirection === 'reverse' }}
+                accessibilityLabel="Рычаг назад"
+                style={[
+                  styles.directionButton,
+                  driveDirection === 'reverse' && styles.directionButtonReverseActive,
+                  !canControl && styles.controlButtonDisabled,
+                ]}
+              >
+                <Icon
+                  name="chevron-down"
+                  size={14}
+                  color={driveDirection === 'reverse' ? colors.white : colors.primary}
+                />
+                <Text
+                  style={[
+                    styles.directionButtonText,
+                    driveDirection === 'reverse' && styles.directionButtonTextActive,
+                  ]}
+                >
+                  НАЗАД
+                </Text>
+              </Pressable>
+            </View>
           </View>
-          <Text style={styles.speedValue}>{speedPercent}%</Text>
+
+          <View style={styles.sliderBlock}>
+            <View style={styles.speedTitleRow}>
+              <Text style={styles.controlSectionLabel}>ЗАДАННАЯ СКОРОСТЬ</Text>
+              <Text style={styles.requestedSpeedValue}>{speedSetting}%</Text>
+            </View>
+            <SpeedSlider
+              value={speedSetting}
+              disabled={!canControl}
+              onValueChange={setRequestedSpeed}
+              onSlidingComplete={finishSpeedChange}
+            />
+            <View style={styles.actualSpeedRow}>
+              <Text style={styles.actualSpeedText}>
+                Факт: {speedPercent}% · {actualDirectionText}
+              </Text>
+              <Text style={styles.slipHint}>занос от 60%</Text>
+            </View>
+          </View>
         </View>
 
         <View style={styles.controlsRow}>
           <Pressable
             disabled={!canControl}
-            onPressIn={() => setControl('left', true)}
-            onPressOut={() => setControl('left', false)}
+            onPressIn={() => setSteering(-1, true)}
+            onPressOut={() => setSteering(-1, false)}
             hitSlop={6}
             accessibilityRole="button"
             accessibilityLabel="Повернуть влево"
             style={({ pressed }) => [
               styles.steerButton,
-              pressed && canControl && styles.controlButtonPressed,
+              (pressed || steeringCommand === -1) &&
+                canControl &&
+                styles.controlButtonPressed,
               !canControl && styles.controlButtonDisabled,
             ]}
           >
@@ -316,33 +460,41 @@ export default function IceResurfacingGameScreen() {
             <Text style={styles.steerButtonText}>ВЛЕВО</Text>
           </Pressable>
 
-          <Pressable
-            disabled={!canControl}
-            onPressIn={() => setControl('forward', true)}
-            onPressOut={() => setControl('forward', false)}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Удерживать газ"
-            style={({ pressed }) => [
-              styles.forwardButton,
-              pressed && canControl && styles.forwardButtonPressed,
-              !canControl && styles.controlButtonDisabled,
-            ]}
-          >
-            <Icon name="chevron-up" size={32} color={colors.white} />
-            <Text style={styles.forwardButtonText}>ГАЗ</Text>
-          </Pressable>
+          <View style={styles.wheelStatus} accessibilityLabel={`Передние колёса ${wheelAngleDegrees} градусов`}>
+            <View style={styles.wheelAxle}>
+              <View
+                style={[
+                  styles.wheelIndicator,
+                  { transform: [{ rotate: `${wheelAngleDegrees}deg` }] },
+                ]}
+              />
+              <View
+                style={[
+                  styles.wheelIndicator,
+                  { transform: [{ rotate: `${wheelAngleDegrees}deg` }] },
+                ]}
+              />
+            </View>
+            <Text style={styles.wheelStatusLabel}>ПЕРЕДНИЕ КОЛЁСА</Text>
+            <Text style={styles.wheelStatusValue}>
+              {wheelAngleDegrees === 0
+                ? 'прямо'
+                : `${Math.abs(wheelAngleDegrees)}° ${wheelAngleDegrees < 0 ? 'влево' : 'вправо'}`}
+            </Text>
+          </View>
 
           <Pressable
             disabled={!canControl}
-            onPressIn={() => setControl('right', true)}
-            onPressOut={() => setControl('right', false)}
+            onPressIn={() => setSteering(1, true)}
+            onPressOut={() => setSteering(1, false)}
             hitSlop={6}
             accessibilityRole="button"
             accessibilityLabel="Повернуть вправо"
             style={({ pressed }) => [
               styles.steerButton,
-              pressed && canControl && styles.controlButtonPressed,
+              (pressed || steeringCommand === 1) &&
+                canControl &&
+                styles.controlButtonPressed,
               !canControl && styles.controlButtonDisabled,
             ]}
           >
@@ -350,7 +502,9 @@ export default function IceResurfacingGameScreen() {
             <Text style={styles.steerButtonText}>ВПРАВО</Text>
           </Pressable>
         </View>
-        <Text style={styles.brakingHint}>Отпустите газ, чтобы плавно затормозить</Text>
+        <Text style={styles.brakingHint}>
+          Ползунок на 0% плавно останавливает машину
+        </Text>
       </View>
 
       <Modal
@@ -531,7 +685,7 @@ const styles = StyleSheet.create({
   },
   controlsPanel: {
     paddingHorizontal: 15,
-    paddingTop: 7,
+    paddingTop: 6,
     paddingBottom: 5,
     borderTopWidth: 1,
     borderTopColor: colors.border,
@@ -542,56 +696,96 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: -3 },
     elevation: 6,
   },
-  speedRow: {
-    height: 19,
+  driveControlsRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
+    alignItems: 'flex-end',
+    gap: 10,
   },
-  speedLabel: {
-    width: 62,
+  directionBlock: {
+    width: 116,
+  },
+  controlSectionLabel: {
     color: colors.textSecondary,
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: '800',
     letterSpacing: 0.7,
   },
-  speedTrack: {
+  directionSwitch: {
+    height: 38,
+    flexDirection: 'row',
+    marginTop: 3,
+    padding: 2,
+    borderWidth: 1,
+    borderColor: '#C8D5DE',
+    borderRadius: 11,
+    backgroundColor: '#EDF2F5',
+  },
+  directionButton: {
     flex: 1,
-    height: 7,
-    overflow: 'hidden',
-    borderRadius: 4,
-    backgroundColor: '#E3E9ED',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
   },
-  speedFill: {
-    height: '100%',
-    borderRadius: 4,
-    backgroundColor: colors.accent,
+  directionButtonActive: {
+    backgroundColor: colors.primary,
   },
-  crashThresholdMarker: {
-    position: 'absolute',
-    left: `${(CONFIG.CRASH_SPEED / CONFIG.MAX_FORWARD_SPEED) * 100}%`,
-    top: 0,
-    bottom: 0,
-    width: 2,
-    backgroundColor: colors.error,
+  directionButtonReverseActive: {
+    backgroundColor: '#526B7D',
   },
-  speedValue: {
-    width: 34,
+  directionButtonText: {
+    marginTop: -3,
+    color: colors.primary,
+    fontSize: 7,
+    fontWeight: '900',
+    letterSpacing: 0.15,
+  },
+  directionButtonTextActive: {
+    color: colors.white,
+  },
+  sliderBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  speedTitleRow: {
+    height: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  requestedSpeedValue: {
     color: colors.primary,
     fontSize: 11,
     fontWeight: '800',
     textAlign: 'right',
     fontVariant: ['tabular-nums'],
   },
+  actualSpeedRow: {
+    height: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: -2,
+  },
+  actualSpeedText: {
+    color: colors.textSecondary,
+    fontSize: 8,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  slipHint: {
+    color: '#A76017',
+    fontSize: 8,
+    fontWeight: '700',
+  },
   controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 4,
+    marginTop: 5,
   },
   steerButton: {
     width: 82,
-    height: 58,
+    height: 54,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
@@ -606,31 +800,38 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.5,
   },
-  forwardButton: {
-    width: 90,
-    height: 68,
+  wheelStatus: {
+    flex: 1,
+    height: 52,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 23,
+    marginHorizontal: 7,
+  },
+  wheelAxle: {
+    height: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 17,
+  },
+  wheelIndicator: {
+    width: 5,
+    height: 14,
+    borderRadius: 2.5,
     backgroundColor: colors.primary,
-    borderWidth: 3,
-    borderColor: '#D6E4EF',
-    shadowColor: colors.primary,
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 4,
   },
-  forwardButtonPressed: {
-    transform: [{ scale: 0.95 }],
-    backgroundColor: '#102A4C',
+  wheelStatusLabel: {
+    marginTop: 1,
+    color: colors.textSecondary,
+    fontSize: 7,
+    fontWeight: '800',
+    letterSpacing: 0.45,
   },
-  forwardButtonText: {
-    marginTop: -5,
-    color: colors.white,
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 1,
+  wheelStatusValue: {
+    marginTop: 1,
+    color: colors.primary,
+    fontSize: 9,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
   },
   controlButtonPressed: {
     transform: [{ scale: 0.95 }],
@@ -641,9 +842,9 @@ const styles = StyleSheet.create({
     opacity: 0.42,
   },
   brakingHint: {
-    marginTop: 1,
+    marginTop: 0,
     color: colors.textSecondary,
-    fontSize: 10,
+    fontSize: 9,
     textAlign: 'center',
   },
   modalOverlay: {

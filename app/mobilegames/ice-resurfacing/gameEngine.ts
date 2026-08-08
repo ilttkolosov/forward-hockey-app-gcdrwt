@@ -12,10 +12,14 @@ export type IceGamePhase =
   | 'won'
   | 'crashed';
 
+export type IceDriveDirection = 'forward' | 'reverse';
+
 export interface IceGameControls {
-  forward: boolean;
-  left: boolean;
-  right: boolean;
+  /** Положение ползунка скорости: 0 — стоп, 1 — максимум. */
+  speedRatio: number;
+  /** Команда рулю: -1 — влево, 0 — прямо, 1 — вправо. */
+  steering: number;
+  direction: IceDriveDirection;
 }
 
 interface Point {
@@ -30,10 +34,17 @@ export interface IceGameEngineState {
   y: number;
   /** Угол в радианах: 0 — вверх, Math.PI — вниз. */
   angle: number;
+  /** Фактический угол передних колёс в радианах. */
+  steeringAngle: number;
+  /** Скорость со знаком: отрицательное значение означает задний ход. */
   speed: number;
   lateralSpeed: number;
   gateProgress: number;
   elapsedMs: number;
+  /** Таймер включается только после пересечения льда передней осью. */
+  timerStarted: boolean;
+  /** Служебное время физики, включая выезд из бокса; используется в логах. */
+  runtimeMs: number;
   remainingPercent: number;
   crashImpactSpeed: number | null;
   coverage: Uint8Array;
@@ -53,10 +64,12 @@ export interface IceGameSnapshot {
   x: number;
   y: number;
   angle: number;
+  steeringAngle: number;
   speed: number;
   lateralSpeed: number;
   gateProgress: number;
   elapsedMs: number;
+  timerStarted: boolean;
   remainingPercent: number;
   crashImpactSpeed: number | null;
   coverageRevision: number;
@@ -136,10 +149,13 @@ export const createInitialIceGameState = (): IceGameEngineState => {
     y: -40,
     // Машина начинает в тоннеле и смотрит передней частью вниз, на лёд.
     angle: Math.PI,
+    steeringAngle: 0,
     speed: 0,
     lateralSpeed: 0,
     gateProgress: 0,
     elapsedMs: 0,
+    timerStarted: false,
+    runtimeMs: 0,
     remainingPercent: 100,
     crashImpactSpeed: null,
     ...coverageGrid,
@@ -155,6 +171,10 @@ export const createInitialIceGameState = (): IceGameEngineState => {
     startX: state.x,
     startY: state.y,
     maximumSpeed: CONFIG.MAX_FORWARD_SPEED,
+    maximumWheelAngle: CONFIG.MAX_FRONT_WHEEL_ANGLE_DEGREES,
+    fullLockSlipFromPercent: Math.round(
+      CONFIG.SLIP_START_FULL_LOCK_SPEED_RATIO * 100
+    ),
     crashSpeed: CONFIG.CRASH_SPEED,
     coverageCells: state.totalEligibleCells,
   });
@@ -194,6 +214,18 @@ const localPointToWorld = (
     x: x + basis.rightX * lateralOffset + basis.forwardX * forwardOffset,
     y: y + basis.rightY * lateralOffset + basis.forwardY * forwardOffset,
   };
+};
+
+/** Передняя ось первой пересекает верхнюю границу льда при старте. */
+const hasFrontAxleReachedIce = (state: IceGameEngineState) => {
+  const frontAxle = localPointToWorld(
+    state.x,
+    state.y,
+    state.angle,
+    0,
+    CONFIG.FRONT_AXLE_OFFSET
+  );
+  return frontAxle.y >= 0 && isPointInsideRoundedRink(frontAxle.x, frontAxle.y);
 };
 
 /**
@@ -418,50 +450,102 @@ export const stepIceGame = (
 
   if (state.phase === 'won' || state.phase === 'crashed') return;
 
-  state.elapsedMs += deltaSeconds * 1000;
+  state.runtimeMs += deltaSeconds * 1000;
+  if (state.timerStarted) state.elapsedMs += deltaSeconds * 1000;
 
-  // Газ разгоняет машину, отпускание газа включает плавное торможение.
-  state.speed = controls.forward
-    ? moveTowards(
-        state.speed,
-        CONFIG.MAX_FORWARD_SPEED,
-        CONFIG.FORWARD_ACCELERATION * deltaSeconds
-      )
-    : moveTowards(state.speed, 0, CONFIG.COAST_BRAKING * deltaSeconds);
+  // Ползунок задаёт целевую скорость. Рычаг меняет только знак этой цели:
+  // при переключении на ходу машина сперва тормозит до нуля и лишь затем едет
+  // в противоположную сторону.
+  const requestedSpeedRatio = clamp(controls.speedRatio, 0, 1);
+  const directionSign = controls.direction === 'forward' ? 1 : -1;
+  const targetSpeed = requestedSpeedRatio * CONFIG.MAX_FORWARD_SPEED * directionSign;
+  const isDirectionChange =
+    Math.abs(state.speed) > 0.05 &&
+    Math.abs(targetSpeed) > 0.05 &&
+    Math.sign(state.speed) !== Math.sign(targetSpeed);
 
-  const steeringInput = (controls.right ? 1 : 0) - (controls.left ? 1 : 0);
-  const steeringSpeedRatio = clamp(
-    (state.speed - CONFIG.MIN_STEERING_SPEED) /
-      (CONFIG.MAX_FORWARD_SPEED - CONFIG.MIN_STEERING_SPEED),
+  if (isDirectionChange) {
+    state.speed = moveTowards(
+      state.speed,
+      0,
+      CONFIG.DIRECTION_CHANGE_BRAKING * deltaSeconds
+    );
+  } else {
+    const speedChangeRate =
+      Math.abs(targetSpeed) > Math.abs(state.speed)
+        ? CONFIG.DRIVE_ACCELERATION
+        : CONFIG.SPEED_REDUCTION;
+    state.speed = moveTowards(state.speed, targetSpeed, speedChangeRate * deltaSeconds);
+  }
+  if (Math.abs(state.speed) < 0.01 && requestedSpeedRatio === 0) state.speed = 0;
+
+  // Руль управляет фактическим углом передних колёс. Газ и направление здесь
+  // намеренно не участвуют: при изменении скорости зажатые колёса не прямятся.
+  const maximumSteeringAngle =
+    (CONFIG.MAX_FRONT_WHEEL_ANGLE_DEGREES * Math.PI) / 180;
+  const steeringInput = clamp(controls.steering, -1, 1);
+  const targetSteeringAngle = steeringInput * maximumSteeringAngle;
+  const wheelTurnRateDegrees =
+    steeringInput === 0
+      ? CONFIG.FRONT_WHEEL_RETURN_DEGREES_PER_SECOND
+      : CONFIG.FRONT_WHEEL_TURN_DEGREES_PER_SECOND;
+  state.steeringAngle = moveTowards(
+    state.steeringAngle,
+    targetSteeringAngle,
+    (wheelTurnRateDegrees * Math.PI * deltaSeconds) / 180
+  );
+
+  const absoluteSpeed = Math.abs(state.speed);
+  const speedRatio = clamp(absoluteSpeed / CONFIG.MAX_FORWARD_SPEED, 0, 1);
+  const steeringLockRatio = clamp(
+    Math.abs(state.steeringAngle) / maximumSteeringAngle,
     0,
     1
   );
-  const highSpeedSlip = clamp(
-    (state.speed / CONFIG.MAX_FORWARD_SPEED - CONFIG.SLIP_START_SPEED_RATIO) /
-      (1 - CONFIG.SLIP_START_SPEED_RATIO),
+  const slipStartSpeedRatio = clamp(
+    CONFIG.SLIP_START_FULL_LOCK_SPEED_RATIO +
+      (1 - steeringLockRatio) * CONFIG.SLIP_START_STRAIGHT_BONUS,
+    CONFIG.SLIP_START_FULL_LOCK_SPEED_RATIO,
+    0.98
+  );
+  const steeringSlipStrength = clamp(
+    (steeringLockRatio - CONFIG.SLIP_MIN_STEERING_RATIO) /
+      (1 - CONFIG.SLIP_MIN_STEERING_RATIO),
     0,
     1
   );
-  const steeringAuthority = 1 - highSpeedSlip * CONFIG.HIGH_SPEED_STEERING_LOSS;
+  const highSpeedSlip =
+    clamp(
+      (speedRatio - slipStartSpeedRatio) / Math.max(0.02, 1 - slipStartSpeedRatio),
+      0,
+      1
+    ) * steeringSlipStrength;
 
-  state.angle = normalizeAngle(
-    state.angle +
-      steeringInput *
-        CONFIG.MAX_STEERING_RATE *
-        steeringSpeedRatio *
-        steeringAuthority *
-        deltaSeconds
-  );
+  // Модель «велосипеда»: передняя ось задаёт радиус поворота, а знак скорости
+  // автоматически разворачивает механику руля при движении задним ходом.
+  const previousAngle = state.angle;
+  if (absoluteSpeed >= CONFIG.MIN_STEERING_SPEED) {
+    const rawYawRate =
+      (state.speed / CONFIG.WHEELBASE) * Math.tan(state.steeringAngle);
+    const steeringAuthority = 1 - highSpeedSlip * CONFIG.HIGH_SPEED_STEERING_LOSS;
+    const yawRate =
+      clamp(rawYawRate, -CONFIG.MAX_BODY_YAW_RATE, CONFIG.MAX_BODY_YAW_RATE) *
+      steeringAuthority;
+    state.angle = normalizeAngle(state.angle + yawRate * deltaSeconds);
+  }
 
-  // На большой скорости корпус уже повернул, а масса продолжает скользить по
-  // прежней траектории. Получившаяся боковая скорость постепенно гасится льдом.
-  if (steeringInput !== 0 && highSpeedSlip > 0) {
+  // На большой скорости корпус начинает менять направление, а масса продолжает
+  // скользить по прежней траектории. На полном вывороте порог равен 60%.
+  if (steeringLockRatio > 0 && highSpeedSlip > 0) {
     state.lateralSpeed -=
-      steeringInput * CONFIG.SLIP_LATERAL_ACCELERATION * highSpeedSlip * deltaSeconds;
+      Math.sign(state.steeringAngle) *
+      CONFIG.SLIP_LATERAL_ACCELERATION *
+      highSpeedSlip *
+      deltaSeconds;
   }
   const grip =
     CONFIG.NORMAL_LATERAL_GRIP *
-    (steeringInput !== 0 && highSpeedSlip > 0
+    (steeringLockRatio > 0 && highSpeedSlip > 0
       ? CONFIG.TURNING_LATERAL_GRIP_MULTIPLIER
       : 1);
   state.lateralSpeed *= Math.exp(-grip * deltaSeconds);
@@ -479,14 +563,17 @@ export const stepIceGame = (
 
   if (!isVehiclePlacementAllowed(proposedX, proposedY, state.angle, state.gateProgress)) {
     const impactSpeed = Math.hypot(state.speed, state.lateralSpeed);
-    if (state.elapsedMs - state.lastCollisionLogMs > 350) {
-      state.lastCollisionLogMs = state.elapsedMs;
+    const collisionAngle = state.angle;
+    // Не оставляем корпус в геометрически запрещённом повороте внутри борта.
+    state.angle = previousAngle;
+    if (state.runtimeMs - state.lastCollisionLogMs > 350) {
+      state.lastCollisionLogMs = state.runtimeMs;
       logIceGame('Контакт с бортом', {
         impactSpeed: Number(impactSpeed.toFixed(1)),
         crashThreshold: CONFIG.CRASH_SPEED,
         x: Number(proposedX.toFixed(1)),
         y: Number(proposedY.toFixed(1)),
-        angleDegrees: Number(((state.angle * 180) / Math.PI).toFixed(1)),
+        angleDegrees: Number(((collisionAngle * 180) / Math.PI).toFixed(1)),
         gateProgress: Number(state.gateProgress.toFixed(2)),
       });
     }
@@ -511,8 +598,24 @@ export const stepIceGame = (
   state.x = proposedX;
   state.y = proposedY;
 
+  if (!state.timerStarted && state.phase === 'playing' && hasFrontAxleReachedIce(state)) {
+    state.timerStarted = true;
+    state.elapsedMs += deltaSeconds * 1000;
+    logIceGame('Таймер запущен: передняя ось выехала на лёд', {
+      x: Number(state.x.toFixed(1)),
+      y: Number(state.y.toFixed(1)),
+      runtimeSeconds: Number((state.runtimeMs / 1000).toFixed(2)),
+    });
+  }
+
   // Полоса чистого льда строится строго за задним кондиционером.
-  if (state.speed > 0.3) markSweptCoverage(state);
+  if (state.speed > 0.3) {
+    markSweptCoverage(state);
+  } else {
+    // Задним ходом кондиционер не заливает лёд. Сбрасываем начало полосы,
+    // чтобы после нового движения вперёд не соединить две точки насквозь.
+    state.lastConditionerPosition = null;
+  }
 
   if (
     state.phase === 'playing' &&
@@ -531,15 +634,19 @@ export const stepIceGame = (
     logIceGame('Машина полностью покинула лёд — закрываем ворота');
   }
 
-  if (state.elapsedMs - state.lastDebugLogMs >= CONFIG.DEBUG_PHYSICS_INTERVAL_MS) {
-    state.lastDebugLogMs = state.elapsedMs;
+  if (state.runtimeMs - state.lastDebugLogMs >= CONFIG.DEBUG_PHYSICS_INTERVAL_MS) {
+    state.lastDebugLogMs = state.runtimeMs;
     logIceGame('Физика', {
       phase: state.phase,
       timeSeconds: Number((state.elapsedMs / 1000).toFixed(1)),
+      timerStarted: state.timerStarted,
+      targetSpeedPercent: Math.round(requestedSpeedRatio * 100),
+      direction: controls.direction,
       speed: Number(state.speed.toFixed(1)),
-      speedPercent: Math.round((state.speed / CONFIG.MAX_FORWARD_SPEED) * 100),
+      speedPercent: Math.round((Math.abs(state.speed) / CONFIG.MAX_FORWARD_SPEED) * 100),
       lateralSlip: Number(state.lateralSpeed.toFixed(1)),
       angleDegrees: Number(((state.angle * 180) / Math.PI).toFixed(1)),
+      frontWheelDegrees: Number(((state.steeringAngle * 180) / Math.PI).toFixed(1)),
       remainingPercent: Number(state.remainingPercent.toFixed(2)),
     });
   }
@@ -593,10 +700,12 @@ export const createIceGameSnapshot = (
   x: state.x,
   y: state.y,
   angle: state.angle,
+  steeringAngle: state.steeringAngle,
   speed: state.speed,
   lateralSpeed: state.lateralSpeed,
   gateProgress: state.gateProgress,
   elapsedMs: state.elapsedMs,
+  timerStarted: state.timerStarted,
   remainingPercent: state.remainingPercent,
   crashImpactSpeed: state.crashImpactSpeed,
   coverageRevision: state.coverageRevision,
@@ -610,4 +719,3 @@ export const formatIceGameTime = (elapsedMs: number) => {
   const tenths = totalTenths % 10;
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${tenths}`;
 };
-
