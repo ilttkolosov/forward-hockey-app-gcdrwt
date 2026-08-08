@@ -336,6 +336,36 @@ export default function IceRink({ snapshot }: IceRinkProps) {
             <Path d="M9 19 C10 31 5 37 3 48" fill="none" stroke="#51656C" strokeWidth="1.6" />
           </G>
         )}
+        {/* Задний кондиционер нарисован по той же геометрии, которой движок
+            рассчитывает полосу заливки. Он немного шире корпуса машины. */}
+        <Rect
+          x={-CONFIG.CONDITIONER_WIDTH / 2 - 1}
+          y={CONFIG.CONDITIONER_REAR_OFFSET - CONFIG.CONDITIONER_DEPTH / 2 + 1.8}
+          width={CONFIG.CONDITIONER_WIDTH + 2}
+          height={CONFIG.CONDITIONER_DEPTH + 1}
+          rx="2.5"
+          fill="#102331"
+          opacity="0.2"
+        />
+        <Rect
+          x={-CONFIG.CONDITIONER_WIDTH / 2}
+          y={CONFIG.CONDITIONER_REAR_OFFSET - CONFIG.CONDITIONER_DEPTH / 2}
+          width={CONFIG.CONDITIONER_WIDTH}
+          height={CONFIG.CONDITIONER_DEPTH}
+          rx="2"
+          fill="#AEBCC5"
+          stroke="#334B5B"
+          strokeWidth="1"
+        />
+        <Line
+          x1={-CONFIG.CONDITIONER_WIDTH / 2 + 2}
+          y1={CONFIG.CONDITIONER_REAR_OFFSET + CONFIG.CONDITIONER_DEPTH / 2 - 1.4}
+          x2={CONFIG.CONDITIONER_WIDTH / 2 - 2}
+          y2={CONFIG.CONDITIONER_REAR_OFFSET + CONFIG.CONDITIONER_DEPTH / 2 - 1.4}
+          stroke="#E5F2F7"
+          strokeWidth="1.2"
+          opacity="0.9"
+        />
         <Rect
           x={-CONFIG.VEHICLE_WIDTH / 2 - 1.5}
           y={-CONFIG.VEHICLE_LENGTH / 2 + 2}

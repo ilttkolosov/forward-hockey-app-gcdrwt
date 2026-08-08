@@ -15,8 +15,8 @@ export type IceGamePhase =
 export type IceDriveDirection = 'forward' | 'reverse';
 
 export interface IceGameControls {
-  /** Положение ползунка скорости: 0 — стоп, 1 — максимум. */
-  speedRatio: number;
+  /** Кнопка хода удерживается правой рукой. */
+  drivePressed: boolean;
   /** Команда рулю: -1 — влево, 0 — прямо, 1 — вправо. */
   steering: number;
   direction: IceDriveDirection;
@@ -45,6 +45,11 @@ export interface IceGameEngineState {
   timerStarted: boolean;
   /** Служебное время физики, включая выезд из бокса; используется в логах. */
   runtimeMs: number;
+  /** После первого полного выезда ворота больше не открываются до 99% заливки. */
+  initialExitCompleted: boolean;
+  /** Текущий адаптивный предел скорости рядом с бортом: 0.75–1. */
+  boardSpeedLimitRatio: number;
+  boardClearance: number;
   remainingPercent: number;
   crashImpactSpeed: number | null;
   coverage: Uint8Array;
@@ -70,6 +75,8 @@ export interface IceGameSnapshot {
   gateProgress: number;
   elapsedMs: number;
   timerStarted: boolean;
+  boardSpeedLimitRatio: number;
+  boardClearance: number;
   remainingPercent: number;
   crashImpactSpeed: number | null;
   coverageRevision: number;
@@ -115,6 +122,22 @@ const isPointInsideRoundedRink = (x: number, y: number) => {
   return dx * dx + dy * dy <= radius * radius;
 };
 
+/**
+ * Точное расстояние от внутренней точки до контура скруглённой площадки.
+ * Формула одинаково работает на прямом участке борта и в круглом углу.
+ */
+const getRoundedRinkClearance = (point: Point) => {
+  const radius = CONFIG.RINK_CORNER_RADIUS;
+  const halfWidth = CONFIG.RINK_WIDTH / 2;
+  const halfHeight = CONFIG.RINK_HEIGHT / 2;
+  const qx = Math.abs(point.x - halfWidth) - (halfWidth - radius);
+  const qy = Math.abs(point.y - halfHeight) - (halfHeight - radius);
+  const outsideDistance = Math.hypot(Math.max(qx, 0), Math.max(qy, 0));
+  const insideDistance = Math.min(Math.max(qx, qy), 0);
+  const signedDistance = outsideDistance + insideDistance - radius;
+  return Math.max(0, -signedDistance);
+};
+
 const createCoverageGrid = () => {
   const size = CONFIG.COVERAGE_COLUMNS * CONFIG.COVERAGE_ROWS;
   const eligibleCoverage = new Uint8Array(size);
@@ -156,6 +179,9 @@ export const createInitialIceGameState = (): IceGameEngineState => {
     elapsedMs: 0,
     timerStarted: false,
     runtimeMs: 0,
+    initialExitCompleted: false,
+    boardSpeedLimitRatio: 1,
+    boardClearance: CONFIG.BOARD_SLOWDOWN_DISTANCE,
     remainingPercent: 100,
     crashImpactSpeed: null,
     ...coverageGrid,
@@ -176,6 +202,8 @@ export const createInitialIceGameState = (): IceGameEngineState => {
       CONFIG.SLIP_START_FULL_LOCK_SPEED_RATIO * 100
     ),
     crashSpeed: CONFIG.CRASH_SPEED,
+    boardMinimumSpeedPercent: Math.round(CONFIG.BOARD_MIN_SPEED_RATIO * 100),
+    completionPercent: 100 - CONFIG.COMPLETION_REMAINING_PERCENT,
     coverageCells: state.totalEligibleCells,
   });
   return state;
@@ -273,6 +301,32 @@ const getVehicleHullPoints = (x: number, y: number, angle: number): Point[] => {
       conditionerForwardOffset + halfConditionerDepth
     ),
   ];
+};
+
+/** Минимальный зазор от корпуса/кондиционера до ближайшего закрытого борта. */
+const getVehicleBoardClearance = (state: IceGameEngineState) => {
+  const hull = getVehicleHullPoints(state.x, state.y, state.angle);
+  let minimumClearance = Infinity;
+
+  hull.forEach(point => {
+    // Открытый верхний проём не является бортом: на старте и при возвращении
+    // машина должна свободно проходить через него без искусственного лимита.
+    const isInsideOpenGate =
+      state.gateProgress >= CONFIG.GATE_COLLISION_OPEN_PROGRESS &&
+      point.y <= CONFIG.BOARD_SLOWDOWN_DISTANCE &&
+      point.x >= RINK_GATE_LEFT &&
+      point.x <= RINK_GATE_RIGHT;
+    if (point.y < 0 || isInsideOpenGate) return;
+
+    minimumClearance = Math.min(
+      minimumClearance,
+      getRoundedRinkClearance(point)
+    );
+  });
+
+  return Number.isFinite(minimumClearance)
+    ? minimumClearance
+    : CONFIG.BOARD_SLOWDOWN_DISTANCE;
 };
 
 const isPointAllowed = (point: Point, gateProgress: number) => {
@@ -400,7 +454,9 @@ const updateGate = (state: IceGameEngineState, deltaSeconds: number) => {
   let target = 0;
   if (state.phase === 'intro' || state.phase === 'returning') {
     target = 1;
-  } else if (state.phase === 'playing' && state.y <= CONFIG.GATE_CLOSE_AFTER_Y) {
+  } else if (state.phase === 'playing' && !state.initialExitCompleted) {
+    // После стартового выезда этот флаг уже не сбрасывается. Приближение к
+    // воротам во время заливки поэтому не сможет открыть их раньше 99%.
     target = 1;
   }
 
@@ -453,10 +509,21 @@ export const stepIceGame = (
   state.runtimeMs += deltaSeconds * 1000;
   if (state.timerStarted) state.elapsedMs += deltaSeconds * 1000;
 
-  // Ползунок задаёт целевую скорость. Рычаг меняет только знак этой цели:
-  // при переключении на ходу машина сперва тормозит до нуля и лишь затем едет
-  // в противоположную сторону.
-  const requestedSpeedRatio = clamp(controls.speedRatio, 0, 1);
+  // Удерживаемая кнопка задаёт максимальную скорость в направлении рычага.
+  // Возле борта эта цель плавно уменьшается с 100% до безопасных 75%.
+  state.boardClearance = getVehicleBoardClearance(state);
+  const boardProximityRatio = clamp(
+    state.boardClearance / CONFIG.BOARD_SLOWDOWN_DISTANCE,
+    0,
+    1
+  );
+  state.boardSpeedLimitRatio =
+    CONFIG.BOARD_MIN_SPEED_RATIO +
+    (1 - CONFIG.BOARD_MIN_SPEED_RATIO) * boardProximityRatio;
+
+  const requestedSpeedRatio = controls.drivePressed
+    ? state.boardSpeedLimitRatio
+    : 0;
   const directionSign = controls.direction === 'forward' ? 1 : -1;
   const targetSpeed = requestedSpeedRatio * CONFIG.MAX_FORWARD_SPEED * directionSign;
   const isDirectionChange =
@@ -474,10 +541,10 @@ export const stepIceGame = (
     const speedChangeRate =
       Math.abs(targetSpeed) > Math.abs(state.speed)
         ? CONFIG.DRIVE_ACCELERATION
-        : CONFIG.SPEED_REDUCTION;
+        : CONFIG.COAST_BRAKING;
     state.speed = moveTowards(state.speed, targetSpeed, speedChangeRate * deltaSeconds);
   }
-  if (Math.abs(state.speed) < 0.01 && requestedSpeedRatio === 0) state.speed = 0;
+  if (Math.abs(state.speed) < 0.01 && !controls.drivePressed) state.speed = 0;
 
   // Руль управляет фактическим углом передних колёс. Газ и направление здесь
   // намеренно не участвуют: при изменении скорости зажатые колёса не прямятся.
@@ -598,6 +665,18 @@ export const stepIceGame = (
   state.x = proposedX;
   state.y = proposedY;
 
+  if (
+    state.phase === 'playing' &&
+    !state.initialExitCompleted &&
+    getVehicleHullPoints(state.x, state.y, state.angle).every(point => point.y > 1)
+  ) {
+    state.initialExitCompleted = true;
+    logIceGame('Стартовый выезд завершён — ворота закрываются до 99% заливки', {
+      y: Number(state.y.toFixed(1)),
+      cleanPercent: Number((100 - state.remainingPercent).toFixed(2)),
+    });
+  }
+
   if (!state.timerStarted && state.phase === 'playing' && hasFrontAxleReachedIce(state)) {
     state.timerStarted = true;
     state.elapsedMs += deltaSeconds * 1000;
@@ -640,6 +719,7 @@ export const stepIceGame = (
       phase: state.phase,
       timeSeconds: Number((state.elapsedMs / 1000).toFixed(1)),
       timerStarted: state.timerStarted,
+      drivePressed: controls.drivePressed,
       targetSpeedPercent: Math.round(requestedSpeedRatio * 100),
       direction: controls.direction,
       speed: Number(state.speed.toFixed(1)),
@@ -647,6 +727,8 @@ export const stepIceGame = (
       lateralSlip: Number(state.lateralSpeed.toFixed(1)),
       angleDegrees: Number(((state.angle * 180) / Math.PI).toFixed(1)),
       frontWheelDegrees: Number(((state.steeringAngle * 180) / Math.PI).toFixed(1)),
+      boardClearance: Number(state.boardClearance.toFixed(1)),
+      boardSpeedLimitPercent: Math.round(state.boardSpeedLimitRatio * 100),
       remainingPercent: Number(state.remainingPercent.toFixed(2)),
     });
   }
@@ -706,6 +788,8 @@ export const createIceGameSnapshot = (
   gateProgress: state.gateProgress,
   elapsedMs: state.elapsedMs,
   timerStarted: state.timerStarted,
+  boardSpeedLimitRatio: state.boardSpeedLimitRatio,
+  boardClearance: state.boardClearance,
   remainingPercent: state.remainingPercent,
   crashImpactSpeed: state.crashImpactSpeed,
   coverageRevision: state.coverageRevision,

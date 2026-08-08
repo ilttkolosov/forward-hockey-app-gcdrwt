@@ -9,28 +9,32 @@ export const ICE_RESURFACING_CONFIG = {
   // Геометрия площадки и ворот.
   RINK_WIDTH: 320,
   RINK_HEIGHT: 560,
-  RINK_CORNER_RADIUS: 34,
+  RINK_CORNER_RADIUS: 84,
   GATE_WIDTH: 76,
   GATE_ANIMATION_SECONDS: 0.7,
   GATE_COLLISION_OPEN_PROGRESS: 0.78,
-  GATE_CLOSE_AFTER_Y: 52,
   STAGING_AREA_TOP: -72,
 
   // Геометрия машины. Спрайт направлен передней частью вверх.
   VEHICLE_WIDTH: 28,
   VEHICLE_LENGTH: 48,
-  CONDITIONER_WIDTH: 36,
+  CONDITIONER_WIDTH: 40,
   CONDITIONER_DEPTH: 8,
   CONDITIONER_REAR_OFFSET: 22,
   FRONT_AXLE_OFFSET: 14,
   WHEELBASE: 32,
 
-  // Динамика движения (единицы игрового мира и секунды). Ползунок задаёт
-  // целевую скорость, а машина достигает её с инерцией — без мгновенных скачков.
+  // Динамика движения (единицы игрового мира и секунды). Удержание кнопки
+  // разгоняет машину, отпускание включает плавное торможение по инерции.
   MAX_FORWARD_SPEED: 98,
   DRIVE_ACCELERATION: 57,
-  SPEED_REDUCTION: 64,
+  COAST_BRAKING: 45,
   DIRECTION_CHANGE_BRAKING: 78,
+
+  // Вблизи борта максимальная скорость плавно уменьшается до 75%. Расстояние
+  // считается от внешних точек корпуса и кондиционера, а не от центра машины.
+  BOARD_SLOWDOWN_DISTANCE: 34,
+  BOARD_MIN_SPEED_RATIO: 0.75,
 
   // Передние колёса поворачиваются независимо от газа. Угол и скорость их
   // перекладки вынесены отдельно, чтобы быстро настраивать управление.
@@ -58,7 +62,7 @@ export const ICE_RESURFACING_CONFIG = {
   // Сетка используется и для расчёта площади, и для маски чистого льда.
   COVERAGE_COLUMNS: 40,
   COVERAGE_ROWS: 70,
-  COMPLETION_REMAINING_PERCENT: 0.8,
+  COMPLETION_REMAINING_PERCENT: 1,
 
   // Частота обновления React-интерфейса ниже частоты физики, чтобы SVG не
   // создавал лишнюю нагрузку. Физика всё равно считается через каждый кадр.
