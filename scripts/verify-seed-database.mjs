@@ -41,6 +41,29 @@ const counts = Object.fromEntries(
 const missingEventIds = Number(scalar(
   'SELECT COUNT(*) FROM event_teams et LEFT JOIN events e ON e.id = et.event_id WHERE e.id IS NULL'
 ));
+let gameTrainingSupported = true;
+try {
+  db.run(
+    `INSERT INTO trainings
+      (id, uid, type, title, start_at, end_at, timezone, location, note,
+       team_id, team_name, updated_at, raw_json)
+     VALUES (?, ?, 'game', ?, ?, ?, ?, '', '', ?, ?, ?, ?)`,
+    [
+      '__schema_check_game__',
+      '__schema_check_game__',
+      'Проверка типа «Игра»',
+      '2099-01-01T10:00:00+03:00',
+      '2099-01-01T11:00:00+03:00',
+      'Europe/Moscow',
+      'forward-2014',
+      'Динамо-Форвард 2014',
+      new Date().toISOString(),
+      '{}',
+    ]
+  );
+} catch {
+  gameTrainingSupported = false;
+}
 
 db.close();
 
@@ -58,10 +81,14 @@ if (
   throw new Error(`Seed содержит пустые обязательные таблицы: ${JSON.stringify(counts)}`);
 }
 if (missingEventIds !== 0) throw new Error(`Нарушены связи event_teams: ${missingEventIds}`);
+if (!gameTrainingSupported) {
+  throw new Error('Схема trainings не принимает поддерживаемый тип game');
+}
 
 console.log('[Seed] Проверка успешна:', {
   integrity,
   packagedUserVersion,
   migratedUserVersion: userVersion,
+  gameTrainingSupported,
   counts,
 });

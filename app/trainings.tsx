@@ -157,7 +157,13 @@ export default function TrainingsScreen() {
 
       const result = await synchronizeTrainings(!isOffline, forceNetwork);
       setTrainings(result.trainings);
-      setNetworkError(result.error ? 'Не удалось обновить расписание. Показаны сохранённые данные.' : null);
+      setNetworkError(result.error
+        ? result.failureStage === 'database'
+          ? 'Расписание получено, но не удалось сохранить его на устройстве.'
+          : result.failureStage === 'validation'
+            ? 'Сервер вернул некорректное расписание. Показаны сохранённые данные.'
+            : 'Не удалось получить расписание с сервера. Показаны сохранённые данные.'
+        : null);
     } catch (error) {
       console.warn('[Тренировки] Не удалось подготовить экран расписания:', error);
       setNetworkError('Не удалось открыть сохранённое расписание.');
@@ -287,7 +293,11 @@ export default function TrainingsScreen() {
 
           {(isOffline || networkError) && (
             <View accessibilityRole="alert" style={styles.warning}>
-              <Icon name="cloud-offline-outline" size={20} color={colors.warning} />
+              <Icon
+                name={isOffline ? 'cloud-offline-outline' : 'warning-outline'}
+                size={20}
+                color={colors.warning}
+              />
               <Text style={styles.warningText}>
                 {isOffline
                   ? 'Нет подключения к интернету. Показано сохранённое расписание.'

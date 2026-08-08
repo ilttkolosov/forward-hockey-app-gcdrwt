@@ -15,6 +15,7 @@ export interface TrainingSyncResult {
   source: 'network' | 'database';
   updated: boolean;
   error?: Error;
+  failureStage?: 'network' | 'validation' | 'database';
 }
 
 type TrainingListener = (trainings: Training[]) => void;
@@ -122,12 +123,15 @@ export const synchronizeTrainings = async (
     }
 
     const startedAt = Date.now();
+    let failureStage: NonNullable<TrainingSyncResult['failureStage']> = 'network';
     try {
       const response = await apiService.fetchTrainings(query);
+      failureStage = 'validation';
       const normalized = response.data.map(normalizeTraining);
       if (normalized.some(item => item.team.id !== query.team)) {
         throw new Error('Сервер вернул расписание другой команды');
       }
+      failureStage = 'database';
       await replaceTrainingsInRange(normalized, query.date_from, query.date_to, query.team || '');
       console.log(
         `[Тренировки] SQLite обновлён: ${normalized.length} занятий, `
@@ -144,7 +148,7 @@ export const synchronizeTrainings = async (
         error
       );
       void rescheduleTrainingNotifications();
-      return { trainings: cached, source: 'database', updated: false, error };
+      return { trainings: cached, source: 'database', updated: false, error, failureStage };
     }
   })();
 

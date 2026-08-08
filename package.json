@@ -20,7 +20,7 @@
     "logos:sync": "node scripts/sync-team-logo-assets.mjs",
     "generate:route-types": "node scripts/generate-route-types.js",
     "typecheck": "tsc --noEmit",
-    "check": "npm run photos:generate && npm run logos:generate && npm run generate:route-types && npm run typecheck && npm run lint",
+    "check": "npm run photos:generate && npm run logos:generate && npm run seed:verify && npm run generate:route-types && npm run typecheck && npm run lint",
     "prebuild": "expo prebuild",
     "eas-build": "npx --yes eas-cli@21.7.0 build"
   },

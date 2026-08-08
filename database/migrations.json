@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "migrations": [
     {
       "version": 1,
@@ -20,6 +20,11 @@
       "version": 4,
       "name": "training_schedule",
       "sql": "CREATE TABLE IF NOT EXISTS trainings (id TEXT PRIMARY KEY NOT NULL, uid TEXT NOT NULL UNIQUE, type TEXT NOT NULL CHECK(type IN ('ice', 'ofp')), title TEXT NOT NULL, start_at TEXT NOT NULL, end_at TEXT NOT NULL, timezone TEXT NOT NULL, location TEXT, note TEXT, team_id TEXT, team_name TEXT, updated_at TEXT, raw_json TEXT NOT NULL);\nCREATE INDEX IF NOT EXISTS idx_trainings_start_at ON trainings(start_at);\nCREATE INDEX IF NOT EXISTS idx_trainings_team_start ON trainings(team_id, start_at);\nINSERT OR IGNORE INTO metadata (key, value) VALUES ('trainings_last_sync_at', '');"
+    },
+    {
+      "version": 5,
+      "name": "training_game_type",
+      "sql": "CREATE TABLE trainings_v5 (id TEXT PRIMARY KEY NOT NULL, uid TEXT NOT NULL UNIQUE, type TEXT NOT NULL CHECK(type IN ('ice', 'ofp', 'game')), title TEXT NOT NULL, start_at TEXT NOT NULL, end_at TEXT NOT NULL, timezone TEXT NOT NULL, location TEXT, note TEXT, team_id TEXT, team_name TEXT, updated_at TEXT, raw_json TEXT NOT NULL);\nINSERT INTO trainings_v5 (id, uid, type, title, start_at, end_at, timezone, location, note, team_id, team_name, updated_at, raw_json) SELECT id, uid, type, title, start_at, end_at, timezone, location, note, team_id, team_name, updated_at, raw_json FROM trainings;\nDROP TABLE trainings;\nALTER TABLE trainings_v5 RENAME TO trainings;\nCREATE INDEX idx_trainings_start_at ON trainings(start_at);\nCREATE INDEX idx_trainings_team_start ON trainings(team_id, start_at);\nINSERT INTO metadata (key, value) VALUES ('schema_version', '5') ON CONFLICT(key) DO UPDATE SET value = excluded.value;"
     }
   ]
 }
