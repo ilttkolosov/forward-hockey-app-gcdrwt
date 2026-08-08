@@ -49,6 +49,59 @@ const formatTime = (iso: string, timezone: string): string => {
   }
 };
 
+const formatWeekDate = (date: Date): string => date.toLocaleDateString('ru-RU', {
+  day: 'numeric',
+  month: 'long',
+});
+
+const getCurrentWeekLabel = (today = new Date()): string => {
+  const monday = new Date(today);
+  monday.setHours(12, 0, 0, 0);
+  const daysSinceMonday = (monday.getDay() + 6) % 7;
+  monday.setDate(monday.getDate() - daysSinceMonday);
+
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+
+  return `Неделя с ${formatWeekDate(monday)} по ${formatWeekDate(sunday)}`;
+};
+
+const getRussianForm = (
+  value: number,
+  forms: [string, string, string]
+): string => {
+  const remainder100 = Math.abs(value) % 100;
+  const remainder10 = remainder100 % 10;
+  if (remainder100 >= 11 && remainder100 <= 19) return forms[2];
+  if (remainder10 === 1) return forms[0];
+  if (remainder10 >= 2 && remainder10 <= 4) return forms[1];
+  return forms[2];
+};
+
+const formatDuration = (startIso: string, endIso: string): string => {
+  const durationMinutes = Math.round(
+    (new Date(endIso).getTime() - new Date(startIso).getTime()) / 60_000
+  );
+  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return '';
+
+  if (durationMinutes < 60) {
+    return `${durationMinutes} ${getRussianForm(durationMinutes, ['минута', 'минуты', 'минут'])}`;
+  }
+
+  const hours = Math.floor(durationMinutes / 60);
+  const minutes = durationMinutes % 60;
+  if (minutes === 0) {
+    return `${hours} ${getRussianForm(hours, ['час', 'часа', 'часов'])}`;
+  }
+  if (minutes === 30) {
+    return `${hours},5 часа`;
+  }
+
+  const hourText = `${hours} ${getRussianForm(hours, ['час', 'часа', 'часов'])}`;
+  const minuteText = `${minutes} ${getRussianForm(minutes, ['минута', 'минуты', 'минут'])}`;
+  return `${hourText} ${minuteText}`;
+};
+
 const isCurrentOrFuture = (training: Training): boolean => {
   const beginningOfToday = new Date();
   beginningOfToday.setHours(0, 0, 0, 0);
@@ -62,6 +115,7 @@ export default function TrainingsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [networkError, setNetworkError] = useState<string | null>(null);
+  const currentWeekLabel = useMemo(() => getCurrentWeekLabel(), []);
 
   useTrackScreenView('Расписание тренировок');
 
@@ -122,7 +176,7 @@ export default function TrainingsScreen() {
         </TouchableOpacity>
         <View style={styles.headerText}>
           <Text style={styles.title}>Тренировки</Text>
-          <Text style={styles.subtitle}>Динамо-Форвард 2014</Text>
+          <Text style={styles.subtitle}>{currentWeekLabel}</Text>
         </View>
       </View>
 
@@ -169,10 +223,15 @@ export default function TrainingsScreen() {
                         <View style={[styles.badge, isIce ? styles.iceBadge : styles.ofpBadge]}>
                           <Text style={styles.badgeText}>{isIce ? 'ЛЁД' : 'ОФП'}</Text>
                         </View>
-                        <Text style={styles.time}>
-                          {formatTime(training.start_at, training.timezone)}–
-                          {formatTime(training.end_at, training.timezone)}
-                        </Text>
+                        <View style={styles.timeBlock}>
+                          <Text style={styles.time}>
+                            {formatTime(training.start_at, training.timezone)}–
+                            {formatTime(training.end_at, training.timezone)}
+                          </Text>
+                          <Text style={styles.duration}>
+                            {formatDuration(training.start_at, training.end_at)}
+                          </Text>
+                        </View>
                       </View>
                       <Text style={styles.trainingTitle}>{training.title}</Text>
                       {!!training.location && (
@@ -252,7 +311,9 @@ const styles = StyleSheet.create({
   iceBadge: { backgroundColor: '#E9F3FF' },
   ofpBadge: { backgroundColor: '#FFF0E9' },
   badgeText: { color: colors.primary, fontSize: 11, fontWeight: '800' },
+  timeBlock: { alignItems: 'flex-end', marginLeft: 12 },
   time: { fontSize: 18, fontWeight: '800', color: colors.primary },
+  duration: { marginTop: 2, fontSize: 12, color: colors.textSecondary },
   trainingTitle: { marginTop: 10, fontSize: 16, fontWeight: '600', color: colors.text },
   detailRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
   detailText: { flex: 1, marginLeft: 6, color: colors.textSecondary, lineHeight: 18 },

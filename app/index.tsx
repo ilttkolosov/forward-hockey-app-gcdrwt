@@ -40,24 +40,22 @@ const quickNavStyles = StyleSheet.create({
     width: '48%',
     backgroundColor: colors.surface,
     borderRadius: 12,
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     marginBottom: 12,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: colors.border,
   },
-  wideItem: {
-    width: '100%',
-  },
   icon: {
-    marginBottom: 8,
+    marginBottom: 6,
   },
   title: {
     fontSize: 14,
     fontWeight: '600',
     color: colors.text,
     textAlign: 'center',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   subtitle: {
     fontSize: 12,
@@ -257,12 +255,12 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </Link>
 
-          {/* Архив игр */}
-          <Link href="/season" asChild>
+          {/* Расписание тренировок */}
+          <Link href="/trainings" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
-              <Icon name="archive" size={24} color={colors.primary} style={quickNavStyles.icon} />
-              <Text style={quickNavStyles.title}>Архив игр</Text>
-              <Text style={quickNavStyles.subtitle}>История матчей</Text>
+              <Icon name="calendar" size={24} color={colors.primary} style={quickNavStyles.icon} />
+              <Text style={quickNavStyles.title}>Тренировки</Text>
+              <Text style={quickNavStyles.subtitle}>Недельное расписание</Text>
             </TouchableOpacity>
           </Link>
 
@@ -274,6 +272,15 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </Link>
 
+          {/* Архив матчей */}
+          <Link href="/season" asChild>
+            <TouchableOpacity style={quickNavStyles.item}>
+              <Icon name="archive" size={24} color={colors.primary} style={quickNavStyles.icon} />
+              <Text style={quickNavStyles.title}>Архив матчей</Text>
+              <Text style={quickNavStyles.subtitle}>История матчей</Text>
+            </TouchableOpacity>
+          </Link>
+
           {/* Игроки */}
           <Link href="/players" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
@@ -282,15 +289,6 @@ export default function HomeScreen() {
               <Text style={quickNavStyles.subtitle}>
                 {playersCount > 0 ? `${playersCount} игроков` : 'Состав команды'}
               </Text>
-            </TouchableOpacity>
-          </Link>
-
-          {/* Расписание тренировок */}
-          <Link href="/trainings" asChild>
-            <TouchableOpacity style={[quickNavStyles.item, quickNavStyles.wideItem]}>
-              <Icon name="calendar" size={24} color={colors.primary} style={quickNavStyles.icon} />
-              <Text style={quickNavStyles.title}>Тренировки</Text>
-              <Text style={quickNavStyles.subtitle}>Расписание льда и ОФП</Text>
             </TouchableOpacity>
           </Link>
         </View>
