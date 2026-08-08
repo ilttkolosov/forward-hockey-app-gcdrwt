@@ -215,13 +215,22 @@ export default function TrainingsScreen() {
               <Text style={styles.dateTitle}>{formatCalendarDate(section.date)}</Text>
               {section.items.map(training => {
                 const isIce = training.type === 'ice';
+                const isGame = training.type === 'game';
                 return (
                   <View key={training.uid} style={styles.card}>
-                    <View style={[styles.typeMarker, isIce ? styles.iceMarker : styles.ofpMarker]} />
+                    <View style={[
+                      styles.typeMarker,
+                      isIce ? styles.iceMarker : isGame ? styles.gameMarker : styles.ofpMarker,
+                    ]} />
                     <View style={styles.cardContent}>
                       <View style={styles.cardHeader}>
-                        <View style={[styles.badge, isIce ? styles.iceBadge : styles.ofpBadge]}>
-                          <Text style={styles.badgeText}>{isIce ? 'ЛЁД' : 'ОФП'}</Text>
+                        <View style={[
+                          styles.badge,
+                          isIce ? styles.iceBadge : isGame ? styles.gameBadge : styles.ofpBadge,
+                        ]}>
+                          <Text style={styles.badgeText}>
+                            {isIce ? 'ЛЕД' : isGame ? 'ИГРА' : 'ОФП'}
+                          </Text>
                         </View>
                         <View style={styles.timeBlock}>
                           <Text style={styles.time}>
@@ -305,11 +314,13 @@ const styles = StyleSheet.create({
   typeMarker: { width: 5 },
   iceMarker: { backgroundColor: colors.accent },
   ofpMarker: { backgroundColor: colors.secondary },
+  gameMarker: { backgroundColor: colors.success },
   cardContent: { flex: 1, padding: 14 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   badge: { borderRadius: 12, paddingHorizontal: 9, paddingVertical: 4 },
   iceBadge: { backgroundColor: '#E9F3FF' },
   ofpBadge: { backgroundColor: '#FFF0E9' },
+  gameBadge: { backgroundColor: '#EAF7EF' },
   badgeText: { color: colors.primary, fontSize: 11, fontWeight: '800' },
   timeBlock: { alignItems: 'flex-end', marginLeft: 12 },
   time: { fontSize: 18, fontWeight: '800', color: colors.primary },

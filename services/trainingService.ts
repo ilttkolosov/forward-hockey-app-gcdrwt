@@ -41,7 +41,15 @@ export const getTrainingSyncWindow = (now = new Date()): TrainingQuery => ({
   team: TRAINING_TEAM_ID,
 });
 
-const isTrainingType = (value: unknown): value is TrainingType => value === 'ice' || value === 'ofp';
+const isTrainingType = (value: unknown): value is TrainingType => (
+  value === 'ice' || value === 'ofp' || value === 'game'
+);
+
+const defaultTrainingTitle = (type: TrainingType): string => {
+  if (type === 'ice') return 'Лед';
+  if (type === 'ofp') return 'ОФП';
+  return 'Игра';
+};
 
 const normalizeTraining = (item: Training): Training => {
   if (!item || !item.id || !item.uid || !isTrainingType(item.type)) {
@@ -56,7 +64,7 @@ const normalizeTraining = (item: Training): Training => {
     id: String(item.id),
     uid: String(item.uid),
     type: item.type,
-    title: String(item.title || (item.type === 'ice' ? 'Тренировка на льду' : 'Тренировка ОФП')),
+    title: String(item.title || defaultTrainingTitle(item.type)),
     // Сохраняем исходное ISO со смещением зоны: календарная дата в SQLite
     // должна совпадать с датой тренировки в Санкт-Петербурге.
     start_at: String(item.start_at),

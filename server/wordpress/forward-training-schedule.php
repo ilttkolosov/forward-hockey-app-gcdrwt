@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Forward — расписание тренировок
  * Description: Безопасный импорт JSON/XML в The Events Calendar и API для мобильного приложения.
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: HC Forward
  *
  * Рекомендуемое размещение:
@@ -129,7 +129,22 @@ function forward_training_normalize_type($value) {
     if (in_array($normalized, array('ofp', 'офп', 'земля'), true)) {
         return 'ofp';
     }
-    return new WP_Error('invalid_type', 'Тип должен быть ice/лед или ofp/ОФП/земля.');
+    if (in_array($normalized, array('game', 'игра', 'матч'), true)) {
+        return 'game';
+    }
+    return new WP_Error(
+        'invalid_type',
+        'Тип должен быть ice/лед, ofp/ОФП/земля или game/игра/матч.'
+    );
+}
+
+function forward_training_type_label($type) {
+    $labels = array(
+        'ice' => 'Лед',
+        'ofp' => 'ОФП',
+        'game' => 'Игра',
+    );
+    return isset($labels[$type]) ? $labels[$type] : 'Тренировка';
 }
 
 function forward_training_parse_payload($raw) {
@@ -280,12 +295,14 @@ function forward_training_normalize_payload(array $payload) {
         }
         $known_uids[$uid] = true;
 
-        $title = $type === 'ice' ? 'Тренировка — Лёд' : 'Тренировка — ОФП';
+        $default_title = forward_training_type_label($type);
+        $source_title = sanitize_text_field($source['title'] ?? '');
+        $title = $source_title !== '' ? $source_title : $default_title;
         $normalized[] = array(
             'row' => $row,
             'uid' => $uid,
             'type' => $type,
-            'title' => sanitize_text_field($source['title'] ?? $title),
+            'title' => $title,
             'start' => $start,
             'end' => $end,
             'timezone' => $timezone_name,
@@ -346,7 +363,7 @@ function forward_training_find_event_by_uid($uid) {
 function forward_training_description(array $event) {
     $lines = array(
         '<p><strong>Команда:</strong> ' . esc_html($event['team_name']) . '</p>',
-        '<p><strong>Тип:</strong> ' . ($event['type'] === 'ice' ? 'Лёд' : 'ОФП') . '</p>',
+        '<p><strong>Тип:</strong> ' . esc_html(forward_training_type_label($event['type'])) . '</p>',
     );
     if ($event['location'] !== '') {
         $lines[] = '<p><strong>Место:</strong> ' . esc_html($event['location']) . '</p>';
@@ -693,10 +710,82 @@ function forward_training_render_admin_page() {
             </p></div>
         <?php endif; ?>
 
+        <style>
+            .forward-training-builder {
+                max-width: 1200px;
+                margin: 18px 0;
+                padding: 16px;
+                border: 1px solid #c3c4c7;
+                border-radius: 4px;
+                background: #fff;
+            }
+            .forward-training-builder h2 { margin-top: 0; }
+            .forward-training-builder-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                gap: 12px;
+                margin-bottom: 14px;
+            }
+            .forward-training-builder-field span {
+                display: block;
+                margin-bottom: 5px;
+                font-weight: 600;
+            }
+            .forward-training-builder-field input,
+            .forward-training-builder-field select { width: 100%; }
+            #forward-training-builder-status { margin-left: 10px; }
+        </style>
+
         <form method="post" enctype="multipart/form-data">
             <?php wp_nonce_field('forward_training_import', 'forward_training_nonce'); ?>
-            <p><input type="file" name="forward_training_file" accept=".json,.xml,application/json,text/xml,application/xml"></p>
-            <textarea name="forward_training_payload" rows="24" style="width:100%;font-family:monospace"><?php
+
+            <div class="forward-training-builder">
+                <h2>Добавить занятие вручную</h2>
+                <p>
+                    Заполните поля и нажмите «Добавить в JSON». Запись будет добавлена в набор ниже;
+                    если поле JSON очищено, будет сформирован новый безопасный набор без удаления других занятий.
+                </p>
+                <div class="forward-training-builder-grid">
+                    <label class="forward-training-builder-field">
+                        <span>Дата тренировки</span>
+                        <input type="date" id="forward-training-builder-date">
+                    </label>
+                    <label class="forward-training-builder-field">
+                        <span>Тип тренировки</span>
+                        <select id="forward-training-builder-type">
+                            <option value="ice">Лед</option>
+                            <option value="ofp">ОФП</option>
+                            <option value="game">Игра</option>
+                        </select>
+                    </label>
+                    <label class="forward-training-builder-field">
+                        <span>Наименование тренировки</span>
+                        <input type="text" id="forward-training-builder-title"
+                               placeholder="Если пусто — название по типу">
+                    </label>
+                    <label class="forward-training-builder-field">
+                        <span>Время с</span>
+                        <input type="time" id="forward-training-builder-start" step="300">
+                    </label>
+                    <label class="forward-training-builder-field">
+                        <span>Время по</span>
+                        <input type="time" id="forward-training-builder-end" step="300">
+                    </label>
+                    <label class="forward-training-builder-field">
+                        <span>Примечание</span>
+                        <input type="text" id="forward-training-builder-note">
+                    </label>
+                </div>
+                <button type="button" class="button button-secondary" id="forward-training-builder-add">
+                    Добавить в JSON
+                </button>
+                <span id="forward-training-builder-status" role="status" aria-live="polite"></span>
+            </div>
+
+            <p><input type="file" id="forward-training-file" name="forward_training_file"
+                      accept=".json,.xml,application/json,text/xml,application/xml"></p>
+            <textarea id="forward-training-payload" name="forward_training_payload" rows="24"
+                      style="width:100%;font-family:monospace"><?php
                 echo esc_textarea($raw);
             ?></textarea>
             <p>
@@ -711,6 +800,150 @@ function forward_training_render_admin_page() {
                         onclick="return confirm('Записать расписание в The Events Calendar?');">Импортировать</button>
             </p>
         </form>
+
+        <script>
+        (function () {
+            'use strict';
+
+            var defaults = <?php echo wp_json_encode(array(
+                'schemaVersion' => FORWARD_TRAINING_API_SCHEMA,
+                'timezone' => forward_training_default_timezone(),
+                'teamId' => FORWARD_TRAINING_DEFAULT_TEAM_ID,
+                'teamName' => FORWARD_TRAINING_DEFAULT_TEAM_NAME,
+                'currentYear' => forward_training_current_year(),
+                'maxEvents' => FORWARD_TRAINING_MAX_EVENTS,
+            ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+            var payloadField = document.getElementById('forward-training-payload');
+            var fileField = document.getElementById('forward-training-file');
+            var dateField = document.getElementById('forward-training-builder-date');
+            var typeField = document.getElementById('forward-training-builder-type');
+            var titleField = document.getElementById('forward-training-builder-title');
+            var startField = document.getElementById('forward-training-builder-start');
+            var endField = document.getElementById('forward-training-builder-end');
+            var noteField = document.getElementById('forward-training-builder-note');
+            var addButton = document.getElementById('forward-training-builder-add');
+            var statusField = document.getElementById('forward-training-builder-status');
+            var weekdayNames = [
+                'воскресенье', 'понедельник', 'вторник', 'среда',
+                'четверг', 'пятница', 'суббота'
+            ];
+            var typeLabels = { ice: 'Лед', ofp: 'ОФП', game: 'Игра' };
+
+            if (!payloadField || !addButton) return;
+
+            function showStatus(message, isError) {
+                statusField.textContent = message;
+                statusField.style.color = isError ? '#b32d2e' : '#008a20';
+            }
+
+            function createEmptyPayload(dateValue) {
+                return {
+                    schema_version: defaults.schemaVersion,
+                    timezone: defaults.timezone,
+                    team: { id: defaults.teamId, name: defaults.teamName },
+                    range_from: dateValue,
+                    range_to: dateValue,
+                    replace_range: false,
+                    events: []
+                };
+            }
+
+            function parsePayloadDate(value, fallbackYear) {
+                var text = String(value || '').trim();
+                var match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+                if (match) return match[1] + '-' + match[2] + '-' + match[3];
+
+                match = text.match(/^(\d{2})\.(\d{2})(?:\.(\d{4}))?$/);
+                if (!match) return '';
+                var year = match[3] || String(fallbackYear);
+                return year + '-' + match[2] + '-' + match[1];
+            }
+
+            function expandPayloadRange(payload, dateValue) {
+                var payloadYear = Number(payload.year) || defaults.currentYear;
+                var rangeFrom = parsePayloadDate(payload.range_from, payloadYear);
+                var rangeTo = parsePayloadDate(payload.range_to, payloadYear);
+                if (!rangeFrom || dateValue < rangeFrom) payload.range_from = dateValue;
+                if (!rangeTo || dateValue > rangeTo) payload.range_to = dateValue;
+            }
+
+            addButton.addEventListener('click', function () {
+                showStatus('', false);
+                var dateValue = dateField.value;
+                var typeValue = typeField.value;
+                var startValue = startField.value;
+                var endValue = endField.value;
+
+                if (!dateValue || !startValue || !endValue) {
+                    showStatus('Укажите дату, время начала и время окончания.', true);
+                    return;
+                }
+                if (!typeLabels[typeValue]) {
+                    showStatus('Выберите допустимый тип тренировки.', true);
+                    return;
+                }
+                if (endValue <= startValue) {
+                    showStatus('Время окончания должно быть позже времени начала.', true);
+                    return;
+                }
+
+                var selectedDate = new Date(dateValue + 'T12:00:00');
+                if (Number.isNaN(selectedDate.getTime())) {
+                    showStatus('Выбрана некорректная дата.', true);
+                    return;
+                }
+
+                var payload;
+                var currentJson = payloadField.value.trim();
+                try {
+                    if (currentJson === '') {
+                        payload = createEmptyPayload(dateValue);
+                    } else {
+                        if (currentJson.charAt(0) === '<') {
+                            throw new Error('Конструктор добавляет записи только в JSON. Очистите поле или используйте JSON-файл.');
+                        }
+                        payload = JSON.parse(currentJson);
+                        if (!payload || Array.isArray(payload) || typeof payload !== 'object') {
+                            throw new Error('Корневой элемент JSON должен быть объектом расписания.');
+                        }
+                        if (!Object.prototype.hasOwnProperty.call(payload, 'events')) payload.events = [];
+                        if (!Array.isArray(payload.events)) {
+                            throw new Error('Поле events в текущем JSON должно быть массивом.');
+                        }
+                    }
+                } catch (error) {
+                    showStatus(error && error.message ? error.message : 'Не удалось разобрать текущий JSON.', true);
+                    return;
+                }
+
+                if (payload.events.length >= defaults.maxEvents) {
+                    showStatus('В одном наборе разрешено не более ' + defaults.maxEvents + ' записей.', true);
+                    return;
+                }
+
+                var titleValue = titleField.value.trim() || typeLabels[typeValue];
+                payload.events.push({
+                    date: dateValue,
+                    weekday: weekdayNames[selectedDate.getDay()],
+                    type: typeValue,
+                    title: titleValue,
+                    start: startValue,
+                    end: endValue,
+                    note: noteField.value.trim()
+                });
+                expandPayloadRange(payload, dateValue);
+                payloadField.value = JSON.stringify(payload, null, 2);
+                if (fileField) fileField.value = '';
+                titleField.value = '';
+                noteField.value = '';
+                showStatus(
+                    'Добавлено: ' + dateValue + ', ' + typeLabels[typeValue]
+                    + ', ' + startValue + '–' + endValue + '. Записей в наборе: ' + payload.events.length + '.',
+                    false
+                );
+            });
+        }());
+        </script>
 
         <?php if (is_array($result) && !empty($result['events'])) : ?>
             <table class="widefat striped">

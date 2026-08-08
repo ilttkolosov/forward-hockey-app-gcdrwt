@@ -31,9 +31,11 @@ const leadText = (minutes: number): string => {
   return `за ${minutes} минут`;
 };
 
-const trainingTypeTitle = (training: Training): string => (
-  training.type === 'ice' ? 'Тренировка на льду' : 'Тренировка ОФП'
-);
+const trainingTypeTitle = (training: Training): string => {
+  if (training.type === 'ice') return 'Тренировка на льду';
+  if (training.type === 'ofp') return 'Тренировка ОФП';
+  return 'Игра';
+};
 
 const formatTime = (date: Date, timezone: string): string => {
   try {

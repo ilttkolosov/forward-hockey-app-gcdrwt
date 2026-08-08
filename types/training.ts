@@ -1,4 +1,4 @@
-export type TrainingType = 'ice' | 'ofp';
+export type TrainingType = 'ice' | 'ofp' | 'game';
 
 export interface TrainingTeam {
   id: string;
