@@ -8,12 +8,38 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { Href, useRouter } from 'expo-router';
 import { colors, commonStyles } from '../../styles/commonStyles';
 import Icon from '../../components/Icon';
 
-const games = [
-  { id: "1", name: 'Memory', description: 'Найди пары игроков' },
+interface MobileGameCard {
+  id: string;
+  name: string;
+  description: string;
+  href: Href;
+  icon: 'grid-outline' | 'snow-outline';
+  accent: string;
+  isNew?: boolean;
+}
+
+const games: MobileGameCard[] = [
+  {
+    id: 'memory',
+    name: 'Memory',
+    description: 'Найди пары игроков',
+    href: '/mobilegames/1',
+    icon: 'grid-outline',
+    accent: colors.primary,
+  },
+  {
+    id: 'ice-resurfacing',
+    name: 'Заливка льда',
+    description: 'Управляй Zamboni и подготовь площадку',
+    href: '/mobilegames/ice-resurfacing',
+    icon: 'snow-outline',
+    accent: colors.accent,
+    isNew: true,
+  },
   //{ id: 'hockey', name: 'Хоккей', description: 'Сыграй в аэрохоккей' },
 ];
 
@@ -40,16 +66,20 @@ export default function MobileGamesScreen() {
           <TouchableOpacity
             key={game.id}
             style={styles.gameCard}
-            onPress={() => router.push(`/mobilegames/${game.id}`)}
+            onPress={() => router.push(game.href)}
             activeOpacity={0.7}
           >
-            <View style={styles.iconContainer}>
-              <Icon name="game-controller" size={28} color={colors.primary} />
+            <View style={[styles.iconContainer, { backgroundColor: `${game.accent}14` }]}>
+              <Icon name={game.icon} size={29} color={game.accent} />
             </View>
             <View style={styles.textContainer}>
-              <Text style={styles.gameName}>{game.name}</Text>
+              <View style={styles.gameTitleRow}>
+                <Text style={styles.gameName}>{game.name}</Text>
+                {game.isNew && <Text style={styles.newBadge}>НОВАЯ</Text>}
+              </View>
               <Text style={styles.gameDesc}>{game.description}</Text>
             </View>
+            <Icon name="chevron-forward" size={21} color={colors.textSecondary} />
           </TouchableOpacity>
         ))}
         <View style={{ height: 32 }} />
@@ -98,6 +128,11 @@ const styles = StyleSheet.create({
   textContainer: {
     flex: 1,
   },
+  gameTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   gameName: {
     fontSize: 18,
     fontWeight: '600',
@@ -107,5 +142,16 @@ const styles = StyleSheet.create({
   gameDesc: {
     fontSize: 14,
     color: colors.textSecondary,
+  },
+  newBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    overflow: 'hidden',
+    borderRadius: 8,
+    color: '#A4411C',
+    backgroundColor: '#FFF0E8',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.6,
   },
 });
