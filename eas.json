@@ -31,6 +31,13 @@
       "autoIncrement": true
     }
   },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascAppId": "6753309650"
+      }
+    }
+  },
   "cli": {
     "version": ">=21.7.0 <22.0.0",
     "appVersionSource": "remote"
