@@ -42,7 +42,7 @@ const EMPTY_CONTROLS: IceGameControls = {
 const PHASE_TEXT: Record<IceGamePhase, string> = {
   intro: 'Ворота открываются…',
   playing: 'Залейте всю площадку',
-  returning: 'Лёд готов — возвращайтесь в верхние ворота',
+  returning: 'Заливка завершена — возвращайтесь в верхние ворота',
   parking: 'Машина в боксе, ворота закрываются…',
   won: 'Площадка готова!',
   crashed: 'Машина повреждена',
@@ -462,7 +462,18 @@ export default function IceResurfacingGameScreen() {
       : snapshot.speed > 0
         ? 'вперёд'
         : 'назад';
-  const displayedRemainingPercent = Math.max(0, snapshot.remainingPercent).toFixed(1);
+  const remainingPercent = Math.max(0, snapshot.remainingPercent);
+  const displayedRemainingPercent =
+    remainingPercent > 0 && remainingPercent < 1
+      ? remainingPercent.toFixed(3)
+      : remainingPercent.toFixed(1);
+  const phaseMessage = snapshot.incompleteReturnWarning
+    ? 'Заливка ещё не завершена. Вернитесь на лёд и закончите работу.'
+    : snapshot.phase === 'returning' && !snapshot.timerFinished
+      ? 'Ворота открыты — залейте больше 99% площадки'
+      : snapshot.phase === 'playing' && !snapshot.timerStarted
+        ? 'Зажмите кнопку хода и выезжайте на лёд'
+        : PHASE_TEXT[snapshot.phase];
   const isResultVisible = snapshot.phase === 'won' || snapshot.phase === 'crashed';
   const didWin = snapshot.phase === 'won';
 
@@ -518,6 +529,7 @@ export default function IceResurfacingGameScreen() {
           styles.phaseBanner,
           snapshot.phase === 'returning' && styles.phaseBannerReturning,
           snapshot.phase === 'crashed' && styles.phaseBannerError,
+          snapshot.incompleteReturnWarning && styles.phaseBannerIncomplete,
         ]}
       >
         <Text
@@ -525,13 +537,12 @@ export default function IceResurfacingGameScreen() {
             styles.phaseText,
             snapshot.phase === 'returning' && styles.phaseTextReturning,
             snapshot.phase === 'crashed' && styles.phaseTextError,
+            snapshot.incompleteReturnWarning && styles.phaseTextIncomplete,
           ]}
-          numberOfLines={1}
+          numberOfLines={snapshot.incompleteReturnWarning ? 2 : 1}
           adjustsFontSizeToFit
         >
-          {snapshot.phase === 'playing' && !snapshot.timerStarted
-            ? 'Зажмите кнопку хода и выезжайте на лёд'
-            : PHASE_TEXT[snapshot.phase]}
+          {phaseMessage}
         </Text>
       </View>
 
@@ -754,7 +765,7 @@ export default function IceResurfacingGameScreen() {
                 <Text style={styles.resultStatLabel}>{didWin ? 'Лёд' : 'Скорость удара'}</Text>
                 <Text style={styles.resultStatValue}>
                   {didWin
-                    ? `${Math.max(0, 100 - snapshot.remainingPercent).toFixed(1)}%`
+                    ? `${Math.max(0, 100 - snapshot.remainingPercent).toFixed(2)}%`
                     : `${Math.round(snapshot.crashImpactSpeed ?? 0)} ед.`}
                 </Text>
               </View>
@@ -877,6 +888,12 @@ const styles = StyleSheet.create({
   phaseBannerError: {
     backgroundColor: '#FDEDEC',
   },
+  phaseBannerIncomplete: {
+    minHeight: 42,
+    borderWidth: 1,
+    borderColor: '#D69A25',
+    backgroundColor: '#FFF4D9',
+  },
   phaseText: {
     color: colors.primary,
     fontSize: 13,
@@ -888,6 +905,9 @@ const styles = StyleSheet.create({
   },
   phaseTextError: {
     color: colors.error,
+  },
+  phaseTextIncomplete: {
+    color: '#8A5810',
   },
   rinkContainer: {
     flex: 1,

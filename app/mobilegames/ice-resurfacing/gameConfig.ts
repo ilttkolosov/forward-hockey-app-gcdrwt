@@ -25,16 +25,19 @@ export const ICE_RESURFACING_CONFIG = {
   REAR_AXLE_OFFSET: 13,
   WHEELBASE: 32,
 
-  // Круглая щётка автоматически выходит слева спереди, когда машина идёт
-  // параллельно борту. Все расстояния заданы в единицах игрового мира, которые
-  // на типичном iPhone почти совпадают с экранными точками.
-  SIDE_BRUSH_FORWARD_OFFSET: 17,
+  // Круглая щётка автоматически выходит у левого переднего угла при подходе
+  // к борту. Все расстояния заданы в единицах игрового мира, которые на
+  // типичном iPhone почти совпадают с экранными точками.
+  SIDE_BRUSH_FORWARD_OFFSET: 20,
+  SIDE_BRUSH_RETRACTED_LATERAL_OFFSET: 15.5,
+  SIDE_BRUSH_EXTENSION_DISTANCE: 7.5,
+  SIDE_BRUSH_VISUAL_RADIUS: 5.7,
+  SIDE_BRUSH_COVERAGE_RADIUS: 7.5,
   SIDE_BRUSH_DEPLOY_DISTANCE: 7,
   SIDE_BRUSH_RETRACT_DISTANCE: 8.5,
   SIDE_BRUSH_FULL_EXTENSION_DISTANCE: 3,
   SIDE_BRUSH_FULL_PRESS_DISTANCE: 1.1,
-  SIDE_BRUSH_MIN_FORWARD_SPEED: 3,
-  SIDE_BRUSH_BOARD_ALIGNMENT: 0.58,
+  SIDE_BRUSH_BOARD_ALIGNMENT: 0.2,
   SIDE_BRUSH_ANIMATION_PER_SECOND: 4.8,
   SIDE_BRUSH_ASSIST_SPEED_RATIO: 0.9,
 
@@ -83,6 +86,9 @@ export const ICE_RESURFACING_CONFIG = {
   // Сетка используется и для расчёта площади, и для маски чистого льда.
   COVERAGE_COLUMNS: 40,
   COVERAGE_ROWS: 70,
+  // Ворота начинают открываться на отметке 99%. Результат фиксируется после
+  // её превышения: из-за дискретной сетки это следующая очищенная клетка.
+  GATE_OPEN_REMAINING_PERCENT: 1,
   COMPLETION_REMAINING_PERCENT: 1,
 
   // Фиксированный шаг не даёт ProMotion-экрану считать физику 120 раз/с.

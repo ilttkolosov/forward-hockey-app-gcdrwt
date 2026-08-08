@@ -43,10 +43,14 @@ export interface IceGameEngineState {
   elapsedMs: number;
   /** Таймер включается только после пересечения льда передней осью. */
   timerStarted: boolean;
+  /** После превышения 99% таймер замораживается, пока машина едет в бокс. */
+  timerFinished: boolean;
   /** Служебное время физики, включая выезд из бокса; используется в логах. */
   runtimeMs: number;
   /** После первого полного выезда ворота больше не открываются до 99% заливки. */
   initialExitCompleted: boolean;
+  /** Машина вошла в ворота до превышения 99% и должна вернуться на лёд. */
+  incompleteReturnWarning: boolean;
   /** Текущий адаптивный предел скорости рядом с бортом: 0.75–1. */
   boardSpeedLimitRatio: number;
   boardClearance: number;
@@ -64,6 +68,7 @@ export interface IceGameEngineState {
   totalEligibleCells: number;
   coverageRevision: number;
   lastConditionerPosition: Point | null;
+  lastSideBrushPosition: Point | null;
   lastDebugLogMs: number;
   lastCollisionLogMs: number;
   lastReportedRemainingBand: number;
@@ -80,13 +85,16 @@ export interface IceGameSnapshot {
   lateralSpeed: number;
   gateProgress: number;
   elapsedMs: number;
+  runtimeMs: number;
   timerStarted: boolean;
+  timerFinished: boolean;
   boardSpeedLimitRatio: number;
   boardClearance: number;
   sideBrushExtension: number;
   sideBrushActive: boolean;
   frontWheelBoardSlip: number;
   remainingPercent: number;
+  incompleteReturnWarning: boolean;
   crashImpactSpeed: number | null;
   coverageRevision: number;
   coveragePath: string;
@@ -204,8 +212,10 @@ export const createInitialIceGameState = (): IceGameEngineState => {
     gateProgress: 0,
     elapsedMs: 0,
     timerStarted: false,
+    timerFinished: false,
     runtimeMs: 0,
     initialExitCompleted: false,
+    incompleteReturnWarning: false,
     boardSpeedLimitRatio: 1,
     boardClearance: CONFIG.BOARD_SLOWDOWN_DISTANCE,
     sideBrushExtension: 0,
@@ -218,6 +228,7 @@ export const createInitialIceGameState = (): IceGameEngineState => {
     coveredEligibleCells: 0,
     coverageRevision: 0,
     lastConditionerPosition: null,
+    lastSideBrushPosition: null,
     lastDebugLogMs: 0,
     lastCollisionLogMs: -Infinity,
     lastReportedRemainingBand: 100,
@@ -233,7 +244,8 @@ export const createInitialIceGameState = (): IceGameEngineState => {
     ),
     crashSpeed: CONFIG.CRASH_SPEED,
     boardMinimumSpeedPercent: Math.round(CONFIG.BOARD_MIN_SPEED_RATIO * 100),
-    completionPercent: 100 - CONFIG.COMPLETION_REMAINING_PERCENT,
+    gateOpenPercent: 100 - CONFIG.GATE_OPEN_REMAINING_PERCENT,
+    completionRule: `>${100 - CONFIG.COMPLETION_REMAINING_PERCENT}%`,
     coverageCells: state.totalEligibleCells,
   });
   return state;
@@ -366,12 +378,14 @@ interface BoardSurfaceInfo {
 }
 
 /**
- * Проверяет именно левую переднюю рабочую зону машины. Щётка не появляется,
- * когда Zamboni смотрит в борт: она предназначена только для прохода вдоль него.
+ * Проверяет левый передний угол рабочего габарита машины. Он шире кузова, как
+ * задний кондиционер: так расстояние 3–7 единиц соответствует именно внешней
+ * кромке оборудования. Небольшой порог по нормали выпускает щётку в скруглении,
+ * но не при лобовом ударе.
  */
 const getSideBrushBoardInfo = (
   state: IceGameEngineState
-): (BoardSurfaceInfo & { alignedAlongLeftBoard: boolean }) | null => {
+): (BoardSurfaceInfo & { boardAtLeftFrontCorner: boolean }) | null => {
   const point = localPointToWorld(
     state.x,
     state.y,
@@ -386,17 +400,12 @@ const getSideBrushBoardInfo = (
   const boardIsOnLeft =
     inwardNormal.x * basis.rightX + inwardNormal.y * basis.rightY >=
     CONFIG.SIDE_BRUSH_BOARD_ALIGNMENT;
-  const forwardIntoBoard = Math.abs(
-    inwardNormal.x * basis.forwardX + inwardNormal.y * basis.forwardY
-  );
 
   return {
     point,
     clearance: getRoundedRinkClearance(point),
     inwardNormal,
-    alignedAlongLeftBoard:
-      boardIsOnLeft &&
-      forwardIntoBoard <= 1 - CONFIG.SIDE_BRUSH_BOARD_ALIGNMENT,
+    boardAtLeftFrontCorner: boardIsOnLeft,
   };
 };
 
@@ -510,6 +519,22 @@ const interpolateAngle = (from: number, to: number, ratio: number) =>
 const getConditionerCenter = (x: number, y: number, angle: number) =>
   localPointToWorld(x, y, angle, 0, -CONFIG.CONDITIONER_REAR_OFFSET);
 
+/** Фактический центр щётки с учётом текущей анимации выдвижения. */
+const getSideBrushCenter = (
+  x: number,
+  y: number,
+  angle: number,
+  extension: number
+) =>
+  localPointToWorld(
+    x,
+    y,
+    angle,
+    -CONFIG.SIDE_BRUSH_RETRACTED_LATERAL_OFFSET -
+      extension * CONFIG.SIDE_BRUSH_EXTENSION_DISTANCE,
+    CONFIG.SIDE_BRUSH_FORWARD_OFFSET
+  );
+
 const markConditionerFootprint = (
   state: IceGameEngineState,
   center: Point,
@@ -567,9 +592,60 @@ const markConditionerFootprint = (
   return changed;
 };
 
+/** Круглая рабочая область боковой щётки очищает снег вплотную к борту. */
+const markSideBrushFootprint = (
+  state: IceGameEngineState,
+  center: Point
+) => {
+  const cellWidth = CONFIG.RINK_WIDTH / CONFIG.COVERAGE_COLUMNS;
+  const cellHeight = CONFIG.RINK_HEIGHT / CONFIG.COVERAGE_ROWS;
+  const radius = CONFIG.SIDE_BRUSH_COVERAGE_RADIUS;
+  const radiusSquared = radius * radius;
+  const minColumn = clamp(
+    Math.floor((center.x - radius) / cellWidth),
+    0,
+    CONFIG.COVERAGE_COLUMNS - 1
+  );
+  const maxColumn = clamp(
+    Math.floor((center.x + radius) / cellWidth),
+    0,
+    CONFIG.COVERAGE_COLUMNS - 1
+  );
+  const minRow = clamp(
+    Math.floor((center.y - radius) / cellHeight),
+    0,
+    CONFIG.COVERAGE_ROWS - 1
+  );
+  const maxRow = clamp(
+    Math.floor((center.y + radius) / cellHeight),
+    0,
+    CONFIG.COVERAGE_ROWS - 1
+  );
+  let changed = false;
+
+  for (let row = minRow; row <= maxRow; row += 1) {
+    for (let column = minColumn; column <= maxColumn; column += 1) {
+      const index = row * CONFIG.COVERAGE_COLUMNS + column;
+      if (!state.eligibleCoverage[index] || state.coverage[index]) continue;
+
+      const cellX = (column + 0.5) * cellWidth;
+      const cellY = (row + 0.5) * cellHeight;
+      const dx = cellX - center.x;
+      const dy = cellY - center.y;
+      if (dx * dx + dy * dy > radiusSquared) continue;
+
+      state.coverage[index] = 1;
+      state.coveredEligibleCells += 1;
+      changed = true;
+    }
+  }
+
+  return changed;
+};
+
 /**
- * Заливаем не только текущий прямоугольник кондиционера, но и промежуток от
- * предыдущего кадра. Это исключает дырки в полосе даже при редком кадре.
+ * Заливаем не только текущие отпечатки кондиционера и щётки, но и промежутки
+ * от предыдущего кадра. Это исключает дырки в полосе даже при редком кадре.
  */
 const markSweptCoverage = (state: IceGameEngineState) => {
   const current = getConditionerCenter(state.x, state.y, state.angle);
@@ -592,6 +668,39 @@ const markSweptCoverage = (state: IceGameEngineState) => {
   }
 
   state.lastConditionerPosition = current;
+
+  // Щётка работает при любом ненулевом выдвижении, включая короткую фазу
+  // выпуска/уборки. Её траектория интерполируется отдельно от кондиционера.
+  if (state.sideBrushExtension > 0.01) {
+    const currentBrush = getSideBrushCenter(
+      state.x,
+      state.y,
+      state.angle,
+      state.sideBrushExtension
+    );
+    const previousBrush = state.lastSideBrushPosition ?? currentBrush;
+    const brushDistance = Math.hypot(
+      currentBrush.x - previousBrush.x,
+      currentBrush.y - previousBrush.y
+    );
+    const brushSamples = Math.max(
+      1,
+      Math.ceil(brushDistance / (cellSize * 0.45))
+    );
+
+    for (let sample = 0; sample <= brushSamples; sample += 1) {
+      const ratio = sample / brushSamples;
+      const center = {
+        x: previousBrush.x + (currentBrush.x - previousBrush.x) * ratio,
+        y: previousBrush.y + (currentBrush.y - previousBrush.y) * ratio,
+      };
+      changed = markSideBrushFootprint(state, center) || changed;
+    }
+    state.lastSideBrushPosition = currentBrush;
+  } else {
+    state.lastSideBrushPosition = null;
+  }
+
   if (!changed) return;
 
   state.coverageRevision += 1;
@@ -634,6 +743,23 @@ const hasCompletelyExitedThroughGate = (state: IceGameEngineState) => {
   );
 };
 
+/** Любая часть корпуса пересекла линию открытых ворот со стороны площадки. */
+const hasEnteredReturnGate = (state: IceGameEngineState) => {
+  const pointsPastGate = getVehicleHullPoints(state.x, state.y, state.angle).filter(
+    point => point.y < 0
+  );
+  return (
+    pointsPastGate.length > 0 &&
+    pointsPastGate.every(
+      point => point.x > RINK_GATE_LEFT && point.x < RINK_GATE_RIGHT
+    )
+  );
+};
+
+/** Предупреждение снимается лишь после полного возвращения машины на лёд. */
+const hasCompletelyReturnedToIce = (state: IceGameEngineState) =>
+  getVehicleHullPoints(state.x, state.y, state.angle).every(point => point.y > 1);
+
 /**
  * Один шаг физики. Функция намеренно изменяет объект state: это позволяет
  * считать движение 60 раз в секунду без создания мусора и пауз сборщика памяти.
@@ -666,7 +792,9 @@ export const stepIceGame = (
   if (state.phase === 'won' || state.phase === 'crashed') return;
 
   state.runtimeMs += deltaSeconds * 1000;
-  if (state.timerStarted) state.elapsedMs += deltaSeconds * 1000;
+  if (state.timerStarted && !state.timerFinished) {
+    state.elapsedMs += deltaSeconds * 1000;
+  }
 
   // Удерживаемая кнопка задаёт максимальную скорость в направлении рычага.
   // Возле борта эта цель плавно уменьшается с 100% до безопасных 75%.
@@ -684,13 +812,9 @@ export const stepIceGame = (
   const brushDistanceLimit = state.sideBrushActive
     ? CONFIG.SIDE_BRUSH_RETRACT_DISTANCE
     : CONFIG.SIDE_BRUSH_DEPLOY_DISTANCE;
-  const brushMinimumSpeed = state.sideBrushActive
-    ? CONFIG.SIDE_BRUSH_MIN_FORWARD_SPEED * 0.5
-    : CONFIG.SIDE_BRUSH_MIN_FORWARD_SPEED;
   const shouldDeploySideBrush = Boolean(
-    sideBrushInfo?.alignedAlongLeftBoard &&
-      sideBrushInfo.clearance <= brushDistanceLimit &&
-      state.speed >= brushMinimumSpeed
+    sideBrushInfo?.boardAtLeftFrontCorner &&
+      sideBrushInfo.clearance <= brushDistanceLimit
   );
   state.sideBrushClearance =
     sideBrushInfo?.clearance ?? CONFIG.SIDE_BRUSH_DEPLOY_DISTANCE;
@@ -976,30 +1100,73 @@ export const stepIceGame = (
     });
   }
 
-  // Полоса чистого льда строится строго за задним кондиционером.
+  // Чистый лёд остаётся за задним кондиционером и выдвинутой круглой щёткой.
   if (state.speed > 0.3) {
     markSweptCoverage(state);
   } else {
-    // Задним ходом кондиционер не заливает лёд. Сбрасываем начало полосы,
-    // чтобы после нового движения вперёд не соединить две точки насквозь.
+    // На месте и задним ходом механизмы не заливают лёд. Сбрасываем начало
+    // полос, чтобы после нового движения не соединить две точки насквозь.
     state.lastConditionerPosition = null;
+    state.lastSideBrushPosition = null;
+  }
+
+  if (
+    state.timerStarted &&
+    !state.timerFinished &&
+    state.remainingPercent < CONFIG.COMPLETION_REMAINING_PERCENT
+  ) {
+    state.timerFinished = true;
+    state.incompleteReturnWarning = false;
+    logIceGame('Таймер остановлен: залито более 99%', {
+      elapsedMs: Math.round(state.elapsedMs),
+      coveredCells: state.coveredEligibleCells,
+      cleanPercent: Number((100 - state.remainingPercent).toFixed(2)),
+    });
   }
 
   if (
     state.phase === 'playing' &&
-    state.remainingPercent <= CONFIG.COMPLETION_REMAINING_PERCENT
+    state.remainingPercent <= CONFIG.GATE_OPEN_REMAINING_PERCENT
   ) {
     setPhase(state, 'returning');
-    logIceGame('Площадка залита — открываем ворота для возвращения', {
+    logIceGame('Залито 99% — открываем ворота для возвращения', {
       remainingPercent: Number(state.remainingPercent.toFixed(2)),
     });
   }
 
-  if (state.phase === 'returning' && hasCompletelyExitedThroughGate(state)) {
+  if (
+    state.phase === 'returning' &&
+    !state.timerFinished &&
+    hasEnteredReturnGate(state) &&
+    !state.incompleteReturnWarning
+  ) {
+    state.incompleteReturnWarning = true;
+    logIceGame('Возвращение отклонено: на площадке остался незалитый лёд', {
+      remainingPercent: Number(state.remainingPercent.toFixed(2)),
+    });
+  }
+
+  if (
+    state.incompleteReturnWarning &&
+    (state.timerFinished || hasCompletelyReturnedToIce(state))
+  ) {
+    state.incompleteReturnWarning = false;
+    logIceGame(
+      state.timerFinished
+        ? 'Предупреждение снято: залито более 99%'
+        : 'Машина вернулась на лёд для завершения работы'
+    );
+  }
+
+  if (
+    state.phase === 'returning' &&
+    state.timerFinished &&
+    hasCompletelyExitedThroughGate(state)
+  ) {
     state.speed = 0;
     state.lateralSpeed = 0;
     setPhase(state, 'parking');
-    logIceGame('Машина полностью покинула лёд — закрываем ворота');
+    logIceGame('Машина полностью покинула залитый лёд — закрываем ворота');
   }
 
   if (
@@ -1011,6 +1178,7 @@ export const stepIceGame = (
       phase: state.phase,
       timeSeconds: Number((state.elapsedMs / 1000).toFixed(1)),
       timerStarted: state.timerStarted,
+      timerFinished: state.timerFinished,
       drivePressed: controls.drivePressed,
       targetSpeedPercent: Math.round(requestedSpeedRatio * 100),
       direction: controls.direction,
@@ -1025,6 +1193,7 @@ export const stepIceGame = (
       sideBrushClearance: Number(state.sideBrushClearance.toFixed(1)),
       frontWheelBoardSlip: Number(state.frontWheelBoardSlip.toFixed(2)),
       remainingPercent: Number(state.remainingPercent.toFixed(2)),
+      incompleteReturnWarning: state.incompleteReturnWarning,
     });
   }
 };
@@ -1082,13 +1251,16 @@ export const createIceGameSnapshot = (
   lateralSpeed: state.lateralSpeed,
   gateProgress: state.gateProgress,
   elapsedMs: state.elapsedMs,
+  runtimeMs: state.runtimeMs,
   timerStarted: state.timerStarted,
+  timerFinished: state.timerFinished,
   boardSpeedLimitRatio: state.boardSpeedLimitRatio,
   boardClearance: state.boardClearance,
   sideBrushExtension: state.sideBrushExtension,
   sideBrushActive: state.sideBrushActive,
   frontWheelBoardSlip: state.frontWheelBoardSlip,
   remainingPercent: state.remainingPercent,
+  incompleteReturnWarning: state.incompleteReturnWarning,
   crashImpactSpeed: state.crashImpactSpeed,
   coverageRevision: state.coverageRevision,
   coveragePath,

@@ -60,10 +60,11 @@ export default function IceRink({ snapshot }: IceRinkProps) {
   const gateAngle = snapshot.gateProgress * 84;
   const hasSkid = Math.abs(snapshot.lateralSpeed) > 5;
   const sideBrushCenterX =
-    -CONFIG.VEHICLE_WIDTH / 2 - 1.5 - snapshot.sideBrushExtension * 7.5;
+    -CONFIG.SIDE_BRUSH_RETRACTED_LATERAL_OFFSET -
+    snapshot.sideBrushExtension * CONFIG.SIDE_BRUSH_EXTENSION_DISTANCE;
   const sideBrushCenterY = -CONFIG.SIDE_BRUSH_FORWARD_OFFSET;
   const sideBrushRotation =
-    ((snapshot.elapsedMs / 7) * Math.max(0.25, snapshot.sideBrushExtension)) % 360;
+    ((snapshot.runtimeMs / 7) * Math.max(0.25, snapshot.sideBrushExtension)) % 360;
   const boardPath = [
     `M${RINK_GATE_LEFT} 0`,
     `H${CONFIG.RINK_CORNER_RADIUS}`,
@@ -98,25 +99,38 @@ export default function IceRink({ snapshot }: IceRinkProps) {
           <Stop offset="0.7" stopColor="#F5FDFF" />
           <Stop offset="1" stopColor="#CDEAF3" />
         </LinearGradient>
-        <Pattern id="dirtyIce" patternUnits="userSpaceOnUse" width="42" height="38">
-          <Rect width="42" height="38" fill="#CED9DC" />
+        <Pattern id="dirtyIce" patternUnits="userSpaceOnUse" width="56" height="48">
+          <Rect width="56" height="48" fill="#AEBCC0" />
           <Path
-            d="M-4 8 C8 2 18 18 46 5 M3 30 C17 18 27 41 45 26"
-            fill="none"
-            stroke="#AAB8BC"
-            strokeWidth="1.4"
-            opacity="0.55"
+            d="M-8 4 C5 -2 16 11 29 8 C41 5 46 -1 62 4 L62 17 C45 13 37 21 24 17 C9 13 2 20 -8 15Z"
+            fill="#899BA0"
+            opacity="0.36"
           />
           <Path
-            d="M4 17 L13 14 M25 8 L37 12 M17 34 L23 30"
+            d="M-5 34 C8 25 17 39 29 32 C40 25 48 33 62 28 L62 48 L-5 48Z"
+            fill="#C7D1D3"
+            opacity="0.38"
+          />
+          <Path
+            d="M-6 12 C8 4 20 20 34 11 C44 5 51 14 62 8 M-3 39 C12 27 25 48 39 36 C46 30 52 37 61 32"
             fill="none"
-            stroke="#F5F7F7"
-            strokeWidth="2.2"
+            stroke="#71868C"
+            strokeWidth="1.8"
+            opacity="0.62"
+          />
+          <Path
+            d="M3 23 L15 18 M23 5 L38 10 M40 25 L53 20 M15 43 L25 38 M46 44 L55 40"
+            fill="none"
+            stroke="#E3E9EA"
+            strokeWidth="2.4"
             strokeLinecap="round"
-            opacity="0.72"
+            opacity="0.66"
           />
-          <Circle cx="8" cy="25" r="1.4" fill="#B7C3C6" />
-          <Circle cx="33" cy="22" r="1" fill="#F7F9F9" />
+          <Circle cx="8" cy="29" r="2.2" fill="#82959A" opacity="0.7" />
+          <Circle cx="31" cy="23" r="1.4" fill="#DCE3E4" />
+          <Circle cx="49" cy="14" r="2.7" fill="#96A7AB" opacity="0.65" />
+          <Circle cx="19" cy="10" r="1.1" fill="#E8EDEE" />
+          <Circle cx="43" cy="42" r="1.6" fill="#788D92" opacity="0.58" />
         </Pattern>
         <ClipPath id="rinkClip">
           <Rect
@@ -400,24 +414,24 @@ export default function IceRink({ snapshot }: IceRinkProps) {
               <Circle
                 cx={sideBrushCenterX}
                 cy={sideBrushCenterY}
-                r="5.7"
+                r={CONFIG.SIDE_BRUSH_VISUAL_RADIUS}
                 fill="#F18A2B"
                 stroke="#8B4C18"
                 strokeWidth="1"
               />
               <Line
-                x1={sideBrushCenterX - 5}
+                x1={sideBrushCenterX - CONFIG.SIDE_BRUSH_VISUAL_RADIUS + 0.7}
                 y1={sideBrushCenterY}
-                x2={sideBrushCenterX + 5}
+                x2={sideBrushCenterX + CONFIG.SIDE_BRUSH_VISUAL_RADIUS - 0.7}
                 y2={sideBrushCenterY}
                 stroke="#FFE1AD"
                 strokeWidth="1"
               />
               <Line
                 x1={sideBrushCenterX}
-                y1={sideBrushCenterY - 5}
+                y1={sideBrushCenterY - CONFIG.SIDE_BRUSH_VISUAL_RADIUS + 0.7}
                 x2={sideBrushCenterX}
-                y2={sideBrushCenterY + 5}
+                y2={sideBrushCenterY + CONFIG.SIDE_BRUSH_VISUAL_RADIUS - 0.7}
                 stroke="#FFE1AD"
                 strokeWidth="1"
               />
