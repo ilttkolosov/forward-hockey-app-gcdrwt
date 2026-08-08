@@ -59,9 +59,9 @@ interface HoldControlButtonProps {
 }
 
 /**
- * Нативный Pan-жест начинается сразу при касании и ОБЯЗАТЕЛЬНО вызывает
- * onFinalize при отпускании, отмене системой или уходе пальца за пределы кнопки.
- * Отдельные gesture-handler'ы поддерживают два пальца: руль слева и ход справа.
+ * Manual-жест меняет состояние только по физическим событиям DOWN/UP. Поэтому
+ * кнопка не может активироваться при рендере: true существует строго между
+ * касанием и UP/CANCEL/FINALIZE. Руль и ход остаются независимыми жестами.
  */
 function HoldControlButton({
   active,
@@ -73,6 +73,7 @@ function HoldControlButton({
   children,
 }: HoldControlButtonProps) {
   const onActiveChangeRef = useRef(onActiveChange);
+  const physicalTouchActiveRef = useRef(false);
   const accessibilityReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
@@ -82,23 +83,33 @@ function HoldControlButton({
   }, [onActiveChange]);
 
   const activateGesture = useCallback(() => {
+    if (physicalTouchActiveRef.current) return;
+    physicalTouchActiveRef.current = true;
     onActiveChangeRef.current(true);
   }, []);
 
   const finalizeGesture = useCallback(() => {
-    // Этот путь срабатывает и для END, и для CANCELLED/FAILED — кнопка не
-    // может остаться нажатой после того, как iOS забрала касание себе.
+    physicalTouchActiveRef.current = false;
     onActiveChangeRef.current(false);
   }, []);
 
   const holdGesture = useMemo(
     () =>
-      Gesture.Pan()
+      Gesture.Manual()
         .enabled(!disabled)
-        .minDistance(0)
-        .maxPointers(1)
-        .shouldCancelWhenOutside(false)
-        .onBegin(activateGesture)
+        .shouldCancelWhenOutside(true)
+        .onTouchesDown((_event, stateManager) => {
+          stateManager.activate();
+          activateGesture();
+        })
+        .onTouchesUp((_event, stateManager) => {
+          finalizeGesture();
+          stateManager.end();
+        })
+        .onTouchesCancelled((_event, stateManager) => {
+          finalizeGesture();
+          stateManager.fail();
+        })
         .onFinalize(finalizeGesture)
         .runOnJS(true),
     [activateGesture, disabled, finalizeGesture]
@@ -106,8 +117,8 @@ function HoldControlButton({
 
   useEffect(() => {
     if (!disabled) return;
-    onActiveChangeRef.current(false);
-  }, [disabled]);
+    finalizeGesture();
+  }, [disabled, finalizeGesture]);
 
   useEffect(
     () => () => {
@@ -691,9 +702,14 @@ export default function IceResurfacingGameScreen() {
               <Icon
                 name={driveDirection === 'forward' ? 'chevron-up' : 'chevron-down'}
                 size={31}
-                color={colors.white}
+                color={driveButtonPressed ? colors.white : colors.primary}
               />
-              <Text style={styles.driveButtonText}>
+              <Text
+                style={[
+                  styles.driveButtonText,
+                  driveButtonPressed && styles.driveButtonTextPressed,
+                ]}
+              >
                 {driveDirection === 'forward' ? 'ВПЕРЁД' : 'НАЗАД'}
               </Text>
             </HoldControlButton>
@@ -1056,9 +1072,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 3,
     borderWidth: 3,
-    borderColor: '#D6E4EF',
+    borderColor: '#B7C8D5',
     borderRadius: 20,
-    backgroundColor: colors.primary,
+    backgroundColor: '#F5F8FA',
     shadowColor: colors.primary,
     shadowOpacity: 0.22,
     shadowRadius: 5,
@@ -1068,14 +1084,17 @@ const styles = StyleSheet.create({
   driveButtonPressed: {
     transform: [{ scale: 0.95 }],
     borderColor: colors.accent,
-    backgroundColor: '#102A4C',
+    backgroundColor: colors.primary,
   },
   driveButtonText: {
     marginTop: -4,
-    color: colors.white,
+    color: colors.primary,
     fontSize: 9,
     fontWeight: '900',
     letterSpacing: 0.65,
+  },
+  driveButtonTextPressed: {
+    color: colors.white,
   },
   controlButtonPressed: {
     transform: [{ scale: 0.95 }],
