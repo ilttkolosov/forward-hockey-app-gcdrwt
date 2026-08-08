@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -92,6 +93,8 @@ const getWeekTitle = (weekOffset: number): string => {
 
 const MIN_WEEK_OFFSET = -1;
 const MAX_WEEK_OFFSET = 12;
+const TRAINING_PROGRESS_COLOR = '#E4EAF0';
+const TRAINING_PROGRESS_SECONDARY_TEXT = '#5E6B73';
 
 const getRussianForm = (
   value: number,
@@ -129,8 +132,17 @@ const formatDuration = (startIso: string, endIso: string): string => {
   return `${hourText} ${minuteText}`;
 };
 
-const isCurrentOrFuture = (training: Training): boolean => {
-  const beginningOfToday = new Date();
+const getTrainingProgress = (training: Training, currentTimeMs: number): number => {
+  const startTime = new Date(training.start_at).getTime();
+  const endTime = new Date(training.end_at).getTime();
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime) return 0;
+  if (currentTimeMs <= startTime) return 0;
+  if (currentTimeMs >= endTime) return 1;
+  return (currentTimeMs - startTime) / (endTime - startTime);
+};
+
+const isCurrentOrFuture = (training: Training, currentTimeMs: number): boolean => {
+  const beginningOfToday = new Date(currentTimeMs);
   beginningOfToday.setHours(0, 0, 0, 0);
   return new Date(training.end_at).getTime() >= beginningOfToday.getTime();
 };
@@ -144,6 +156,7 @@ export default function TrainingsScreen() {
   const [networkError, setNetworkError] = useState<string | null>(null);
   const [showPastTrainings, setShowPastTrainings] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
+  const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
   const selectedWeek = useMemo(() => getWeekRange(weekOffset), [weekOffset]);
 
   useTrackScreenView('Расписание тренировок');
@@ -183,13 +196,25 @@ export default function TrainingsScreen() {
     setNetworkError(null);
   }), []);
 
+  useEffect(() => {
+    const updateCurrentTime = () => setCurrentTimeMs(Date.now());
+    const interval = setInterval(updateCurrentTime, 30_000);
+    const appStateSubscription = AppState.addEventListener('change', state => {
+      if (state === 'active') updateCurrentTime();
+    });
+    return () => {
+      clearInterval(interval);
+      appStateSubscription.remove();
+    };
+  }, []);
+
   const sections = useMemo<TrainingSection[]>(() => {
     const grouped = new Map<string, Training[]>();
     trainings.filter(training => {
       const date = training.start_at.slice(0, 10);
       if (date < selectedWeek.startDate || date > selectedWeek.endDate) return false;
       if (weekOffset !== 0 || showPastTrainings) return true;
-      return isCurrentOrFuture(training);
+      return isCurrentOrFuture(training, currentTimeMs);
     }).forEach(training => {
       const date = training.start_at.slice(0, 10);
       const existing = grouped.get(date) || [];
@@ -197,7 +222,7 @@ export default function TrainingsScreen() {
       grouped.set(date, existing);
     });
     return [...grouped.entries()].map(([date, items]) => ({ date, items }));
-  }, [selectedWeek.endDate, selectedWeek.startDate, showPastTrainings, trainings, weekOffset]);
+  }, [currentTimeMs, selectedWeek.endDate, selectedWeek.startDate, showPastTrainings, trainings, weekOffset]);
 
   const selectWeek = (nextOffset: number) => {
     if (nextOffset < MIN_WEEK_OFFSET || nextOffset > MAX_WEEK_OFFSET) return;
@@ -320,8 +345,16 @@ export default function TrainingsScreen() {
               {section.items.map(training => {
                 const isIce = training.type === 'ice';
                 const isGame = training.type === 'game';
+                const trainingProgress = getTrainingProgress(training, currentTimeMs);
+                const progressWidth = `${Math.round(trainingProgress * 1000) / 10}%` as `${number}%`;
                 return (
                   <View key={training.uid} style={styles.card}>
+                    {trainingProgress > 0 && (
+                      <View
+                        pointerEvents="none"
+                        style={[styles.progressFill, { width: progressWidth }]}
+                      />
+                    )}
                     <View style={[
                       styles.typeMarker,
                       isIce ? styles.iceMarker : isGame ? styles.gameMarker : styles.ofpMarker,
@@ -341,7 +374,10 @@ export default function TrainingsScreen() {
                             {formatTime(training.start_at, training.timezone)}–
                             {formatTime(training.end_at, training.timezone)}
                           </Text>
-                          <Text style={styles.duration}>
+                          <Text style={[
+                            styles.duration,
+                            trainingProgress > 0 && styles.progressSecondaryText,
+                          ]}>
                             {formatDuration(training.start_at, training.end_at)}
                           </Text>
                         </View>
@@ -349,14 +385,32 @@ export default function TrainingsScreen() {
                       <Text style={styles.trainingTitle}>{training.title}</Text>
                       {!!training.location && (
                         <View style={styles.detailRow}>
-                          <Icon name="location-outline" size={16} color={colors.textSecondary} />
-                          <Text style={styles.detailText}>{training.location}</Text>
+                          <Icon
+                            name="location-outline"
+                            size={16}
+                            color={trainingProgress > 0
+                              ? TRAINING_PROGRESS_SECONDARY_TEXT
+                              : colors.textSecondary}
+                          />
+                          <Text style={[
+                            styles.detailText,
+                            trainingProgress > 0 && styles.progressSecondaryText,
+                          ]}>{training.location}</Text>
                         </View>
                       )}
                       {!!training.note && (
                         <View style={styles.detailRow}>
-                          <Icon name="information-circle-outline" size={16} color={colors.textSecondary} />
-                          <Text style={styles.detailText}>{training.note}</Text>
+                          <Icon
+                            name="information-circle-outline"
+                            size={16}
+                            color={trainingProgress > 0
+                              ? TRAINING_PROGRESS_SECONDARY_TEXT
+                              : colors.textSecondary}
+                          />
+                          <Text style={[
+                            styles.detailText,
+                            trainingProgress > 0 && styles.progressSecondaryText,
+                          ]}>{training.note}</Text>
                         </View>
                       )}
                     </View>
@@ -444,11 +498,18 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: 10,
   },
-  typeMarker: { width: 5 },
+  progressFill: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: TRAINING_PROGRESS_COLOR,
+  },
+  typeMarker: { width: 5, zIndex: 1 },
   iceMarker: { backgroundColor: colors.accent },
   ofpMarker: { backgroundColor: colors.secondary },
   gameMarker: { backgroundColor: colors.success },
-  cardContent: { flex: 1, padding: 14 },
+  cardContent: { flex: 1, padding: 14, zIndex: 1 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   badge: { borderRadius: 12, paddingHorizontal: 9, paddingVertical: 4 },
   iceBadge: { backgroundColor: '#E9F3FF' },
@@ -458,6 +519,7 @@ const styles = StyleSheet.create({
   timeBlock: { alignItems: 'flex-end', marginLeft: 12 },
   time: { fontSize: 18, fontWeight: '800', color: colors.primary },
   duration: { marginTop: 2, fontSize: 12, color: colors.textSecondary },
+  progressSecondaryText: { color: TRAINING_PROGRESS_SECONDARY_TEXT },
   trainingTitle: { marginTop: 10, fontSize: 16, fontWeight: '600', color: colors.text },
   detailRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
   detailText: { flex: 1, marginLeft: 6, color: colors.textSecondary, lineHeight: 18 },
