@@ -17,7 +17,7 @@ interface MobileGameCard {
   name: string;
   description: string;
   href: Href;
-  icon: 'grid-outline' | 'snow-outline';
+  icon: 'grid-outline' | 'snow-outline' | 'create-outline';
   accent: string;
   isNew?: boolean;
 }
@@ -38,6 +38,14 @@ const games: MobileGameCard[] = [
     href: '/mobilegames/ice-resurfacing',
     icon: 'snow-outline',
     accent: colors.accent,
+  },
+  {
+    id: 'five-in-row',
+    name: 'Крестики-нолики, 5 в ряд',
+    description: 'Бесконечное поле, компьютер или два игрока',
+    href: '/mobilegames/five-in-row',
+    icon: 'create-outline',
+    accent: '#C4543D',
     isNew: true,
   },
   //{ id: 'hockey', name: 'Хоккей', description: 'Сыграй в аэрохоккей' },
