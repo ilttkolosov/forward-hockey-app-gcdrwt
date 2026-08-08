@@ -27,7 +27,7 @@ interface TrainingSection {
   items: Training[];
 }
 
-interface CurrentWeekRange {
+interface WeekRange {
   startDate: string;
   endDate: string;
   label: string;
@@ -67,11 +67,11 @@ const formatIsoDate = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
-const getCurrentWeekRange = (today = new Date()): CurrentWeekRange => {
+const getWeekRange = (weekOffset = 0, today = new Date()): WeekRange => {
   const monday = new Date(today);
   monday.setHours(12, 0, 0, 0);
   const daysSinceMonday = (monday.getDay() + 6) % 7;
-  monday.setDate(monday.getDate() - daysSinceMonday);
+  monday.setDate(monday.getDate() - daysSinceMonday + weekOffset * 7);
 
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
@@ -82,6 +82,16 @@ const getCurrentWeekRange = (today = new Date()): CurrentWeekRange => {
     label: `Неделя с ${formatWeekDate(monday)} по ${formatWeekDate(sunday)}`,
   };
 };
+
+const getWeekTitle = (weekOffset: number): string => {
+  if (weekOffset === -1) return 'Предыдущая неделя';
+  if (weekOffset === 0) return 'Текущая неделя';
+  if (weekOffset === 1) return 'Следующая неделя';
+  return weekOffset < 0 ? `${Math.abs(weekOffset)} недели назад` : `Через ${weekOffset} недели`;
+};
+
+const MIN_WEEK_OFFSET = -1;
+const MAX_WEEK_OFFSET = 12;
 
 const getRussianForm = (
   value: number,
@@ -133,7 +143,8 @@ export default function TrainingsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [networkError, setNetworkError] = useState<string | null>(null);
   const [showPastTrainings, setShowPastTrainings] = useState(false);
-  const currentWeek = useMemo(() => getCurrentWeekRange(), []);
+  const [weekOffset, setWeekOffset] = useState(0);
+  const selectedWeek = useMemo(() => getWeekRange(weekOffset), [weekOffset]);
 
   useTrackScreenView('Расписание тренировок');
 
@@ -169,10 +180,10 @@ export default function TrainingsScreen() {
   const sections = useMemo<TrainingSection[]>(() => {
     const grouped = new Map<string, Training[]>();
     trainings.filter(training => {
-      if (isCurrentOrFuture(training)) return true;
-      if (!showPastTrainings) return false;
       const date = training.start_at.slice(0, 10);
-      return date >= currentWeek.startDate && date <= currentWeek.endDate;
+      if (date < selectedWeek.startDate || date > selectedWeek.endDate) return false;
+      if (weekOffset !== 0 || showPastTrainings) return true;
+      return isCurrentOrFuture(training);
     }).forEach(training => {
       const date = training.start_at.slice(0, 10);
       const existing = grouped.get(date) || [];
@@ -180,7 +191,13 @@ export default function TrainingsScreen() {
       grouped.set(date, existing);
     });
     return [...grouped.entries()].map(([date, items]) => ({ date, items }));
-  }, [currentWeek.endDate, currentWeek.startDate, showPastTrainings, trainings]);
+  }, [selectedWeek.endDate, selectedWeek.startDate, showPastTrainings, trainings, weekOffset]);
+
+  const selectWeek = (nextOffset: number) => {
+    if (nextOffset < MIN_WEEK_OFFSET || nextOffset > MAX_WEEK_OFFSET) return;
+    setWeekOffset(nextOffset);
+    if (nextOffset !== 0) setShowPastTrainings(false);
+  };
 
   const togglePastTrainings = () => {
     setShowPastTrainings(currentValue => {
@@ -209,9 +226,9 @@ export default function TrainingsScreen() {
         </TouchableOpacity>
         <View style={styles.headerText}>
           <Text style={styles.title}>Тренировки</Text>
-          <Text style={styles.subtitle}>{currentWeek.label}</Text>
+          <Text style={styles.subtitle}>{selectedWeek.label}</Text>
         </View>
-        <TouchableOpacity
+        {weekOffset === 0 ? <TouchableOpacity
           accessibilityHint="Переключает отображение уже прошедших занятий с понедельника текущей недели"
           accessibilityLabel={showPastTrainings
             ? 'Скрыть прошедшие тренировки'
@@ -227,7 +244,7 @@ export default function TrainingsScreen() {
             size={24}
             color={showPastTrainings ? colors.primary : colors.textSecondary}
           />
-        </TouchableOpacity>
+        </TouchableOpacity> : <View style={styles.pastToggle} />}
       </View>
 
       {loading ? (
@@ -241,6 +258,33 @@ export default function TrainingsScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           showsVerticalScrollIndicator={false}
         >
+          <View style={styles.weekNavigation}>
+            <TouchableOpacity
+              accessibilityLabel="Предыдущая неделя"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: weekOffset === MIN_WEEK_OFFSET }}
+              disabled={weekOffset === MIN_WEEK_OFFSET}
+              onPress={() => selectWeek(weekOffset - 1)}
+              style={[styles.weekArrow, weekOffset === MIN_WEEK_OFFSET && styles.weekArrowDisabled]}
+            >
+              <Icon name="chevron-back" size={24} color={colors.primary} />
+            </TouchableOpacity>
+            <View style={styles.weekNavigationText}>
+              <Text style={styles.weekNavigationTitle}>{getWeekTitle(weekOffset)}</Text>
+              <Text style={styles.weekNavigationRange}>{selectedWeek.label}</Text>
+            </View>
+            <TouchableOpacity
+              accessibilityLabel="Следующая неделя"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: weekOffset === MAX_WEEK_OFFSET }}
+              disabled={weekOffset === MAX_WEEK_OFFSET}
+              onPress={() => selectWeek(weekOffset + 1)}
+              style={[styles.weekArrow, weekOffset === MAX_WEEK_OFFSET && styles.weekArrowDisabled]}
+            >
+              <Icon name="chevron-forward" size={24} color={colors.primary} />
+            </TouchableOpacity>
+          </View>
+
           {(isOffline || networkError) && (
             <View accessibilityRole="alert" style={styles.warning}>
               <Icon name="cloud-offline-outline" size={20} color={colors.warning} />
@@ -340,6 +384,26 @@ const styles = StyleSheet.create({
   title: { fontSize: 24, fontWeight: '800', color: colors.text },
   subtitle: { marginTop: 2, fontSize: 13, color: colors.textSecondary },
   content: { padding: 16, paddingBottom: 40 },
+  weekNavigation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 68,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    backgroundColor: colors.surface,
+  },
+  weekArrow: {
+    width: 52,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  weekArrowDisabled: { opacity: 0.25 },
+  weekNavigationText: { flex: 1, alignItems: 'center', paddingVertical: 10 },
+  weekNavigationTitle: { fontSize: 16, fontWeight: '700', color: colors.text },
+  weekNavigationRange: { marginTop: 3, fontSize: 12, color: colors.textSecondary },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   loadingText: { marginTop: 12, color: colors.textSecondary },
   warning: {

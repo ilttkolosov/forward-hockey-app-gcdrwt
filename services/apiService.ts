@@ -86,7 +86,9 @@ class ApiService {
     });
     console.log(`[Тренировки] Запрос расписания: ${url.toString()}`);
 
-    const response = await fetchWithTimeout(url.toString(), {}, 8_000);
+    // WordPress endpoint can legitimately take longer than eight seconds on a
+    // mobile connection, especially after publishing a new week.
+    const response = await fetchWithTimeout(url.toString(), {}, 20_000);
     if (!response.ok) {
       throw new Error(`Сервер расписания вернул HTTP ${response.status}`);
     }

@@ -7,8 +7,8 @@ import type { Training, TrainingQuery, TrainingType } from '../types/training';
 import { rescheduleTrainingNotifications } from './trainingNotificationService';
 
 export const TRAINING_TEAM_ID = 'forward-2014';
-const PAST_DAYS = 7;
-const FUTURE_DAYS = 90;
+const PAST_WEEKS = 1;
+const FUTURE_WEEKS = 12;
 
 export interface TrainingSyncResult {
   trainings: Training[];
@@ -35,11 +35,19 @@ const addDays = (date: Date, days: number): Date => {
   return result;
 };
 
-export const getTrainingSyncWindow = (now = new Date()): TrainingQuery => ({
-  date_from: toLocalIsoDate(addDays(now, -PAST_DAYS)),
-  date_to: toLocalIsoDate(addDays(now, FUTURE_DAYS)),
-  team: TRAINING_TEAM_ID,
-});
+export const getTrainingSyncWindow = (now = new Date()): TrainingQuery => {
+  const currentMonday = new Date(now);
+  currentMonday.setHours(12, 0, 0, 0);
+  currentMonday.setDate(currentMonday.getDate() - ((currentMonday.getDay() + 6) % 7));
+
+  return {
+    // Целые недели нужны экрану с навигацией: предыдущая неделя не должна
+    // обрезаться текущим днём недели.
+    date_from: toLocalIsoDate(addDays(currentMonday, -PAST_WEEKS * 7)),
+    date_to: toLocalIsoDate(addDays(currentMonday, FUTURE_WEEKS * 7 + 6)),
+    team: TRAINING_TEAM_ID,
+  };
+};
 
 const isTrainingType = (value: unknown): value is TrainingType => (
   value === 'ice' || value === 'ofp' || value === 'game'
