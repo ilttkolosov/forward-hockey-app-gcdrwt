@@ -40,7 +40,6 @@ import type {
 import {
   getMessengerMessages,
   isMessengerConnectionError,
-  markMessengerDelivered,
   markMessengerRead,
   messengerErrorMessage,
   removeMessengerReaction,
@@ -195,6 +194,10 @@ export default function MessengerRoomScreen() {
   const flushRunning = useRef(false);
   const realtimeSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingScrollAnimation = useRef<boolean | null>(null);
+  const acknowledgedRead = useRef<{
+    room_id: string;
+    sequence: string;
+  } | null>(null);
 
   const scrollToLatest = useCallback((animated: boolean) => {
     pendingScrollAnimation.current = animated;
@@ -289,6 +292,32 @@ export default function MessengerRoomScreen() {
     }
   }, [db, isAuthenticated, refreshOutbox, roomId]);
 
+  const acknowledgeLatest = useCallback(
+    async (sequence: string) => {
+      if (
+        acknowledgedRead.current?.room_id === roomId &&
+        acknowledgedRead.current.sequence === sequence
+      ) {
+        return;
+      }
+      acknowledgedRead.current = { room_id: roomId, sequence };
+      try {
+        // Reading a room also advances its delivered cursor on the server, so
+        // a separate /delivered request would only duplicate the same work.
+        await markMessengerRead(roomId, sequence);
+      } catch (error) {
+        if (
+          acknowledgedRead.current?.room_id === roomId &&
+          acknowledgedRead.current.sequence === sequence
+        ) {
+          acknowledgedRead.current = null;
+        }
+        throw error;
+      }
+    },
+    [roomId],
+  );
+
   const loadMessages = useCallback(
     async (scroll = false) => {
       if (!roomId || refreshRunning.current || !isAuthenticated) return;
@@ -326,10 +355,7 @@ export default function MessengerRoomScreen() {
         await cacheMessengerMessages(db, remote.items);
         const latestSequence = remote.page.latest_sequence;
         if (latestSequence) {
-          await Promise.all([
-            markMessengerDelivered(roomId, latestSequence),
-            markMessengerRead(roomId, latestSequence),
-          ]);
+          await acknowledgeLatest(latestSequence);
         }
         setOffline(false);
         if (!outboxError) setSyncError(null);
@@ -358,7 +384,15 @@ export default function MessengerRoomScreen() {
         refreshRunning.current = false;
       }
     },
-    [db, flushOutbox, isAuthenticated, refreshOutbox, roomId, scrollToLatest],
+    [
+      acknowledgeLatest,
+      db,
+      flushOutbox,
+      isAuthenticated,
+      refreshOutbox,
+      roomId,
+      scrollToLatest,
+    ],
   );
 
   const scheduleRealtimeSync = useCallback(
@@ -399,10 +433,7 @@ export default function MessengerRoomScreen() {
             );
           });
           void cacheMessengerMessages(db, [message]);
-          void Promise.all([
-            markMessengerDelivered(roomId, message.sequence),
-            markMessengerRead(roomId, message.sequence),
-          ]).catch((error) =>
+          void acknowledgeLatest(message.sequence).catch((error) =>
             console.warn(
               "[Messenger realtime] Не удалось подтвердить сообщение:",
               error,
@@ -411,10 +442,18 @@ export default function MessengerRoomScreen() {
           scheduleRealtimeSync();
           scrollToLatest(true);
         } else if (
+          event.type === "message.receipt_updated" &&
+          event.room_id === roomId
+        ) {
+          // Our own read acknowledgement is echoed through Socket.IO. It does
+          // not change this screen and must not start a REST/realtime loop.
+          if (event.recipient_user_id !== session?.user.id) {
+            scheduleRealtimeSync(100);
+          }
+        } else if (
           event.type === "sync.required" ||
           event.type === "connection.ready" ||
-          ((event.type === "message.receipt_updated" ||
-            event.type === "message.reaction_updated") &&
+          (event.type === "message.reaction_updated" &&
             event.room_id === roomId)
         ) {
           scheduleRealtimeSync(0);
@@ -433,11 +472,13 @@ export default function MessengerRoomScreen() {
       };
     }, [
       db,
+      acknowledgeLatest,
       isAuthenticated,
       loadMessages,
       roomId,
       router,
       scheduleRealtimeSync,
+      session?.user.id,
       scrollToLatest,
     ]),
   );
@@ -503,6 +544,13 @@ export default function MessengerRoomScreen() {
         room_id: roomId,
         client_message_id: clientMessageId,
         media_type: file.kind,
+        mime_type: file.type,
+        upload_size_bytes: file.size_bytes,
+        upload_size_kb:
+          file.size_bytes === null ? null : Math.round(file.size_bytes / 1024),
+        original_size_bytes: file.original_size_bytes,
+        image_width: file.width,
+        image_height: file.height,
         has_caption: Boolean(text.trim()),
       });
       try {
@@ -534,6 +582,10 @@ export default function MessengerRoomScreen() {
           room_id: roomId,
           message_id: result.message.id,
           media_type: result.message.media?.type,
+          stored_size_bytes: result.message.media?.size_bytes,
+          stored_size_kb: result.message.media?.size_bytes
+            ? Math.round(result.message.media.size_bytes / 1024)
+            : null,
         });
       } catch (error) {
         setOffline(isMessengerConnectionError(error));

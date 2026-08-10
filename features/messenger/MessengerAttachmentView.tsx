@@ -14,7 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
 import type { MessengerLocation, MessengerMedia } from "./types";
 import {
@@ -34,6 +34,7 @@ export default function MessengerAttachmentView({
   location,
   accessToken,
 }: MessengerAttachmentViewProps) {
+  const insets = useSafeAreaInsets();
   const [localUri, setLocalUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -196,17 +197,30 @@ export default function MessengerAttachmentView({
         visible={viewerVisible}
         animationType="fade"
         presentationStyle="fullScreen"
+        statusBarTranslucent={false}
         onRequestClose={() => setViewerVisible(false)}
       >
-        <SafeAreaView style={styles.viewer} edges={["top", "bottom"]}>
+        <View
+          style={[
+            styles.viewer,
+            {
+              paddingTop: Math.max(insets.top, 12),
+              paddingBottom: insets.bottom,
+            },
+          ]}
+        >
           <View style={styles.viewerHeader}>
             <Text style={styles.viewerTitle} numberOfLines={1}>
               {media.original_name ||
                 (media.type === "image" ? "Фотография" : "Видео")}
             </Text>
             <TouchableOpacity
-              style={styles.closeButton}
+              style={[
+                styles.closeButton,
+                { marginRight: Math.max(insets.right, 8) },
+              ]}
               onPress={() => setViewerVisible(false)}
+              hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
               accessibilityLabel="Закрыть просмотр"
             >
               <Icon name="close" size={28} color={colors.white} />
@@ -238,7 +252,7 @@ export default function MessengerAttachmentView({
               />
             )}
           </View>
-        </SafeAreaView>
+        </View>
       </Modal>
     </>
   );
@@ -324,10 +338,12 @@ const styles = StyleSheet.create({
   },
   viewerTitle: { flex: 1, color: colors.white, fontWeight: "700" },
   closeButton: {
-    width: 56,
-    height: 56,
+    width: 48,
+    height: 48,
     alignItems: "center",
     justifyContent: "center",
+    borderRadius: 24,
+    backgroundColor: "rgba(255,255,255,0.12)",
   },
   viewerContent: { flex: 1, alignItems: "center", justifyContent: "center" },
   zoomContainer: { width: "100%", height: "100%" },
