@@ -32,6 +32,9 @@ function lastMessageText(room: MessengerRoom): string {
   if (!room.last_message) return "Сообщений пока нет";
   if (room.last_message.kind === "image") return "Фото";
   if (room.last_message.kind === "video") return "Видео";
+  if (room.last_message.kind === "file")
+    return room.last_message.media?.original_name || "Файл";
+  if (room.last_message.kind === "location") return "Геопозиция";
   return room.last_message.text;
 }
 
@@ -147,13 +150,8 @@ export default function MessengerRoomsScreen() {
                   kind: message.kind,
                   text: message.text,
                   created_at: message.created_at,
-                  media: message.media
-                    ? {
-                        id: message.media.id,
-                        type: message.media.type,
-                        url: message.media.url,
-                      }
-                    : null,
+                  media: message.media,
+                  location: message.location,
                   author: {
                     id: message.author.id,
                     display_name: message.author.display_name,
@@ -188,6 +186,7 @@ export default function MessengerRoomsScreen() {
         id: room.id,
         title: room.title,
         canWrite: String(room.can_write),
+        canMedia: String(room.can_send_media),
         canReact: String(room.can_react),
       },
     });

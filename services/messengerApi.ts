@@ -325,6 +325,51 @@ export function sendMessengerText(
   );
 }
 
+export function sendMessengerMedia(
+  roomId: string,
+  clientMessageId: string,
+  file: { uri: string; name: string; type: string },
+  caption?: string,
+  replyToMessageId?: string | null,
+) {
+  const form = new FormData();
+  form.append("client_message_id", clientMessageId);
+  if (caption?.trim()) form.append("caption", caption.trim());
+  if (replyToMessageId) form.append("reply_to_message_id", replyToMessageId);
+  form.append("file", file as unknown as Blob);
+  return messengerRequest<{ message: MessengerMessage; created: boolean }>(
+    `/chat/rooms/${roomId}/media`,
+    { method: "POST", body: form },
+  );
+}
+
+export function sendMessengerLocation(
+  roomId: string,
+  clientMessageId: string,
+  location: {
+    latitude: number;
+    longitude: number;
+    accuracy_meters?: number | null;
+    label?: string | null;
+  },
+  replyToMessageId?: string | null,
+) {
+  return messengerRequest<{ message: MessengerMessage; created: boolean }>(
+    `/chat/rooms/${roomId}/location`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        client_message_id: clientMessageId,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy_meters: location.accuracy_meters ?? undefined,
+        label: location.label?.trim() || undefined,
+        reply_to_message_id: replyToMessageId || undefined,
+      }),
+    },
+  );
+}
+
 export function setMessengerReaction(messageId: string, reaction: string) {
   return messengerRequest<{
     message_id: string;

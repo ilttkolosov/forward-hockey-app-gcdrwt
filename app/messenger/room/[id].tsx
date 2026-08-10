@@ -4,6 +4,7 @@ import { useSQLiteContext } from "expo-sqlite";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   ImageBackground,
   KeyboardAvoidingView,
@@ -17,9 +18,11 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Svg, { Path } from "react-native-svg";
 import Icon from "../../../components/Icon";
 import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
+import MessengerAttachmentView from "../../../features/messenger/MessengerAttachmentView";
 import {
   cacheMessengerMessages,
   enqueueMessengerText,
@@ -41,11 +44,21 @@ import {
   markMessengerRead,
   messengerErrorMessage,
   removeMessengerReaction,
+  sendMessengerLocation,
+  sendMessengerMedia,
   sendMessengerText,
   setMessengerReaction,
 } from "../../../services/messengerApi";
 import { subscribeMessengerRealtime } from "../../../services/messengerRealtime";
 import { messengerLog } from "../../../services/messengerLogger";
+import {
+  currentMessengerLocation,
+  pickMessengerFile,
+  pickMessengerMedia,
+  takeMessengerPhoto,
+  type MessengerUploadFile,
+} from "../../../services/messengerAttachmentPicker";
+import { seedMessengerMediaCache } from "../../../services/messengerMediaCache";
 import { colors } from "../../../styles/commonStyles";
 
 function pendingMessage(
@@ -70,6 +83,7 @@ function pendingMessage(
       avatar_url: currentUser.avatar_url,
     },
     media: null,
+    location: null,
     reply_to: replyTarget
       ? {
           id: replyTarget.id,
@@ -91,6 +105,36 @@ function pendingMessage(
     },
     pending: true,
   };
+}
+
+function MessageTail({ mine }: { mine: boolean }) {
+  return (
+    <Svg
+      width={14}
+      height={16}
+      viewBox="0 0 14 16"
+      style={mine ? styles.mineTail : styles.theirsTail}
+      pointerEvents="none"
+    >
+      <Path
+        d={
+          mine
+            ? "M1 0 C2 7 5 12 13 15 C8 15 3 13 0 10 Z"
+            : "M13 0 C12 7 9 12 1 15 C6 15 11 13 14 10 Z"
+        }
+        fill={mine ? "#D9EBFB" : "#FCFEFF"}
+      />
+    </Svg>
+  );
+}
+
+function isEmojiOnly(value: string): boolean {
+  const compact = value.replace(/\s/g, "");
+  if (!compact || compact.length > 32) return false;
+  return (
+    !/[A-Za-zА-Яа-яЁё0-9]/.test(compact) &&
+    /\p{Extended_Pictographic}/u.test(compact)
+  );
 }
 
 function DeliveryChecks({ message }: { message: MessengerMessage }) {
@@ -125,11 +169,13 @@ export default function MessengerRoomScreen() {
     id: string;
     title?: string;
     canWrite?: string;
+    canMedia?: string;
     canReact?: string;
   }>();
   const { session, isAuthenticated } = useMessengerAuth();
   const roomId = params.id;
   const canWrite = params.canWrite !== "false";
+  const canMedia = params.canMedia !== "false";
   const canReact = params.canReact !== "false";
   const [messages, setMessages] = useState<MessengerMessage[]>([]);
   const [outbox, setOutbox] = useState<MessengerOutboxItem[]>([]);
@@ -143,10 +189,17 @@ export default function MessengerRoomScreen() {
     null,
   );
   const [reactionBusy, setReactionBusy] = useState(false);
+  const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
   const listRef = useRef<FlatList<MessengerMessage>>(null);
   const refreshRunning = useRef(false);
   const flushRunning = useRef(false);
   const realtimeSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingScrollAnimation = useRef<boolean | null>(null);
+
+  const scrollToLatest = useCallback((animated: boolean) => {
+    pendingScrollAnimation.current = animated;
+    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated }));
+  }, []);
 
   const visibleMessages = useMemo(() => {
     const pending = session
@@ -248,6 +301,7 @@ export default function MessengerRoomScreen() {
       try {
         const cached = await loadCachedMessengerMessages(db, roomId);
         if (cached.length) {
+          if (scroll) pendingScrollAnimation.current = false;
           setMessages(cached);
           setLoading(false);
           messengerLog("debug", "room.cache.loaded", {
@@ -267,6 +321,7 @@ export default function MessengerRoomScreen() {
           );
         }
         const remote = await getMessengerMessages(roomId);
+        if (scroll) pendingScrollAnimation.current = false;
         setMessages(remote.items);
         await cacheMessengerMessages(db, remote.items);
         const latestSequence = remote.page.latest_sequence;
@@ -285,10 +340,7 @@ export default function MessengerRoomScreen() {
           outbox_error: Boolean(outboxError),
           duration_ms: Date.now() - startedAt,
         });
-        if (scroll)
-          requestAnimationFrame(() =>
-            listRef.current?.scrollToEnd({ animated: false }),
-          );
+        if (scroll) scrollToLatest(false);
       } catch (error) {
         setOffline(isMessengerConnectionError(error));
         setSyncError(
@@ -306,7 +358,7 @@ export default function MessengerRoomScreen() {
         refreshRunning.current = false;
       }
     },
-    [db, flushOutbox, isAuthenticated, refreshOutbox, roomId],
+    [db, flushOutbox, isAuthenticated, refreshOutbox, roomId, scrollToLatest],
   );
 
   const scheduleRealtimeSync = useCallback(
@@ -333,6 +385,7 @@ export default function MessengerRoomScreen() {
           event.message.room_id === roomId
         ) {
           const message = event.message;
+          pendingScrollAnimation.current = true;
           setMessages((current) => {
             const withoutDuplicate = current.filter(
               (item) =>
@@ -356,9 +409,7 @@ export default function MessengerRoomScreen() {
             ),
           );
           scheduleRealtimeSync();
-          requestAnimationFrame(() =>
-            listRef.current?.scrollToEnd({ animated: true }),
-          );
+          scrollToLatest(true);
         } else if (
           event.type === "sync.required" ||
           event.type === "connection.ready" ||
@@ -387,6 +438,7 @@ export default function MessengerRoomScreen() {
       roomId,
       router,
       scheduleRealtimeSync,
+      scrollToLatest,
     ]),
   );
 
@@ -411,15 +463,161 @@ export default function MessengerRoomScreen() {
       });
       setText("");
       setReplyingTo(null);
+      pendingScrollAnimation.current = true;
       await refreshOutbox();
-      requestAnimationFrame(() =>
-        listRef.current?.scrollToEnd({ animated: true }),
-      );
-      await loadMessages(true);
+      scrollToLatest(true);
+      await loadMessages(false);
     } finally {
       setSending(false);
     }
   };
+
+  const storeSentMessage = useCallback(
+    async (message: MessengerMessage) => {
+      pendingScrollAnimation.current = true;
+      setMessages((current) => {
+        const withoutDuplicate = current.filter(
+          (item) =>
+            item.id !== message.id &&
+            item.client_message_id !== message.client_message_id,
+        );
+        return [...withoutDuplicate, message].sort(
+          (left, right) =>
+            new Date(left.created_at).getTime() -
+            new Date(right.created_at).getTime(),
+        );
+      });
+      await cacheMessengerMessages(db, [message]);
+      scrollToLatest(true);
+    },
+    [db, scrollToLatest],
+  );
+
+  const sendUpload = useCallback(
+    async (file: MessengerUploadFile) => {
+      if (!roomId || !session || sending || !canMedia) return;
+      setSending(true);
+      setAttachmentMenuVisible(false);
+      const clientMessageId = Crypto.randomUUID();
+      messengerLog("info", "media.upload.started", {
+        room_id: roomId,
+        client_message_id: clientMessageId,
+        media_type: file.kind,
+        has_caption: Boolean(text.trim()),
+      });
+      try {
+        const result = await sendMessengerMedia(
+          roomId,
+          clientMessageId,
+          file,
+          text,
+          replyingTo?.id,
+        );
+        await storeSentMessage(result.message);
+        if (result.message.media) {
+          void seedMessengerMediaCache(result.message.media, file.uri).catch(
+            (cacheError) =>
+              messengerLog("warn", "media.cache.seed_failed", {
+                asset_id: result.message.media?.id,
+                message:
+                  cacheError instanceof Error
+                    ? cacheError.message
+                    : "Не удалось сохранить локальную копию",
+              }),
+          );
+        }
+        setText("");
+        setReplyingTo(null);
+        setOffline(false);
+        setSyncError(null);
+        messengerLog("info", "media.upload.completed", {
+          room_id: roomId,
+          message_id: result.message.id,
+          media_type: result.message.media?.type,
+        });
+      } catch (error) {
+        setOffline(isMessengerConnectionError(error));
+        const message = messengerErrorMessage(
+          error,
+          "Не удалось отправить вложение",
+        );
+        setSyncError(message);
+        messengerLog("warn", "media.upload.failed", {
+          room_id: roomId,
+          client_message_id: clientMessageId,
+          media_type: file.kind,
+          message,
+        });
+        Alert.alert("Вложение не отправлено", message);
+      } finally {
+        setSending(false);
+      }
+    },
+    [
+      canMedia,
+      replyingTo?.id,
+      roomId,
+      sending,
+      session,
+      storeSentMessage,
+      text,
+    ],
+  );
+
+  const chooseAttachment = useCallback(
+    async (kind: "camera" | "library" | "file" | "location") => {
+      if (sending) return;
+      let requestStarted = false;
+      setAttachmentMenuVisible(false);
+      try {
+        if (kind === "location") {
+          setSending(true);
+          const location = await currentMessengerLocation();
+          const clientMessageId = Crypto.randomUUID();
+          messengerLog("info", "location.send.started", {
+            room_id: roomId,
+            client_message_id: clientMessageId,
+          });
+          requestStarted = true;
+          const result = await sendMessengerLocation(
+            roomId,
+            clientMessageId,
+            location,
+            replyingTo?.id,
+          );
+          await storeSentMessage(result.message);
+          setReplyingTo(null);
+          setOffline(false);
+          setSyncError(null);
+          return;
+        }
+        const file =
+          kind === "camera"
+            ? await takeMessengerPhoto()
+            : kind === "library"
+              ? await pickMessengerMedia()
+              : await pickMessengerFile();
+        if (file) await sendUpload(file);
+      } catch (error) {
+        const message = messengerErrorMessage(
+          error,
+          kind === "location"
+            ? "Не удалось отправить геопозицию"
+            : "Не удалось подготовить вложение",
+        );
+        if (requestStarted) setOffline(isMessengerConnectionError(error));
+        setSyncError(message);
+        messengerLog("warn", "attachment.action.failed", { kind, message });
+        Alert.alert(
+          kind === "location" ? "Геопозиция не отправлена" : "Ошибка вложения",
+          message,
+        );
+      } finally {
+        if (kind === "location") setSending(false);
+      }
+    },
+    [replyingTo?.id, roomId, sendUpload, sending, storeSentMessage],
+  );
 
   const toggleReaction = async (
     message: MessengerMessage,
@@ -460,6 +658,8 @@ export default function MessengerRoomScreen() {
     if (reply.text) return reply.text;
     if (reply.kind === "image") return "Фото";
     if (reply.kind === "video") return "Видео";
+    if (reply.kind === "file") return "Файл";
+    if (reply.kind === "location") return "Геопозиция";
     return "Сообщение";
   };
 
@@ -512,19 +712,32 @@ export default function MessengerRoomScreen() {
               visibleMessages.length ? styles.messageList : styles.emptyList
             }
             onContentSizeChange={() => {
-              if (visibleMessages.length)
-                listRef.current?.scrollToEnd({ animated: false });
+              if (!visibleMessages.length) return;
+              const animated = pendingScrollAnimation.current;
+              if (animated === null) return;
+              pendingScrollAnimation.current = null;
+              listRef.current?.scrollToEnd({ animated });
             }}
             renderItem={({ item }) => {
               const mine = item.author.id === session?.user.id;
+              const media = item.deleted_at ? null : (item.media ?? null);
+              const location = item.deleted_at ? null : (item.location ?? null);
               const body = item.deleted_at
                 ? "Сообщение удалено"
                 : item.text ||
-                  (item.kind === "image"
-                    ? "Фото"
-                    : item.kind === "video"
-                      ? "Видео"
-                      : "");
+                  (!media && !location
+                    ? item.kind === "image"
+                      ? "Фото"
+                      : item.kind === "video"
+                        ? "Видео"
+                        : item.kind === "file"
+                          ? "Файл"
+                          : item.kind === "location"
+                            ? "Геопозиция"
+                            : ""
+                    : "");
+              const emojiOnly =
+                !item.deleted_at && item.kind === "text" && isEmojiOnly(body);
               return (
                 <View
                   style={[
@@ -537,7 +750,7 @@ export default function MessengerRoomScreen() {
                       displayName={item.author.display_name}
                       avatarUrl={item.author.avatar_url}
                       accessToken={session?.access_token}
-                      size={34}
+                      size={40}
                     />
                   )}
                   <View
@@ -558,9 +771,7 @@ export default function MessengerRoomScreen() {
                       ]}
                       accessibilityHint="Удерживайте, чтобы ответить или поставить реакцию"
                     >
-                      <View
-                        style={mine ? styles.mineTail : styles.theirsTail}
-                      />
+                      <MessageTail mine={mine} />
                       {item.reply_to && (
                         <View style={styles.replyQuote}>
                           <Text style={styles.replyAuthor} numberOfLines={1}>
@@ -576,7 +787,23 @@ export default function MessengerRoomScreen() {
                           {item.author.display_name}
                         </Text>
                       )}
-                      <Text style={styles.messageText}>{body}</Text>
+                      {(media || location) && session?.access_token && (
+                        <MessengerAttachmentView
+                          media={media}
+                          location={location}
+                          accessToken={session.access_token}
+                        />
+                      )}
+                      {body ? (
+                        <Text
+                          style={[
+                            styles.messageText,
+                            emojiOnly && styles.emojiOnlyText,
+                          ]}
+                        >
+                          {body}
+                        </Text>
+                      ) : null}
                       <View style={styles.messageMeta}>
                         <Text style={styles.time}>
                           {new Date(item.created_at).toLocaleTimeString(
@@ -679,6 +906,75 @@ export default function MessengerRoomScreen() {
           </Pressable>
         </Modal>
 
+        <Modal
+          visible={attachmentMenuVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setAttachmentMenuVisible(false)}
+        >
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setAttachmentMenuVisible(false)}
+          >
+            <Pressable
+              style={styles.attachmentSheet}
+              onPress={(event) => event.stopPropagation()}
+            >
+              <View style={styles.attachmentSheetHeader}>
+                <Text style={styles.actionTitle}>Добавить вложение</Text>
+                <TouchableOpacity
+                  style={styles.attachmentClose}
+                  onPress={() => setAttachmentMenuVisible(false)}
+                >
+                  <Icon name="close" size={23} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.attachmentGrid}>
+                <TouchableOpacity
+                  style={styles.attachmentAction}
+                  onPress={() => void chooseAttachment("camera")}
+                >
+                  <View style={styles.attachmentActionIcon}>
+                    <Icon name="camera" size={27} color={colors.white} />
+                  </View>
+                  <Text style={styles.attachmentActionText}>Камера</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.attachmentAction}
+                  onPress={() => void chooseAttachment("library")}
+                >
+                  <View style={styles.attachmentActionIcon}>
+                    <Icon name="images" size={27} color={colors.white} />
+                  </View>
+                  <Text style={styles.attachmentActionText}>Медиатека</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.attachmentAction}
+                  onPress={() => void chooseAttachment("file")}
+                >
+                  <View style={styles.attachmentActionIcon}>
+                    <Icon name="document" size={27} color={colors.white} />
+                  </View>
+                  <Text style={styles.attachmentActionText}>Файл</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.attachmentAction}
+                  onPress={() => void chooseAttachment("location")}
+                >
+                  <View style={styles.attachmentActionIcon}>
+                    <Icon name="location" size={27} color={colors.white} />
+                  </View>
+                  <Text style={styles.attachmentActionText}>Геопозиция</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.attachmentHint}>
+                Фотографии автоматически уменьшаются до 1920 px и сжимаются
+                перед отправкой.
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
         {canWrite ? (
           <View style={styles.composerShell}>
             {replyingTo && (
@@ -688,9 +984,16 @@ export default function MessengerRoomScreen() {
                     {replyingTo.author.display_name}
                   </Text>
                   <Text style={styles.replyText} numberOfLines={1}>
-                    {replyingTo.deleted_at
-                      ? "Сообщение удалено"
-                      : replyingTo.text || "Сообщение"}
+                    {replyPreview({
+                      id: replyingTo.id,
+                      kind: replyingTo.kind,
+                      text: replyingTo.text,
+                      deleted_at: replyingTo.deleted_at,
+                      author: {
+                        id: replyingTo.author.id,
+                        display_name: replyingTo.author.display_name,
+                      },
+                    })}
                   </Text>
                 </View>
                 <TouchableOpacity
@@ -703,6 +1006,16 @@ export default function MessengerRoomScreen() {
               </View>
             )}
             <View style={styles.composer}>
+              {canMedia && (
+                <TouchableOpacity
+                  style={styles.attachButton}
+                  onPress={() => setAttachmentMenuVisible(true)}
+                  disabled={sending}
+                  accessibilityLabel="Добавить вложение"
+                >
+                  <Icon name="add" size={30} color={colors.primary} />
+                </TouchableOpacity>
+              )}
               <TextInput
                 style={styles.input}
                 value={text}
@@ -779,7 +1092,7 @@ const styles = StyleSheet.create({
   },
   messageRowMine: { justifyContent: "flex-end" },
   messageRowTheirs: { justifyContent: "flex-start" },
-  messageColumn: { maxWidth: "79%", alignItems: "flex-start" },
+  messageColumn: { maxWidth: "82%", alignItems: "flex-start" },
   messageColumnMine: { alignItems: "flex-end" },
   message: {
     position: "relative",
@@ -802,31 +1115,13 @@ const styles = StyleSheet.create({
   },
   mineTail: {
     position: "absolute",
-    right: -8,
-    bottom: -1,
-    width: 0,
-    height: 0,
-    borderStyle: "solid",
-    borderTopWidth: 9,
-    borderBottomWidth: 0,
-    borderLeftWidth: 8,
-    borderRightWidth: 0,
-    borderTopColor: "#D9EBFB",
-    borderLeftColor: "transparent",
+    right: -10,
+    bottom: 0,
   },
   theirsTail: {
     position: "absolute",
-    left: -8,
-    bottom: -1,
-    width: 0,
-    height: 0,
-    borderStyle: "solid",
-    borderTopWidth: 9,
-    borderBottomWidth: 0,
-    borderLeftWidth: 0,
-    borderRightWidth: 8,
-    borderTopColor: "#FCFEFF",
-    borderRightColor: "transparent",
+    left: -10,
+    bottom: 0,
   },
   author: {
     marginBottom: 3,
@@ -835,6 +1130,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   messageText: { color: colors.text, fontSize: 15, lineHeight: 20 },
+  emojiOnlyText: { fontSize: 38, lineHeight: 46 },
   replyQuote: {
     minWidth: 130,
     marginBottom: 6,
@@ -930,6 +1226,14 @@ const styles = StyleSheet.create({
     color: colors.text,
     backgroundColor: colors.backgroundAlt,
   },
+  attachButton: {
+    width: 46,
+    height: 46,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 23,
+    backgroundColor: "#EAF3FF",
+  },
   sendButton: {
     width: 48,
     height: 48,
@@ -949,6 +1253,57 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 20,
     backgroundColor: colors.surface,
+  },
+  attachmentSheet: {
+    padding: 16,
+    paddingBottom: 20,
+    borderRadius: 22,
+    backgroundColor: colors.surface,
+  },
+  attachmentSheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  attachmentClose: {
+    width: 42,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  attachmentGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  attachmentAction: {
+    width: "48%",
+    minHeight: 96,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: 16,
+    backgroundColor: colors.backgroundAlt,
+  },
+  attachmentActionIcon: {
+    width: 52,
+    height: 52,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 26,
+    backgroundColor: colors.primary,
+  },
+  attachmentActionText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  attachmentHint: {
+    marginTop: 14,
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: "center",
   },
   actionTitle: {
     marginBottom: 13,

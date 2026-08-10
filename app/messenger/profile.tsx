@@ -24,6 +24,11 @@ import {
   uploadMessengerAvatar,
 } from "../../services/messengerApi";
 import { messengerLog } from "../../services/messengerLogger";
+import {
+  clearMessengerMediaCache,
+  formatMessengerBytes,
+  messengerMediaCacheSize,
+} from "../../services/messengerMediaCache";
 import { colors } from "../../styles/commonStyles";
 
 export default function MessengerProfileScreen() {
@@ -36,6 +41,8 @@ export default function MessengerProfileScreen() {
   const [selectedAsset, setSelectedAsset] =
     useState<ImagePicker.ImagePickerAsset | null>(null);
   const [busy, setBusy] = useState(false);
+  const [cacheBusy, setCacheBusy] = useState(false);
+  const [cacheBytes, setCacheBytes] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -45,6 +52,19 @@ export default function MessengerProfileScreen() {
   useEffect(() => {
     setDisplayName(session?.user.display_name || "");
   }, [session?.user.display_name]);
+
+  useEffect(() => {
+    void messengerMediaCacheSize()
+      .then(setCacheBytes)
+      .catch((cacheError) =>
+        messengerLog("warn", "media.cache.size_failed", {
+          message:
+            cacheError instanceof Error
+              ? cacheError.message
+              : "Неизвестная ошибка",
+        }),
+      );
+  }, []);
 
   const chooseAvatar = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -131,6 +151,34 @@ export default function MessengerProfileScreen() {
         },
       },
     ]);
+  };
+
+  const confirmClearCache = () => {
+    Alert.alert(
+      "Очистить кэш медиа?",
+      "Локальные копии фото, видео и файлов будут удалены с устройства. На сервере вложения сохранятся и при необходимости загрузятся снова.",
+      [
+        { text: "Отмена", style: "cancel" },
+        {
+          text: "Очистить",
+          style: "destructive",
+          onPress: () => {
+            setCacheBusy(true);
+            void clearMessengerMediaCache()
+              .then(() => setCacheBytes(0))
+              .catch((cacheError) =>
+                Alert.alert(
+                  "Не удалось очистить кэш",
+                  cacheError instanceof Error
+                    ? cacheError.message
+                    : "Повторите попытку позже",
+                ),
+              )
+              .finally(() => setCacheBusy(false));
+          },
+        },
+      ],
+    );
   };
 
   if (!session) return null;
@@ -228,6 +276,30 @@ export default function MessengerProfileScreen() {
               </TouchableOpacity>
             )}
           </View>
+
+          <View style={styles.cacheCard}>
+            <View style={styles.cacheIcon}>
+              <Icon name="folder-open" size={25} color={colors.primary} />
+            </View>
+            <View style={styles.cacheText}>
+              <Text style={styles.cacheTitle}>Кэш медиа</Text>
+              <Text style={styles.cacheSubtitle}>
+                На устройстве: {formatMessengerBytes(cacheBytes)}. Оригиналы
+                остаются на сервере.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.cacheButton, cacheBusy && styles.disabled]}
+              onPress={confirmClearCache}
+              disabled={cacheBusy || cacheBytes === 0}
+            >
+              {cacheBusy ? (
+                <ActivityIndicator size="small" color={colors.error} />
+              ) : (
+                <Text style={styles.cacheButtonText}>Очистить</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -265,6 +337,35 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: colors.surface,
   },
+  cacheCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginHorizontal: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 18,
+    backgroundColor: colors.surface,
+  },
+  cacheIcon: {
+    width: 46,
+    height: 46,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 15,
+    backgroundColor: "#EAF3FF",
+  },
+  cacheText: { flex: 1, minWidth: 0 },
+  cacheTitle: { color: colors.text, fontSize: 15, fontWeight: "800" },
+  cacheSubtitle: {
+    marginTop: 3,
+    color: colors.textSecondary,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  cacheButton: { paddingVertical: 10, paddingHorizontal: 4 },
+  cacheButtonText: { color: colors.error, fontSize: 12, fontWeight: "800" },
   avatarWrap: { marginBottom: 16 },
   avatarPreview: { width: 112, height: 112, borderRadius: 56 },
   photoButton: {

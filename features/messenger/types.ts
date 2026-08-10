@@ -27,6 +27,25 @@ export interface MessengerSession {
   user: MessengerUser;
 }
 
+export type MessengerMessageKind =
+  "text" | "image" | "video" | "file" | "location";
+
+export interface MessengerMedia {
+  id: string;
+  type: "image" | "video" | "file";
+  mime_type: string;
+  size_bytes: number;
+  original_name: string;
+  url: string;
+}
+
+export interface MessengerLocation {
+  latitude: number;
+  longitude: number;
+  accuracy_meters: number | null;
+  label: string | null;
+}
+
 export interface InvitationPreview {
   id: string;
   status: "active" | "revoked" | "expired" | "consumed";
@@ -54,10 +73,11 @@ export interface MessengerRoom {
   last_message: null | {
     id: string;
     sequence: string;
-    kind: "text" | "image" | "video";
+    kind: MessengerMessageKind;
     text: string;
     created_at: string;
-    media: null | { id: string; type: "image" | "video"; url: string };
+    media: MessengerMedia | null;
+    location: MessengerLocation | null;
     author: { id: string; display_name: string; avatar_url: string | null };
   };
 }
@@ -70,7 +90,7 @@ export interface MessengerReaction {
 
 export interface MessengerReply {
   id: string;
-  kind: "text" | "image" | "video";
+  kind: MessengerMessageKind;
   text: string;
   deleted_at: string | null;
   author: {
@@ -84,7 +104,7 @@ export interface MessengerMessage {
   sequence: string;
   room_id: string;
   client_message_id: string;
-  kind: "text" | "image" | "video";
+  kind: MessengerMessageKind;
   text: string;
   created_at: string;
   edited_at: string | null;
@@ -95,13 +115,8 @@ export interface MessengerMessage {
     display_name: string;
     avatar_url: string | null;
   };
-  media: null | {
-    id: string;
-    type: "image" | "video";
-    mime_type: string;
-    size_bytes: number;
-    url: string;
-  };
+  media: MessengerMedia | null;
+  location: MessengerLocation | null;
   reply_to: MessengerReply | null;
   reactions: MessengerReaction[];
   delivery: {
