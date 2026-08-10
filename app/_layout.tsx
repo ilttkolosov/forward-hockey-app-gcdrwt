@@ -34,6 +34,7 @@ import { Buffer } from 'buffer';
 import NetInfo from '@react-native-community/netinfo';
 import { dataAvailability } from '../services/dataAvailability';
 import { NetworkStatusProvider } from '../contexts/NetworkStatusContext';
+import { MessengerAuthProvider } from '../contexts/MessengerAuthContext';
 import { SQLiteProvider } from 'expo-sqlite';
 import { DATABASE_ASSET_SOURCE, DATABASE_NAME, migrateDatabase } from '../database';
 import {
@@ -594,6 +595,10 @@ function RootLayoutContent() {
         <Stack.Screen name="tournaments/[id]" />
         <Stack.Screen name="command/[id]" />
         <Stack.Screen name="mobilegames/[id]" />
+        <Stack.Screen name="messenger/index" />
+        <Stack.Screen name="messenger/register" />
+        <Stack.Screen name="messenger/rooms" />
+        <Stack.Screen name="messenger/room/[id]" />
       </Stack>
     </GestureHandlerRootView>
   );
@@ -607,7 +612,9 @@ export default function RootLayout() {
       onInit={migrateDatabase}
     >
       <NetworkStatusProvider>
-        <RootLayoutContent />
+        <MessengerAuthProvider>
+          <RootLayoutContent />
+        </MessengerAuthProvider>
       </NetworkStatusProvider>
     </SQLiteProvider>
   );

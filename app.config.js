@@ -50,6 +50,11 @@ export default ({ config }) => {
       'expo-router',
       'expo-web-browser',
       'expo-notifications',
+      'expo-secure-store',
+      ['expo-camera', {
+        cameraPermission: 'Разрешите доступ к камере для сканирования QR-кода приглашения.',
+        recordAudioAndroid: false,
+      }],
       ['./plugins/withAppMetrica.js', {
         apiKey: '2a2cbf5f-f609-4a7b-80c6-99ba84d59501',
       }],

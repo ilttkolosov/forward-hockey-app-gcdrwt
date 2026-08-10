@@ -26,6 +26,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDeclension } from './tournaments/index'; // ← импортируем склонение
 import { useTrackScreenView } from '../hooks/useTrackScreenView';
 import { useNetworkStatus } from '../contexts/NetworkStatusContext';
+import { useMessengerAuth } from '../contexts/MessengerAuthContext';
 
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 
@@ -114,6 +115,7 @@ const warningStyles = StyleSheet.create({
 
 export default function HomeScreen() {
   const { isOffline } = useNetworkStatus();
+  const { isAuthenticated: isMessengerAuthenticated } = useMessengerAuth();
   const [currentGames, setCurrentGames] = useState<Game[]>([]);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
   const [upcomingCount, setUpcomingCount] = useState<number>(0);
@@ -288,6 +290,17 @@ export default function HomeScreen() {
               <Text style={quickNavStyles.title}>Игроки</Text>
               <Text style={quickNavStyles.subtitle}>
                 {playersCount > 0 ? `${playersCount} игроков` : 'Состав команды'}
+              </Text>
+            </TouchableOpacity>
+          </Link>
+
+          {/* Командный мессенджер */}
+          <Link href="/messenger" asChild>
+            <TouchableOpacity style={quickNavStyles.item}>
+              <Icon name="chatbubbles" size={24} color={colors.primary} style={quickNavStyles.icon} />
+              <Text style={quickNavStyles.title}>Общение</Text>
+              <Text style={quickNavStyles.subtitle}>
+                {isMessengerAuthenticated ? 'Чаты команды' : 'Вход по приглашению'}
               </Text>
             </TouchableOpacity>
           </Link>
