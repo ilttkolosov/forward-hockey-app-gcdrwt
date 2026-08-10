@@ -136,6 +136,23 @@ function isEmojiOnly(value: string): boolean {
   );
 }
 
+function logMessageCacheFailure(
+  message: MessengerMessage,
+  error: unknown,
+): void {
+  const errorMessage =
+    error instanceof Error ? error.message : "Не удалось записать сообщение";
+  console.warn(
+    `[Messenger] Сообщение ${message.id} доставлено, но не записано в локальный кэш:`,
+    error,
+  );
+  messengerLog("warn", "message.cache.write_failed", {
+    room_id: message.room_id,
+    message_id: message.id,
+    message: errorMessage,
+  });
+}
+
 function DeliveryChecks({ message }: { message: MessengerMessage }) {
   if (message.pending) {
     return (
@@ -250,7 +267,11 @@ export default function MessengerRoomScreen() {
             item.text,
             item.reply_to_message_id,
           );
-          await cacheMessengerMessages(db, [result.message]);
+          try {
+            await cacheMessengerMessages(db, [result.message]);
+          } catch (cacheError) {
+            logMessageCacheFailure(result.message, cacheError);
+          }
           await removeMessengerOutboxItem(db, item.client_message_id);
           console.log(
             `[Messenger] Сообщение ${item.client_message_id} отправлено из outbox`,
@@ -432,7 +453,9 @@ export default function MessengerRoomScreen() {
                 new Date(right.created_at).getTime(),
             );
           });
-          void cacheMessengerMessages(db, [message]);
+          void cacheMessengerMessages(db, [message]).catch((cacheError) =>
+            logMessageCacheFailure(message, cacheError),
+          );
           void acknowledgeLatest(message.sequence).catch((error) =>
             console.warn(
               "[Messenger realtime] Не удалось подтвердить сообщение:",
@@ -528,7 +551,13 @@ export default function MessengerRoomScreen() {
             new Date(right.created_at).getTime(),
         );
       });
-      await cacheMessengerMessages(db, [message]);
+      try {
+        await cacheMessengerMessages(db, [message]);
+      } catch (cacheError) {
+        // The server has already accepted the message. A local cache failure
+        // must not turn a successful send into a misleading error alert.
+        logMessageCacheFailure(message, cacheError);
+      }
       scrollToLatest(true);
     },
     [db, scrollToLatest],
@@ -638,6 +667,12 @@ export default function MessengerRoomScreen() {
             replyingTo?.id,
           );
           await storeSentMessage(result.message);
+          messengerLog("info", "location.send.completed", {
+            room_id: roomId,
+            message_id: result.message.id,
+            latitude: result.message.location?.latitude,
+            longitude: result.message.location?.longitude,
+          });
           setReplyingTo(null);
           setOffline(false);
           setSyncError(null);

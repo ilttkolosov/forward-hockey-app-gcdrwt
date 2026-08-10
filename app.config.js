@@ -12,6 +12,7 @@ export default ({ config }) => {
     (fs.existsSync(localGoogleServicesPath)
       ? "./google-services.json"
       : undefined);
+  const googleMapsApiKey = process.env.GOOGLE_MAPS_API_KEY;
 
   return {
     ...config,
@@ -45,6 +46,9 @@ export default ({ config }) => {
       edgeToEdgeEnabled: true,
       package: "com.kolosovaleksandr.Forward2014",
       ...(googleServicesFile ? { googleServicesFile } : {}),
+      ...(googleMapsApiKey
+        ? { config: { googleMaps: { apiKey: googleMapsApiKey } } }
+        : {}),
       jsEngine: "hermes",
     },
     web: {

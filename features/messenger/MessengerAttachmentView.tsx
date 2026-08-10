@@ -5,9 +5,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
 import type { MessengerLocation, MessengerMedia } from "./types";
+import MessengerLocationPreview from "./MessengerLocationPreview";
 import {
   cacheMessengerMedia,
   formatMessengerBytes,
@@ -73,35 +72,7 @@ export default function MessengerAttachmentView({
   }, [ensureLocal, media?.type]);
 
   if (location) {
-    const openMap = () => {
-      const { latitude, longitude } = location;
-      const label = encodeURIComponent(location.label || "Геопозиция");
-      const url =
-        Platform.OS === "ios"
-          ? `https://maps.apple.com/?ll=${latitude},${longitude}&q=${label}`
-          : `geo:${latitude},${longitude}?q=${latitude},${longitude}(${label})`;
-      void Linking.openURL(url);
-    };
-    return (
-      <TouchableOpacity
-        style={styles.locationCard}
-        activeOpacity={0.84}
-        onPress={openMap}
-      >
-        <View style={styles.locationIcon}>
-          <Icon name="location" size={25} color={colors.white} />
-        </View>
-        <View style={styles.attachmentText}>
-          <Text style={styles.attachmentTitle} numberOfLines={1}>
-            {location.label || "Моя геопозиция"}
-          </Text>
-          <Text style={styles.attachmentSubtitle}>
-            {location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}
-          </Text>
-        </View>
-        <Icon name="open-outline" size={18} color={colors.primary} />
-      </TouchableOpacity>
-    );
+    return <MessengerLocationPreview location={location} />;
   }
 
   if (!media) return null;
@@ -286,17 +257,6 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     backgroundColor: "rgba(255, 255, 255, 0.54)",
   },
-  locationCard: {
-    width: 235,
-    minHeight: 72,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginBottom: 4,
-    padding: 9,
-    borderRadius: 13,
-    backgroundColor: "rgba(255, 255, 255, 0.54)",
-  },
   fileIcon: {
     width: 44,
     height: 44,
@@ -304,14 +264,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 22,
     backgroundColor: colors.primary,
-  },
-  locationIcon: {
-    width: 48,
-    height: 48,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 13,
-    backgroundColor: colors.accent,
   },
   attachmentText: { flex: 1, minWidth: 0 },
   attachmentTitle: { color: colors.text, fontSize: 13, fontWeight: "800" },
