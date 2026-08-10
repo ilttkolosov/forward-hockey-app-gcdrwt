@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -19,6 +19,7 @@ import {
 } from "../../features/messenger/repository";
 import type { MessengerRoom } from "../../features/messenger/types";
 import { getMessengerRooms } from "../../services/messengerApi";
+import { subscribeMessengerRealtime } from "../../services/messengerRealtime";
 import { colors } from "../../styles/commonStyles";
 
 function lastMessageText(room: MessengerRoom): string {
@@ -26,6 +27,14 @@ function lastMessageText(room: MessengerRoom): string {
   if (room.last_message.kind === "image") return "Фото";
   if (room.last_message.kind === "video") return "Видео";
   return room.last_message.text;
+}
+
+function sequenceIsNewer(candidate: string, current: string): boolean {
+  const left = candidate.replace(/^0+/, "") || "0";
+  const right = current.replace(/^0+/, "") || "0";
+  return left.length !== right.length
+    ? left.length > right.length
+    : left.localeCompare(right) > 0;
 }
 
 export default function MessengerRoomsScreen() {
@@ -37,17 +46,20 @@ export default function MessengerRoomsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const realtimeSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadRooms = useCallback(
-    async (showRefresh = false) => {
+    async (showRefresh = false, includeCache = true) => {
       if (!isAuthenticated) return;
       if (showRefresh) setRefreshing(true);
       setError(null);
       try {
-        const cached = await loadCachedMessengerRooms(db);
-        if (cached.length) {
-          setRooms(cached);
-          setLoading(false);
+        if (includeCache) {
+          const cached = await loadCachedMessengerRooms(db);
+          if (cached.length) {
+            setRooms(cached);
+            setLoading(false);
+          }
         }
         const remote = await getMessengerRooms();
         setRooms(remote);
@@ -69,14 +81,87 @@ export default function MessengerRoomsScreen() {
     [db, isAuthenticated],
   );
 
+  const scheduleRealtimeSync = useCallback(
+    (delay = 150) => {
+      if (realtimeSyncTimer.current)
+        clearTimeout(realtimeSyncTimer.current);
+      realtimeSyncTimer.current = setTimeout(() => {
+        realtimeSyncTimer.current = null;
+        void loadRooms(false, false);
+      }, delay);
+    },
+    [loadRooms],
+  );
+
   useFocusEffect(
     useCallback(() => {
       if (status === "unauthenticated") {
         router.replace("/messenger/register");
         return;
       }
-      if (status === "authenticated") void loadRooms();
-    }, [loadRooms, router, status]),
+      if (status !== "authenticated") return;
+      void loadRooms();
+      const unsubscribe = subscribeMessengerRealtime((event) => {
+        if (event.type === "message.created") {
+          const message = event.message;
+          // Update the visible card immediately; REST below remains the source
+          // of truth and corrects unread counters after reconnect/duplicates.
+          setRooms((current) =>
+            current.map((room) => {
+              if (
+                room.id !== message.room_id ||
+                !sequenceIsNewer(
+                  message.sequence,
+                  room.last_message?.sequence || "0",
+                )
+              )
+                return room;
+              const alreadyShown = room.last_message?.id === message.id;
+              const unread =
+                message.author.id !== session?.user.id &&
+                sequenceIsNewer(message.sequence, room.last_read_sequence) &&
+                !alreadyShown;
+              return {
+                ...room,
+                unread_count: room.unread_count + (unread ? 1 : 0),
+                last_message: {
+                  id: message.id,
+                  sequence: message.sequence,
+                  kind: message.kind,
+                  text: message.text,
+                  created_at: message.created_at,
+                  media: message.media
+                    ? {
+                        id: message.media.id,
+                        type: message.media.type,
+                        url: message.media.url,
+                      }
+                    : null,
+                  author: {
+                    id: message.author.id,
+                    display_name: message.author.display_name,
+                    avatar_url: message.author.avatar_url,
+                  },
+                },
+              };
+            }),
+          );
+          scheduleRealtimeSync();
+        } else if (
+          event.type === "sync.required" ||
+          event.type === "connection.ready"
+        ) {
+          scheduleRealtimeSync(0);
+        }
+      });
+      return () => {
+        unsubscribe();
+        if (realtimeSyncTimer.current) {
+          clearTimeout(realtimeSyncTimer.current);
+          realtimeSyncTimer.current = null;
+        }
+      };
+    }, [loadRooms, router, scheduleRealtimeSync, session?.user.id, status]),
   );
 
   const openRoom = (room: MessengerRoom) => {
@@ -143,7 +228,7 @@ export default function MessengerRoomsScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => loadRooms(true)}
+            onRefresh={() => void loadRooms(true, false)}
           />
         }
         contentContainerStyle={rooms.length ? styles.list : styles.emptyList}

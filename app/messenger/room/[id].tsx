@@ -35,6 +35,7 @@ import {
   markMessengerRead,
   sendMessengerText,
 } from "../../../services/messengerApi";
+import { subscribeMessengerRealtime } from "../../../services/messengerRealtime";
 import { colors } from "../../../styles/commonStyles";
 
 function pendingMessage(
@@ -89,6 +90,7 @@ export default function MessengerRoomScreen() {
   const listRef = useRef<FlatList<MessengerMessage>>(null);
   const refreshRunning = useRef(false);
   const flushRunning = useRef(false);
+  const realtimeSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const visibleMessages = useMemo(() => {
     const pending = session
@@ -172,6 +174,18 @@ export default function MessengerRoomScreen() {
     [db, flushOutbox, isAuthenticated, refreshOutbox, roomId],
   );
 
+  const scheduleRealtimeSync = useCallback(
+    (delay = 150) => {
+      if (realtimeSyncTimer.current)
+        clearTimeout(realtimeSyncTimer.current);
+      realtimeSyncTimer.current = setTimeout(() => {
+        realtimeSyncTimer.current = null;
+        void loadMessages(false);
+      }, delay);
+    },
+    [loadMessages],
+  );
+
   useFocusEffect(
     useCallback(() => {
       if (!isAuthenticated) {
@@ -179,9 +193,60 @@ export default function MessengerRoomScreen() {
         return;
       }
       void loadMessages(true);
-      const timer = setInterval(() => void loadMessages(false), 3000);
-      return () => clearInterval(timer);
-    }, [isAuthenticated, loadMessages, router]),
+      const unsubscribe = subscribeMessengerRealtime((event) => {
+        if (
+          event.type === "message.created" &&
+          event.message.room_id === roomId
+        ) {
+          const message = event.message;
+          setMessages((current) => {
+            const withoutDuplicate = current.filter(
+              (item) =>
+                item.id !== message.id &&
+                item.client_message_id !== message.client_message_id,
+            );
+            return [...withoutDuplicate, message].sort(
+              (left, right) =>
+                new Date(left.created_at).getTime() -
+                new Date(right.created_at).getTime(),
+            );
+          });
+          void cacheMessengerMessages(db, [message]);
+          void Promise.all([
+            markMessengerDelivered(roomId, message.sequence),
+            markMessengerRead(roomId, message.sequence),
+          ]).catch((error) =>
+            console.warn(
+              "[Messenger realtime] Не удалось подтвердить сообщение:",
+              error,
+            ),
+          );
+          scheduleRealtimeSync();
+          requestAnimationFrame(() =>
+            listRef.current?.scrollToEnd({ animated: true }),
+          );
+        } else if (
+          event.type === "sync.required" ||
+          event.type === "connection.ready" ||
+          ((event.type === "message.receipt_updated" ||
+            event.type === "message.reaction_updated") &&
+            event.room_id === roomId)
+        ) {
+          scheduleRealtimeSync(0);
+        }
+      });
+      // Reconciliation is intentionally infrequent: Socket.IO performs normal
+      // foreground delivery, while this timer protects against a lost event.
+      const timer = setInterval(() => void loadMessages(false), 30_000);
+      return () => {
+        unsubscribe();
+        clearInterval(timer);
+        if (realtimeSyncTimer.current) {
+          clearTimeout(realtimeSyncTimer.current);
+          realtimeSyncTimer.current = null;
+        }
+      };
+    }, [db, isAuthenticated, loadMessages, roomId, router, scheduleRealtimeSync]),
   );
 
   const send = async () => {

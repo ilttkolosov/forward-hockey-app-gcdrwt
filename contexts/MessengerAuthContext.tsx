@@ -6,6 +6,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import { AppState } from "react-native";
 import type { MessengerSession } from "../features/messenger/types";
 import {
   getMessengerMe,
@@ -18,6 +19,11 @@ import {
   saveMessengerSession,
   subscribeMessengerSession,
 } from "../services/messengerSession";
+import {
+  connectMessengerRealtime,
+  disconnectMessengerRealtime,
+  resumeMessengerRealtime,
+} from "../services/messengerRealtime";
 
 type MessengerAuthStatus = "loading" | "authenticated" | "unauthenticated";
 
@@ -68,6 +74,19 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       active = false;
       unsubscribe();
     };
+  }, []);
+
+  useEffect(() => {
+    const accessToken = session?.access_token;
+    if (accessToken) connectMessengerRealtime(accessToken);
+    else disconnectMessengerRealtime();
+  }, [session?.access_token]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") resumeMessengerRealtime();
+    });
+    return () => subscription.remove();
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {

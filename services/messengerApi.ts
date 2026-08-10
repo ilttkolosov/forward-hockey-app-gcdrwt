@@ -13,7 +13,8 @@ import {
   saveMessengerSession,
 } from "./messengerSession";
 
-export const MESSENGER_API_BASE_URL = "https://forward.is-gone.com/api/v1";
+export const MESSENGER_SERVER_ORIGIN = "https://forward.is-gone.com";
+export const MESSENGER_API_BASE_URL = `${MESSENGER_SERVER_ORIGIN}/api/v1`;
 
 interface ApiErrorEnvelope {
   error?: {
