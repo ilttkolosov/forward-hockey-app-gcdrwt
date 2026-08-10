@@ -60,6 +60,8 @@ import {
 import { seedMessengerMediaCache } from "../../../services/messengerMediaCache";
 import { colors } from "../../../styles/commonStyles";
 
+type MessengerAttachmentKind = "camera" | "library" | "file" | "location";
+
 function pendingMessage(
   item: MessengerOutboxItem,
   currentUser: MessengerUser,
@@ -210,6 +212,10 @@ export default function MessengerRoomScreen() {
   const refreshRunning = useRef(false);
   const flushRunning = useRef(false);
   const realtimeSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attachmentLaunchTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const pendingAttachmentKind = useRef<MessengerAttachmentKind | null>(null);
   const pendingScrollAnimation = useRef<boolean | null>(null);
   const acknowledgedRead = useRef<{
     room_id: string;
@@ -492,6 +498,11 @@ export default function MessengerRoomScreen() {
           clearTimeout(realtimeSyncTimer.current);
           realtimeSyncTimer.current = null;
         }
+        if (attachmentLaunchTimer.current) {
+          clearTimeout(attachmentLaunchTimer.current);
+          attachmentLaunchTimer.current = null;
+        }
+        pendingAttachmentKind.current = null;
       };
     }, [
       db,
@@ -646,10 +657,21 @@ export default function MessengerRoomScreen() {
   );
 
   const chooseAttachment = useCallback(
-    async (kind: "camera" | "library" | "file" | "location") => {
-      if (sending) return;
+    async (kind: MessengerAttachmentKind) => {
+      if (sending) {
+        messengerLog("debug", "attachment.action.skipped", {
+          kind,
+          room_id: roomId,
+          reason: "sending",
+        });
+        return;
+      }
       let requestStarted = false;
       setAttachmentMenuVisible(false);
+      messengerLog("debug", "attachment.action.started", {
+        kind,
+        room_id: roomId,
+      });
       try {
         if (kind === "location") {
           setSending(true);
@@ -684,7 +706,20 @@ export default function MessengerRoomScreen() {
             : kind === "library"
               ? await pickMessengerMedia()
               : await pickMessengerFile();
-        if (file) await sendUpload(file);
+        if (file) {
+          messengerLog("debug", "attachment.action.prepared", {
+            kind,
+            room_id: roomId,
+            media_type: file.kind,
+            size_bytes: file.size_bytes,
+          });
+          await sendUpload(file);
+        } else {
+          messengerLog("debug", "attachment.action.canceled", {
+            kind,
+            room_id: roomId,
+          });
+        }
       } catch (error) {
         const message = messengerErrorMessage(
           error,
@@ -704,6 +739,51 @@ export default function MessengerRoomScreen() {
       }
     },
     [replyingTo?.id, roomId, sendUpload, sending, storeSentMessage],
+  );
+
+  const runPendingAttachment = useCallback(() => {
+    if (attachmentLaunchTimer.current) {
+      clearTimeout(attachmentLaunchTimer.current);
+      attachmentLaunchTimer.current = null;
+    }
+    const kind = pendingAttachmentKind.current;
+    if (!kind) return;
+    pendingAttachmentKind.current = null;
+    void chooseAttachment(kind);
+  }, [chooseAttachment]);
+
+  const queueAttachment = useCallback(
+    (kind: MessengerAttachmentKind) => {
+      if (sending) {
+        messengerLog("debug", "attachment.action.skipped", {
+          kind,
+          room_id: roomId,
+          reason: "sending",
+        });
+        return;
+      }
+      pendingAttachmentKind.current = kind;
+      messengerLog("debug", "attachment.action.queued", {
+        kind,
+        room_id: roomId,
+      });
+      setAttachmentMenuVisible(false);
+      if (Platform.OS === "web") {
+        pendingAttachmentKind.current = null;
+        void chooseAttachment(kind);
+        return;
+      }
+      if (attachmentLaunchTimer.current) {
+        clearTimeout(attachmentLaunchTimer.current);
+      }
+      // onDismiss is exact on iOS. Android has no onDismiss callback, while
+      // the timeout also protects against an interrupted iOS dismissal.
+      attachmentLaunchTimer.current = setTimeout(
+        runPendingAttachment,
+        Platform.OS === "ios" ? 700 : 350,
+      );
+    },
+    [chooseAttachment, roomId, runPendingAttachment, sending],
   );
 
   const toggleReaction = async (
@@ -998,6 +1078,7 @@ export default function MessengerRoomScreen() {
           transparent
           animationType="slide"
           onRequestClose={() => setAttachmentMenuVisible(false)}
+          onDismiss={runPendingAttachment}
         >
           <Pressable
             style={styles.modalBackdrop}
@@ -1019,7 +1100,8 @@ export default function MessengerRoomScreen() {
               <View style={styles.attachmentGrid}>
                 <TouchableOpacity
                   style={styles.attachmentAction}
-                  onPress={() => void chooseAttachment("camera")}
+                  onPress={() => queueAttachment("camera")}
+                  disabled={sending}
                 >
                   <View style={styles.attachmentActionIcon}>
                     <Icon name="camera" size={27} color={colors.white} />
@@ -1028,7 +1110,8 @@ export default function MessengerRoomScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.attachmentAction}
-                  onPress={() => void chooseAttachment("library")}
+                  onPress={() => queueAttachment("library")}
+                  disabled={sending}
                 >
                   <View style={styles.attachmentActionIcon}>
                     <Icon name="images" size={27} color={colors.white} />
@@ -1037,7 +1120,8 @@ export default function MessengerRoomScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.attachmentAction}
-                  onPress={() => void chooseAttachment("file")}
+                  onPress={() => queueAttachment("file")}
+                  disabled={sending}
                 >
                   <View style={styles.attachmentActionIcon}>
                     <Icon name="document" size={27} color={colors.white} />
@@ -1046,7 +1130,8 @@ export default function MessengerRoomScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.attachmentAction}
-                  onPress={() => void chooseAttachment("location")}
+                  onPress={() => queueAttachment("location")}
+                  disabled={sending}
                 >
                   <View style={styles.attachmentActionIcon}>
                     <Icon name="location" size={27} color={colors.white} />
@@ -1055,7 +1140,7 @@ export default function MessengerRoomScreen() {
                 </TouchableOpacity>
               </View>
               <Text style={styles.attachmentHint}>
-                Фотографии автоматически уменьшаются до 1920 px и сжимаются
+                Фотографии автоматически уменьшаются до 1600 px и сжимаются
                 перед отправкой.
               </Text>
             </Pressable>
