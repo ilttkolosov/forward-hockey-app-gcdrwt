@@ -23,6 +23,7 @@ import {
   updateMessengerProfile,
   uploadMessengerAvatar,
 } from "../../services/messengerApi";
+import { messengerLog } from "../../services/messengerLogger";
 import { colors } from "../../styles/commonStyles";
 
 export default function MessengerProfileScreen() {
@@ -66,6 +67,10 @@ export default function MessengerProfileScreen() {
     }
     setBusy(true);
     setError(null);
+    messengerLog("info", "profile.save.started", {
+      has_new_avatar: Boolean(selectedAsset),
+      first_run: params.firstRun === "1",
+    });
     try {
       await updateMessengerProfile(name);
       if (selectedAsset) {
@@ -78,9 +83,18 @@ export default function MessengerProfileScreen() {
       await refreshUser();
       setSelectedAsset(null);
       console.log("[Messenger profile] Профиль пользователя сохранён");
+      messengerLog("info", "profile.save.completed", {
+        avatar_uploaded: Boolean(selectedAsset),
+      });
       if (params.firstRun === "1") router.replace("/messenger/rooms");
       else router.back();
     } catch (saveError) {
+      messengerLog("warn", "profile.save.failed", {
+        message:
+          saveError instanceof Error
+            ? saveError.message
+            : "Не удалось сохранить профиль",
+      });
       setError(
         saveError instanceof Error
           ? saveError.message

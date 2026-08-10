@@ -19,8 +19,13 @@ import {
   loadCachedMessengerRooms,
 } from "../../features/messenger/repository";
 import type { MessengerRoom } from "../../features/messenger/types";
-import { getMessengerRooms } from "../../services/messengerApi";
+import {
+  getMessengerRooms,
+  isMessengerConnectionError,
+  messengerErrorMessage,
+} from "../../services/messengerApi";
 import { subscribeMessengerRealtime } from "../../services/messengerRealtime";
+import { messengerLog } from "../../services/messengerLogger";
 import { colors } from "../../styles/commonStyles";
 
 function lastMessageText(room: MessengerRoom): string {
@@ -54,6 +59,11 @@ export default function MessengerRoomsScreen() {
       if (!isAuthenticated) return;
       if (showRefresh) setRefreshing(true);
       setError(null);
+      const startedAt = Date.now();
+      messengerLog("debug", "rooms.sync.started", {
+        include_cache: includeCache,
+        manual_refresh: showRefresh,
+      });
       try {
         if (includeCache) {
           const cached = await loadCachedMessengerRooms(db);
@@ -67,13 +77,20 @@ export default function MessengerRoomsScreen() {
         await cacheMessengerRooms(db, remote);
         setOffline(false);
         console.log(`[Messenger] Загружено комнат: ${remote.length}`);
+        messengerLog("info", "rooms.sync.completed", {
+          room_count: remote.length,
+          duration_ms: Date.now() - startedAt,
+        });
       } catch (loadError) {
-        setOffline(true);
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Не удалось обновить чаты",
-        );
+        setOffline(isMessengerConnectionError(loadError));
+        setError(messengerErrorMessage(loadError, "Не удалось обновить чаты"));
+        messengerLog("warn", "rooms.sync.failed", {
+          category: isMessengerConnectionError(loadError)
+            ? "connection"
+            : "server",
+          message: messengerErrorMessage(loadError),
+          duration_ms: Date.now() - startedAt,
+        });
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -230,7 +247,11 @@ export default function MessengerRoomsScreen() {
           style={styles.warning}
           onPress={() => void loadRooms(true)}
         >
-          <Icon name="cloud-offline-outline" size={21} color={colors.warning} />
+          <Icon
+            name={offline ? "cloud-offline-outline" : "alert-circle-outline"}
+            size={21}
+            color={colors.warning}
+          />
           <Text style={styles.warningText}>
             {error}. Нажмите, чтобы повторить.
           </Text>

@@ -13,6 +13,7 @@ import {
   loadMessengerSession,
   saveMessengerSession,
 } from "./messengerSession";
+import { messengerLog, messengerRequestId } from "./messengerLogger";
 
 export const MESSENGER_SERVER_ORIGIN = "https://forward.is-gone.com";
 export const MESSENGER_API_BASE_URL = `${MESSENGER_SERVER_ORIGIN}/api/v1`;
@@ -49,6 +50,34 @@ export class MessengerApiError extends Error {
   ) {
     super(message);
     this.name = "MessengerApiError";
+  }
+}
+
+/**
+ * HTTP errors mean that the device reached the messenger server and received
+ * a response. Only fetch-level failures should switch the UI to offline mode.
+ */
+export function isMessengerConnectionError(error: unknown): boolean {
+  return !(error instanceof MessengerApiError);
+}
+
+export function messengerErrorMessage(
+  error: unknown,
+  fallback = "Не удалось выполнить запрос к мессенджеру",
+): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function messengerErrorDetails(error: unknown): string | undefined {
+  if (!(error instanceof MessengerApiError) || error.details === undefined) {
+    return undefined;
+  }
+  try {
+    return JSON.stringify(error.details, (key, value) =>
+      /token|password|authorization|cookie/i.test(key) ? "[REDACTED]" : value,
+    ).slice(0, 1000);
+  } catch {
+    return "[unserializable]";
   }
 }
 
@@ -107,9 +136,13 @@ export async function messengerRequest<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
+  const startedAt = Date.now();
+  const requestId = messengerRequestId();
+  const method = options.method || "GET";
   const session = await loadMessengerSession();
   const headers = new Headers(options.headers);
   headers.set("Accept", "application/json");
+  headers.set("x-request-id", requestId);
   if (options.body && !(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
@@ -117,20 +150,63 @@ export async function messengerRequest<T>(
     headers.set("Authorization", `Bearer ${session.access_token}`);
   }
 
-  const response = await fetch(`${MESSENGER_API_BASE_URL}${path}`, {
-    ...options,
-    headers,
+  messengerLog("debug", "api.request", {
+    request_id: requestId,
+    method,
+    path,
+    authenticated: Boolean(!options.public && session?.access_token),
+    body_kind:
+      options.body instanceof FormData
+        ? "form-data"
+        : options.body
+          ? "json"
+          : "none",
   });
-  if (
-    response.status === 401 &&
-    !options.public &&
-    !options.noRefresh &&
-    Boolean(session?.refresh_token)
-  ) {
-    await refreshMessengerSession();
-    return messengerRequest<T>(path, { ...options, noRefresh: true });
+  try {
+    const response = await fetch(`${MESSENGER_API_BASE_URL}${path}`, {
+      ...options,
+      headers,
+    });
+    const serverRequestId = response.headers.get("x-request-id") || requestId;
+    messengerLog(response.ok ? "info" : "warn", "api.response", {
+      request_id: serverRequestId,
+      method,
+      path,
+      status: response.status,
+      duration_ms: Date.now() - startedAt,
+    });
+    if (
+      response.status === 401 &&
+      !options.public &&
+      !options.noRefresh &&
+      Boolean(session?.refresh_token)
+    ) {
+      messengerLog("info", "auth.refresh", {
+        request_id: serverRequestId,
+        reason: "http_401",
+      });
+      await refreshMessengerSession();
+      return messengerRequest<T>(path, { ...options, noRefresh: true });
+    }
+    return await parseResponse<T>(response);
+  } catch (error) {
+    messengerLog(
+      error instanceof MessengerApiError ? "warn" : "error",
+      "api.failure",
+      {
+        request_id: requestId,
+        method,
+        path,
+        duration_ms: Date.now() - startedAt,
+        category: error instanceof MessengerApiError ? "http" : "connection",
+        status: error instanceof MessengerApiError ? error.status : undefined,
+        code: error instanceof MessengerApiError ? error.code : undefined,
+        message: messengerErrorMessage(error),
+        details: messengerErrorDetails(error),
+      },
+    );
+    throw error;
   }
-  return parseResponse<T>(response);
 }
 
 async function sessionContext() {

@@ -36,13 +36,16 @@ import type {
 } from "../../../features/messenger/types";
 import {
   getMessengerMessages,
+  isMessengerConnectionError,
   markMessengerDelivered,
   markMessengerRead,
+  messengerErrorMessage,
   removeMessengerReaction,
   sendMessengerText,
   setMessengerReaction,
 } from "../../../services/messengerApi";
 import { subscribeMessengerRealtime } from "../../../services/messengerRealtime";
+import { messengerLog } from "../../../services/messengerLogger";
 import { colors } from "../../../styles/commonStyles";
 
 function pendingMessage(
@@ -134,6 +137,7 @@ export default function MessengerRoomScreen() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [offline, setOffline] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<MessengerMessage | null>(null);
   const [actionMessage, setActionMessage] = useState<MessengerMessage | null>(
     null,
@@ -169,10 +173,21 @@ export default function MessengerRoomScreen() {
   const flushOutbox = useCallback(async () => {
     if (flushRunning.current || !isAuthenticated) return;
     flushRunning.current = true;
+    let firstError: unknown = null;
     try {
       const pending = await loadMessengerOutbox(db, roomId);
+      messengerLog("debug", "outbox.flush.started", {
+        room_id: roomId,
+        pending_count: pending.length,
+      });
       for (const item of pending) {
         try {
+          messengerLog("debug", "outbox.item.sending", {
+            room_id: item.room_id,
+            client_message_id: item.client_message_id,
+            attempts: item.attempts,
+            has_reply: Boolean(item.reply_to_message_id),
+          });
           const result = await sendMessengerText(
             item.room_id,
             item.client_message_id,
@@ -184,12 +199,38 @@ export default function MessengerRoomScreen() {
           console.log(
             `[Messenger] Сообщение ${item.client_message_id} отправлено из outbox`,
           );
+          messengerLog("info", "outbox.item.sent", {
+            room_id: item.room_id,
+            client_message_id: item.client_message_id,
+            message_id: result.message.id,
+            created: result.created,
+          });
         } catch (error) {
           await markMessengerOutboxFailure(db, item.client_message_id, error);
-          throw error;
+          firstError ??= error;
+          console.warn(
+            `[Messenger] Не удалось отправить outbox ${item.client_message_id}:`,
+            error,
+          );
+          messengerLog("warn", "outbox.item.failed", {
+            room_id: item.room_id,
+            client_message_id: item.client_message_id,
+            category: isMessengerConnectionError(error)
+              ? "connection"
+              : "server",
+            message: messengerErrorMessage(error),
+          });
+          // A rejected message must not block every message queued after it.
+          // On a real connection failure further attempts would only add delay.
+          if (isMessengerConnectionError(error)) break;
         }
       }
       await refreshOutbox();
+      messengerLog(firstError ? "warn" : "debug", "outbox.flush.finished", {
+        room_id: roomId,
+        failed: Boolean(firstError),
+      });
+      if (firstError) throw firstError;
     } finally {
       flushRunning.current = false;
     }
@@ -199,14 +240,32 @@ export default function MessengerRoomScreen() {
     async (scroll = false) => {
       if (!roomId || refreshRunning.current || !isAuthenticated) return;
       refreshRunning.current = true;
+      const startedAt = Date.now();
+      messengerLog("debug", "room.sync.started", {
+        room_id: roomId,
+        scroll,
+      });
       try {
         const cached = await loadCachedMessengerMessages(db, roomId);
         if (cached.length) {
           setMessages(cached);
           setLoading(false);
+          messengerLog("debug", "room.cache.loaded", {
+            room_id: roomId,
+            message_count: cached.length,
+          });
         }
         await refreshOutbox();
-        await flushOutbox();
+        let outboxError: unknown = null;
+        try {
+          await flushOutbox();
+        } catch (error) {
+          outboxError = error;
+          setOffline(isMessengerConnectionError(error));
+          setSyncError(
+            messengerErrorMessage(error, "Не удалось отправить сообщение"),
+          );
+        }
         const remote = await getMessengerMessages(roomId);
         setMessages(remote.items);
         await cacheMessengerMessages(db, remote.items);
@@ -218,13 +277,30 @@ export default function MessengerRoomScreen() {
           ]);
         }
         setOffline(false);
+        if (!outboxError) setSyncError(null);
+        messengerLog("info", "room.sync.completed", {
+          room_id: roomId,
+          message_count: remote.items.length,
+          latest_sequence: latestSequence,
+          outbox_error: Boolean(outboxError),
+          duration_ms: Date.now() - startedAt,
+        });
         if (scroll)
           requestAnimationFrame(() =>
             listRef.current?.scrollToEnd({ animated: false }),
           );
       } catch (error) {
-        setOffline(true);
+        setOffline(isMessengerConnectionError(error));
+        setSyncError(
+          messengerErrorMessage(error, "Не удалось обновить сообщения"),
+        );
         console.warn("[Messenger] Показан локальный кэш комнаты:", error);
+        messengerLog("warn", "room.sync.failed", {
+          room_id: roomId,
+          category: isMessengerConnectionError(error) ? "connection" : "server",
+          message: messengerErrorMessage(error),
+          duration_ms: Date.now() - startedAt,
+        });
       } finally {
         setLoading(false);
         refreshRunning.current = false;
@@ -328,18 +404,18 @@ export default function MessengerRoomScreen() {
         reply_to_message_id: replyingTo?.id || null,
         created_at: createdAt,
       });
+      messengerLog("info", "message.queued", {
+        room_id: roomId,
+        client_message_id: clientMessageId,
+        has_reply: Boolean(replyingTo?.id),
+      });
       setText("");
       setReplyingTo(null);
       await refreshOutbox();
       requestAnimationFrame(() =>
         listRef.current?.scrollToEnd({ animated: true }),
       );
-      try {
-        await flushOutbox();
-        await loadMessages(true);
-      } catch {
-        setOffline(true);
-      }
+      await loadMessages(true);
     } finally {
       setSending(false);
     }
@@ -413,7 +489,11 @@ export default function MessengerRoomScreen() {
               {params.title || "Чат"}
             </Text>
             <Text style={styles.subtitle}>
-              {offline ? "Нет сети · сообщения сохранены" : "В сети"}
+              {offline
+                ? "Нет сети · сообщения сохранены"
+                : syncError
+                  ? `Ошибка синхронизации: ${syncError}`
+                  : "В сети"}
             </Text>
           </View>
         </View>
