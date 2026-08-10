@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
+import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
 import {
   cacheMessengerRooms,
   loadCachedMessengerRooms,
@@ -83,8 +84,7 @@ export default function MessengerRoomsScreen() {
 
   const scheduleRealtimeSync = useCallback(
     (delay = 150) => {
-      if (realtimeSyncTimer.current)
-        clearTimeout(realtimeSyncTimer.current);
+      if (realtimeSyncTimer.current) clearTimeout(realtimeSyncTimer.current);
       realtimeSyncTimer.current = setTimeout(() => {
         realtimeSyncTimer.current = null;
         void loadRooms(false, false);
@@ -171,6 +171,7 @@ export default function MessengerRoomsScreen() {
         id: room.id,
         title: room.title,
         canWrite: String(room.can_write),
+        canReact: String(room.can_react),
       },
     });
   };
@@ -205,6 +206,20 @@ export default function MessengerRoomsScreen() {
               : session?.user.display_name || "Командные чаты"}
           </Text>
         </View>
+        {session && (
+          <TouchableOpacity
+            style={styles.profileButton}
+            onPress={() => router.push("/messenger/profile")}
+            accessibilityLabel="Открыть мой профиль"
+          >
+            <AuthenticatedAvatar
+              displayName={session.user.display_name}
+              avatarUrl={session.user.avatar_url}
+              accessToken={session.access_token}
+              size={36}
+            />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity style={styles.iconButton} onPress={handleLogout}>
           <Icon name="log-out-outline" size={25} color={colors.textSecondary} />
         </TouchableOpacity>
@@ -301,6 +316,12 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   iconButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileButton: {
     width: 44,
     height: 44,
     alignItems: "center",

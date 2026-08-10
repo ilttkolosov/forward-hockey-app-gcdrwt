@@ -39,6 +39,7 @@ interface MessengerAuthContextValue {
     display_name?: string;
     email?: string;
   }): Promise<void>;
+  refreshUser(): Promise<void>;
   logout(): Promise<void>;
 }
 
@@ -122,6 +123,16 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
     setStatus("unauthenticated");
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    const user = await getMessengerMe();
+    const current = await loadMessengerSession();
+    if (!current) return;
+    const next = { ...current, user };
+    await saveMessengerSession(next);
+    setSession(next);
+    setStatus("authenticated");
+  }, []);
+
   const value = useMemo<MessengerAuthContextValue>(
     () => ({
       status,
@@ -129,9 +140,10 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       isAuthenticated: status === "authenticated" && Boolean(session),
       login,
       register,
+      refreshUser,
       logout,
     }),
-    [login, logout, register, session, status],
+    [login, logout, refreshUser, register, session, status],
   );
 
   return (

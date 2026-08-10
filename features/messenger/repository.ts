@@ -105,11 +105,12 @@ export function enqueueMessengerText(
 ) {
   return db.runAsync(
     `INSERT OR IGNORE INTO messenger_outbox
-      (client_message_id, room_id, text, created_at, attempts, last_error)
-     VALUES (?, ?, ?, ?, 0, NULL)`,
+      (client_message_id, room_id, text, reply_to_message_id, created_at, attempts, last_error)
+     VALUES (?, ?, ?, ?, ?, 0, NULL)`,
     item.client_message_id,
     item.room_id,
     item.text,
+    item.reply_to_message_id,
     item.created_at,
   );
 }

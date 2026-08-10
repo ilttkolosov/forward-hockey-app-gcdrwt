@@ -66,11 +66,13 @@ export default function MessengerRegistrationScreen() {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
+  const [registeringNewAccount, setRegisteringNewAccount] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isAuthenticated) router.replace("/messenger/rooms");
-  }, [isAuthenticated, router]);
+    if (isAuthenticated && !registeringNewAccount)
+      router.replace("/messenger/rooms");
+  }, [isAuthenticated, registeringNewAccount, router]);
 
   const checkInvitation = useCallback(async (value: string) => {
     const token = extractInviteToken(value);
@@ -139,6 +141,7 @@ export default function MessengerRegistrationScreen() {
 
   const submitRegistration = async () => {
     if (!inviteToken || !preview) return;
+    setRegisteringNewAccount(true);
     setBusy(true);
     setError(null);
     try {
@@ -149,8 +152,12 @@ export default function MessengerRegistrationScreen() {
         display_name: displayName.trim() || undefined,
         email: email.trim() || undefined,
       });
-      router.replace("/messenger/rooms");
+      router.replace({
+        pathname: "/messenger/profile",
+        params: { firstRun: "1" },
+      });
     } catch (registrationError) {
+      setRegisteringNewAccount(false);
       setError(
         registrationError instanceof Error
           ? registrationError.message

@@ -68,6 +68,17 @@ export interface MessengerReaction {
   reacted_by_me: boolean;
 }
 
+export interface MessengerReply {
+  id: string;
+  kind: "text" | "image" | "video";
+  text: string;
+  deleted_at: string | null;
+  author: {
+    id: string;
+    display_name: string;
+  };
+}
+
 export interface MessengerMessage {
   id: string;
   sequence: string;
@@ -91,6 +102,7 @@ export interface MessengerMessage {
     size_bytes: number;
     url: string;
   };
+  reply_to: MessengerReply | null;
   reactions: MessengerReaction[];
   delivery: {
     status: "sent" | "delivered" | "read";
@@ -105,6 +117,7 @@ export interface MessengerOutboxItem {
   client_message_id: string;
   room_id: string;
   text: string;
+  reply_to_message_id: string | null;
   created_at: string;
   attempts: number;
   last_error: string | null;

@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import type {
   InvitationPreview,
   MessengerMessage,
+  MessengerReaction,
   MessengerRoom,
   MessengerSession,
   MessengerUser,
@@ -15,6 +16,12 @@ import {
 
 export const MESSENGER_SERVER_ORIGIN = "https://forward.is-gone.com";
 export const MESSENGER_API_BASE_URL = `${MESSENGER_SERVER_ORIGIN}/api/v1`;
+
+export function messengerMediaUrl(path: string | null): string | null {
+  if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${MESSENGER_SERVER_ORIGIN}${path.startsWith("/") ? "" : "/"}${path}`;
+}
 
 interface ApiErrorEnvelope {
   error?: {
@@ -176,6 +183,32 @@ export function getMessengerMe() {
   return messengerRequest<MessengerUser>("/auth/me");
 }
 
+export function updateMessengerProfile(displayName: string) {
+  return messengerRequest<MessengerUser>("/users/me", {
+    method: "PATCH",
+    body: JSON.stringify({ display_name: displayName }),
+  });
+}
+
+export function uploadMessengerAvatar(file: {
+  uri: string;
+  name: string;
+  type: string;
+}) {
+  const form = new FormData();
+  form.append("file", file as unknown as Blob);
+  return messengerRequest<{ asset_id: string; url: string }>(
+    "/users/me/avatar",
+    { method: "PUT", body: form },
+  );
+}
+
+export function removeMessengerAvatar() {
+  return messengerRequest<{ removed: true }>("/users/me/avatar", {
+    method: "DELETE",
+  });
+}
+
 export async function logoutFromMessenger(): Promise<void> {
   try {
     await messengerRequest("/auth/logout", { method: "POST" });
@@ -201,14 +234,36 @@ export function sendMessengerText(
   roomId: string,
   clientMessageId: string,
   text: string,
+  replyToMessageId?: string | null,
 ) {
   return messengerRequest<{ message: MessengerMessage; created: boolean }>(
     `/chat/rooms/${roomId}/messages`,
     {
       method: "POST",
-      body: JSON.stringify({ client_message_id: clientMessageId, text }),
+      body: JSON.stringify({
+        client_message_id: clientMessageId,
+        text,
+        reply_to_message_id: replyToMessageId || undefined,
+      }),
     },
   );
+}
+
+export function setMessengerReaction(messageId: string, reaction: string) {
+  return messengerRequest<{
+    message_id: string;
+    reactions: MessengerReaction[];
+  }>(`/chat/messages/${messageId}/reaction`, {
+    method: "PUT",
+    body: JSON.stringify({ reaction }),
+  });
+}
+
+export function removeMessengerReaction(messageId: string) {
+  return messengerRequest<{
+    message_id: string;
+    reactions: MessengerReaction[];
+  }>(`/chat/messages/${messageId}/reaction`, { method: "DELETE" });
 }
 
 export function markMessengerDelivered(roomId: string, sequence: string) {
