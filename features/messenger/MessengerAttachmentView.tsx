@@ -27,14 +27,12 @@ interface MessengerAttachmentViewProps {
   media: MessengerMedia | null;
   location: MessengerLocation | null;
   accessToken: string;
-  onLongPress?: () => void;
 }
 
 export default function MessengerAttachmentView({
   media,
   location,
   accessToken,
-  onLongPress,
 }: MessengerAttachmentViewProps) {
   const insets = useSafeAreaInsets();
   const [localUri, setLocalUri] = useState<string | null>(null);
@@ -139,8 +137,6 @@ export default function MessengerAttachmentView({
           style={styles.imageFrame}
           activeOpacity={0.9}
           onPress={openViewer}
-          onLongPress={onLongPress}
-          delayLongPress={280}
         >
           {localUri ? (
             <Image
@@ -161,8 +157,6 @@ export default function MessengerAttachmentView({
             style={styles.fileOpenAction}
             activeOpacity={0.84}
             onPress={media.type === "video" ? openViewer : openFile}
-            onLongPress={onLongPress}
-            delayLongPress={280}
             disabled={loading}
           >
             <View style={styles.fileIcon}>

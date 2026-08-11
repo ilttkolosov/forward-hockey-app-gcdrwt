@@ -20,7 +20,6 @@ import {
   Modal,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
-  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -29,7 +28,9 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  type ViewToken,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import Icon from "../../../components/Icon";
@@ -37,6 +38,7 @@ import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
 import {
   applyOptimisticReaction,
+  compareMessengerSequence,
   firstUnreadMessengerMessage,
   mergeMessengerMessages,
   pendingMessengerMessage,
@@ -100,46 +102,50 @@ import { saveMessengerMediaToDevice } from "../../../services/messengerMediaSave
 import { colors } from "../../../styles/commonStyles";
 
 type MessengerAttachmentKind = "camera" | "library" | "file" | "location";
+type InitialAnchorMode = "unread" | "latest";
 
 function SwipeableMessage({
   children,
   enabled,
   onReply,
+  onLongPress,
 }: {
   children: React.ReactNode;
   enabled: boolean;
   onReply: () => void;
+  onLongPress: () => void;
 }) {
   const translateX = useRef(new Animated.Value(0)).current;
-  const responder = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_event, gesture) =>
-          enabled &&
-          gesture.dx < -8 &&
-          Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.35,
-        onPanResponderMove: (_event, gesture) => {
-          translateX.setValue(Math.max(-76, Math.min(0, gesture.dx)));
-        },
-        onPanResponderRelease: (_event, gesture) => {
-          if (enabled && gesture.dx <= -48) onReply();
-          Animated.spring(translateX, {
-            toValue: 0,
-            useNativeDriver: true,
-            speed: 24,
-            bounciness: 5,
-          }).start();
-        },
-        onPanResponderTerminate: () => {
-          Animated.spring(translateX, {
-            toValue: 0,
-            useNativeDriver: true,
-            speed: 24,
-            bounciness: 5,
-          }).start();
-        },
-      }),
-    [enabled, onReply, translateX],
+  const resetPosition = useCallback(() => {
+    Animated.spring(translateX, {
+      toValue: 0,
+      useNativeDriver: true,
+      speed: 24,
+      bounciness: 5,
+    }).start();
+  }, [translateX]);
+  const messageGesture = useMemo(
+    () => {
+      const swipe = Gesture.Pan()
+        .enabled(enabled)
+        .activeOffsetX(-10)
+        .failOffsetY([-18, 18])
+        .onUpdate((event) => {
+          translateX.setValue(Math.max(-76, Math.min(0, event.translationX)));
+        })
+        .onEnd((event) => {
+          if (event.translationX <= -48) onReply();
+        })
+        .onFinalize(resetPosition)
+        .runOnJS(true);
+      const hold = Gesture.LongPress()
+        .minDuration(320)
+        .maxDistance(12)
+        .onStart(onLongPress)
+        .runOnJS(true);
+      return Gesture.Race(swipe, hold);
+    },
+    [enabled, onLongPress, onReply, resetPosition, translateX],
   );
 
   return (
@@ -147,12 +153,11 @@ function SwipeableMessage({
       <View style={styles.swipeReplyCue} pointerEvents="none">
         <Icon name="arrow-undo" size={24} color={colors.white} />
       </View>
-      <Animated.View
-        {...responder.panHandlers}
-        style={{ transform: [{ translateX }] }}
-      >
-        {children}
-      </Animated.View>
+      <GestureDetector gesture={messageGesture}>
+        <Animated.View style={{ transform: [{ translateX }] }}>
+          {children}
+        </Animated.View>
+      </GestureDetector>
     </View>
   );
 }
@@ -244,6 +249,7 @@ export default function MessengerRoomScreen() {
     canMedia?: string;
     canReact?: string;
     lastReadSequence?: string;
+    latestSequence?: string;
     unreadCount?: string;
   }>();
   const { session, isAuthenticated } = useMessengerAuth();
@@ -293,6 +299,7 @@ export default function MessengerRoomScreen() {
   const listRef = useRef<FlatList<MessengerMessage>>(null);
   const inputRef = useRef<TextInput>(null);
   const messagesRef = useRef<MessengerMessage[]>([]);
+  const messageHeights = useRef<Map<string, number>>(new Map());
   const refreshRunning = useRef(false);
   const flushRunning = useRef(false);
   const flushRequested = useRef(false);
@@ -315,6 +322,16 @@ export default function MessengerRoomScreen() {
   const initialPositionConfigured = useRef(false);
   const initialPositionAttempts = useRef(0);
   const initialAnchorClientId = useRef<string | null>(null);
+  const initialAnchorMode = useRef<InitialAnchorMode>("latest");
+  const initialAnchorHeight = useRef(0);
+  const initialAnchorSettling = useRef(false);
+  const initialPositionStartedAt = useRef(0);
+  const initialPositionRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const initialPositionFallbackTimer = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const nearLatest = useRef(true);
   const initialReadSequence = useRef(params.lastReadSequence || "0");
   const initialReadAcknowledged = useRef(false);
@@ -533,16 +550,28 @@ export default function MessengerRoomScreen() {
         room_id: roomId,
         initial,
       });
-      let localItemsShown = false;
+      let localPositionReady = false;
+      let historyCompleteAtStart = false;
+      let expectedUnreadCount = Number(params.unreadCount || 0);
+      if (!Number.isFinite(expectedUnreadCount)) expectedUnreadCount = 0;
       try {
         if (initial && session) {
-          const [cached, pending, cachedRoom] = await Promise.all([
-            loadCachedMessengerMessages(db, roomId),
-            loadMessengerOutbox(db, roomId),
-            loadCachedMessengerRoom(db, roomId),
-          ]);
-          if (!params.lastReadSequence && cachedRoom) {
-            initialReadSequence.current = cachedRoom.last_read_sequence || "0";
+          const [cached, pending, cachedRoom, historyComplete] =
+            await Promise.all([
+              loadCachedMessengerMessages(db, roomId),
+              loadMessengerOutbox(db, roomId),
+              loadCachedMessengerRoom(db, roomId),
+              isMessengerRoomHistoryComplete(db, roomId),
+            ]);
+          historyCompleteAtStart = historyComplete;
+          const routeReadSequence = params.lastReadSequence || "0";
+          const cachedReadSequence = cachedRoom?.last_read_sequence || "0";
+          initialReadSequence.current =
+            compareMessengerSequence(routeReadSequence, cachedReadSequence) >= 0
+              ? routeReadSequence
+              : cachedReadSequence;
+          if (params.unreadCount === undefined && cachedRoom) {
+            expectedUnreadCount = cachedRoom.unread_count;
           }
           const confirmedClientIds = new Set(
             cached.map((message) => message.client_message_id),
@@ -566,15 +595,58 @@ export default function MessengerRoomScreen() {
             );
           const local = mergeMessengerMessages(cached, pendingMessages);
           if (local.length) {
-            localItemsShown = true;
             setMessages(local);
             setLoading(false);
-            setInitialDataReady(true);
           }
+          const expectedLatestCandidates = [
+            params.latestSequence,
+            cachedRoom?.last_message?.sequence,
+          ].filter((sequence): sequence is string => Boolean(sequence));
+          const expectedLatestSequence = expectedLatestCandidates.reduce<
+            string | null
+          >(
+            (latest, sequence) =>
+              !latest || compareMessengerSequence(sequence, latest) > 0
+                ? sequence
+                : latest,
+            null,
+          );
+          const localConfirmed = local.filter((message) => !message.pending);
+          const localOldestSequence = localConfirmed[0]?.sequence ?? null;
+          const localLatestSequence = localConfirmed.at(-1)?.sequence ?? null;
+          const localHasExpectedLatest = expectedLatestSequence
+            ? Boolean(
+                localLatestSequence &&
+                  compareMessengerSequence(
+                    localLatestSequence,
+                    expectedLatestSequence,
+                  ) >= 0,
+              )
+            : pendingMessages.length > 0;
+          const localCoversUnreadBoundary = Boolean(
+            historyComplete ||
+              expectedUnreadCount <= 0 ||
+              (localOldestSequence &&
+                compareMessengerSequence(
+                  localOldestSequence,
+                  initialReadSequence.current,
+                ) <= 0),
+          );
+          localPositionReady =
+            local.length > 0 &&
+            localHasExpectedLatest &&
+            localCoversUnreadBoundary;
+          if (localPositionReady) setInitialDataReady(true);
           messengerLog("debug", "room.cache.loaded", {
             room_id: roomId,
             message_count: cached.length,
             pending_count: pendingMessages.length,
+            history_complete: historyComplete,
+            last_read_sequence: initialReadSequence.current,
+            expected_latest_sequence: expectedLatestSequence,
+            local_latest_sequence: localLatestSequence,
+            unread_count: expectedUnreadCount,
+            position_ready: localPositionReady,
           });
         }
         let outboxError: unknown = null;
@@ -610,16 +682,25 @@ export default function MessengerRoomScreen() {
         if (initial) {
           if (!remote.page.has_more) {
             await markMessengerRoomHistoryComplete(db, roomId);
-          } else if (localItemsShown) {
-            void hydrateOlderHistory(
-              remote.page.oldest_sequence,
-              remote.page.has_more,
-            );
           } else {
-            await hydrateOlderHistory(
+            const remoteCoversUnreadBoundary = Boolean(
+              remote.page.oldest_sequence &&
+                compareMessengerSequence(
+                  remote.page.oldest_sequence,
+                  initialReadSequence.current,
+                ) <= 0,
+            );
+            const mustWaitForOlderHistory =
+              !localPositionReady &&
+              expectedUnreadCount > 0 &&
+              !historyCompleteAtStart &&
+              !remoteCoversUnreadBoundary;
+            const hydration = hydrateOlderHistory(
               remote.page.oldest_sequence,
               remote.page.has_more,
             );
+            if (mustWaitForOlderHistory) await hydration;
+            else void hydration;
           }
           setInitialDataReady(true);
         }
@@ -645,7 +726,7 @@ export default function MessengerRoomScreen() {
           duration_ms: Date.now() - startedAt,
         });
       } finally {
-        if (initial && !localItemsShown) setInitialDataReady(true);
+        if (initial) setInitialDataReady(true);
         setLoading(false);
         refreshRunning.current = false;
       }
@@ -657,15 +738,37 @@ export default function MessengerRoomScreen() {
       hydrateOlderHistory,
       isAuthenticated,
       params.lastReadSequence,
+      params.latestSequence,
+      params.unreadCount,
       roomId,
       session,
     ],
   );
 
+  const clearInitialPositionTimers = useCallback(() => {
+    if (initialPositionRetryTimer.current) {
+      clearTimeout(initialPositionRetryTimer.current);
+      initialPositionRetryTimer.current = null;
+    }
+    if (initialPositionFallbackTimer.current) {
+      clearTimeout(initialPositionFallbackTimer.current);
+      initialPositionFallbackTimer.current = null;
+    }
+  }, []);
+
   const finishInitialPosition = useCallback(() => {
     if (!pendingInitialPosition.current) return;
     pendingInitialPosition.current = false;
+    initialAnchorSettling.current = false;
+    clearInitialPositionTimers();
     setListReady(true);
+    messengerLog("info", "room.initial_position.completed", {
+      room_id: roomId,
+      mode: initialAnchorMode.current,
+      anchor_client_message_id: initialAnchorClientId.current,
+      attempts: initialPositionAttempts.current,
+      duration_ms: Date.now() - initialPositionStartedAt.current,
+    });
     if (initialReadAcknowledged.current) return;
     initialReadAcknowledged.current = true;
     const latestSequence =
@@ -678,7 +781,7 @@ export default function MessengerRoomScreen() {
         console.warn("[Messenger] Не удалось отметить чат прочитанным:", error);
       });
     }
-  }, [acknowledgeLatest]);
+  }, [acknowledgeLatest, clearInitialPositionTimers, roomId]);
 
   const positionInitialMessages = useCallback(() => {
     if (!pendingInitialPosition.current) return;
@@ -691,19 +794,76 @@ export default function MessengerRoomScreen() {
       finishInitialPosition();
       return;
     }
-    if (index === current.length - 1) {
+    if (initialAnchorMode.current === "latest") {
       listRef.current?.scrollToEnd({ animated: false });
-      setTimeout(finishInitialPosition, 40);
       return;
     }
     listRef.current?.scrollToIndex({
       index,
       animated: false,
-      viewPosition: 0,
-      viewOffset: 10,
+      viewPosition: 0.5,
+      viewOffset: initialAnchorHeight.current / 2,
     });
-    setTimeout(finishInitialPosition, 100);
   }, [finishInitialPosition]);
+
+  const settleInitialPosition = useCallback(() => {
+    if (
+      !pendingInitialPosition.current ||
+      initialAnchorSettling.current
+    ) {
+      return;
+    }
+    initialAnchorSettling.current = true;
+    requestAnimationFrame(() => {
+      if (!pendingInitialPosition.current) return;
+      const current = messagesRef.current;
+      const index = current.findIndex(
+        (message) =>
+          message.client_message_id === initialAnchorClientId.current,
+      );
+      if (index < 0) {
+        finishInitialPosition();
+        return;
+      }
+      if (initialAnchorMode.current === "latest") {
+        listRef.current?.scrollToEnd({ animated: false });
+      } else {
+        listRef.current?.scrollToIndex({
+          index,
+          animated: false,
+          viewPosition: 0.5,
+          // With viewPosition=0.5 this offset places the top of the complete
+          // cell (the unread divider) at the vertical centre of the feed.
+          viewOffset: initialAnchorHeight.current / 2,
+        });
+      }
+      initialPositionRetryTimer.current = setTimeout(
+        finishInitialPosition,
+        140,
+      );
+    });
+  }, [finishInitialPosition]);
+
+  const handleViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken<MessengerMessage>[] }) => {
+      if (!pendingInitialPosition.current) return;
+      const anchorId = initialAnchorClientId.current;
+      if (
+        anchorId &&
+        viewableItems.some(
+          (token) => token.item.client_message_id === anchorId,
+        )
+      ) {
+        settleInitialPosition();
+      }
+    },
+    [settleInitialPosition],
+  );
+
+  const initialViewabilityConfig = useMemo(
+    () => ({ itemVisiblePercentThreshold: 1 }),
+    [],
+  );
 
   useEffect(() => {
     if (!initialDataReady || initialPositionConfigured.current || !session) {
@@ -726,11 +886,48 @@ export default function MessengerRoomScreen() {
       firstUnread?.client_message_id ??
       current.at(-1)?.client_message_id ??
       null;
+    initialAnchorMode.current = firstUnread ? "unread" : "latest";
+    initialAnchorHeight.current =
+      messageHeights.current.get(initialAnchorClientId.current || "") ?? 0;
+    initialAnchorSettling.current = false;
     nearLatest.current = !firstUnread;
     pendingInitialPosition.current = true;
     initialPositionAttempts.current = 0;
+    initialPositionStartedAt.current = Date.now();
+    messengerLog("info", "room.initial_position.configured", {
+      room_id: roomId,
+      mode: initialAnchorMode.current,
+      message_count: current.length,
+      last_read_sequence: initialReadSequence.current,
+      anchor_sequence: firstUnread?.sequence ?? current.at(-1)?.sequence ?? null,
+      anchor_index: current.findIndex(
+        (message) =>
+          message.client_message_id === initialAnchorClientId.current,
+      ),
+    });
+    clearInitialPositionTimers();
+    initialPositionFallbackTimer.current = setTimeout(() => {
+      if (!pendingInitialPosition.current) return;
+      messengerLog("warn", "room.initial_position.timeout", {
+        room_id: roomId,
+        mode: initialAnchorMode.current,
+        attempts: initialPositionAttempts.current,
+      });
+      positionInitialMessages();
+      initialPositionRetryTimer.current = setTimeout(
+        finishInitialPosition,
+        180,
+      );
+    }, 4_000);
     requestAnimationFrame(positionInitialMessages);
-  }, [initialDataReady, positionInitialMessages, session]);
+  }, [
+    clearInitialPositionTimers,
+    finishInitialPosition,
+    initialDataReady,
+    positionInitialMessages,
+    roomId,
+    session,
+  ]);
 
   const handleScrollToIndexFailed = useCallback(
     (info: {
@@ -741,16 +938,21 @@ export default function MessengerRoomScreen() {
       if (!pendingInitialPosition.current) return;
       initialPositionAttempts.current += 1;
       listRef.current?.scrollToOffset({
-        offset: Math.max(0, info.averageItemLength * info.index),
+        offset: Math.max(
+          0,
+          (info.averageItemLength || 72) * info.index,
+        ),
         animated: false,
       });
-      if (initialPositionAttempts.current >= 2) {
-        setTimeout(finishInitialPosition, 60);
-      } else {
-        setTimeout(positionInitialMessages, 60);
+      if (initialPositionRetryTimer.current) {
+        clearTimeout(initialPositionRetryTimer.current);
       }
+      initialPositionRetryTimer.current = setTimeout(
+        positionInitialMessages,
+        Math.min(80 + initialPositionAttempts.current * 20, 240),
+      );
     },
-    [finishInitialPosition, positionInitialMessages],
+    [positionInitialMessages],
   );
 
   const handleListScroll = useCallback(
@@ -851,12 +1053,14 @@ export default function MessengerRoomScreen() {
           clearTimeout(actionDismissTimer.current);
           actionDismissTimer.current = null;
         }
+        clearInitialPositionTimers();
         pendingMessageAction.current = null;
         pendingAttachmentKind.current = null;
       };
     }, [
       db,
       acknowledgeLatest,
+      clearInitialPositionTimers,
       flushOutbox,
       isAuthenticated,
       loadMessages,
@@ -1446,10 +1650,14 @@ export default function MessengerRoomScreen() {
             initialNumToRender={18}
             maxToRenderPerBatch={14}
             windowSize={9}
-            maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+            maintainVisibleContentPosition={
+              listReady ? { minIndexForVisible: 0 } : undefined
+            }
             onScroll={handleListScroll}
             scrollEventThrottle={80}
             onScrollToIndexFailed={handleScrollToIndexFailed}
+            onViewableItemsChanged={handleViewableItemsChanged}
+            viewabilityConfig={initialViewabilityConfig}
             onContentSizeChange={() => {
               if (!visibleMessages.length) return;
               if (pendingInitialPosition.current) {
@@ -1482,7 +1690,19 @@ export default function MessengerRoomScreen() {
               const emojiOnly =
                 !item.deleted_at && item.kind === "text" && isEmojiOnly(body);
               return (
-                <>
+                <View
+                  collapsable={false}
+                  onLayout={(event) => {
+                    const height = event.nativeEvent.layout.height;
+                    messageHeights.current.set(item.client_message_id, height);
+                    if (
+                      pendingInitialPosition.current &&
+                      item.client_message_id === initialAnchorClientId.current
+                    ) {
+                      initialAnchorHeight.current = height;
+                    }
+                  }}
+                >
                   {item.client_message_id === unreadMarkerClientId && (
                     <View style={styles.unreadDivider}>
                       <View style={styles.unreadDividerLine} />
@@ -1495,6 +1715,12 @@ export default function MessengerRoomScreen() {
                   <SwipeableMessage
                     enabled={canWrite && !item.pending && !item.deleted_at}
                     onReply={() => beginReply(item)}
+                    onLongPress={() => {
+                      if (!item.pending) {
+                        setShowAllReactions(false);
+                        setActionMessage(item);
+                      }
+                    }}
                   >
                     <View
                       style={[
@@ -1516,15 +1742,7 @@ export default function MessengerRoomScreen() {
                           mine && styles.messageColumnMine,
                         ]}
                       >
-                        <TouchableOpacity
-                          activeOpacity={0.94}
-                          delayLongPress={280}
-                          onLongPress={() => {
-                            if (!item.pending) {
-                              setShowAllReactions(false);
-                              setActionMessage(item);
-                            }
-                          }}
+                        <View
                           style={[
                             styles.message,
                             mine ? styles.mine : styles.theirs,
@@ -1571,10 +1789,6 @@ export default function MessengerRoomScreen() {
                               media={media}
                               location={location}
                               accessToken={session.access_token}
-                              onLongPress={() => {
-                                setShowAllReactions(false);
-                                setActionMessage(item);
-                              }}
                             />
                           )}
                           {body ? (
@@ -1596,7 +1810,7 @@ export default function MessengerRoomScreen() {
                             </Text>
                             {mine && <DeliveryChecks message={item} />}
                           </View>
-                        </TouchableOpacity>
+                        </View>
                         {item.reactions.length > 0 && (
                           <View
                             style={[
@@ -1629,7 +1843,7 @@ export default function MessengerRoomScreen() {
                       </View>
                     </View>
                   </SwipeableMessage>
-                </>
+                </View>
               );
             }}
             ListEmptyComponent={

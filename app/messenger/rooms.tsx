@@ -210,6 +210,7 @@ export default function MessengerRoomsScreen() {
         canMedia: String(room.can_send_media),
         canReact: String(room.can_react),
         lastReadSequence: room.last_read_sequence,
+        latestSequence: room.last_message?.sequence || "",
         unreadCount: String(room.unread_count),
       },
     });
