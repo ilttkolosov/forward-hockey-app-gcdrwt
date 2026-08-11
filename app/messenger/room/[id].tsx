@@ -181,9 +181,6 @@ function SwipeableMessage({
 
   return (
     <View style={styles.swipeShell}>
-      <View style={styles.swipeReplyCue} pointerEvents="none">
-        <Icon name="arrow-undo" size={24} color={colors.white} />
-      </View>
       <GestureDetector gesture={messageGesture}>
         <Animated.View
           style={{
@@ -438,6 +435,9 @@ export default function MessengerRoomScreen() {
     | null
   >(null);
   const pendingScrollAnimation = useRef<boolean | null>(null);
+  const pendingScrollFallbackTimer = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const pendingInitialPosition = useRef(false);
   const initialPositionConfigured = useRef(false);
   const initialPositionAttempts = useRef(0);
@@ -473,15 +473,40 @@ export default function MessengerRoomScreen() {
     void loadQuickMessengerReactions().then(setQuickReactions);
   }, []);
 
+  const clearPendingLatestScroll = useCallback(() => {
+    pendingScrollAnimation.current = null;
+    if (pendingScrollFallbackTimer.current) {
+      clearTimeout(pendingScrollFallbackTimer.current);
+      pendingScrollFallbackTimer.current = null;
+    }
+  }, []);
+
   const scrollToLatest = useCallback((animated: boolean) => {
     pendingScrollAnimation.current = animated;
-    // The first frame commits the new cell; the second scrolls using the new
-    // content height. onContentSizeChange below remains a fallback for images
-    // and other cells whose final height becomes known later.
+    if (pendingScrollFallbackTimer.current) {
+      clearTimeout(pendingScrollFallbackTimer.current);
+    }
+    // A content-size fallback is useful while React commits a newly sent
+    // bubble, but it must expire. Otherwise a much later reaction or modal
+    // transition can consume the stale intent and pull the reader down.
+    pendingScrollFallbackTimer.current = setTimeout(() => {
+      pendingScrollAnimation.current = null;
+      pendingScrollFallbackTimer.current = null;
+    }, 700);
     requestAnimationFrame(() =>
       requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated })),
     );
   }, []);
+
+  const beginManualFeedNavigation = useCallback(() => {
+    nearLatest.current = false;
+    keyboardScrollPending.current = false;
+    clearPendingLatestScroll();
+    if (keyboardScrollTimer.current) {
+      clearTimeout(keyboardScrollTimer.current);
+      keyboardScrollTimer.current = null;
+    }
+  }, [clearPendingLatestScroll]);
 
   useEffect(() => {
     const showEvent =
@@ -492,15 +517,15 @@ export default function MessengerRoomScreen() {
       showEvent,
       (event: KeyboardEvent) => {
         if (Platform.OS === "ios") Keyboard.scheduleLayoutAnimation(event);
+        if (!nearLatest.current) return;
         keyboardScrollPending.current = true;
-        nearLatest.current = true;
         scrollToLatest(true);
         if (keyboardScrollTimer.current) {
           clearTimeout(keyboardScrollTimer.current);
         }
         keyboardScrollTimer.current = setTimeout(
           () => {
-            scrollToLatest(true);
+            if (nearLatest.current) scrollToLatest(true);
             keyboardScrollPending.current = false;
             keyboardScrollTimer.current = null;
           },
@@ -523,8 +548,9 @@ export default function MessengerRoomScreen() {
         clearTimeout(keyboardScrollTimer.current);
         keyboardScrollTimer.current = null;
       }
+      clearPendingLatestScroll();
     };
-  }, [scrollToLatest]);
+  }, [clearPendingLatestScroll, scrollToLatest]);
 
   const visibleMessages = messages;
   const waitingForInitialUnread =
@@ -1396,7 +1422,7 @@ export default function MessengerRoomScreen() {
               ),
             );
           }
-          if (nearLatest.current || message.author.id === session?.user.id) {
+          if (nearLatest.current) {
             scrollToLatest(true);
           }
         } else if (
@@ -1470,7 +1496,6 @@ export default function MessengerRoomScreen() {
       refreshRoomIdentity,
       router,
       scheduleConnectionSync,
-      session?.user.id,
       scrollToLatest,
     ]),
   );
@@ -1665,6 +1690,7 @@ export default function MessengerRoomScreen() {
                 }
               : null,
           }));
+          if (nearLatest.current) scrollToLatest(true);
           messengerLog("info", "location.send.started", {
             room_id: roomId,
             client_message_id: request.clientMessageId,
@@ -1725,6 +1751,7 @@ export default function MessengerRoomScreen() {
               }
             : null,
         }));
+        if (nearLatest.current) scrollToLatest(true);
         messengerLog("debug", "attachment.action.prepared", {
           kind,
           room_id: roomId,
@@ -1783,6 +1810,7 @@ export default function MessengerRoomScreen() {
       restoreAttachmentComposer,
       roomId,
       sendUpload,
+      scrollToLatest,
       storeSentMessage,
       updatePendingAttachment,
     ],
@@ -1951,9 +1979,14 @@ export default function MessengerRoomScreen() {
       setReplyingTo(message);
       setActionMessage(null);
       setShowAllReactions(false);
+      // Replying is an explicit transition back to the composer. Unlike
+      // reactions, receipts and incoming events, it may reveal the newest
+      // message and move the feed to the bottom.
+      nearLatest.current = true;
+      scrollToLatest(true);
       requestAnimationFrame(() => inputRef.current?.focus());
     },
-    [canWrite],
+    [canWrite, scrollToLatest],
   );
 
   const copyMessageText = useCallback(async (message: MessengerMessage) => {
@@ -2194,6 +2227,7 @@ export default function MessengerRoomScreen() {
               listReady ? { minIndexForVisible: 0 } : undefined
             }
             onScroll={handleListScroll}
+            onScrollBeginDrag={beginManualFeedNavigation}
             scrollEventThrottle={80}
             onScrollToIndexFailed={handleScrollToIndexFailed}
             onViewableItemsChanged={handleViewableItemsChanged}
@@ -2206,7 +2240,8 @@ export default function MessengerRoomScreen() {
               }
               const animated = pendingScrollAnimation.current;
               if (animated === null) return;
-              pendingScrollAnimation.current = null;
+              clearPendingLatestScroll();
+              if (!nearLatest.current) return;
               listRef.current?.scrollToEnd({ animated });
             }}
             renderItem={({ item }) => {
@@ -2907,8 +2942,8 @@ export default function MessengerRoomScreen() {
                 multiline
                 maxLength={4000}
                 onFocus={() => {
+                  if (!nearLatest.current) return;
                   keyboardScrollPending.current = true;
-                  nearLatest.current = true;
                   scrollToLatest(true);
                 }}
               />
@@ -3005,17 +3040,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   swipeShell: { position: "relative", width: "100%" },
-  swipeReplyCue: {
-    position: "absolute",
-    right: 2,
-    top: 8,
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 22,
-    backgroundColor: colors.primary,
-  },
   messageRow: {
     width: "100%",
     flexDirection: "row",
