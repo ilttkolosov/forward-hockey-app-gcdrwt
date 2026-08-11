@@ -35,6 +35,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { dataAvailability } from '../services/dataAvailability';
 import { NetworkStatusProvider } from '../contexts/NetworkStatusContext';
 import { MessengerAuthProvider } from '../contexts/MessengerAuthContext';
+import MessengerPersistenceBridge from '../features/messenger/MessengerPersistenceBridge';
 import { SQLiteProvider } from 'expo-sqlite';
 import { DATABASE_ASSET_SOURCE, DATABASE_NAME, migrateDatabase } from '../database';
 import {
@@ -281,6 +282,21 @@ function RootLayoutContent() {
     if (route === '/trainings') {
       initializationLog('Открытие расписания по нажатию на уведомление о тренировке');
       router.push('/trainings');
+      return;
+    }
+    // Push delivery is intentionally not enabled yet. This routing contract is
+    // kept ready for the later push transport, which will feed the same local
+    // SQLite pipeline as realtime messages.
+    const data = response.notification.request.content.data;
+    if (data?.type === 'messenger.message' && typeof data.room_id === 'string') {
+      initializationLog('Открытие комнаты по нажатию на уведомление мессенджера');
+      router.push({
+        pathname: '/messenger/room/[id]',
+        params: {
+          id: data.room_id,
+          title: typeof data.room_title === 'string' ? data.room_title : 'Чат',
+        },
+      });
     }
   }, [isInitializing, lastNotificationResponse, router]);
 
@@ -613,6 +629,7 @@ export default function RootLayout() {
     >
       <NetworkStatusProvider>
         <MessengerAuthProvider>
+          <MessengerPersistenceBridge />
           <RootLayoutContent />
         </MessengerAuthProvider>
       </NetworkStatusProvider>

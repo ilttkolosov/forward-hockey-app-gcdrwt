@@ -23,6 +23,7 @@ export type MessengerRealtimeEvent =
       type: "message.reaction_updated";
       room_id: string;
       message_id: string;
+      reactions?: MessengerMessage["reactions"];
     }
   | {
       type: "presence.updated";
@@ -134,8 +135,11 @@ export function connectMessengerRealtime(accessToken: string): void {
   );
   nextSocket.on(
     "message.reaction_updated",
-    (payload: { room_id: string; message_id: string }) =>
-      publish({ type: "message.reaction_updated", ...payload }),
+    (payload: {
+      room_id: string;
+      message_id: string;
+      reactions?: MessengerMessage["reactions"];
+    }) => publish({ type: "message.reaction_updated", ...payload }),
   );
   nextSocket.on(
     "presence.updated",
@@ -164,4 +168,3 @@ export function subscribeMessengerRealtime(
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
-

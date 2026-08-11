@@ -56,10 +56,13 @@ import {
   cacheMessengerMessages,
   enqueueMessengerText,
   isMessengerRoomHistoryComplete,
+  loadCachedMessengerMessageBounds,
+  loadCachedMessengerMessageWindow,
+  loadCachedMessengerMessagesAfter,
+  loadCachedMessengerMessagesBefore,
   loadCachedMessengerRoom,
-  loadCachedMessengerMessages,
+  loadMessengerLocalReadState,
   loadMessengerOutbox,
-  markCachedMessengerRoomRead,
   markMessengerOutboxFailure,
   markMessengerRoomHistoryComplete,
   removeMessengerOutboxItem,
@@ -81,7 +84,6 @@ import {
   getMessengerMessages,
   getMessengerRooms,
   isMessengerConnectionError,
-  markMessengerRead,
   messengerErrorMessage,
   removeMessengerReaction,
   sendMessengerLocation,
@@ -89,6 +91,7 @@ import {
   sendMessengerText,
   setMessengerReaction,
 } from "../../../services/messengerApi";
+import { queueMessengerReadReceipt } from "../../../services/messengerReadSync";
 import { subscribeMessengerRealtime } from "../../../services/messengerRealtime";
 import { messengerLog } from "../../../services/messengerLogger";
 import {
@@ -316,9 +319,10 @@ export default function MessengerRoomScreen() {
   const flushRunning = useRef(false);
   const flushRequested = useRef(false);
   const flushOutboxRef = useRef<() => Promise<void>>(async () => undefined);
-  const historyHydrationRunning = useRef(false);
+  const olderMessagesLoading = useRef(false);
+  const newerCachedMessagesLoading = useRef(false);
+  const remoteHasMoreNewerMessages = useRef(true);
   const reactionMutationIds = useRef<Set<string>>(new Set());
-  const realtimeSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectionSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -348,7 +352,11 @@ export default function MessengerRoomScreen() {
     typeof setTimeout
   > | null>(null);
   const nearLatest = useRef(true);
+  const latestVisibleSequence = useRef<string | null>(null);
   const initialReadSequence = useRef(params.lastReadSequence || "0");
+  const initialUnreadBoundarySequence = useRef(
+    params.lastReadSequence || "0",
+  );
   const initialUnreadExpectedRef = useRef(false);
   const initialReadAcknowledged = useRef(false);
   const latestKnownSequence = useRef<string | null>(null);
@@ -479,24 +487,14 @@ export default function MessengerRoomScreen() {
     async (sequence: string) => {
       if (
         acknowledgedRead.current?.room_id === roomId &&
-        acknowledgedRead.current.sequence === sequence
+        compareMessengerSequence(acknowledgedRead.current.sequence, sequence) >=
+          0
       ) {
         return;
       }
       acknowledgedRead.current = { room_id: roomId, sequence };
       try {
-        await markCachedMessengerRoomRead(db, roomId, sequence);
-      } catch (cacheError) {
-        messengerLog("warn", "room.read.cache_failed", {
-          room_id: roomId,
-          sequence,
-          message: messengerErrorMessage(cacheError),
-        });
-      }
-      try {
-        // Reading a room also advances its delivered cursor on the server, so
-        // a separate /delivered request would only duplicate the same work.
-        await markMessengerRead(roomId, sequence);
+        await queueMessengerReadReceipt(db, roomId, sequence, session?.user.id);
       } catch (error) {
         if (
           acknowledgedRead.current?.room_id === roomId &&
@@ -504,60 +502,125 @@ export default function MessengerRoomScreen() {
         ) {
           acknowledgedRead.current = null;
         }
+        messengerLog("warn", "room.read.local_failed", {
+          room_id: roomId,
+          sequence,
+          message: messengerErrorMessage(error),
+        });
         throw error;
       }
     },
-    [db, roomId],
+    [db, roomId, session?.user.id],
   );
 
-  const hydrateOlderHistory = useCallback(
-    async (oldestSequence: string | null, hasMore: boolean) => {
-      if (
-        !oldestSequence ||
-        !hasMore ||
-        historyHydrationRunning.current ||
-        (await isMessengerRoomHistoryComplete(db, roomId))
-      ) {
-        if (!hasMore) await markMessengerRoomHistoryComplete(db, roomId);
+  const loadOlderMessages = useCallback(async () => {
+    if (
+      !listReady ||
+      olderMessagesLoading.current ||
+      !messagesRef.current.length
+    )
+      return;
+    const oldest = messagesRef.current.find((message) => !message.pending);
+    if (!oldest) return;
+    olderMessagesLoading.current = true;
+    try {
+      const cached = await loadCachedMessengerMessagesBefore(
+        db,
+        roomId,
+        oldest.sequence,
+        20,
+      );
+      if (cached.length) {
+        setMessages((current) =>
+          mergeMessengerMessages(current, cached, reactionMutationIds.current),
+        );
         return;
       }
-      historyHydrationRunning.current = true;
-      let cursor: string | null = oldestSequence;
-      let more: boolean = hasMore;
-      try {
-        while (cursor && more) {
-          const page = await getMessengerMessages(roomId, {
-            cursor,
-            direction: "before",
-            limit: 100,
-          });
-          if (!page.items.length) {
-            more = false;
-            break;
-          }
-          await cacheMessengerMessages(db, page.items);
-          setMessages((current) =>
-            mergeMessengerMessages(
-              current,
-              page.items,
-              reactionMutationIds.current,
-            ),
-          );
-          cursor = page.page.oldest_sequence;
-          more = page.page.has_more;
-        }
-        if (!more) await markMessengerRoomHistoryComplete(db, roomId);
-      } catch (error) {
-        messengerLog("warn", "room.history.hydration_failed", {
-          room_id: roomId,
-          message: messengerErrorMessage(error),
-        });
-      } finally {
-        historyHydrationRunning.current = false;
+      if (await isMessengerRoomHistoryComplete(db, roomId)) return;
+      const remote = await getMessengerMessages(roomId, {
+        cursor: oldest.sequence,
+        direction: "before",
+        limit: 20,
+      });
+      if (remote.items.length) {
+        await cacheMessengerMessages(db, remote.items);
+        setMessages((current) =>
+          mergeMessengerMessages(
+            current,
+            remote.items,
+            reactionMutationIds.current,
+          ),
+        );
       }
-    },
-    [db, roomId],
-  );
+      if (!remote.page.has_more) {
+        await markMessengerRoomHistoryComplete(db, roomId);
+      }
+    } catch (error) {
+      messengerLog("warn", "room.history.page_failed", {
+        room_id: roomId,
+        message: messengerErrorMessage(error),
+      });
+    } finally {
+      olderMessagesLoading.current = false;
+    }
+  }, [db, listReady, roomId]);
+
+  const loadNewerMessages = useCallback(async () => {
+    if (
+      !listReady ||
+      newerCachedMessagesLoading.current ||
+      refreshRunning.current
+    ) {
+      return;
+    }
+    const latest = [...messagesRef.current]
+      .reverse()
+      .find((message) => !message.pending);
+    if (!latest) return;
+    newerCachedMessagesLoading.current = true;
+    try {
+      const cached = await loadCachedMessengerMessagesAfter(
+        db,
+        roomId,
+        latest.sequence,
+        20,
+      );
+      if (cached.length) {
+        setMessages((current) =>
+          mergeMessengerMessages(current, cached, reactionMutationIds.current),
+        );
+      }
+      if (cached.length >= 20 || !remoteHasMoreNewerMessages.current) return;
+
+      const cursor = cached.at(-1)?.sequence ?? latest.sequence;
+      const remote = await getMessengerMessages(roomId, {
+        cursor,
+        direction: "after",
+        limit: 20 - cached.length,
+      });
+      remoteHasMoreNewerMessages.current = remote.page.has_more;
+      if (remote.page.latest_sequence) {
+        latestKnownSequence.current = remote.page.latest_sequence;
+      }
+      if (remote.items.length) {
+        await cacheMessengerMessages(db, remote.items);
+        setMessages((current) =>
+          mergeMessengerMessages(
+            current,
+            remote.items,
+            reactionMutationIds.current,
+          ),
+        );
+      }
+    } catch (error) {
+      messengerLog("warn", "room.newer_history.page_failed", {
+        room_id: roomId,
+        message: messengerErrorMessage(error),
+      });
+    } finally {
+      newerCachedMessagesLoading.current = false;
+    }
+  }, [db, listReady, roomId]);
 
   const loadMessages = useCallback(
     async (initial = false) => {
@@ -568,30 +631,64 @@ export default function MessengerRoomScreen() {
         room_id: roomId,
         initial,
       });
-      let historyCompleteAtStart = false;
-      let localOldestSequence: string | null = null;
       let localLatestSequence: string | null = null;
+      let cachedLatestSequence: string | null = null;
       let expectedUnreadCount = Number(params.unreadCount || 0);
       if (!Number.isFinite(expectedUnreadCount)) expectedUnreadCount = 0;
       try {
         if (initial && session) {
-          const [cached, pending, cachedRoom, historyComplete] =
+          const [pending, cachedRoom, historyComplete, cachedBounds] =
             await Promise.all([
-              loadCachedMessengerMessages(db, roomId),
               loadMessengerOutbox(db, roomId),
               loadCachedMessengerRoom(db, roomId),
               isMessengerRoomHistoryComplete(db, roomId),
+              loadCachedMessengerMessageBounds(db, roomId),
             ]);
-          historyCompleteAtStart = historyComplete;
           const routeReadSequence = params.lastReadSequence || "0";
           const cachedReadSequence = cachedRoom?.last_read_sequence || "0";
-          initialReadSequence.current =
+          const serverReadSequence =
             compareMessengerSequence(routeReadSequence, cachedReadSequence) >= 0
               ? routeReadSequence
               : cachedReadSequence;
+          const localReadState = await loadMessengerLocalReadState(
+            db,
+            roomId,
+            serverReadSequence,
+          );
+          initialReadSequence.current = localReadState.local_read_sequence;
+          initialUnreadBoundarySequence.current =
+            localReadState.local_read_sequence;
           if (params.unreadCount === undefined && cachedRoom) {
             expectedUnreadCount = cachedRoom.unread_count;
           }
+          const expectedLatestCandidates = [
+            params.latestSequence,
+            cachedRoom?.last_message?.sequence,
+            cachedBounds.latest_sequence,
+          ].filter((sequence): sequence is string => Boolean(sequence));
+          const expectedLatestSequence = expectedLatestCandidates.reduce<
+            string | null
+          >(
+            (latest, sequence) =>
+              !latest || compareMessengerSequence(sequence, latest) > 0
+                ? sequence
+                : latest,
+            null,
+          );
+          if (
+            expectedLatestSequence &&
+            compareMessengerSequence(
+              initialReadSequence.current,
+              expectedLatestSequence,
+            ) >= 0
+          ) {
+            expectedUnreadCount = 0;
+          }
+          const cached = await loadCachedMessengerMessageWindow(db, roomId, {
+            anchorSequence: initialUnreadBoundarySequence.current,
+            hasUnread: expectedUnreadCount > 0,
+            limit: 20,
+          });
           const confirmedClientIds = new Set(
             cached.map((message) => message.client_message_id),
           );
@@ -617,28 +714,6 @@ export default function MessengerRoomScreen() {
             setMessages(local);
             setLoading(false);
           }
-          const expectedLatestCandidates = [
-            params.latestSequence,
-            cachedRoom?.last_message?.sequence,
-          ].filter((sequence): sequence is string => Boolean(sequence));
-          const expectedLatestSequence = expectedLatestCandidates.reduce<
-            string | null
-          >(
-            (latest, sequence) =>
-              !latest || compareMessengerSequence(sequence, latest) > 0
-                ? sequence
-                : latest,
-            null,
-          );
-          if (
-            expectedLatestSequence &&
-            compareMessengerSequence(
-              initialReadSequence.current,
-              expectedLatestSequence,
-            ) >= 0
-          ) {
-            expectedUnreadCount = 0;
-          }
           initialUnreadExpectedRef.current = expectedUnreadCount > 0;
           setInitialUnreadExpected(expectedUnreadCount > 0);
           if (local.length) {
@@ -648,16 +723,17 @@ export default function MessengerRoomScreen() {
             setInitialDataReady(true);
           }
           const localConfirmed = local.filter((message) => !message.pending);
-          localOldestSequence = localConfirmed[0]?.sequence ?? null;
           localLatestSequence = localConfirmed.at(-1)?.sequence ?? null;
+          cachedLatestSequence = cachedBounds.latest_sequence;
           messengerLog("debug", "room.cache.loaded", {
             room_id: roomId,
-            message_count: cached.length,
+            window_message_count: cached.length,
             pending_count: pendingMessages.length,
             history_complete: historyComplete,
-            last_read_sequence: initialReadSequence.current,
+            last_read_sequence: initialUnreadBoundarySequence.current,
             expected_latest_sequence: expectedLatestSequence,
             local_latest_sequence: localLatestSequence,
+            cache_latest_sequence: cachedLatestSequence,
             unread_count: expectedUnreadCount,
             position_ready: local.length > 0,
             position_source: local.length > 0 ? "sqlite" : "network",
@@ -673,15 +749,20 @@ export default function MessengerRoomScreen() {
             messengerErrorMessage(error, "Не удалось отправить сообщение"),
           );
         }
-        const applyRemoteMessages = async (items: MessengerMessage[]) => {
+        const applyRemoteMessages = async (
+          items: MessengerMessage[],
+          exposeInFeed: boolean,
+        ) => {
           if (!items.length) return;
-          setMessages((current) =>
-            mergeMessengerMessages(
-              current,
-              items,
-              reactionMutationIds.current,
-            ),
-          );
+          if (exposeInFeed) {
+            setMessages((current) =>
+              mergeMessengerMessages(
+                current,
+                items,
+                reactionMutationIds.current,
+              ),
+            );
+          }
           await cacheMessengerMessages(db, items);
           void removeMessengerOutboxItems(
             db,
@@ -689,65 +770,58 @@ export default function MessengerRoomScreen() {
           );
         };
 
-        let latestSequence = localLatestSequence;
+        const reconciliationCursor = initial
+          ? cachedLatestSequence
+          : (await loadCachedMessengerMessageBounds(db, roomId))
+              .latest_sequence || latestKnownSequence.current;
+        const visibleConfirmedTail = initial
+          ? localLatestSequence
+          : messagesRef.current
+              .filter((message) => !message.pending)
+              .at(-1)?.sequence;
+        const remoteIsContiguousWithFeed = Boolean(
+          !visibleConfirmedTail ||
+          !reconciliationCursor ||
+          compareMessengerSequence(
+            visibleConfirmedTail,
+            reconciliationCursor,
+          ) === 0,
+        );
+        let latestSequence = reconciliationCursor || localLatestSequence;
         let receivedMessageCount = 0;
         let syncDirection: "after" | "latest" = "latest";
 
-        if (initial && localLatestSequence) {
-          // SQLite already contains the read anchor and the preceding history.
-          // Ask the server only for messages after the newest cached sequence;
-          // this is the exact unread tail and avoids downloading the same 79+
-          // messages on every entry into a room.
+        if (reconciliationCursor) {
+          // Reconcile strictly after SQLite's newest confirmed sequence. One
+          // small page is enough for this pass; subsequent realtime events or
+          // reconnects continue from the advanced cursor without repainting
+          // old cells.
           syncDirection = "after";
-          let cursor = localLatestSequence;
-          let hasMore = true;
-          let pageCount = 0;
-          while (hasMore && pageCount < 50) {
-            const page = await getMessengerMessages(roomId, {
-              cursor,
-              direction: "after",
-              limit: 100,
-            });
-            pageCount += 1;
-            receivedMessageCount += page.items.length;
-            await applyRemoteMessages(page.items);
-            if (page.page.latest_sequence) {
-              latestSequence = page.page.latest_sequence;
-            }
-            hasMore = page.page.has_more;
-            const nextCursor = page.page.latest_sequence;
-            if (
-              !hasMore ||
-              !nextCursor ||
-              compareMessengerSequence(nextCursor, cursor) <= 0
-            ) {
-              break;
-            }
-            cursor = nextCursor;
-          }
-          if (hasMore && pageCount >= 50) {
-            messengerLog("warn", "room.newer_history.page_limit", {
-              room_id: roomId,
-              page_count: pageCount,
-              latest_sequence: latestSequence,
-            });
-          }
-          if (!historyCompleteAtStart && localOldestSequence) {
-            void hydrateOlderHistory(localOldestSequence, true);
+          const page = await getMessengerMessages(roomId, {
+            cursor: reconciliationCursor,
+            direction: "after",
+            limit: 20,
+          });
+          receivedMessageCount = page.items.length;
+          remoteHasMoreNewerMessages.current = page.page.has_more;
+          await applyRemoteMessages(
+            page.items,
+            remoteIsContiguousWithFeed,
+          );
+          if (page.page.latest_sequence) {
+            latestSequence = page.page.latest_sequence;
           }
         } else {
-          const remote = await getMessengerMessages(roomId, { limit: 100 });
+          const remote = await getMessengerMessages(roomId, { limit: 20 });
           receivedMessageCount = remote.items.length;
           latestSequence = remote.page.latest_sequence;
-          await applyRemoteMessages(remote.items);
+          // `latest` already returns the newest window. Its `has_more` flag
+          // refers to older history, not messages below the visible tail.
+          remoteHasMoreNewerMessages.current = false;
+          await applyRemoteMessages(remote.items, true);
           if (initial) {
             if (!remote.page.has_more) {
               await markMessengerRoomHistoryComplete(db, roomId);
-            } else {
-              void hydrateOlderHistory(
-                remote.page.oldest_sequence,
-                remote.page.has_more,
-              );
             }
           }
         }
@@ -759,16 +833,6 @@ export default function MessengerRoomScreen() {
           nearLatest.current
         ) {
           scrollToLatest(false);
-        }
-        if (
-          latestSequence &&
-          initialReadAcknowledged.current &&
-          compareMessengerSequence(
-            latestSequence,
-            initialReadSequence.current,
-          ) > 0
-        ) {
-          await acknowledgeLatest(latestSequence);
         }
         setOffline(false);
         if (!outboxError) setSyncError(null);
@@ -800,10 +864,8 @@ export default function MessengerRoomScreen() {
       }
     },
     [
-      acknowledgeLatest,
       db,
       flushOutbox,
-      hydrateOlderHistory,
       isAuthenticated,
       params.lastReadSequence,
       params.latestSequence,
@@ -840,25 +902,21 @@ export default function MessengerRoomScreen() {
     });
     if (initialReadAcknowledged.current) return;
     initialReadAcknowledged.current = true;
-    const latestSequence =
-      latestKnownSequence.current ||
-      [...messagesRef.current].reverse().find((message) => !message.pending)
-        ?.sequence;
-    // When only the cached read anchor is available, acknowledging the same
-    // sequence would incorrectly clear SQLite's unread counter before the
-    // unread tail has arrived. Advance the cursor only when a genuinely newer
-    // confirmed message is already known.
+    const visibleSequence = latestVisibleSequence.current;
     if (
-      latestSequence &&
+      visibleSequence &&
       compareMessengerSequence(
-        latestSequence,
+        visibleSequence,
         initialReadSequence.current,
       ) > 0
     ) {
-      void acknowledgeLatest(latestSequence).catch((error) => {
-        initialReadAcknowledged.current = false;
-        console.warn("[Messenger] Не удалось отметить чат прочитанным:", error);
-      });
+      initialReadSequence.current = visibleSequence;
+      void acknowledgeLatest(visibleSequence).catch((error) =>
+        console.warn(
+          "[Messenger] Не удалось локально отметить видимые сообщения:",
+          error,
+        ),
+      );
     }
   }, [acknowledgeLatest, clearInitialPositionTimers, roomId]);
 
@@ -886,10 +944,7 @@ export default function MessengerRoomScreen() {
   }, [finishInitialPosition]);
 
   const settleInitialPosition = useCallback(() => {
-    if (
-      !pendingInitialPosition.current ||
-      initialAnchorSettling.current
-    ) {
+    if (!pendingInitialPosition.current || initialAnchorSettling.current) {
       return;
     }
     initialAnchorSettling.current = true;
@@ -925,18 +980,43 @@ export default function MessengerRoomScreen() {
 
   const handleViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken<MessengerMessage>[] }) => {
-      if (!pendingInitialPosition.current) return;
-      const anchorId = initialAnchorClientId.current;
+      const latestVisible = viewableItems
+        .filter((token) => token.isViewable && !token.item.pending)
+        .map((token) => token.item.sequence)
+        .reduce<string | null>(
+          (latest, sequence) =>
+            !latest || compareMessengerSequence(sequence, latest) > 0
+              ? sequence
+              : latest,
+          null,
+        );
+      latestVisibleSequence.current = latestVisible;
       if (
-        anchorId &&
+        pendingInitialPosition.current &&
+        initialAnchorClientId.current &&
         viewableItems.some(
-          (token) => token.item.client_message_id === anchorId,
+          (token) =>
+            token.item.client_message_id === initialAnchorClientId.current,
         )
       ) {
         settleInitialPosition();
+        return;
+      }
+      if (!initialReadAcknowledged.current) return;
+      if (
+        latestVisible &&
+        compareMessengerSequence(latestVisible, initialReadSequence.current) > 0
+      ) {
+        initialReadSequence.current = latestVisible;
+        void acknowledgeLatest(latestVisible).catch((error) =>
+          console.warn(
+            "[Messenger] Не удалось локально отметить видимые сообщения:",
+            error,
+          ),
+        );
       }
     },
-    [settleInitialPosition],
+    [acknowledgeLatest, settleInitialPosition],
   );
 
   const initialViewabilityConfig = useMemo(
@@ -948,7 +1028,7 @@ export default function MessengerRoomScreen() {
     if (!initialUnreadExpected || unreadMarkerClientId || !session) return;
     const firstUnread = firstUnreadMessengerMessage(
       messages,
-      initialReadSequence.current,
+      initialUnreadBoundarySequence.current,
       session.user.id,
     );
     if (firstUnread) {
@@ -969,12 +1049,12 @@ export default function MessengerRoomScreen() {
     }
     const firstUnread = firstUnreadMessengerMessage(
       current,
-      initialReadSequence.current,
+      initialUnreadBoundarySequence.current,
       session.user.id,
     );
     const readAnchor = lastReadMessengerMessage(
       current,
-      initialReadSequence.current,
+      initialUnreadBoundarySequence.current,
     );
     const shouldAnchorUnreadBoundary =
       initialUnreadExpectedRef.current || Boolean(firstUnread);
@@ -997,7 +1077,7 @@ export default function MessengerRoomScreen() {
       room_id: roomId,
       mode: initialAnchorMode.current,
       message_count: current.length,
-      last_read_sequence: initialReadSequence.current,
+      last_read_sequence: initialUnreadBoundarySequence.current,
       anchor_sequence: anchor?.sequence ?? null,
       unread_marker_sequence: firstUnread?.sequence ?? null,
       source: readAnchor ? "sqlite" : firstUnread ? "network" : "latest",
@@ -1040,10 +1120,7 @@ export default function MessengerRoomScreen() {
       if (!pendingInitialPosition.current) return;
       initialPositionAttempts.current += 1;
       listRef.current?.scrollToOffset({
-        offset: Math.max(
-          0,
-          (info.averageItemLength || 72) * info.index,
-        ),
+        offset: Math.max(0, (info.averageItemLength || 72) * info.index),
         animated: false,
       });
       if (initialPositionRetryTimer.current) {
@@ -1063,19 +1140,17 @@ export default function MessengerRoomScreen() {
         event.nativeEvent;
       nearLatest.current =
         contentOffset.y + layoutMeasurement.height >= contentSize.height - 120;
+      if (!pendingInitialPosition.current && contentOffset.y <= 100) {
+        void loadOlderMessages();
+      }
+      if (
+        !pendingInitialPosition.current &&
+        contentOffset.y + layoutMeasurement.height >= contentSize.height - 160
+      ) {
+        void loadNewerMessages();
+      }
     },
-    [],
-  );
-
-  const scheduleRealtimeSync = useCallback(
-    (delay = 150) => {
-      if (realtimeSyncTimer.current) clearTimeout(realtimeSyncTimer.current);
-      realtimeSyncTimer.current = setTimeout(() => {
-        realtimeSyncTimer.current = null;
-        void loadMessages(false);
-      }, delay);
-    },
-    [loadMessages],
+    [loadNewerMessages, loadOlderMessages],
   );
 
   const scheduleConnectionSync = useCallback(() => {
@@ -1119,7 +1194,7 @@ export default function MessengerRoomScreen() {
           );
           void removeMessengerOutboxItem(db, message.client_message_id);
           latestKnownSequence.current = message.sequence;
-          if (initialReadAcknowledged.current) {
+          if (initialReadAcknowledged.current && nearLatest.current) {
             void acknowledgeLatest(message.sequence).catch((error) =>
               console.warn(
                 "[Messenger realtime] Не удалось подтвердить сообщение:",
@@ -1134,11 +1209,8 @@ export default function MessengerRoomScreen() {
           event.type === "message.receipt_updated" &&
           event.room_id === roomId
         ) {
-          // Our own read acknowledgement is echoed through Socket.IO. It does
-          // not change this screen and must not start a REST/realtime loop.
-          if (event.recipient_user_id !== session?.user.id) {
-            scheduleRealtimeSync(100);
-          }
+          // Receipt cursors belong to the delivery metadata layer. They must
+          // never trigger a history fetch or replace the visible feed.
         } else if (
           event.type === "sync.required" ||
           event.type === "connection.ready"
@@ -1153,19 +1225,28 @@ export default function MessengerRoomScreen() {
           event.room_id === roomId &&
           !reactionMutationIds.current.has(event.message_id)
         ) {
-          scheduleRealtimeSync(100);
+          if (event.reactions) {
+            setMessages((current) => {
+              const next = current.map((message) =>
+                message.id === event.message_id
+                  ? { ...message, reactions: event.reactions || [] }
+                  : message,
+              );
+              const updated = next.find(
+                (message) => message.id === event.message_id,
+              );
+              if (updated) void cacheMessengerMessages(db, [updated]);
+              return next;
+            });
+          }
         }
       });
       // Reconciliation is intentionally infrequent: Socket.IO performs normal
       // foreground delivery, while this timer protects against a lost event.
-      const timer = setInterval(() => void loadMessages(false), 45_000);
+      const timer = setInterval(() => void loadMessages(false), 120_000);
       return () => {
         unsubscribe();
         clearInterval(timer);
-        if (realtimeSyncTimer.current) {
-          clearTimeout(realtimeSyncTimer.current);
-          realtimeSyncTimer.current = null;
-        }
         if (connectionSyncTimer.current) {
           clearTimeout(connectionSyncTimer.current);
           connectionSyncTimer.current = null;
@@ -1191,7 +1272,6 @@ export default function MessengerRoomScreen() {
       roomId,
       router,
       scheduleConnectionSync,
-      scheduleRealtimeSync,
       session?.user.id,
       scrollToLatest,
     ]),

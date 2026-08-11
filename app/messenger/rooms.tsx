@@ -55,7 +55,6 @@ export default function MessengerRoomsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const realtimeSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectionSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -131,17 +130,6 @@ export default function MessengerRoomsScreen() {
     [db, isAuthenticated],
   );
 
-  const scheduleRealtimeSync = useCallback(
-    (delay = 150) => {
-      if (realtimeSyncTimer.current) clearTimeout(realtimeSyncTimer.current);
-      realtimeSyncTimer.current = setTimeout(() => {
-        realtimeSyncTimer.current = null;
-        void loadRooms(false, false);
-      }, delay);
-    },
-    [loadRooms],
-  );
-
   const scheduleConnectionSync = useCallback(() => {
     if (connectionSyncTimer.current) return;
     const run = (): void => {
@@ -205,7 +193,6 @@ export default function MessengerRoomsScreen() {
               };
             }),
           );
-          scheduleRealtimeSync();
         } else if (
           event.type === "sync.required" ||
           event.type === "connection.ready"
@@ -215,23 +202,12 @@ export default function MessengerRoomsScreen() {
       });
       return () => {
         unsubscribe();
-        if (realtimeSyncTimer.current) {
-          clearTimeout(realtimeSyncTimer.current);
-          realtimeSyncTimer.current = null;
-        }
         if (connectionSyncTimer.current) {
           clearTimeout(connectionSyncTimer.current);
           connectionSyncTimer.current = null;
         }
       };
-    }, [
-      loadRooms,
-      router,
-      scheduleConnectionSync,
-      scheduleRealtimeSync,
-      session?.user.id,
-      status,
-    ]),
+    }, [loadRooms, router, scheduleConnectionSync, session?.user.id, status]),
   );
 
   const openRoom = (room: MessengerRoom) => {

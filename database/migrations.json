@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "migrations": [
     {
       "version": 1,
@@ -40,6 +40,11 @@
       "version": 8,
       "name": "messenger_complete_local_history",
       "sql": "CREATE TABLE IF NOT EXISTS messenger_room_cache_state (room_id TEXT PRIMARY KEY NOT NULL, history_complete INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);\nINSERT INTO metadata (key, value) VALUES ('schema_version', '8') ON CONFLICT(key) DO UPDATE SET value = excluded.value;"
+    },
+    {
+      "version": 9,
+      "name": "messenger_local_read_state",
+      "sql": "CREATE TABLE IF NOT EXISTS messenger_room_read_state (room_id TEXT PRIMARY KEY NOT NULL, local_read_sequence TEXT NOT NULL DEFAULT '0', synced_read_sequence TEXT NOT NULL DEFAULT '0', pending_read_sequence TEXT, updated_at TEXT NOT NULL);\nCREATE INDEX IF NOT EXISTS idx_messenger_room_read_pending ON messenger_room_read_state(pending_read_sequence) WHERE pending_read_sequence IS NOT NULL;\nINSERT INTO metadata (key, value) VALUES ('schema_version', '9') ON CONFLICT(key) DO UPDATE SET value = excluded.value;"
     }
   ]
 }
