@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -56,6 +56,27 @@ export default function MessengerRoomsScreen() {
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const realtimeSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const orderedRooms = useMemo(
+    () =>
+      [...rooms].sort((left, right) => {
+        const leftDirect =
+          left.room_type === "direct" || left.kind === "direct";
+        const rightDirect =
+          right.room_type === "direct" || right.kind === "direct";
+        if (leftDirect !== rightDirect) return leftDirect ? 1 : -1;
+        if (!leftDirect && left.sort_order !== right.sort_order) {
+          return left.sort_order - right.sort_order;
+        }
+        if (leftDirect) {
+          const leftTime = left.last_message?.created_at || "";
+          const rightTime = right.last_message?.created_at || "";
+          if (leftTime !== rightTime) return rightTime.localeCompare(leftTime);
+        }
+        return left.title.localeCompare(right.title, "ru");
+      }),
+    [rooms],
+  );
 
   const loadRooms = useCallback(
     async (showRefresh = false, includeCache = true) => {
@@ -222,6 +243,13 @@ export default function MessengerRoomsScreen() {
               : session?.user.display_name || "Командные чаты"}
           </Text>
         </View>
+        <TouchableOpacity
+          style={styles.iconButton}
+          onPress={() => router.push("/messenger/contacts")}
+          accessibilityLabel="Новое личное сообщение"
+        >
+          <Icon name="create-outline" size={25} color={colors.primary} />
+        </TouchableOpacity>
         {session && (
           <TouchableOpacity
             style={styles.profileButton}
@@ -258,7 +286,7 @@ export default function MessengerRoomsScreen() {
       )}
 
       <FlatList
-        data={rooms}
+        data={orderedRooms}
         keyExtractor={(room) => room.id}
         refreshControl={
           <RefreshControl
@@ -266,41 +294,66 @@ export default function MessengerRoomsScreen() {
             onRefresh={() => void loadRooms(true, false)}
           />
         }
-        contentContainerStyle={rooms.length ? styles.list : styles.emptyList}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.roomCard}
-            onPress={() => openRoom(item)}
-          >
-            <View style={styles.roomIcon}>
-              <Icon name="chatbubbles" size={25} color={colors.primary} />
-            </View>
-            <View style={styles.roomContent}>
-              <View style={styles.roomTitleRow}>
-                <Text style={styles.roomTitle} numberOfLines={1}>
-                  {item.title}
+        contentContainerStyle={
+          orderedRooms.length ? styles.list : styles.emptyList
+        }
+        renderItem={({ item }) => {
+          const direct = item.room_type === "direct" || item.kind === "direct";
+          return (
+            <TouchableOpacity
+              style={styles.roomCard}
+              onPress={() => openRoom(item)}
+            >
+              {direct && item.peer ? (
+                <AuthenticatedAvatar
+                  displayName={item.peer.display_name}
+                  avatarUrl={item.peer.avatar_url}
+                  accessToken={session?.access_token}
+                  size={50}
+                />
+              ) : (
+                <View style={styles.roomIcon}>
+                  <Icon name="chatbubbles" size={25} color={colors.primary} />
+                </View>
+              )}
+              <View style={styles.roomContent}>
+                <View style={styles.roomTitleRow}>
+                  <Text style={styles.roomTitle} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  {item.unread_count > 0 && (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadText}>{item.unread_count}</Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.roomKindRow}>
+                  {!direct && (
+                    <Icon name="pin" size={12} color={colors.primary} />
+                  )}
+                  <Text style={styles.teamName} numberOfLines={1}>
+                    {direct ? "Личный чат" : "Общий чат"} · {item.team_name}
+                  </Text>
+                </View>
+                <Text style={styles.preview} numberOfLines={1}>
+                  {item.last_message
+                    ? `${
+                        item.last_message.author.id === session?.user.id
+                          ? "Вы"
+                          : item.last_message.author.display_name
+                      }: `
+                    : ""}
+                  {lastMessageText(item)}
                 </Text>
-                {item.unread_count > 0 && (
-                  <View style={styles.unreadBadge}>
-                    <Text style={styles.unreadText}>{item.unread_count}</Text>
-                  </View>
-                )}
               </View>
-              <Text style={styles.teamName}>{item.team_name}</Text>
-              <Text style={styles.preview} numberOfLines={1}>
-                {item.last_message
-                  ? `${item.last_message.author.display_name}: `
-                  : ""}
-                {lastMessageText(item)}
-              </Text>
-            </View>
-            <Icon
-              name="chevron-forward"
-              size={20}
-              color={colors.textSecondary}
-            />
-          </TouchableOpacity>
-        )}
+              <Icon
+                name="chevron-forward"
+                size={20}
+                color={colors.textSecondary}
+              />
+            </TouchableOpacity>
+          );
+        }}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Icon
@@ -376,8 +429,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   roomIcon: {
-    width: 48,
-    height: 48,
+    width: 50,
+    height: 50,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 16,
@@ -386,7 +439,13 @@ const styles = StyleSheet.create({
   roomContent: { flex: 1, minWidth: 0 },
   roomTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   roomTitle: { flex: 1, fontSize: 16, fontWeight: "800", color: colors.text },
-  teamName: { marginTop: 2, fontSize: 12, color: colors.textSecondary },
+  roomKindRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 2,
+  },
+  teamName: { flexShrink: 1, fontSize: 12, color: colors.textSecondary },
   preview: { marginTop: 6, fontSize: 13, color: colors.textSecondary },
   unreadBadge: {
     minWidth: 24,

@@ -1,16 +1,20 @@
 import * as Crypto from "expo-crypto";
+import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Alert,
   FlatList,
   ImageBackground,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -33,12 +37,18 @@ import {
 } from "../../../features/messenger/repository";
 import type {
   MessengerMessage,
+  MessengerContact,
   MessengerOutboxItem,
   MessengerReply,
+  MessengerRoom,
   MessengerUser,
 } from "../../../features/messenger/types";
 import {
+  createMessengerDirectRoom,
+  forwardMessengerMessage,
+  getMessengerContacts,
   getMessengerMessages,
+  getMessengerRooms,
   isMessengerConnectionError,
   markMessengerRead,
   messengerErrorMessage,
@@ -61,6 +71,62 @@ import { seedMessengerMediaCache } from "../../../services/messengerMediaCache";
 import { colors } from "../../../styles/commonStyles";
 
 type MessengerAttachmentKind = "camera" | "library" | "file" | "location";
+
+function SwipeableMessage({
+  children,
+  enabled,
+  onReply,
+}: {
+  children: React.ReactNode;
+  enabled: boolean;
+  onReply: () => void;
+}) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const responder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, gesture) =>
+          enabled &&
+          gesture.dx < -8 &&
+          Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.35,
+        onPanResponderMove: (_event, gesture) => {
+          translateX.setValue(Math.max(-76, Math.min(0, gesture.dx)));
+        },
+        onPanResponderRelease: (_event, gesture) => {
+          if (enabled && gesture.dx <= -48) onReply();
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: true,
+            speed: 24,
+            bounciness: 5,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: true,
+            speed: 24,
+            bounciness: 5,
+          }).start();
+        },
+      }),
+    [enabled, onReply, translateX],
+  );
+
+  return (
+    <View style={styles.swipeShell}>
+      <View style={styles.swipeReplyCue} pointerEvents="none">
+        <Icon name="arrow-undo" size={24} color={colors.white} />
+      </View>
+      <Animated.View
+        {...responder.panHandlers}
+        style={{ transform: [{ translateX }] }}
+      >
+        {children}
+      </Animated.View>
+    </View>
+  );
+}
 
 function pendingMessage(
   item: MessengerOutboxItem,
@@ -97,6 +163,7 @@ function pendingMessage(
           },
         }
       : null,
+    forwarded_from: null,
     reactions: [],
     delivery: {
       status: "sent",
@@ -208,7 +275,17 @@ export default function MessengerRoomScreen() {
   );
   const [reactionBusy, setReactionBusy] = useState(false);
   const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
+  const [forwardingMessage, setForwardingMessage] =
+    useState<MessengerMessage | null>(null);
+  const [forwardRooms, setForwardRooms] = useState<MessengerRoom[]>([]);
+  const [forwardContacts, setForwardContacts] = useState<MessengerContact[]>(
+    [],
+  );
+  const [forwardLoading, setForwardLoading] = useState(false);
+  const [forwardBusy, setForwardBusy] = useState<string | null>(null);
+  const [forwardError, setForwardError] = useState<string | null>(null);
   const listRef = useRef<FlatList<MessengerMessage>>(null);
+  const inputRef = useRef<TextInput>(null);
   const refreshRunning = useRef(false);
   const flushRunning = useRef(false);
   const realtimeSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -814,11 +891,81 @@ export default function MessengerRoomScreen() {
     }
   };
 
-  const beginReply = (message: MessengerMessage) => {
-    if (!canWrite || message.pending) return;
-    setReplyingTo(message);
+  const beginReply = useCallback(
+    (message: MessengerMessage) => {
+      if (!canWrite || message.pending) return;
+      setReplyingTo(message);
+      setActionMessage(null);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    },
+    [canWrite],
+  );
+
+  const copyMessageText = useCallback(async (message: MessengerMessage) => {
+    if (!message.text.trim()) return;
+    await Clipboard.setStringAsync(message.text);
     setActionMessage(null);
-  };
+  }, []);
+
+  const beginForward = useCallback(async (message: MessengerMessage) => {
+    if (message.pending || message.deleted_at) return;
+    setActionMessage(null);
+    setForwardingMessage(message);
+    setForwardLoading(true);
+    setForwardError(null);
+    try {
+      const [roomsResult, contactsResult] = await Promise.all([
+        getMessengerRooms(),
+        getMessengerContacts(),
+      ]);
+      setForwardRooms(
+        roomsResult.filter((room) =>
+          message.kind === "text" ? room.can_write : room.can_send_media,
+        ),
+      );
+      setForwardContacts(contactsResult);
+    } catch (error) {
+      setForwardError(
+        messengerErrorMessage(error, "Не удалось загрузить адресатов"),
+      );
+    } finally {
+      setForwardLoading(false);
+    }
+  }, []);
+
+  const forwardTo = useCallback(
+    async (busyKey: string, resolveTarget: () => Promise<MessengerRoom>) => {
+      if (!forwardingMessage || forwardBusy) return;
+      setForwardBusy(busyKey);
+      setForwardError(null);
+      try {
+        const target = await resolveTarget();
+        const result = await forwardMessengerMessage(
+          forwardingMessage.id,
+          target.id,
+          Crypto.randomUUID(),
+        );
+        if (target.id === roomId) await storeSentMessage(result.message);
+        setForwardingMessage(null);
+        Alert.alert("Сообщение переслано", `Получатель: ${target.title}`);
+      } catch (error) {
+        setForwardError(
+          messengerErrorMessage(error, "Не удалось переслать сообщение"),
+        );
+      } finally {
+        setForwardBusy(null);
+      }
+    },
+    [forwardBusy, forwardingMessage, roomId, storeSentMessage],
+  );
+
+  const newForwardContacts = useMemo(() => {
+    const roomIds = new Set(forwardRooms.map((room) => room.id));
+    return forwardContacts.filter(
+      (contact) =>
+        !contact.direct_room_id || !roomIds.has(contact.direct_room_id),
+    );
+  }, [forwardContacts, forwardRooms]);
 
   const replyPreview = (reply: MessengerReply): string => {
     if (reply.deleted_at) return "Сообщение удалено";
@@ -906,110 +1053,131 @@ export default function MessengerRoomScreen() {
               const emojiOnly =
                 !item.deleted_at && item.kind === "text" && isEmojiOnly(body);
               return (
-                <View
-                  style={[
-                    styles.messageRow,
-                    mine ? styles.messageRowMine : styles.messageRowTheirs,
-                  ]}
+                <SwipeableMessage
+                  enabled={canWrite && !item.pending && !item.deleted_at}
+                  onReply={() => beginReply(item)}
                 >
-                  {!mine && (
-                    <AuthenticatedAvatar
-                      displayName={item.author.display_name}
-                      avatarUrl={item.author.avatar_url}
-                      accessToken={session?.access_token}
-                      size={40}
-                    />
-                  )}
                   <View
                     style={[
-                      styles.messageColumn,
-                      mine && styles.messageColumnMine,
+                      styles.messageRow,
+                      mine ? styles.messageRowMine : styles.messageRowTheirs,
                     ]}
                   >
-                    <TouchableOpacity
-                      activeOpacity={0.94}
-                      delayLongPress={250}
-                      onLongPress={() =>
-                        !item.pending && setActionMessage(item)
-                      }
+                    {!mine && (
+                      <AuthenticatedAvatar
+                        displayName={item.author.display_name}
+                        avatarUrl={item.author.avatar_url}
+                        accessToken={session?.access_token}
+                        size={40}
+                      />
+                    )}
+                    <View
                       style={[
-                        styles.message,
-                        mine ? styles.mine : styles.theirs,
+                        styles.messageColumn,
+                        mine && styles.messageColumnMine,
                       ]}
-                      accessibilityHint="Удерживайте, чтобы ответить или поставить реакцию"
                     >
-                      <MessageTail mine={mine} />
-                      {item.reply_to && (
-                        <View style={styles.replyQuote}>
-                          <Text style={styles.replyAuthor} numberOfLines={1}>
-                            {item.reply_to.author.display_name}
+                      <TouchableOpacity
+                        activeOpacity={0.94}
+                        delayLongPress={280}
+                        onLongPress={() =>
+                          !item.pending && setActionMessage(item)
+                        }
+                        style={[
+                          styles.message,
+                          mine ? styles.mine : styles.theirs,
+                        ]}
+                        accessibilityHint="Удерживайте для меню или смахните влево, чтобы ответить"
+                      >
+                        <MessageTail mine={mine} />
+                        {item.forwarded_from && (
+                          <View style={styles.forwardedHeader}>
+                            <Icon
+                              name="arrow-redo"
+                              size={14}
+                              color={colors.accent}
+                            />
+                            <Text
+                              style={styles.forwardedText}
+                              numberOfLines={1}
+                            >
+                              Переслано от{" "}
+                              {item.forwarded_from.author.display_name}
+                            </Text>
+                          </View>
+                        )}
+                        {item.reply_to && (
+                          <View style={styles.replyQuote}>
+                            <Text style={styles.replyAuthor} numberOfLines={1}>
+                              {item.reply_to.author.display_name}
+                            </Text>
+                            <Text style={styles.replyText} numberOfLines={1}>
+                              {replyPreview(item.reply_to)}
+                            </Text>
+                          </View>
+                        )}
+                        {!mine && (
+                          <Text style={styles.author} numberOfLines={1}>
+                            {item.author.display_name}
                           </Text>
-                          <Text style={styles.replyText} numberOfLines={1}>
-                            {replyPreview(item.reply_to)}
+                        )}
+                        {(media || location) && session?.access_token && (
+                          <MessengerAttachmentView
+                            media={media}
+                            location={location}
+                            accessToken={session.access_token}
+                          />
+                        )}
+                        {body ? (
+                          <Text
+                            style={[
+                              styles.messageText,
+                              emojiOnly && styles.emojiOnlyText,
+                            ]}
+                          >
+                            {body}
                           </Text>
+                        ) : null}
+                        <View style={styles.messageMeta}>
+                          <Text style={styles.time}>
+                            {new Date(item.created_at).toLocaleTimeString(
+                              "ru-RU",
+                              { hour: "2-digit", minute: "2-digit" },
+                            )}
+                          </Text>
+                          {mine && <DeliveryChecks message={item} />}
                         </View>
-                      )}
-                      {!mine && (
-                        <Text style={styles.author} numberOfLines={1}>
-                          {item.author.display_name}
-                        </Text>
-                      )}
-                      {(media || location) && session?.access_token && (
-                        <MessengerAttachmentView
-                          media={media}
-                          location={location}
-                          accessToken={session.access_token}
-                        />
-                      )}
-                      {body ? (
-                        <Text
+                      </TouchableOpacity>
+                      {item.reactions.length > 0 && (
+                        <View
                           style={[
-                            styles.messageText,
-                            emojiOnly && styles.emojiOnlyText,
+                            styles.reactionSummary,
+                            mine && styles.reactionSummaryMine,
                           ]}
                         >
-                          {body}
-                        </Text>
-                      ) : null}
-                      <View style={styles.messageMeta}>
-                        <Text style={styles.time}>
-                          {new Date(item.created_at).toLocaleTimeString(
-                            "ru-RU",
-                            { hour: "2-digit", minute: "2-digit" },
-                          )}
-                        </Text>
-                        {mine && <DeliveryChecks message={item} />}
-                      </View>
-                    </TouchableOpacity>
-                    {item.reactions.length > 0 && (
-                      <View
-                        style={[
-                          styles.reactionSummary,
-                          mine && styles.reactionSummaryMine,
-                        ]}
-                      >
-                        {item.reactions.map((reaction) => (
-                          <TouchableOpacity
-                            key={reaction.reaction}
-                            style={[
-                              styles.reactionChip,
-                              reaction.reacted_by_me &&
-                                styles.reactionChipSelected,
-                            ]}
-                            onPress={() =>
-                              void toggleReaction(item, reaction.reaction)
-                            }
-                            disabled={!canReact || reactionBusy}
-                          >
-                            <Text style={styles.reactionText}>
-                              {reaction.reaction} {reaction.count}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    )}
+                          {item.reactions.map((reaction) => (
+                            <TouchableOpacity
+                              key={reaction.reaction}
+                              style={[
+                                styles.reactionChip,
+                                reaction.reacted_by_me &&
+                                  styles.reactionChipSelected,
+                              ]}
+                              onPress={() =>
+                                void toggleReaction(item, reaction.reaction)
+                              }
+                              disabled={!canReact || reactionBusy}
+                            >
+                              <Text style={styles.reactionText}>
+                                {reaction.reaction} {reaction.count}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      )}
+                    </View>
                   </View>
-                </View>
+                </SwipeableMessage>
               );
             }}
             ListEmptyComponent={
@@ -1039,7 +1207,25 @@ export default function MessengerRoomScreen() {
               style={styles.actionSheet}
               onPress={(event) => event.stopPropagation()}
             >
-              <Text style={styles.actionTitle}>Действия с сообщением</Text>
+              {actionMessage && (
+                <View style={styles.actionMessagePreview}>
+                  <Text style={styles.actionPreviewAuthor} numberOfLines={1}>
+                    {actionMessage.author.display_name}
+                  </Text>
+                  <Text style={styles.actionPreviewText} numberOfLines={2}>
+                    {actionMessage.text ||
+                      (actionMessage.kind === "image"
+                        ? "Фото"
+                        : actionMessage.kind === "video"
+                          ? "Видео"
+                          : actionMessage.kind === "file"
+                            ? actionMessage.media?.original_name || "Файл"
+                            : actionMessage.kind === "location"
+                              ? "Геопозиция"
+                              : "Сообщение")}
+                  </Text>
+                </View>
+              )}
               {canReact && actionMessage && (
                 <View style={styles.reactionPicker}>
                   {["👍", "❤️", "😂", "😮", "😢", "👏", "🏒"].map(
@@ -1062,12 +1248,229 @@ export default function MessengerRoomScreen() {
               )}
               {canWrite && actionMessage && (
                 <TouchableOpacity
-                  style={styles.replyAction}
+                  style={styles.messageAction}
                   onPress={() => beginReply(actionMessage)}
                 >
                   <Icon name="arrow-undo" size={21} color={colors.primary} />
-                  <Text style={styles.replyActionText}>Ответить</Text>
+                  <Text style={styles.messageActionText}>Ответить</Text>
                 </TouchableOpacity>
+              )}
+              {actionMessage?.text.trim() ? (
+                <TouchableOpacity
+                  style={styles.messageAction}
+                  onPress={() => void copyMessageText(actionMessage)}
+                >
+                  <Icon name="copy-outline" size={21} color={colors.primary} />
+                  <Text style={styles.messageActionText}>
+                    Скопировать текст
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              {actionMessage && !actionMessage.deleted_at ? (
+                <TouchableOpacity
+                  style={styles.messageAction}
+                  onPress={() => void beginForward(actionMessage)}
+                >
+                  <Icon name="arrow-redo" size={21} color={colors.primary} />
+                  <Text style={styles.messageActionText}>Переслать</Text>
+                </TouchableOpacity>
+              ) : null}
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        <Modal
+          visible={Boolean(forwardingMessage)}
+          transparent
+          animationType="slide"
+          onRequestClose={() => {
+            if (!forwardBusy) setForwardingMessage(null);
+          }}
+        >
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => {
+              if (!forwardBusy) setForwardingMessage(null);
+            }}
+          >
+            <Pressable
+              style={styles.forwardSheet}
+              onPress={(event) => event.stopPropagation()}
+            >
+              <View style={styles.forwardHeader}>
+                <View>
+                  <Text style={styles.forwardTitle}>Переслать сообщение</Text>
+                  <Text style={styles.forwardSubtitle}>
+                    Выберите один чат или контакт
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.attachmentClose}
+                  onPress={() => setForwardingMessage(null)}
+                  disabled={Boolean(forwardBusy)}
+                  accessibilityLabel="Закрыть выбор получателя"
+                >
+                  <Icon name="close" size={23} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              {forwardLoading ? (
+                <View style={styles.forwardLoading}>
+                  <ActivityIndicator color={colors.primary} />
+                </View>
+              ) : (
+                <ScrollView
+                  style={styles.forwardList}
+                  contentContainerStyle={styles.forwardListContent}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {forwardError ? (
+                    <TouchableOpacity
+                      style={styles.forwardError}
+                      onPress={() =>
+                        forwardingMessage &&
+                        void beginForward(forwardingMessage)
+                      }
+                    >
+                      <Icon
+                        name="alert-circle-outline"
+                        size={20}
+                        color={colors.warning}
+                      />
+                      <Text style={styles.forwardErrorText}>
+                        {forwardError}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+
+                  {forwardRooms.length > 0 ? (
+                    <Text style={styles.forwardSectionTitle}>Чаты</Text>
+                  ) : null}
+                  {forwardRooms.map((target) => {
+                    const key = `room:${target.id}`;
+                    const busy = forwardBusy === key;
+                    return (
+                      <TouchableOpacity
+                        key={key}
+                        style={styles.forwardTarget}
+                        onPress={() =>
+                          void forwardTo(key, () => Promise.resolve(target))
+                        }
+                        disabled={Boolean(forwardBusy)}
+                      >
+                        {target.room_type === "direct" && target.peer ? (
+                          <AuthenticatedAvatar
+                            displayName={target.peer.display_name}
+                            avatarUrl={target.peer.avatar_url}
+                            accessToken={session?.access_token}
+                            size={44}
+                          />
+                        ) : (
+                          <View style={styles.forwardTargetIcon}>
+                            <Icon
+                              name="people"
+                              size={21}
+                              color={colors.primary}
+                            />
+                          </View>
+                        )}
+                        <View style={styles.forwardTargetText}>
+                          <Text
+                            style={styles.forwardTargetTitle}
+                            numberOfLines={1}
+                          >
+                            {target.title}
+                          </Text>
+                          <Text
+                            style={styles.forwardTargetSubtitle}
+                            numberOfLines={1}
+                          >
+                            {target.room_type === "direct"
+                              ? "Личный чат"
+                              : "Общий чат"}
+                            {` · ${target.team_name}`}
+                          </Text>
+                        </View>
+                        {busy ? (
+                          <ActivityIndicator color={colors.primary} />
+                        ) : (
+                          <Icon
+                            name="chevron-forward"
+                            size={20}
+                            color={colors.textSecondary}
+                          />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+
+                  {newForwardContacts.length > 0 ? (
+                    <Text style={styles.forwardSectionTitle}>
+                      Новый личный чат
+                    </Text>
+                  ) : null}
+                  {newForwardContacts.map((contact) => {
+                    const key = `contact:${contact.team_id}:${contact.id}`;
+                    const busy = forwardBusy === key;
+                    return (
+                      <TouchableOpacity
+                        key={key}
+                        style={styles.forwardTarget}
+                        onPress={() =>
+                          void forwardTo(key, async () => {
+                            const result = await createMessengerDirectRoom(
+                              contact.team_id,
+                              contact.id,
+                            );
+                            return result.room;
+                          })
+                        }
+                        disabled={Boolean(forwardBusy)}
+                      >
+                        <AuthenticatedAvatar
+                          displayName={contact.display_name}
+                          avatarUrl={contact.avatar_url}
+                          accessToken={session?.access_token}
+                          size={44}
+                        />
+                        <View style={styles.forwardTargetText}>
+                          <Text
+                            style={styles.forwardTargetTitle}
+                            numberOfLines={1}
+                          >
+                            {contact.display_name}
+                          </Text>
+                          <Text
+                            style={styles.forwardTargetSubtitle}
+                            numberOfLines={1}
+                          >
+                            {contact.family_link
+                              ? "Семейный контакт"
+                              : "Контакт команды"}
+                            {` · ${contact.team_name}`}
+                          </Text>
+                        </View>
+                        {busy ? (
+                          <ActivityIndicator color={colors.primary} />
+                        ) : (
+                          <Icon
+                            name="person-add-outline"
+                            size={20}
+                            color={colors.primary}
+                          />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+
+                  {!forwardError &&
+                  forwardRooms.length === 0 &&
+                  newForwardContacts.length === 0 ? (
+                    <Text style={styles.forwardEmpty}>
+                      Нет доступных получателей
+                    </Text>
+                  ) : null}
+                </ScrollView>
               )}
             </Pressable>
           </Pressable>
@@ -1189,6 +1592,7 @@ export default function MessengerRoomScreen() {
                 </TouchableOpacity>
               )}
               <TextInput
+                ref={inputRef}
                 style={styles.input}
                 value={text}
                 onChangeText={setText}
@@ -1255,6 +1659,18 @@ const styles = StyleSheet.create({
   subtitle: { marginTop: 2, fontSize: 12, color: colors.textSecondary },
   messageList: { padding: 14, paddingBottom: 20 },
   emptyList: { flexGrow: 1, justifyContent: "center" },
+  swipeShell: { position: "relative", width: "100%" },
+  swipeReplyCue: {
+    position: "absolute",
+    right: 2,
+    top: 8,
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 22,
+    backgroundColor: colors.primary,
+  },
   messageRow: {
     width: "100%",
     flexDirection: "row",
@@ -1303,6 +1719,18 @@ const styles = StyleSheet.create({
   },
   messageText: { color: colors.text, fontSize: 15, lineHeight: 20 },
   emojiOnlyText: { fontSize: 38, lineHeight: 46 },
+  forwardedHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginBottom: 5,
+  },
+  forwardedText: {
+    flexShrink: 1,
+    color: colors.accent,
+    fontSize: 11,
+    fontWeight: "800",
+  },
   replyQuote: {
     minWidth: 130,
     marginBottom: 6,
@@ -1426,6 +1854,105 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: colors.surface,
   },
+  actionMessagePreview: {
+    marginBottom: 12,
+    padding: 11,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
+    borderRadius: 10,
+    backgroundColor: colors.backgroundAlt,
+  },
+  actionPreviewAuthor: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  actionPreviewText: {
+    marginTop: 3,
+    color: colors.text,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  messageAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 11,
+    minHeight: 48,
+    paddingHorizontal: 12,
+    marginTop: 4,
+    borderRadius: 13,
+    backgroundColor: "#EAF3FF",
+  },
+  messageActionText: { color: colors.primary, fontSize: 15, fontWeight: "800" },
+  forwardSheet: {
+    maxHeight: "82%",
+    padding: 16,
+    paddingBottom: 10,
+    borderRadius: 22,
+    backgroundColor: colors.surface,
+  },
+  forwardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  forwardTitle: { color: colors.text, fontSize: 18, fontWeight: "800" },
+  forwardSubtitle: { marginTop: 2, color: colors.textSecondary, fontSize: 12 },
+  forwardLoading: {
+    minHeight: 160,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  forwardList: { flexGrow: 0 },
+  forwardListContent: { paddingBottom: 12 },
+  forwardSectionTitle: {
+    marginTop: 12,
+    marginBottom: 5,
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  forwardTarget: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 11,
+    minHeight: 64,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  forwardTargetIcon: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 22,
+    backgroundColor: "#EAF3FF",
+  },
+  forwardTargetText: { flex: 1, minWidth: 0 },
+  forwardTargetTitle: { color: colors.text, fontSize: 15, fontWeight: "800" },
+  forwardTargetSubtitle: {
+    marginTop: 3,
+    color: colors.textSecondary,
+    fontSize: 11,
+  },
+  forwardError: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginVertical: 8,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: "#FFF4E5",
+  },
+  forwardErrorText: { flex: 1, color: colors.text, fontSize: 12 },
+  forwardEmpty: {
+    paddingVertical: 28,
+    color: colors.textSecondary,
+    textAlign: "center",
+  },
   attachmentSheet: {
     padding: 16,
     paddingBottom: 20,
@@ -1498,16 +2025,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundAlt,
   },
   reactionButtonText: { fontSize: 23 },
-  replyAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 9,
-    minHeight: 46,
-    paddingHorizontal: 12,
-    borderRadius: 13,
-    backgroundColor: "#EAF3FF",
-  },
-  replyActionText: { color: colors.primary, fontWeight: "800" },
   readOnly: {
     padding: 14,
     borderTopWidth: 1,

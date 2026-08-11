@@ -64,6 +64,13 @@ export interface MessengerRoom {
   kind: string;
   title: string;
   sort_order: number;
+  room_type: "group" | "direct";
+  peer: null | {
+    id: string;
+    display_name: string;
+    avatar_url: string | null;
+    last_seen_at: string | null;
+  };
   can_write: boolean;
   can_send_media: boolean;
   can_react: boolean;
@@ -82,6 +89,19 @@ export interface MessengerRoom {
   };
 }
 
+export interface MessengerContact {
+  id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  last_seen_at: string | null;
+  team_id: string;
+  team_name: string;
+  family_link: boolean;
+  roles: string[];
+  direct_room_id: string | null;
+}
+
 export interface MessengerReaction {
   reaction: string;
   count: number;
@@ -93,6 +113,14 @@ export interface MessengerReply {
   kind: MessengerMessageKind;
   text: string;
   deleted_at: string | null;
+  author: {
+    id: string;
+    display_name: string;
+  };
+}
+
+export interface MessengerForward {
+  message_id: string;
   author: {
     id: string;
     display_name: string;
@@ -118,6 +146,7 @@ export interface MessengerMessage {
   media: MessengerMedia | null;
   location: MessengerLocation | null;
   reply_to: MessengerReply | null;
+  forwarded_from: MessengerForward | null;
   reactions: MessengerReaction[];
   delivery: {
     status: "sent" | "delivered" | "read";

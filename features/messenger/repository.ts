@@ -55,7 +55,9 @@ export async function loadCachedMessengerRooms(
   db: SQLiteDatabase,
 ): Promise<MessengerRoom[]> {
   const rows = await db.getAllAsync<RoomRow>(
-    "SELECT raw_json FROM messenger_rooms ORDER BY team_name, sort_order, title",
+    `SELECT raw_json FROM messenger_rooms
+      ORDER BY CASE WHEN kind = 'direct' THEN 1 ELSE 0 END,
+               team_name, sort_order, title`,
   );
   return rows
     .map((row) => parseJson<MessengerRoom>(row.raw_json))

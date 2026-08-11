@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import type {
   InvitationPreview,
+  MessengerContact,
   MessengerMessage,
   MessengerReaction,
   MessengerRoom,
@@ -299,6 +300,21 @@ export function getMessengerRooms() {
   return messengerRequest<MessengerRoom[]>("/chat/rooms");
 }
 
+export function getMessengerContacts(teamId?: string) {
+  const query = teamId ? `?team_id=${encodeURIComponent(teamId)}` : "";
+  return messengerRequest<MessengerContact[]>(`/chat/contacts${query}`);
+}
+
+export function createMessengerDirectRoom(teamId: string, userId: string) {
+  return messengerRequest<{ room: MessengerRoom; created: boolean }>(
+    "/chat/direct-rooms",
+    {
+      method: "POST",
+      body: JSON.stringify({ team_id: teamId, user_id: userId }),
+    },
+  );
+}
+
 export function getMessengerMessages(roomId: string) {
   return messengerRequest<{
     items: MessengerMessage[];
@@ -385,6 +401,23 @@ export function removeMessengerReaction(messageId: string) {
     message_id: string;
     reactions: MessengerReaction[];
   }>(`/chat/messages/${messageId}/reaction`, { method: "DELETE" });
+}
+
+export function forwardMessengerMessage(
+  messageId: string,
+  targetRoomId: string,
+  clientMessageId: string,
+) {
+  return messengerRequest<{ message: MessengerMessage; created: boolean }>(
+    `/chat/messages/${messageId}/forward`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        target_room_id: targetRoomId,
+        client_message_id: clientMessageId,
+      }),
+    },
+  );
 }
 
 export function markMessengerDelivered(roomId: string, sequence: string) {
