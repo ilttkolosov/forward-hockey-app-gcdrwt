@@ -119,6 +119,12 @@ export default ({ config }) => {
     },
     extra: {
       router: {},
+      runtimeFeatures: {
+        // android.config is build-only and is not exposed through Constants.
+        // Mirror only the safe boolean so JS never mounts Google MapView when
+        // the native manifest was built without the required API key.
+        androidGoogleMapsConfigured: Boolean(googleMapsApiKey),
+      },
       eas: {
         projectId: "bfe76357-fffa-4dbf-b498-214a56573bcd",
       },

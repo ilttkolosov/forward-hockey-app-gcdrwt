@@ -312,6 +312,7 @@ npx --yes eas-cli@21.7.0 device:create
 
 - `google-services.json` не хранится в Git.
 - Для Android EAS получает его через файловую переменную `GOOGLE_SERVICES_JSON` окружения `preview`.
+- `GOOGLE_MAPS_API_KEY` является необязательным EAS-секретом: с ним Android показывает нативную мини-карту геопозиции, без него используется безопасная карточка со ссылкой на системные карты.
 - Apple и Android signing credentials хранятся на серверах Expo.
 - Приватные ключи, `.p8`, `.p12`, keystore и provisioning profile исключены через `.gitignore`.
 - Секретные значения нельзя добавлять в `app.config.js`, исходный код или README.

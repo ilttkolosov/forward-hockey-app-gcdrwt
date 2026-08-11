@@ -11,6 +11,7 @@ import {
 import MapView, { Marker } from "react-native-maps";
 import Icon from "../../components/Icon";
 import { colors } from "../../styles/commonStyles";
+import { nativeMessengerMapSupported } from "../../services/runtimeEnvironment";
 import type { MessengerLocation } from "./types";
 
 interface MessengerLocationPreviewProps {
@@ -20,11 +21,27 @@ interface MessengerLocationPreviewProps {
 export default function MessengerLocationPreview({
   location,
 }: MessengerLocationPreviewProps) {
-  const { latitude, longitude } = location;
+  const latitude = Number(location.latitude);
+  const longitude = Number(location.longitude);
   const label = location.label || "Моя геопозиция";
-  const coordinate = { latitude, longitude };
+  const validCoordinate =
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180;
+  const coordinate = validCoordinate ? { latitude, longitude } : null;
+  const showNativeMap = nativeMessengerMapSupported && coordinate !== null;
 
   const openMap = async () => {
+    if (!coordinate) {
+      Alert.alert(
+        "Координаты недоступны",
+        "Сообщение содержит некорректную геопозицию.",
+      );
+      return;
+    }
     const encodedLabel = encodeURIComponent(label);
     const url =
       Platform.OS === "ios"
@@ -46,30 +63,41 @@ export default function MessengerLocationPreview({
       accessibilityLabel={`${label}. Открыть в картах`}
     >
       <View style={styles.mapClip} pointerEvents="none">
-        <MapView
-          style={StyleSheet.absoluteFill}
-          region={{
-            ...coordinate,
-            latitudeDelta: 0.008,
-            longitudeDelta: 0.008,
-          }}
-          mapType="standard"
-          loadingEnabled
-          liteMode={Platform.OS === "android"}
-          pitchEnabled={false}
-          rotateEnabled={false}
-          scrollEnabled={false}
-          zoomEnabled={false}
-          toolbarEnabled={false}
-          showsBuildings={false}
-          showsCompass={false}
-          showsPointsOfInterest={false}
-          showsScale={false}
-          showsTraffic={false}
-          showsUserLocation={false}
-        >
-          <Marker coordinate={coordinate} title={label} />
-        </MapView>
+        {showNativeMap ? (
+          <MapView
+            style={StyleSheet.absoluteFill}
+            region={{
+              ...coordinate,
+              latitudeDelta: 0.008,
+              longitudeDelta: 0.008,
+            }}
+            mapType="standard"
+            loadingEnabled
+            liteMode={Platform.OS === "android"}
+            pitchEnabled={false}
+            rotateEnabled={false}
+            scrollEnabled={false}
+            zoomEnabled={false}
+            toolbarEnabled={false}
+            showsBuildings={false}
+            showsCompass={false}
+            showsPointsOfInterest={false}
+            showsScale={false}
+            showsTraffic={false}
+            showsUserLocation={false}
+          >
+            <Marker coordinate={coordinate} title={label} />
+          </MapView>
+        ) : (
+          <View style={styles.mapFallback}>
+            <View style={styles.mapFallbackPin}>
+              <Icon name="location" size={27} color={colors.white} />
+            </View>
+            <Text style={styles.mapFallbackText}>
+              {validCoordinate ? "Открыть в картах" : "Координаты недоступны"}
+            </Text>
+          </View>
+        )}
       </View>
       <View style={styles.details}>
         <View style={styles.locationIcon}>
@@ -80,7 +108,9 @@ export default function MessengerLocationPreview({
             {label}
           </Text>
           <Text style={styles.subtitle}>
-            {latitude.toFixed(5)}, {longitude.toFixed(5)}
+            {validCoordinate
+              ? `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
+              : "Некорректная геопозиция"}
           </Text>
         </View>
         <Icon name="open-outline" size={18} color={colors.primary} />
@@ -102,6 +132,26 @@ const styles = StyleSheet.create({
     height: 132,
     overflow: "hidden",
     backgroundColor: "#DCE7EF",
+  },
+  mapFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#E6EEF4",
+  },
+  mapFallbackPin: {
+    width: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 24,
+    backgroundColor: colors.accent,
+  },
+  mapFallbackText: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: "700",
   },
   details: {
     minHeight: 62,
