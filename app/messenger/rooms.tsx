@@ -261,7 +261,7 @@ export default function MessengerRoomsScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.iconButton}
-          onPress={() => router.replace("/")}
+          onPress={() => router.back()}
         >
           <Icon name="chevron-back" size={28} color={colors.primary} />
         </TouchableOpacity>
