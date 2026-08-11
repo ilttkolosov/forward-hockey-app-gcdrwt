@@ -40,6 +40,7 @@ import {
   applyOptimisticReaction,
   compareMessengerSequence,
   firstUnreadMessengerMessage,
+  lastReadMessengerMessage,
   mergeMessengerMessages,
   pendingMessengerMessage,
 } from "../../../features/messenger/feed";
@@ -102,7 +103,7 @@ import { saveMessengerMediaToDevice } from "../../../services/messengerMediaSave
 import { colors } from "../../../styles/commonStyles";
 
 type MessengerAttachmentKind = "camera" | "library" | "file" | "location";
-type InitialAnchorMode = "unread" | "latest";
+type InitialAnchorMode = "read_anchor" | "unread_fallback" | "latest";
 
 function SwipeableMessage({
   children,
@@ -239,6 +240,16 @@ function DeliveryChecks({ message }: { message: MessengerMessage }) {
   );
 }
 
+function UnreadDivider() {
+  return (
+    <View style={styles.unreadDivider}>
+      <View style={styles.unreadDividerLine} />
+      <Text style={styles.unreadDividerText}>Непрочитанные сообщения</Text>
+      <View style={styles.unreadDividerLine} />
+    </View>
+  );
+}
+
 export default function MessengerRoomScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
@@ -293,13 +304,14 @@ export default function MessengerRoomScreen() {
   const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
   const [listReady, setListReady] = useState(false);
   const [initialDataReady, setInitialDataReady] = useState(false);
+  const [initialUnreadExpected, setInitialUnreadExpected] = useState(false);
   const [unreadMarkerClientId, setUnreadMarkerClientId] = useState<
     string | null
   >(null);
+  const [feedHeight, setFeedHeight] = useState(0);
   const listRef = useRef<FlatList<MessengerMessage>>(null);
   const inputRef = useRef<TextInput>(null);
   const messagesRef = useRef<MessengerMessage[]>([]);
-  const messageHeights = useRef<Map<string, number>>(new Map());
   const refreshRunning = useRef(false);
   const flushRunning = useRef(false);
   const flushRequested = useRef(false);
@@ -307,6 +319,10 @@ export default function MessengerRoomScreen() {
   const historyHydrationRunning = useRef(false);
   const reactionMutationIds = useRef<Set<string>>(new Set());
   const realtimeSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectionSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const lastRoomSyncFinishedAt = useRef(0);
   const attachmentLaunchTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -323,7 +339,6 @@ export default function MessengerRoomScreen() {
   const initialPositionAttempts = useRef(0);
   const initialAnchorClientId = useRef<string | null>(null);
   const initialAnchorMode = useRef<InitialAnchorMode>("latest");
-  const initialAnchorHeight = useRef(0);
   const initialAnchorSettling = useRef(false);
   const initialPositionStartedAt = useRef(0);
   const initialPositionRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(
@@ -334,6 +349,7 @@ export default function MessengerRoomScreen() {
   > | null>(null);
   const nearLatest = useRef(true);
   const initialReadSequence = useRef(params.lastReadSequence || "0");
+  const initialUnreadExpectedRef = useRef(false);
   const initialReadAcknowledged = useRef(false);
   const latestKnownSequence = useRef<string | null>(null);
   const acknowledgedRead = useRef<{
@@ -355,6 +371,8 @@ export default function MessengerRoomScreen() {
   }, []);
 
   const visibleMessages = messages;
+  const waitingForInitialUnread =
+    initialUnreadExpected && !unreadMarkerClientId;
 
   const flushOutbox = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -550,8 +568,9 @@ export default function MessengerRoomScreen() {
         room_id: roomId,
         initial,
       });
-      let localPositionReady = false;
       let historyCompleteAtStart = false;
+      let localOldestSequence: string | null = null;
+      let localLatestSequence: string | null = null;
       let expectedUnreadCount = Number(params.unreadCount || 0);
       if (!Number.isFinite(expectedUnreadCount)) expectedUnreadCount = 0;
       try {
@@ -611,32 +630,26 @@ export default function MessengerRoomScreen() {
                 : latest,
             null,
           );
+          if (
+            expectedLatestSequence &&
+            compareMessengerSequence(
+              initialReadSequence.current,
+              expectedLatestSequence,
+            ) >= 0
+          ) {
+            expectedUnreadCount = 0;
+          }
+          initialUnreadExpectedRef.current = expectedUnreadCount > 0;
+          setInitialUnreadExpected(expectedUnreadCount > 0);
+          if (local.length) {
+            // The first frame is positioned exclusively from SQLite. Network
+            // reconciliation starts below, but can no longer hold the feed in
+            // a hidden/loading state.
+            setInitialDataReady(true);
+          }
           const localConfirmed = local.filter((message) => !message.pending);
-          const localOldestSequence = localConfirmed[0]?.sequence ?? null;
-          const localLatestSequence = localConfirmed.at(-1)?.sequence ?? null;
-          const localHasExpectedLatest = expectedLatestSequence
-            ? Boolean(
-                localLatestSequence &&
-                  compareMessengerSequence(
-                    localLatestSequence,
-                    expectedLatestSequence,
-                  ) >= 0,
-              )
-            : pendingMessages.length > 0;
-          const localCoversUnreadBoundary = Boolean(
-            historyComplete ||
-              expectedUnreadCount <= 0 ||
-              (localOldestSequence &&
-                compareMessengerSequence(
-                  localOldestSequence,
-                  initialReadSequence.current,
-                ) <= 0),
-          );
-          localPositionReady =
-            local.length > 0 &&
-            localHasExpectedLatest &&
-            localCoversUnreadBoundary;
-          if (localPositionReady) setInitialDataReady(true);
+          localOldestSequence = localConfirmed[0]?.sequence ?? null;
+          localLatestSequence = localConfirmed.at(-1)?.sequence ?? null;
           messengerLog("debug", "room.cache.loaded", {
             room_id: roomId,
             message_count: cached.length,
@@ -646,7 +659,8 @@ export default function MessengerRoomScreen() {
             expected_latest_sequence: expectedLatestSequence,
             local_latest_sequence: localLatestSequence,
             unread_count: expectedUnreadCount,
-            position_ready: localPositionReady,
+            position_ready: local.length > 0,
+            position_source: local.length > 0 ? "sqlite" : "network",
           });
         }
         let outboxError: unknown = null;
@@ -659,57 +673,110 @@ export default function MessengerRoomScreen() {
             messengerErrorMessage(error, "Не удалось отправить сообщение"),
           );
         }
-        const remote = await getMessengerMessages(roomId, { limit: 100 });
-        latestKnownSequence.current = remote.page.latest_sequence;
-        setMessages((current) =>
-          mergeMessengerMessages(
-            current,
-            remote.items,
-            reactionMutationIds.current,
-          ),
-        );
-        await cacheMessengerMessages(db, remote.items);
-        if (remote.items.length) {
+        const applyRemoteMessages = async (items: MessengerMessage[]) => {
+          if (!items.length) return;
+          setMessages((current) =>
+            mergeMessengerMessages(
+              current,
+              items,
+              reactionMutationIds.current,
+            ),
+          );
+          await cacheMessengerMessages(db, items);
           void removeMessengerOutboxItems(
             db,
-            remote.items.map((message) => message.client_message_id),
+            items.map((message) => message.client_message_id),
           );
-        }
-        const latestSequence = remote.page.latest_sequence;
-        if (latestSequence && initialReadAcknowledged.current) {
-          await acknowledgeLatest(latestSequence);
-        }
-        if (initial) {
-          if (!remote.page.has_more) {
-            await markMessengerRoomHistoryComplete(db, roomId);
-          } else {
-            const remoteCoversUnreadBoundary = Boolean(
-              remote.page.oldest_sequence &&
-                compareMessengerSequence(
-                  remote.page.oldest_sequence,
-                  initialReadSequence.current,
-                ) <= 0,
-            );
-            const mustWaitForOlderHistory =
-              !localPositionReady &&
-              expectedUnreadCount > 0 &&
-              !historyCompleteAtStart &&
-              !remoteCoversUnreadBoundary;
-            const hydration = hydrateOlderHistory(
-              remote.page.oldest_sequence,
-              remote.page.has_more,
-            );
-            if (mustWaitForOlderHistory) await hydration;
-            else void hydration;
+        };
+
+        let latestSequence = localLatestSequence;
+        let receivedMessageCount = 0;
+        let syncDirection: "after" | "latest" = "latest";
+
+        if (initial && localLatestSequence) {
+          // SQLite already contains the read anchor and the preceding history.
+          // Ask the server only for messages after the newest cached sequence;
+          // this is the exact unread tail and avoids downloading the same 79+
+          // messages on every entry into a room.
+          syncDirection = "after";
+          let cursor = localLatestSequence;
+          let hasMore = true;
+          let pageCount = 0;
+          while (hasMore && pageCount < 50) {
+            const page = await getMessengerMessages(roomId, {
+              cursor,
+              direction: "after",
+              limit: 100,
+            });
+            pageCount += 1;
+            receivedMessageCount += page.items.length;
+            await applyRemoteMessages(page.items);
+            if (page.page.latest_sequence) {
+              latestSequence = page.page.latest_sequence;
+            }
+            hasMore = page.page.has_more;
+            const nextCursor = page.page.latest_sequence;
+            if (
+              !hasMore ||
+              !nextCursor ||
+              compareMessengerSequence(nextCursor, cursor) <= 0
+            ) {
+              break;
+            }
+            cursor = nextCursor;
           }
-          setInitialDataReady(true);
+          if (hasMore && pageCount >= 50) {
+            messengerLog("warn", "room.newer_history.page_limit", {
+              room_id: roomId,
+              page_count: pageCount,
+              latest_sequence: latestSequence,
+            });
+          }
+          if (!historyCompleteAtStart && localOldestSequence) {
+            void hydrateOlderHistory(localOldestSequence, true);
+          }
+        } else {
+          const remote = await getMessengerMessages(roomId, { limit: 100 });
+          receivedMessageCount = remote.items.length;
+          latestSequence = remote.page.latest_sequence;
+          await applyRemoteMessages(remote.items);
+          if (initial) {
+            if (!remote.page.has_more) {
+              await markMessengerRoomHistoryComplete(db, roomId);
+            } else {
+              void hydrateOlderHistory(
+                remote.page.oldest_sequence,
+                remote.page.has_more,
+              );
+            }
+          }
+        }
+
+        if (latestSequence) latestKnownSequence.current = latestSequence;
+        if (
+          initial &&
+          !initialUnreadExpectedRef.current &&
+          nearLatest.current
+        ) {
+          scrollToLatest(false);
+        }
+        if (
+          latestSequence &&
+          initialReadAcknowledged.current &&
+          compareMessengerSequence(
+            latestSequence,
+            initialReadSequence.current,
+          ) > 0
+        ) {
+          await acknowledgeLatest(latestSequence);
         }
         setOffline(false);
         if (!outboxError) setSyncError(null);
         messengerLog("info", "room.sync.completed", {
           room_id: roomId,
-          message_count: remote.items.length,
+          message_count: receivedMessageCount,
           latest_sequence: latestSequence,
+          direction: syncDirection,
           outbox_error: Boolean(outboxError),
           duration_ms: Date.now() - startedAt,
         });
@@ -729,6 +796,7 @@ export default function MessengerRoomScreen() {
         if (initial) setInitialDataReady(true);
         setLoading(false);
         refreshRunning.current = false;
+        lastRoomSyncFinishedAt.current = Date.now();
       }
     },
     [
@@ -741,6 +809,7 @@ export default function MessengerRoomScreen() {
       params.latestSequence,
       params.unreadCount,
       roomId,
+      scrollToLatest,
       session,
     ],
   );
@@ -775,7 +844,17 @@ export default function MessengerRoomScreen() {
       latestKnownSequence.current ||
       [...messagesRef.current].reverse().find((message) => !message.pending)
         ?.sequence;
-    if (latestSequence) {
+    // When only the cached read anchor is available, acknowledging the same
+    // sequence would incorrectly clear SQLite's unread counter before the
+    // unread tail has arrived. Advance the cursor only when a genuinely newer
+    // confirmed message is already known.
+    if (
+      latestSequence &&
+      compareMessengerSequence(
+        latestSequence,
+        initialReadSequence.current,
+      ) > 0
+    ) {
       void acknowledgeLatest(latestSequence).catch((error) => {
         initialReadAcknowledged.current = false;
         console.warn("[Messenger] Не удалось отметить чат прочитанным:", error);
@@ -802,7 +881,7 @@ export default function MessengerRoomScreen() {
       index,
       animated: false,
       viewPosition: 0.5,
-      viewOffset: initialAnchorHeight.current / 2,
+      viewOffset: 0,
     });
   }, [finishInitialPosition]);
 
@@ -832,9 +911,9 @@ export default function MessengerRoomScreen() {
           index,
           animated: false,
           viewPosition: 0.5,
-          // With viewPosition=0.5 this offset places the top of the complete
-          // cell (the unread divider) at the vertical centre of the feed.
-          viewOffset: initialAnchorHeight.current / 2,
+          // The message itself, rather than the unread divider attached to the
+          // following item, is centred vertically.
+          viewOffset: 0,
         });
       }
       initialPositionRetryTimer.current = setTimeout(
@@ -866,6 +945,18 @@ export default function MessengerRoomScreen() {
   );
 
   useEffect(() => {
+    if (!initialUnreadExpected || unreadMarkerClientId || !session) return;
+    const firstUnread = firstUnreadMessengerMessage(
+      messages,
+      initialReadSequence.current,
+      session.user.id,
+    );
+    if (firstUnread) {
+      setUnreadMarkerClientId(firstUnread.client_message_id);
+    }
+  }, [initialUnreadExpected, messages, session, unreadMarkerClientId]);
+
+  useEffect(() => {
     if (!initialDataReady || initialPositionConfigured.current || !session) {
       return;
     }
@@ -881,16 +972,24 @@ export default function MessengerRoomScreen() {
       initialReadSequence.current,
       session.user.id,
     );
+    const readAnchor = lastReadMessengerMessage(
+      current,
+      initialReadSequence.current,
+    );
+    const shouldAnchorUnreadBoundary =
+      initialUnreadExpectedRef.current || Boolean(firstUnread);
+    const anchor = shouldAnchorUnreadBoundary
+      ? readAnchor || firstUnread || current.at(-1) || null
+      : current.at(-1) || null;
     setUnreadMarkerClientId(firstUnread?.client_message_id ?? null);
-    initialAnchorClientId.current =
-      firstUnread?.client_message_id ??
-      current.at(-1)?.client_message_id ??
-      null;
-    initialAnchorMode.current = firstUnread ? "unread" : "latest";
-    initialAnchorHeight.current =
-      messageHeights.current.get(initialAnchorClientId.current || "") ?? 0;
+    initialAnchorClientId.current = anchor?.client_message_id ?? null;
+    initialAnchorMode.current = shouldAnchorUnreadBoundary
+      ? readAnchor
+        ? "read_anchor"
+        : "unread_fallback"
+      : "latest";
     initialAnchorSettling.current = false;
-    nearLatest.current = !firstUnread;
+    nearLatest.current = !shouldAnchorUnreadBoundary;
     pendingInitialPosition.current = true;
     initialPositionAttempts.current = 0;
     initialPositionStartedAt.current = Date.now();
@@ -899,7 +998,9 @@ export default function MessengerRoomScreen() {
       mode: initialAnchorMode.current,
       message_count: current.length,
       last_read_sequence: initialReadSequence.current,
-      anchor_sequence: firstUnread?.sequence ?? current.at(-1)?.sequence ?? null,
+      anchor_sequence: anchor?.sequence ?? null,
+      unread_marker_sequence: firstUnread?.sequence ?? null,
+      source: readAnchor ? "sqlite" : firstUnread ? "network" : "latest",
       anchor_index: current.findIndex(
         (message) =>
           message.client_message_id === initialAnchorClientId.current,
@@ -924,6 +1025,7 @@ export default function MessengerRoomScreen() {
     clearInitialPositionTimers,
     finishInitialPosition,
     initialDataReady,
+    initialUnreadExpected,
     positionInitialMessages,
     roomId,
     session,
@@ -976,6 +1078,22 @@ export default function MessengerRoomScreen() {
     [loadMessages],
   );
 
+  const scheduleConnectionSync = useCallback(() => {
+    if (connectionSyncTimer.current) return;
+    const run = (): void => {
+      const elapsed = Date.now() - lastRoomSyncFinishedAt.current;
+      const remaining = 10_000 - elapsed;
+      if (lastRoomSyncFinishedAt.current > 0 && remaining > 0) {
+        connectionSyncTimer.current = setTimeout(run, remaining);
+        return;
+      }
+      connectionSyncTimer.current = null;
+      void flushOutbox().catch(() => undefined);
+      void loadMessages(false);
+    };
+    connectionSyncTimer.current = setTimeout(run, 250);
+  }, [flushOutbox, loadMessages]);
+
   useFocusEffect(
     useCallback(() => {
       if (!isAuthenticated) {
@@ -1025,8 +1143,11 @@ export default function MessengerRoomScreen() {
           event.type === "sync.required" ||
           event.type === "connection.ready"
         ) {
-          void flushOutbox().catch(() => undefined);
-          scheduleRealtimeSync(0);
+          // A weak connection may emit several reconnect/ready pairs in quick
+          // succession. The live events already update the feed, so one REST
+          // reconciliation per ten seconds is sufficient and prevents the
+          // request cascade visible in the diagnostic log.
+          scheduleConnectionSync();
         } else if (
           event.type === "message.reaction_updated" &&
           event.room_id === roomId &&
@@ -1045,6 +1166,10 @@ export default function MessengerRoomScreen() {
           clearTimeout(realtimeSyncTimer.current);
           realtimeSyncTimer.current = null;
         }
+        if (connectionSyncTimer.current) {
+          clearTimeout(connectionSyncTimer.current);
+          connectionSyncTimer.current = null;
+        }
         if (attachmentLaunchTimer.current) {
           clearTimeout(attachmentLaunchTimer.current);
           attachmentLaunchTimer.current = null;
@@ -1061,11 +1186,11 @@ export default function MessengerRoomScreen() {
       db,
       acknowledgeLatest,
       clearInitialPositionTimers,
-      flushOutbox,
       isAuthenticated,
       loadMessages,
       roomId,
       router,
+      scheduleConnectionSync,
       scheduleRealtimeSync,
       session?.user.id,
       scrollToLatest,
@@ -1647,6 +1772,10 @@ export default function MessengerRoomScreen() {
             contentContainerStyle={
               visibleMessages.length ? styles.messageList : styles.emptyList
             }
+            onLayout={(event) => {
+              const height = Math.round(event.nativeEvent.layout.height);
+              if (height !== feedHeight) setFeedHeight(height);
+            }}
             initialNumToRender={18}
             maxToRenderPerBatch={14}
             windowSize={9}
@@ -1690,27 +1819,9 @@ export default function MessengerRoomScreen() {
               const emojiOnly =
                 !item.deleted_at && item.kind === "text" && isEmojiOnly(body);
               return (
-                <View
-                  collapsable={false}
-                  onLayout={(event) => {
-                    const height = event.nativeEvent.layout.height;
-                    messageHeights.current.set(item.client_message_id, height);
-                    if (
-                      pendingInitialPosition.current &&
-                      item.client_message_id === initialAnchorClientId.current
-                    ) {
-                      initialAnchorHeight.current = height;
-                    }
-                  }}
-                >
+                <View collapsable={false}>
                   {item.client_message_id === unreadMarkerClientId && (
-                    <View style={styles.unreadDivider}>
-                      <View style={styles.unreadDividerLine} />
-                      <Text style={styles.unreadDividerText}>
-                        Непрочитанные сообщения
-                      </Text>
-                      <View style={styles.unreadDividerLine} />
-                    </View>
+                    <UnreadDivider />
                   )}
                   <SwipeableMessage
                     enabled={canWrite && !item.pending && !item.deleted_at}
@@ -1855,6 +1966,26 @@ export default function MessengerRoomScreen() {
                 />
                 <Text style={styles.emptyTitle}>Начните общение</Text>
               </View>
+            }
+            ListFooterComponent={
+              waitingForInitialUnread ? (
+                <View
+                  style={[
+                    styles.unreadTailPlaceholder,
+                    { minHeight: Math.max(140, feedHeight * 0.55) },
+                  ]}
+                >
+                  <UnreadDivider />
+                  <View style={styles.unreadTailStatus}>
+                    {!offline && <ActivityIndicator color={colors.primary} />}
+                    <Text style={styles.unreadTailStatusText}>
+                      {offline
+                        ? "Новые сообщения появятся после восстановления сети"
+                        : "Загружаем новые сообщения…"}
+                    </Text>
+                  </View>
+                </View>
+              ) : null
             }
           />
           {!listReady && visibleMessages.length > 0 && (
@@ -2444,6 +2575,19 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 11,
     fontWeight: "800",
+  },
+  unreadTailPlaceholder: {
+    paddingTop: 2,
+  },
+  unreadTailStatus: {
+    alignItems: "center",
+    gap: 8,
+    paddingTop: 8,
+  },
+  unreadTailStatusText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    textAlign: "center",
   },
   swipeShell: { position: "relative", width: "100%" },
   swipeReplyCue: {

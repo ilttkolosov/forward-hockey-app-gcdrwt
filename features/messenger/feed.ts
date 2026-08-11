@@ -137,6 +137,28 @@ export function firstUnreadMessengerMessage(
   );
 }
 
+/**
+ * Returns the newest confirmed message that was already covered by the local
+ * room read cursor. Both the cursor and the messages come from SQLite during
+ * the first render, so opening a room never has to wait for the network merely
+ * to choose a stable scroll anchor.
+ */
+export function lastReadMessengerMessage(
+  messages: MessengerMessage[],
+  lastReadSequence: string,
+): MessengerMessage | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (
+      !message.pending &&
+      compareMessengerSequence(message.sequence, lastReadSequence) <= 0
+    ) {
+      return message;
+    }
+  }
+  return null;
+}
+
 export function applyOptimisticReaction(
   reactions: MessengerReaction[],
   nextReaction: string | null,

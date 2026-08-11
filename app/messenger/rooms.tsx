@@ -56,6 +56,11 @@ export default function MessengerRoomsScreen() {
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const realtimeSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectionSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const loadRoomsRunning = useRef(false);
+  const lastRoomsSyncFinishedAt = useRef(0);
 
   const orderedRooms = useMemo(
     () =>
@@ -80,7 +85,8 @@ export default function MessengerRoomsScreen() {
 
   const loadRooms = useCallback(
     async (showRefresh = false, includeCache = true) => {
-      if (!isAuthenticated) return;
+      if (!isAuthenticated || loadRoomsRunning.current) return;
+      loadRoomsRunning.current = true;
       if (showRefresh) setRefreshing(true);
       setError(null);
       const startedAt = Date.now();
@@ -118,6 +124,8 @@ export default function MessengerRoomsScreen() {
       } finally {
         setLoading(false);
         setRefreshing(false);
+        loadRoomsRunning.current = false;
+        lastRoomsSyncFinishedAt.current = Date.now();
       }
     },
     [db, isAuthenticated],
@@ -133,6 +141,21 @@ export default function MessengerRoomsScreen() {
     },
     [loadRooms],
   );
+
+  const scheduleConnectionSync = useCallback(() => {
+    if (connectionSyncTimer.current) return;
+    const run = (): void => {
+      const elapsed = Date.now() - lastRoomsSyncFinishedAt.current;
+      const remaining = 10_000 - elapsed;
+      if (lastRoomsSyncFinishedAt.current > 0 && remaining > 0) {
+        connectionSyncTimer.current = setTimeout(run, remaining);
+        return;
+      }
+      connectionSyncTimer.current = null;
+      void loadRooms(false, false);
+    };
+    connectionSyncTimer.current = setTimeout(run, 250);
+  }, [loadRooms]);
 
   useFocusEffect(
     useCallback(() => {
@@ -187,7 +210,7 @@ export default function MessengerRoomsScreen() {
           event.type === "sync.required" ||
           event.type === "connection.ready"
         ) {
-          scheduleRealtimeSync(0);
+          scheduleConnectionSync();
         }
       });
       return () => {
@@ -196,8 +219,19 @@ export default function MessengerRoomsScreen() {
           clearTimeout(realtimeSyncTimer.current);
           realtimeSyncTimer.current = null;
         }
+        if (connectionSyncTimer.current) {
+          clearTimeout(connectionSyncTimer.current);
+          connectionSyncTimer.current = null;
+        }
       };
-    }, [loadRooms, router, scheduleRealtimeSync, session?.user.id, status]),
+    }, [
+      loadRooms,
+      router,
+      scheduleConnectionSync,
+      scheduleRealtimeSync,
+      session?.user.id,
+      status,
+    ]),
   );
 
   const openRoom = (room: MessengerRoom) => {

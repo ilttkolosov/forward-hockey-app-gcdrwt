@@ -192,21 +192,23 @@ export async function messengerRequest<T>(
     }
     return await parseResponse<T>(response);
   } catch (error) {
-    messengerLog(
-      error instanceof MessengerApiError ? "warn" : "error",
-      "api.failure",
-      {
-        request_id: requestId,
-        method,
-        path,
-        duration_ms: Date.now() - startedAt,
-        category: error instanceof MessengerApiError ? "http" : "connection",
-        status: error instanceof MessengerApiError ? error.status : undefined,
-        code: error instanceof MessengerApiError ? error.code : undefined,
-        message: messengerErrorMessage(error),
-        details: messengerErrorDetails(error),
-      },
-    );
+    // A fetch-level failure is an expected offline condition on mobile. Expo
+    // turns console.error into a red development overlay (with a synthetic
+    // NamelessError stack), although the exception is handled by the caller
+    // and the local SQLite cache remains usable. Keep the diagnostic record,
+    // but log it as a warning so a temporary network loss does not look like an
+    // application crash.
+    messengerLog("warn", "api.failure", {
+      request_id: requestId,
+      method,
+      path,
+      duration_ms: Date.now() - startedAt,
+      category: error instanceof MessengerApiError ? "http" : "connection",
+      status: error instanceof MessengerApiError ? error.status : undefined,
+      code: error instanceof MessengerApiError ? error.code : undefined,
+      message: messengerErrorMessage(error),
+      details: messengerErrorDetails(error),
+    });
     throw error;
   }
 }
