@@ -2308,7 +2308,8 @@ export default function MessengerRoomScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.iconButton}
-            onPress={() => router.back()}
+            onPress={() => router.dismissTo("/messenger/rooms")}
+            accessibilityLabel="Вернуться к списку чатов"
           >
             <Icon name="chevron-back" size={28} color={colors.primary} />
           </TouchableOpacity>

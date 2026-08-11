@@ -9,6 +9,7 @@ import {
   Image,
   StyleSheet,
   Animated,
+  AppState,
   Easing,
 } from 'react-native';
 import { colors } from '../styles/commonStyles';
@@ -55,12 +56,22 @@ import { remotePushNotificationsSupported } from '../services/runtimeEnvironment
 global.Buffer = Buffer;
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
+  handleNotification: async notification => {
+    const messengerPush = normalizeMessengerPushPayload(
+      notification.request.content.data,
+    );
+    const messengerDeliveredInForeground =
+      AppState.currentState === 'active' && messengerPush !== null;
+
+    return {
+      shouldShowBanner: !messengerDeliveredInForeground,
+      shouldShowList: !messengerDeliveredInForeground,
+      shouldPlaySound: !messengerDeliveredInForeground,
+      // The server-provided badge remains the source of truth even when the
+      // foreground banner is suppressed. Realtime updates the visible feed.
+      shouldSetBadge: true,
+    };
+  },
 });
 
 // === КОНСТАНТЫ ===
@@ -298,7 +309,10 @@ function RootLayoutContent() {
     if (messengerPush?.type === 'messenger.message' && messengerPush.room_id) {
       void processMessengerPushPayload(data);
       initializationLog('Открытие комнаты по нажатию на уведомление мессенджера');
-      router.push({
+      // A PUSH can be opened while another room is already on screen. Replace
+      // that route so consecutive notifications never build a room-by-room
+      // back stack.
+      router.replace({
         pathname: '/messenger/room/[id]',
         params: {
           id: messengerPush.room_id,
