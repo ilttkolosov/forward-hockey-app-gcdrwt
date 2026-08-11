@@ -42,6 +42,7 @@ import {
   lastReadMessengerMessage,
   mergeMessengerMessages,
   pendingMessengerMessage,
+  prependMessengerMessages,
 } from "../../../features/messenger/feed";
 import MessageReceiptsModal from "../../../features/messenger/MessageReceiptsModal";
 import MessengerAttachmentView from "../../../features/messenger/MessengerAttachmentView";
@@ -463,6 +464,8 @@ export default function MessengerRoomScreen() {
               room_id: item.room_id,
               client_message_id: item.client_message_id,
               message_id: result.message.id,
+              sequence: result.message.sequence,
+              created_at: result.message.created_at,
               created: result.created,
             });
           } catch (error) {
@@ -584,7 +587,11 @@ export default function MessengerRoomScreen() {
       );
       if (cached.length) {
         setMessages((current) =>
-          mergeMessengerMessages(current, cached, reactionMutationIds.current),
+          prependMessengerMessages(
+            current,
+            cached,
+            reactionMutationIds.current,
+          ),
         );
         return;
       }
@@ -597,7 +604,7 @@ export default function MessengerRoomScreen() {
       if (remote.items.length) {
         await cacheMessengerMessages(db, remote.items);
         setMessages((current) =>
-          mergeMessengerMessages(
+          prependMessengerMessages(
             current,
             remote.items,
             reactionMutationIds.current,

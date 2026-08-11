@@ -66,60 +66,114 @@ export function pendingMessengerMessage(
   };
 }
 
-function messageOrder(left: MessengerMessage, right: MessengerMessage): number {
-  if (left.pending !== right.pending) return left.pending ? 1 : -1;
-  if (!left.pending && !right.pending) {
-    const bySequence = compareMessengerSequence(left.sequence, right.sequence);
-    if (bySequence !== 0) return bySequence;
-  }
-  const byCreatedAt = left.created_at.localeCompare(right.created_at);
-  if (byCreatedAt !== 0) return byCreatedAt;
-  return left.client_message_id.localeCompare(right.client_message_id);
+type MessengerMergePlacement = "append" | "prepend";
+
+function sameMessengerMessage(
+  left: MessengerMessage,
+  right: MessengerMessage,
+): boolean {
+  return (
+    left.id === right.id ||
+    left.client_message_id === right.client_message_id
+  );
 }
 
+function normalizedMessengerMessage(
+  message: MessengerMessage,
+): MessengerMessage {
+  return {
+    ...message,
+    pending: message.pending ?? false,
+    send_error: message.pending ? message.send_error : null,
+  };
+}
+
+function mergeMessengerMessage(
+  existing: MessengerMessage,
+  incoming: MessengerMessage,
+  protectedReactionIds: ReadonlySet<string>,
+): MessengerMessage {
+  return {
+    ...existing,
+    ...incoming,
+    reactions: protectedReactionIds.has(incoming.id)
+      ? existing.reactions
+      : incoming.reactions,
+    pending: incoming.pending ?? false,
+    send_error: incoming.pending ? incoming.send_error : null,
+  };
+}
+
+function mergeMessengerMessagesAt(
+  current: MessengerMessage[],
+  incoming: MessengerMessage[],
+  protectedReactionIds: ReadonlySet<string>,
+  placement: MessengerMergePlacement,
+): MessengerMessage[] {
+  const merged = [...current];
+  const added: MessengerMessage[] = [];
+
+  for (const nextMessage of incoming) {
+    const existingIndex = merged.findIndex((existing) =>
+      sameMessengerMessage(existing, nextMessage),
+    );
+    if (existingIndex >= 0) {
+      merged[existingIndex] = mergeMessengerMessage(
+        merged[existingIndex],
+        nextMessage,
+        protectedReactionIds,
+      );
+      continue;
+    }
+
+    const addedIndex = added.findIndex((existing) =>
+      sameMessengerMessage(existing, nextMessage),
+    );
+    if (addedIndex >= 0) {
+      added[addedIndex] = mergeMessengerMessage(
+        added[addedIndex],
+        nextMessage,
+        protectedReactionIds,
+      );
+    } else {
+      added.push(normalizedMessengerMessage(nextMessage));
+    }
+  }
+
+  return placement === "prepend" ? [...added, ...merged] : [...merged, ...added];
+}
+
+/**
+ * Reconciles live, optimistic and server-confirmed messages without changing
+ * the position of a bubble that is already rendered. In particular, replacing
+ * a pending message with the server copy only updates its delivery metadata;
+ * it must never reorder the feed.
+ */
 export function mergeMessengerMessages(
   current: MessengerMessage[],
   incoming: MessengerMessage[],
   protectedReactionIds: ReadonlySet<string> = new Set(),
 ): MessengerMessage[] {
-  const merged = [...current];
+  return mergeMessengerMessagesAt(
+    current,
+    incoming,
+    protectedReactionIds,
+    "append",
+  );
+}
 
-  for (const nextMessage of incoming) {
-    const index = merged.findIndex(
-      (existing) =>
-        existing.id === nextMessage.id ||
-        existing.client_message_id === nextMessage.client_message_id,
-    );
-    if (index < 0) {
-      merged.push({
-        ...nextMessage,
-        pending: nextMessage.pending ?? false,
-        send_error: nextMessage.pending ? nextMessage.send_error : null,
-      });
-      continue;
-    }
-
-    const existing = merged[index];
-    merged[index] = {
-      ...existing,
-      ...nextMessage,
-      reactions: protectedReactionIds.has(nextMessage.id)
-        ? existing.reactions
-        : nextMessage.reactions,
-      pending: nextMessage.pending ?? false,
-      send_error: nextMessage.pending ? nextMessage.send_error : null,
-    };
-  }
-
-  const unique = new Map<string, MessengerMessage>();
-  for (const message of merged) {
-    const key = message.client_message_id || message.id;
-    const existing = unique.get(key);
-    if (!existing || (existing.pending && !message.pending)) {
-      unique.set(key, message);
-    }
-  }
-  return [...unique.values()].sort(messageOrder);
+/** Adds an older, already sorted history page above the visible feed. */
+export function prependMessengerMessages(
+  current: MessengerMessage[],
+  older: MessengerMessage[],
+  protectedReactionIds: ReadonlySet<string> = new Set(),
+): MessengerMessage[] {
+  return mergeMessengerMessagesAt(
+    current,
+    older,
+    protectedReactionIds,
+    "prepend",
+  );
 }
 
 export function firstUnreadMessengerMessage(
