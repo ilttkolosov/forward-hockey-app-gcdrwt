@@ -3,11 +3,13 @@ import * as TaskManager from "expo-task-manager";
 import { Platform } from "react-native";
 import { messengerLog } from "./messengerLogger";
 import { processMessengerPushPayload } from "./messengerPush";
+import { remotePushNotificationsSupported } from "./runtimeEnvironment";
 
 export const MESSENGER_BACKGROUND_NOTIFICATION_TASK =
   "forward-messenger-background-notification";
 
 if (
+  remotePushNotificationsSupported &&
   (Platform.OS === "ios" || Platform.OS === "android") &&
   !TaskManager.isTaskDefined(MESSENGER_BACKGROUND_NOTIFICATION_TASK)
 ) {
@@ -25,7 +27,10 @@ if (
   );
 }
 
-if (Platform.OS === "ios" || Platform.OS === "android") {
+if (
+  remotePushNotificationsSupported &&
+  (Platform.OS === "ios" || Platform.OS === "android")
+) {
   void Notifications.registerTaskAsync(
     MESSENGER_BACKGROUND_NOTIFICATION_TASK,
   ).catch((error) => {

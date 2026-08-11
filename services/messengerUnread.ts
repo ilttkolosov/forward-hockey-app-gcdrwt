@@ -6,6 +6,7 @@ import {
 } from "../features/messenger/repository";
 import type { MessengerRoom } from "../features/messenger/types";
 import { messengerLog } from "./messengerLogger";
+import { remotePushNotificationsSupported } from "./runtimeEnvironment";
 
 let currentUnreadCount = 0;
 const listeners = new Set<(count: number) => void>();
@@ -41,13 +42,15 @@ export async function setMessengerUnreadCount(value: number): Promise<number> {
   if (changed) {
     for (const listener of listeners) listener(next);
   }
-  try {
-    await Notifications.setBadgeCountAsync(next);
-  } catch (error) {
-    messengerLog("debug", "badge.update.skipped", {
-      unread_count: next,
-      message: error instanceof Error ? error.message : String(error),
-    });
+  if (remotePushNotificationsSupported) {
+    try {
+      await Notifications.setBadgeCountAsync(next);
+    } catch (error) {
+      messengerLog("debug", "badge.update.skipped", {
+        unread_count: next,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
   return next;
 }

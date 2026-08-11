@@ -24,11 +24,18 @@ import {
   setMessengerUnreadCount,
   syncMessengerUnreadFromRooms,
 } from "./messengerUnread";
+import {
+  REMOTE_PUSH_UNAVAILABLE_MESSAGE,
+  remotePushNotificationsSupported,
+} from "./runtimeEnvironment";
 
 export const MESSENGER_NOTIFICATION_CHANNEL = "messenger";
 const MESSENGER_PUSH_ENABLED_PREFIX = "messenger_push_enabled:";
 const MESSENGER_PUSH_PROMPTED_PREFIX = "messenger_push_prompted:";
+const MESSENGER_NATIVE_PUSH_TOKEN_PREFIX = "messenger_native_push_token:";
 const SHARED_EXPO_PUSH_TOKEN_KEY = "expo_push_token";
+let enableMessengerPushInFlight: Promise<MessengerPushRegistration> | null = null;
+let observedNativePushToken: string | null = null;
 
 export interface MessengerPushPayload {
   type: "messenger.message" | "messenger.badge";
@@ -47,6 +54,29 @@ function promptedKey(userId: string): string {
   return `${MESSENGER_PUSH_PROMPTED_PREFIX}${userId}`;
 }
 
+function nativePushTokenKey(userId: string): string {
+  return `${MESSENGER_NATIVE_PUSH_TOKEN_PREFIX}${userId}`;
+}
+
+function assertRemotePushAvailable(): void {
+  if (!remotePushNotificationsSupported) {
+    throw new Error(REMOTE_PUSH_UNAVAILABLE_MESSAGE);
+  }
+}
+
+function nativePushTokenIdentity(
+  userId: string,
+  token: Notifications.DevicePushToken,
+): string {
+  let data: string;
+  try {
+    data = JSON.stringify(token.data);
+  } catch {
+    data = String(token.data);
+  }
+  return `${userId}:${token.type}:${data}`;
+}
+
 function expoProjectId(): string {
   const extra = Constants.expoConfig?.extra as
     | { eas?: { projectId?: string } }
@@ -59,7 +89,7 @@ function expoProjectId(): string {
 }
 
 export async function ensureMessengerNotificationChannel(): Promise<void> {
-  if (Platform.OS !== "android") return;
+  if (!remotePushNotificationsSupported || Platform.OS !== "android") return;
   await Notifications.setNotificationChannelAsync(
     MESSENGER_NOTIFICATION_CHANNEL,
     {
@@ -76,6 +106,7 @@ export async function ensureMessengerNotificationChannel(): Promise<void> {
 }
 
 export async function getProjectExpoPushToken(): Promise<string> {
+  assertRemotePushAvailable();
   if (Platform.OS !== "ios" && Platform.OS !== "android") {
     throw new Error("PUSH-уведомления доступны только на мобильном устройстве");
   }
@@ -91,6 +122,7 @@ export async function getProjectExpoPushToken(): Promise<string> {
 }
 
 async function ensureNotificationPermission(request: boolean): Promise<boolean> {
+  if (!remotePushNotificationsSupported) return false;
   let permission = await Notifications.getPermissionsAsync();
   if (permission.status !== "granted" && request) {
     permission = await Notifications.requestPermissionsAsync({
@@ -111,27 +143,45 @@ export async function loadMessengerPushPreference(userId: string): Promise<boole
 export async function enableMessengerPush(
   requestPermission = true,
 ): Promise<MessengerPushRegistration> {
-  const session = await loadMessengerSession();
-  if (!session) throw new Error("Сначала войдите в командный мессенджер");
-  if (!(await ensureNotificationPermission(requestPermission))) {
-    throw new Error(
-      "Разрешение на уведомления не выдано. Его можно включить в настройках устройства.",
-    );
+  assertRemotePushAvailable();
+  if (enableMessengerPushInFlight) return enableMessengerPushInFlight;
+
+  const operation = (async () => {
+    const session = await loadMessengerSession();
+    if (!session) throw new Error("Сначала войдите в командный мессенджер");
+    if (!(await ensureNotificationPermission(requestPermission))) {
+      throw new Error(
+        "Разрешение на уведомления не выдано. Его можно включить в настройках устройства.",
+      );
+    }
+    const token = await getProjectExpoPushToken();
+    const platform = Platform.OS === "ios" ? "ios" : "android";
+    const registration = await registerMessengerPushToken(token, platform);
+    await AsyncStorage.setItem(enabledKey(session.user.id), "true");
+    messengerLog("info", "push.registration.enabled", {
+      registration_id: registration.id,
+      platform,
+    });
+    return registration;
+  })();
+
+  enableMessengerPushInFlight = operation;
+  try {
+    return await operation;
+  } finally {
+    if (enableMessengerPushInFlight === operation) {
+      enableMessengerPushInFlight = null;
+    }
   }
-  const token = await getProjectExpoPushToken();
-  const platform = Platform.OS === "ios" ? "ios" : "android";
-  const registration = await registerMessengerPushToken(token, platform);
-  await AsyncStorage.setItem(enabledKey(session.user.id), "true");
-  messengerLog("info", "push.registration.enabled", {
-    registration_id: registration.id,
-    platform,
-  });
-  return registration;
 }
 
 export async function disableMessengerPush(): Promise<void> {
   const session = await loadMessengerSession();
   if (!session) return;
+  if (!remotePushNotificationsSupported) {
+    await AsyncStorage.setItem(enabledKey(session.user.id), "false");
+    return;
+  }
   try {
     await unregisterMessengerPushToken();
   } finally {
@@ -148,6 +198,10 @@ export async function messengerPushStatus(): Promise<{
 }> {
   const session = await loadMessengerSession();
   if (!session) return { enabled: false, registration: null };
+  if (!remotePushNotificationsSupported) {
+    await AsyncStorage.setItem(enabledKey(session.user.id), "false");
+    return { enabled: false, registration: null };
+  }
   const preferred = await loadMessengerPushPreference(session.user.id);
   try {
     const registration = await getMessengerPushRegistration();
@@ -163,6 +217,7 @@ export async function messengerPushStatus(): Promise<{
 }
 
 export async function syncMessengerPushRegistration(): Promise<void> {
+  if (!remotePushNotificationsSupported) return;
   const session = await loadMessengerSession();
   if (!session || !(await loadMessengerPushPreference(session.user.id))) return;
   if (!(await ensureNotificationPermission(false))) {
@@ -173,7 +228,28 @@ export async function syncMessengerPushRegistration(): Promise<void> {
   await enableMessengerPush(false);
 }
 
+export async function syncMessengerPushTokenRotation(
+  token: Notifications.DevicePushToken,
+): Promise<void> {
+  if (!remotePushNotificationsSupported) return;
+  const session = await loadMessengerSession();
+  if (!session || !(await loadMessengerPushPreference(session.user.id))) return;
+
+  const identity = nativePushTokenIdentity(session.user.id, token);
+  if (observedNativePushToken === identity) return;
+  observedNativePushToken = identity;
+
+  const storageKey = nativePushTokenKey(session.user.id);
+  if ((await AsyncStorage.getItem(storageKey)) === identity) return;
+
+  // Store before requesting the Expo token. That request can itself emit the
+  // native-token event; marking it first prevents a recursive registration loop.
+  await AsyncStorage.setItem(storageKey, identity);
+  await syncMessengerPushRegistration();
+}
+
 export async function shouldOfferMessengerPush(userId: string): Promise<boolean> {
+  if (!remotePushNotificationsSupported) return false;
   return (await AsyncStorage.getItem(promptedKey(userId))) !== "true";
 }
 

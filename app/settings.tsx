@@ -30,6 +30,10 @@ import {
   getProjectExpoPushToken,
   messengerPushStatus,
 } from '../services/messengerPush';
+import {
+  REMOTE_PUSH_UNAVAILABLE_MESSAGE,
+  remotePushNotificationsSupported,
+} from '../services/runtimeEnvironment';
 
 const PUSH_ENABLED_KEY = 'push_notifications_enabled';
 const OPERATION_TIMEOUT_MS = 6_000;
@@ -99,6 +103,9 @@ const deleteTokenFromServer = async (token: string) => {
 };
 
 const ensurePushPermissions = async (): Promise<boolean> => {
+  if (!remotePushNotificationsSupported) {
+    throw new Error(REMOTE_PUSH_UNAVAILABLE_MESSAGE);
+  }
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
   let finalStatus = existingStatus;
   if (existingStatus !== 'granted') {
@@ -139,7 +146,9 @@ export default function SettingsScreen() {
           getTrainingNotificationSettings(),
           messengerPushStatus(),
         ]);
-        setMatchNotificationsEnabled(pushValue === 'true');
+        setMatchNotificationsEnabled(
+          remotePushNotificationsSupported && pushValue === 'true',
+        );
         setMessengerNotificationsEnabled(messengerState.enabled);
         setTrainingNotificationsState(trainingSettings.enabled);
         setTrainingLeadState(trainingSettings.leadMinutes);
@@ -172,6 +181,11 @@ export default function SettingsScreen() {
   };
 
   const toggleMatchNotifications = async (value: boolean) => {
+    if (!remotePushNotificationsSupported) {
+      setMatchNotificationsEnabled(false);
+      await AsyncStorage.setItem(PUSH_ENABLED_KEY, 'false');
+      return;
+    }
     if (value) {
       setMatchNotificationsEnabled(true);
       showOperation('Включение уведомлений о матчах…');
@@ -205,6 +219,10 @@ export default function SettingsScreen() {
   };
 
   const toggleMessengerNotifications = async (value: boolean) => {
+    if (!remotePushNotificationsSupported) {
+      setMessengerNotificationsEnabled(false);
+      return;
+    }
     if (!isMessengerAuthenticated) {
       showOperationError(
         new Error('Сначала активируйте учётную запись командного мессенджера'),
@@ -292,7 +310,9 @@ export default function SettingsScreen() {
             <View style={styles.settingText}>
               <Text style={styles.settingTitle}>Сообщения команды</Text>
               <Text style={styles.settingSubtitle}>
-                {isMessengerAuthenticated
+                {!remotePushNotificationsSupported
+                  ? 'Недоступны в Expo Go — используйте development или preview-сборку'
+                  : isMessengerAuthenticated
                   ? 'Получать новые сообщения мессенджера со звуком и бейджем непрочитанных'
                   : 'Станет доступно после активации учётной записи мессенджера'}
               </Text>
@@ -306,7 +326,12 @@ export default function SettingsScreen() {
                 trackColor={{ false: colors.border, true: colors.primary }}
                 thumbColor={messengerNotificationsEnabled ? colors.white : colors.textSecondary}
                 ios_backgroundColor={colors.border}
-                disabled={!isMessengerAuthenticated || messengerOperation || modalVisible}
+                disabled={
+                  !remotePushNotificationsSupported
+                  || !isMessengerAuthenticated
+                  || messengerOperation
+                  || modalVisible
+                }
               />
             )}
           </View>
@@ -317,7 +342,9 @@ export default function SettingsScreen() {
             <View style={styles.settingText}>
               <Text style={styles.settingTitle}>Уведомления о матчах</Text>
               <Text style={styles.settingSubtitle}>
-                Получать серверные уведомления о предстоящих и текущих играх команды
+                {remotePushNotificationsSupported
+                  ? 'Получать серверные уведомления о предстоящих и текущих играх команды'
+                  : 'Недоступны в Expo Go — используйте development или preview-сборку'}
               </Text>
             </View>
             {isChecking ? (
@@ -329,7 +356,7 @@ export default function SettingsScreen() {
                 trackColor={{ false: colors.border, true: colors.primary }}
                 thumbColor={matchNotificationsEnabled ? colors.white : colors.textSecondary}
                 ios_backgroundColor={colors.border}
-                disabled={modalVisible}
+                disabled={!remotePushNotificationsSupported || modalVisible}
               />
             )}
           </View>

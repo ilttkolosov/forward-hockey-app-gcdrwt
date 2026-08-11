@@ -12,7 +12,11 @@ import { flushMessengerReadReceipts } from "../../services/messengerReadSync";
 import { subscribeMessengerRealtime } from "../../services/messengerRealtime";
 import { messengerLog } from "../../services/messengerLogger";
 import { getMessengerRooms } from "../../services/messengerApi";
-import { syncMessengerPushRegistration } from "../../services/messengerPush";
+import {
+  syncMessengerPushRegistration,
+  syncMessengerPushTokenRotation,
+} from "../../services/messengerPush";
+import { remotePushNotificationsSupported } from "../../services/runtimeEnvironment";
 import {
   setMessengerUnreadCount,
   syncMessengerUnreadFromRooms,
@@ -52,11 +56,13 @@ export default function MessengerPersistenceBridge() {
       }
     };
     void synchronizeRooms(true);
-    void syncMessengerPushRegistration().catch((error) =>
-      messengerLog("debug", "push.registration.sync_deferred", {
-        message: error instanceof Error ? error.message : String(error),
-      }),
-    );
+    if (remotePushNotificationsSupported) {
+      void syncMessengerPushRegistration().catch((error) =>
+        messengerLog("debug", "push.registration.sync_deferred", {
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
     const persistRealtimeMessage = (
       message: Parameters<typeof cacheIncomingMessengerMessage>[1],
     ) => {
@@ -89,22 +95,26 @@ export default function MessengerPersistenceBridge() {
         if (state === "active") {
           void flushMessengerReadReceipts(db);
           void synchronizeRooms(true);
-          void syncMessengerPushRegistration().catch(() => undefined);
+          if (remotePushNotificationsSupported) {
+            void syncMessengerPushRegistration().catch(() => undefined);
+          }
         }
       },
     );
-    const tokenSubscription = Notifications.addPushTokenListener(() => {
-      void syncMessengerPushRegistration().catch((error) =>
-        messengerLog("warn", "push.token.rotation_deferred", {
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    });
+    const tokenSubscription = remotePushNotificationsSupported
+      ? Notifications.addPushTokenListener((token) => {
+          void syncMessengerPushTokenRotation(token).catch((error) =>
+            messengerLog("warn", "push.token.rotation_deferred", {
+              message: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        })
+      : null;
     return () => {
       active = false;
       unsubscribeRealtime();
       appStateSubscription.remove();
-      tokenSubscription.remove();
+      tokenSubscription?.remove();
     };
   }, [db, isAuthenticated, session]);
 

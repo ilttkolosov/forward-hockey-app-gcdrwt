@@ -51,6 +51,7 @@ import {
   normalizeMessengerPushPayload,
   processMessengerPushPayload,
 } from '../services/messengerPush';
+import { remotePushNotificationsSupported } from '../services/runtimeEnvironment';
 global.Buffer = Buffer;
 
 Notifications.setNotificationHandler({
@@ -232,6 +233,10 @@ const progressStyles = StyleSheet.create({
  * Фоновая проверка статуса push-уведомлений и обновление локального флага
  */
 const syncPushSubscriptionStatus = async () => {
+  if (!remotePushNotificationsSupported) {
+    await AsyncStorage.setItem('push_notifications_enabled', 'false');
+    return;
+  }
   try {
     const { status } = await Notifications.getPermissionsAsync();
     if (status !== 'granted') {
