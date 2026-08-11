@@ -61,6 +61,7 @@ import {
   enqueueMessengerText,
   isMessengerRoomHistoryComplete,
   loadCachedMessengerMessageBounds,
+  loadCachedMessengerMessageContext,
   loadCachedMessengerMessageWindow,
   loadCachedMessengerMessagesAfter,
   loadCachedMessengerMessagesBefore,
@@ -84,6 +85,7 @@ import type {
 import {
   createMessengerDirectRoom,
   forwardMessengerMessage,
+  getMessengerMessage,
   getMessengerContacts,
   getMessengerMessageReceipts,
   getMessengerMessages,
@@ -109,6 +111,7 @@ import {
 import { seedMessengerMediaCache } from "../../../services/messengerMediaCache";
 import { saveMessengerMediaToDevice } from "../../../services/messengerMediaSave";
 import { colors } from "../../../styles/commonStyles";
+import { refreshMessengerUnreadFromCache } from "../../../services/messengerUnread";
 
 type MessengerAttachmentKind = "camera" | "library" | "file" | "location";
 type InitialAnchorMode = "read_anchor" | "unread_fallback" | "latest";
@@ -223,6 +226,18 @@ function isEmojiOnly(value: string): boolean {
     !/[A-Za-zА-Яа-яЁё0-9]/.test(compact) &&
     /\p{Extended_Pictographic}/u.test(compact)
   );
+}
+
+function incrementMessengerSequence(value: string): string {
+  const digits = value.split("");
+  let carry = 1;
+  for (let index = digits.length - 1; index >= 0 && carry; index -= 1) {
+    const next = Number(digits[index]) + carry;
+    digits[index] = String(next % 10);
+    carry = next >= 10 ? 1 : 0;
+  }
+  if (carry) digits.unshift("1");
+  return digits.join("");
 }
 
 function logMessageCacheFailure(
@@ -351,6 +366,8 @@ export default function MessengerRoomScreen() {
     lastReadSequence?: string;
     latestSequence?: string;
     unreadCount?: string;
+    pushMessageId?: string;
+    pushSequence?: string;
   }>();
   const { session, isAuthenticated } = useMessengerAuth();
   const roomId = params.id;
@@ -400,6 +417,9 @@ export default function MessengerRoomScreen() {
   const [initialDataReady, setInitialDataReady] = useState(false);
   const [initialUnreadExpected, setInitialUnreadExpected] = useState(false);
   const [unreadMarkerClientId, setUnreadMarkerClientId] = useState<
+    string | null
+  >(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<
     string | null
   >(null);
   const [feedHeight, setFeedHeight] = useState(0);
@@ -464,6 +484,14 @@ export default function MessengerRoomScreen() {
     sequence: string;
   } | null>(null);
   const roomFocusCount = useRef(0);
+  const pushMessageNavigationHandled = useRef<string | null>(null);
+  const messageNavigationTarget = useRef<{
+    messageId: string;
+    attempts: number;
+  } | null>(null);
+  const messageNavigationTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -507,6 +535,114 @@ export default function MessengerRoomScreen() {
       keyboardScrollTimer.current = null;
     }
   }, [clearPendingLatestScroll]);
+
+  const positionMessageNavigationTarget = useCallback(() => {
+    const target = messageNavigationTarget.current;
+    if (!target) return;
+    const index = messagesRef.current.findIndex(
+      (message) => message.id === target.messageId,
+    );
+    if (index < 0) return;
+    listRef.current?.scrollToIndex({
+      index,
+      animated: true,
+      viewPosition: 0.45,
+      viewOffset: 0,
+    });
+    setHighlightedMessageId(target.messageId);
+    if (messageNavigationTimer.current) {
+      clearTimeout(messageNavigationTimer.current);
+    }
+    messageNavigationTimer.current = setTimeout(() => {
+      messageNavigationTarget.current = null;
+      messageNavigationTimer.current = null;
+      setHighlightedMessageId(null);
+    }, 1_200);
+  }, []);
+
+  const navigateToRepliedMessage = useCallback(
+    async (reply: Pick<MessengerReply, "id" | "sequence">) => {
+      beginManualFeedNavigation();
+      try {
+        let sequence = reply.sequence;
+        let context = sequence
+          ? await loadCachedMessengerMessageContext(db, roomId, sequence, 30)
+          : [];
+        let target =
+          messagesRef.current.find((message) => message.id === reply.id) ||
+          context.find((message) => message.id === reply.id);
+        if (!target) {
+          target = await getMessengerMessage(reply.id);
+          sequence = target.sequence;
+          const [before, after] = await Promise.all([
+            getMessengerMessages(roomId, {
+              cursor: incrementMessengerSequence(sequence),
+              direction: "before",
+              limit: 15,
+            }),
+            getMessengerMessages(roomId, {
+              cursor: sequence,
+              direction: "after",
+              limit: 15,
+            }),
+          ]);
+          context = mergeMessengerMessages(
+            before.items,
+            [target, ...after.items],
+            reactionMutationIds.current,
+          );
+          await cacheMessengerMessages(db, context);
+        }
+        if (context.length) {
+          setMessages((current) => {
+            const merged = mergeMessengerMessages(
+              current,
+              context,
+              reactionMutationIds.current,
+            );
+            messagesRef.current = merged;
+            return merged;
+          });
+        }
+        messageNavigationTarget.current = {
+          messageId: target.id,
+          attempts: 0,
+        };
+        requestAnimationFrame(() =>
+          requestAnimationFrame(positionMessageNavigationTarget),
+        );
+      } catch (error) {
+        setSyncError(
+          messengerErrorMessage(error, "Не удалось открыть исходное сообщение"),
+        );
+      }
+    }, [
+      beginManualFeedNavigation,
+      db,
+      positionMessageNavigationTarget,
+      roomId,
+    ],
+  );
+
+  useEffect(() => {
+    if (
+      !listReady ||
+      pushMessageNavigationHandled.current === params.pushMessageId ||
+      !params.pushMessageId
+    ) {
+      return;
+    }
+    pushMessageNavigationHandled.current = params.pushMessageId;
+    void navigateToRepliedMessage({
+      id: params.pushMessageId,
+      sequence: params.pushSequence || undefined,
+    });
+  }, [
+    listReady,
+    navigateToRepliedMessage,
+    params.pushMessageId,
+    params.pushSequence,
+  ]);
 
   useEffect(() => {
     const showEvent =
@@ -691,6 +827,7 @@ export default function MessengerRoomScreen() {
       try {
         await queueMessengerReadReceipt(db, roomId, sequence, session?.user.id);
         clearInitialUnreadIfCovered(sequence);
+        await refreshMessengerUnreadFromCache(db);
       } catch (error) {
         if (
           acknowledgedRead.current?.room_id === roomId &&
@@ -1312,6 +1449,19 @@ export default function MessengerRoomScreen() {
       highestMeasuredFrameIndex: number;
       averageItemLength: number;
     }) => {
+      const navigationTarget = messageNavigationTarget.current;
+      if (navigationTarget) {
+        navigationTarget.attempts += 1;
+        listRef.current?.scrollToOffset({
+          offset: Math.max(0, (info.averageItemLength || 72) * info.index),
+          animated: false,
+        });
+        setTimeout(
+          positionMessageNavigationTarget,
+          Math.min(100 + navigationTarget.attempts * 40, 320),
+        );
+        return;
+      }
       if (!pendingInitialPosition.current) return;
       initialPositionAttempts.current += 1;
       listRef.current?.scrollToOffset({
@@ -1326,7 +1476,7 @@ export default function MessengerRoomScreen() {
         Math.min(80 + initialPositionAttempts.current * 20, 240),
       );
     },
-    [positionInitialMessages],
+    [positionInitialMessages, positionMessageNavigationTarget],
   );
 
   const handleListScroll = useCallback(
@@ -1482,6 +1632,11 @@ export default function MessengerRoomScreen() {
           clearTimeout(actionDismissTimer.current);
           actionDismissTimer.current = null;
         }
+        if (messageNavigationTimer.current) {
+          clearTimeout(messageNavigationTimer.current);
+          messageNavigationTimer.current = null;
+        }
+        messageNavigationTarget.current = null;
         clearInitialPositionTimers();
         pendingMessageAction.current = null;
         pendingAttachmentRequest.current = null;
@@ -2307,6 +2462,8 @@ export default function MessengerRoomScreen() {
                           style={[
                             styles.message,
                             mine ? styles.mine : styles.theirs,
+                            highlightedMessageId === item.id &&
+                              styles.highlightedMessage,
                           ]}
                           accessibilityHint="Удерживайте для меню или смахните влево, чтобы ответить"
                         >
@@ -2328,7 +2485,14 @@ export default function MessengerRoomScreen() {
                             </View>
                           )}
                           {item.reply_to && (
-                            <View style={styles.replyQuote}>
+                            <Pressable
+                              style={styles.replyQuote}
+                              onPress={() =>
+                                void navigateToRepliedMessage(item.reply_to!)
+                              }
+                              accessibilityRole="button"
+                              accessibilityLabel="Перейти к исходному сообщению"
+                            >
                               <Text
                                 style={styles.replyAuthor}
                                 numberOfLines={1}
@@ -2338,7 +2502,7 @@ export default function MessengerRoomScreen() {
                               <Text style={styles.replyText} numberOfLines={1}>
                                 {replyPreview(item.reply_to)}
                               </Text>
-                            </View>
+                            </Pressable>
                           )}
                           {!mine && (
                             <Text style={styles.author} numberOfLines={1}>
@@ -3069,6 +3233,10 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 4,
     borderColor: "#D5E1E9",
     backgroundColor: "#FCFEFF",
+  },
+  highlightedMessage: {
+    borderWidth: 2,
+    borderColor: colors.accent,
   },
   mineTail: {
     position: "absolute",

@@ -7,6 +7,7 @@ import type {
   MessengerReaction,
   MessengerRoom,
   MessengerRoomSettings,
+  MessengerPushRegistration,
   MessengerSession,
   MessengerUser,
 } from "../features/messenger/types";
@@ -414,6 +415,12 @@ export function getMessengerMessages(
   }>(`/chat/rooms/${roomId}/messages?${query.toString()}`);
 }
 
+export function getMessengerMessage(messageId: string) {
+  return messengerRequest<MessengerMessage>(
+    `/chat/messages/${encodeURIComponent(messageId)}`,
+  );
+}
+
 export function sendMessengerText(
   roomId: string,
   clientMessageId: string,
@@ -530,5 +537,30 @@ export function markMessengerRead(roomId: string, sequence: string) {
   return messengerRequest(`/chat/rooms/${roomId}/read`, {
     method: "POST",
     body: JSON.stringify({ last_read_sequence: sequence }),
+  });
+}
+
+export function getMessengerPushRegistration() {
+  return messengerRequest<MessengerPushRegistration | null>(
+    "/push/registration",
+  );
+}
+
+export function registerMessengerPushToken(
+  expoPushToken: string,
+  platform: "ios" | "android",
+) {
+  return messengerRequest<MessengerPushRegistration>("/push/registration", {
+    method: "PUT",
+    body: JSON.stringify({
+      expo_push_token: expoPushToken,
+      platform,
+    }),
+  });
+}
+
+export function unregisterMessengerPushToken() {
+  return messengerRequest<{ unregistered: true }>("/push/registration", {
+    method: "DELETE",
   });
 }

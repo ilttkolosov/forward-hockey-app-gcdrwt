@@ -27,6 +27,7 @@ import { getDeclension } from './tournaments/index'; // ← импортируе
 import { useTrackScreenView } from '../hooks/useTrackScreenView';
 import { useNetworkStatus } from '../contexts/NetworkStatusContext';
 import { useMessengerAuth } from '../contexts/MessengerAuthContext';
+import { useMessengerUnreadCount } from '../services/messengerUnread';
 
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 
@@ -38,6 +39,7 @@ const quickNavStyles = StyleSheet.create({
     marginVertical: 24,
   },
   item: {
+    position: 'relative',
     width: '48%',
     backgroundColor: colors.surface,
     borderRadius: 12,
@@ -62,6 +64,25 @@ const quickNavStyles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSecondary,
     textAlign: 'center',
+  },
+  unreadBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 10,
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 6,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.accent,
+    borderWidth: 2,
+    borderColor: colors.surface,
+  },
+  unreadBadgeText: {
+    color: colors.white,
+    fontSize: 11,
+    fontWeight: '800',
   },
 });
 
@@ -116,6 +137,7 @@ const warningStyles = StyleSheet.create({
 export default function HomeScreen() {
   const { isOffline } = useNetworkStatus();
   const { isAuthenticated: isMessengerAuthenticated } = useMessengerAuth();
+  const messengerUnreadCount = useMessengerUnreadCount();
   const [currentGames, setCurrentGames] = useState<Game[]>([]);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
   const [upcomingCount, setUpcomingCount] = useState<number>(0);
@@ -297,6 +319,13 @@ export default function HomeScreen() {
           {/* Командный мессенджер */}
           <Link href="/messenger" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
+              {isMessengerAuthenticated && messengerUnreadCount > 0 && (
+                <View style={quickNavStyles.unreadBadge}>
+                  <Text style={quickNavStyles.unreadBadgeText}>
+                    {messengerUnreadCount > 99 ? '99+' : messengerUnreadCount}
+                  </Text>
+                </View>
+              )}
               <Icon name="chatbubbles" size={24} color={colors.primary} style={quickNavStyles.icon} />
               <Text style={quickNavStyles.title}>Общение</Text>
               <Text style={quickNavStyles.subtitle}>

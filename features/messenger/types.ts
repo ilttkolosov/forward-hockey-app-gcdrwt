@@ -129,6 +129,7 @@ export interface MessengerReaction {
 
 export interface MessengerReply {
   id: string;
+  sequence?: string;
   kind: MessengerMessageKind;
   text: string;
   deleted_at: string | null;
@@ -208,4 +209,13 @@ export interface MessengerMessageReceipt {
   delivered_at: string | null;
   read_at: string | null;
   status: "sent" | "delivered" | "read";
+}
+
+export interface MessengerPushRegistration {
+  id: string;
+  platform: "ios" | "android";
+  enabled: boolean;
+  last_registered_at: string;
+  last_success_at?: string | null;
+  last_error_code?: string | null;
 }

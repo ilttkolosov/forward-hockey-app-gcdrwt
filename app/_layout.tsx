@@ -46,6 +46,11 @@ import {
 import { syncCompletedHistoricalGames } from '../services/historicalSync';
 import { showAppUpdateNotice } from '../services/appUpdateService';
 import { synchronizeTrainings } from '../services/trainingService';
+import {
+  getProjectExpoPushToken,
+  normalizeMessengerPushPayload,
+  processMessengerPushPayload,
+} from '../services/messengerPush';
 global.Buffer = Buffer;
 
 Notifications.setNotificationHandler({
@@ -53,7 +58,7 @@ Notifications.setNotificationHandler({
     shouldShowBanner: true,
     shouldShowList: true,
     shouldPlaySound: true,
-    shouldSetBadge: false,
+    shouldSetBadge: true,
   }),
 });
 
@@ -235,8 +240,7 @@ const syncPushSubscriptionStatus = async () => {
       return;
     }
 
-    const tokenObj = await Notifications.getExpoPushTokenAsync();
-    const token = tokenObj.data;
+    const token = await getProjectExpoPushToken();
 
     // Отправляем запрос на проверку подписки
     const response = await fetch('https://www.hc-forward.com/wp-json/app/v1/push-subscription', {
@@ -284,17 +288,18 @@ function RootLayoutContent() {
       router.push('/trainings');
       return;
     }
-    // Push delivery is intentionally not enabled yet. This routing contract is
-    // kept ready for the later push transport, which will feed the same local
-    // SQLite pipeline as realtime messages.
     const data = response.notification.request.content.data;
-    if (data?.type === 'messenger.message' && typeof data.room_id === 'string') {
+    const messengerPush = normalizeMessengerPushPayload(data);
+    if (messengerPush?.type === 'messenger.message' && messengerPush.room_id) {
+      void processMessengerPushPayload(data);
       initializationLog('Открытие комнаты по нажатию на уведомление мессенджера');
       router.push({
         pathname: '/messenger/room/[id]',
         params: {
-          id: data.room_id,
-          title: typeof data.room_title === 'string' ? data.room_title : 'Чат',
+          id: messengerPush.room_id,
+          title: messengerPush.room_title || 'Чат',
+          pushMessageId: messengerPush.message_id || '',
+          pushSequence: messengerPush.sequence || '',
         },
       });
     }

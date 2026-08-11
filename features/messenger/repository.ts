@@ -454,6 +454,37 @@ export async function loadCachedMessengerMessageWindow(
   return parsedMessages(rows.reverse());
 }
 
+export async function loadCachedMessengerMessageContext(
+  db: SQLiteDatabase,
+  roomId: string,
+  anchorSequence: string,
+  limit = 30,
+): Promise<MessengerMessage[]> {
+  const boundedLimit = Math.max(3, Math.min(100, limit));
+  const beforeLimit = Math.ceil(boundedLimit / 2);
+  const beforeRows = await db.getAllAsync<MessageRow>(
+    `SELECT raw_json
+       FROM messenger_messages
+      WHERE room_id = ? AND CAST(sequence AS INTEGER) <= CAST(? AS INTEGER)
+      ORDER BY CAST(sequence AS INTEGER) DESC, created_at DESC
+      LIMIT ?`,
+    roomId,
+    anchorSequence,
+    beforeLimit,
+  );
+  const afterRows = await db.getAllAsync<MessageRow>(
+    `SELECT raw_json
+       FROM messenger_messages
+      WHERE room_id = ? AND CAST(sequence AS INTEGER) > CAST(? AS INTEGER)
+      ORDER BY CAST(sequence AS INTEGER), created_at
+      LIMIT ?`,
+    roomId,
+    anchorSequence,
+    boundedLimit - beforeRows.length,
+  );
+  return parsedMessages([...beforeRows.reverse(), ...afterRows]);
+}
+
 export async function loadCachedMessengerMessagesBefore(
   db: SQLiteDatabase,
   roomId: string,

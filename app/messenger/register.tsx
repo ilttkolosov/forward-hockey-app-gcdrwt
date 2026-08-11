@@ -23,6 +23,12 @@ import Icon from "../../components/Icon";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import type { InvitationPreview } from "../../features/messenger/types";
 import { previewMessengerInvitation } from "../../services/messengerApi";
+import {
+  enableMessengerPush,
+  markMessengerPushOffered,
+  shouldOfferMessengerPush,
+} from "../../services/messengerPush";
+import { loadMessengerSession } from "../../services/messengerSession";
 import { colors } from "../../styles/commonStyles";
 
 type ScreenMode = "invite" | "login";
@@ -152,10 +158,44 @@ export default function MessengerRegistrationScreen() {
         display_name: displayName.trim() || undefined,
         email: email.trim() || undefined,
       });
-      router.replace({
-        pathname: "/messenger/profile",
-        params: { firstRun: "1" },
-      });
+      const finish = () =>
+        router.replace({
+          pathname: "/messenger/profile",
+          params: { firstRun: "1" },
+        });
+      const activatedSession = await loadMessengerSession();
+      if (
+        activatedSession &&
+        (await shouldOfferMessengerPush(activatedSession.user.id))
+      ) {
+        await markMessengerPushOffered(activatedSession.user.id);
+        Alert.alert(
+          "Уведомления о сообщениях",
+          "Разрешить PUSH-уведомления мессенджера, системный звук и бейдж непрочитанных сообщений?",
+          [
+            { text: "Позже", style: "cancel", onPress: finish },
+            {
+              text: "Разрешить",
+              onPress: () => {
+                void enableMessengerPush(true)
+                  .then(finish)
+                  .catch((pushError) => {
+                    Alert.alert(
+                      "Уведомления не включены",
+                      pushError instanceof Error
+                        ? pushError.message
+                        : "Разрешение можно выдать позже в настройках.",
+                      [{ text: "OK", onPress: finish }],
+                    );
+                  });
+              },
+            },
+          ],
+          { cancelable: false },
+        );
+      } else {
+        finish();
+      }
     } catch (registrationError) {
       setRegisteringNewAccount(false);
       setError(

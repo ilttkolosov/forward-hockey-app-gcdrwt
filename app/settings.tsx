@@ -23,6 +23,13 @@ import {
   setTrainingNotificationLeadMinutes,
   setTrainingNotificationsEnabled,
 } from '../services/trainingNotificationService';
+import { useMessengerAuth } from '../contexts/MessengerAuthContext';
+import {
+  disableMessengerPush,
+  enableMessengerPush,
+  getProjectExpoPushToken,
+  messengerPushStatus,
+} from '../services/messengerPush';
 
 const PUSH_ENABLED_KEY = 'push_notifications_enabled';
 const OPERATION_TIMEOUT_MS = 6_000;
@@ -100,9 +107,9 @@ const ensurePushPermissions = async (): Promise<boolean> => {
   }
   if (finalStatus !== 'granted') return false;
 
-  const tokenObj = await Notifications.getExpoPushTokenAsync();
-  await sendTokenToYourServer(tokenObj.data);
-  await AsyncStorage.setItem('expo_push_token', tokenObj.data);
+  const token = await getProjectExpoPushToken();
+  await sendTokenToYourServer(token);
+  await AsyncStorage.setItem('expo_push_token', token);
   return true;
 };
 
@@ -112,11 +119,14 @@ const errorMessage = (error: unknown, fallback: string): string => (
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const { isAuthenticated: isMessengerAuthenticated } = useMessengerAuth();
   const [matchNotificationsEnabled, setMatchNotificationsEnabled] = useState(false);
+  const [messengerNotificationsEnabled, setMessengerNotificationsEnabled] = useState(false);
   const [trainingNotificationsEnabled, setTrainingNotificationsState] = useState(false);
   const [trainingLeadMinutes, setTrainingLeadState] = useState(60);
   const [isChecking, setIsChecking] = useState(true);
   const [trainingOperation, setTrainingOperation] = useState(false);
+  const [messengerOperation, setMessengerOperation] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [showError, setShowError] = useState(false);
@@ -124,11 +134,13 @@ export default function SettingsScreen() {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const [pushValue, trainingSettings] = await Promise.all([
+        const [pushValue, trainingSettings, messengerState] = await Promise.all([
           AsyncStorage.getItem(PUSH_ENABLED_KEY),
           getTrainingNotificationSettings(),
+          messengerPushStatus(),
         ]);
         setMatchNotificationsEnabled(pushValue === 'true');
+        setMessengerNotificationsEnabled(messengerState.enabled);
         setTrainingNotificationsState(trainingSettings.enabled);
         setTrainingLeadState(trainingSettings.leadMinutes);
         console.log(
@@ -192,6 +204,33 @@ export default function SettingsScreen() {
     }
   };
 
+  const toggleMessengerNotifications = async (value: boolean) => {
+    if (!isMessengerAuthenticated) {
+      showOperationError(
+        new Error('Сначала активируйте учётную запись командного мессенджера'),
+        'Необходим вход в мессенджер',
+      );
+      return;
+    }
+    setMessengerOperation(true);
+    setMessengerNotificationsEnabled(value);
+    showOperation(
+      value
+        ? 'Включение уведомлений о сообщениях…'
+        : 'Отключение уведомлений о сообщениях…',
+    );
+    try {
+      if (value) await enableMessengerPush(true);
+      else await disableMessengerPush();
+      setModalVisible(false);
+    } catch (error) {
+      setMessengerNotificationsEnabled(!value);
+      showOperationError(error, 'Не удалось изменить уведомления мессенджера');
+    } finally {
+      setMessengerOperation(false);
+    }
+  };
+
   const toggleTrainingNotifications = async (value: boolean) => {
     setTrainingOperation(true);
     showOperation(value
@@ -249,6 +288,31 @@ export default function SettingsScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.sectionTitle}>PUSH-уведомления</Text>
         <View style={styles.settingSection}>
+          <View style={styles.settingItem}>
+            <View style={styles.settingText}>
+              <Text style={styles.settingTitle}>Сообщения команды</Text>
+              <Text style={styles.settingSubtitle}>
+                {isMessengerAuthenticated
+                  ? 'Получать новые сообщения мессенджера со звуком и бейджем непрочитанных'
+                  : 'Станет доступно после активации учётной записи мессенджера'}
+              </Text>
+            </View>
+            {isChecking ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : (
+              <Switch
+                value={messengerNotificationsEnabled}
+                onValueChange={toggleMessengerNotifications}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor={messengerNotificationsEnabled ? colors.white : colors.textSecondary}
+                ios_backgroundColor={colors.border}
+                disabled={!isMessengerAuthenticated || messengerOperation || modalVisible}
+              />
+            )}
+          </View>
+
+          <View style={styles.divider} />
+
           <View style={styles.settingItem}>
             <View style={styles.settingText}>
               <Text style={styles.settingTitle}>Уведомления о матчах</Text>

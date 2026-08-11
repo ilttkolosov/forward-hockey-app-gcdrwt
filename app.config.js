@@ -59,7 +59,13 @@ export default ({ config }) => {
       "expo-font",
       "expo-router",
       "expo-web-browser",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          defaultChannel: "messenger",
+          enableBackgroundRemoteNotifications: true,
+        },
+      ],
       "expo-secure-store",
       [
         "expo-camera",

@@ -28,6 +28,7 @@ import {
 } from "../../services/messengerApi";
 import { subscribeMessengerRealtime } from "../../services/messengerRealtime";
 import { messengerLog } from "../../services/messengerLogger";
+import { syncMessengerUnreadFromRooms } from "../../services/messengerUnread";
 import { colors } from "../../styles/commonStyles";
 
 function lastMessageText(room: MessengerRoom): string {
@@ -101,11 +102,13 @@ export default function MessengerRoomsScreen() {
           const cached = await loadCachedMessengerRooms(db);
           if (cached.length) {
             setRooms(cached);
+            void syncMessengerUnreadFromRooms(cached);
             setLoading(false);
           }
         }
         const remote = await getMessengerRooms();
         setRooms(remote);
+        void syncMessengerUnreadFromRooms(remote);
         await cacheMessengerRooms(db, remote);
         setOffline(false);
         console.log(`[Messenger] Загружено комнат: ${remote.length}`);
@@ -164,8 +167,8 @@ export default function MessengerRoomsScreen() {
           const message = event.message;
           // Update the visible card immediately; REST below remains the source
           // of truth and corrects unread counters after reconnect/duplicates.
-          setRooms((current) =>
-            current.map((room) => {
+          setRooms((current) => {
+            const next = current.map((room) => {
               if (
                 room.id !== message.room_id ||
                 !sequenceIsNewer(
@@ -197,8 +200,10 @@ export default function MessengerRoomsScreen() {
                   },
                 },
               };
-            }),
-          );
+            });
+            void syncMessengerUnreadFromRooms(next);
+            return next;
+          });
         } else if (event.type === "room.updated") {
           scheduleConnectionSync(0);
         } else if (
@@ -364,9 +369,8 @@ export default function MessengerRoomsScreen() {
                     {direct
                       ? "Личный чат"
                       : privateGroup
-                        ? `Мини-группа${item.member_count ? ` · ${item.member_count}` : ""}`
-                        : "Общий чат"}{" "}
-                    · {item.team_name}
+                        ? "Мини-группа"
+                        : "Общий чат"}
                   </Text>
                 </View>
                 <Text style={styles.preview} numberOfLines={1}>

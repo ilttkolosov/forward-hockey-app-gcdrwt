@@ -45,6 +45,7 @@ export function pendingMessengerMessage(
     reply_to: replyTarget
       ? {
           id: replyTarget.id,
+          sequence: replyTarget.sequence,
           kind: replyTarget.kind,
           text: replyTarget.text,
           deleted_at: replyTarget.deleted_at,
@@ -107,6 +108,7 @@ export function pendingMessengerAttachmentMessage(
     reply_to: replyTarget
       ? {
           id: replyTarget.id,
+          sequence: replyTarget.sequence,
           kind: replyTarget.kind,
           text: replyTarget.text,
           deleted_at: replyTarget.deleted_at,
