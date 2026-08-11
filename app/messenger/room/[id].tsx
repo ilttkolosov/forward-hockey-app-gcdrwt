@@ -16,7 +16,6 @@ import {
   FlatList,
   ImageBackground,
   KeyboardAvoidingView,
-  LayoutAnimation,
   Modal,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -111,15 +110,32 @@ type InitialAnchorMode = "read_anchor" | "unread_fallback" | "latest";
 function SwipeableMessage({
   children,
   enabled,
+  animateEntry,
   onReply,
   onLongPress,
 }: {
   children: React.ReactNode;
   enabled: boolean;
+  animateEntry?: boolean;
   onReply: () => void;
   onLongPress: () => void;
 }) {
   const translateX = useRef(new Animated.Value(0)).current;
+  const entryProgress = useRef(
+    new Animated.Value(animateEntry ? 0 : 1),
+  ).current;
+  const entryTranslateY = entryProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [14, 0],
+  });
+  useEffect(() => {
+    if (!animateEntry) return;
+    Animated.timing(entryProgress, {
+      toValue: 1,
+      duration: 180,
+      useNativeDriver: true,
+    }).start();
+  }, [animateEntry, entryProgress]);
   const resetPosition = useCallback(() => {
     Animated.spring(translateX, {
       toValue: 0,
@@ -158,7 +174,12 @@ function SwipeableMessage({
         <Icon name="arrow-undo" size={24} color={colors.white} />
       </View>
       <GestureDetector gesture={messageGesture}>
-        <Animated.View style={{ transform: [{ translateX }] }}>
+        <Animated.View
+          style={{
+            opacity: entryProgress,
+            transform: [{ translateX }, { translateY: entryTranslateY }],
+          }}
+        >
           {children}
         </Animated.View>
       </GestureDetector>
@@ -357,6 +378,7 @@ export default function MessengerRoomScreen() {
   const initialUnreadBoundarySequence = useRef(
     params.lastReadSequence || "0",
   );
+  const initialUnreadTailSequence = useRef<string | null>(null);
   const initialUnreadExpectedRef = useRef(false);
   const initialReadAcknowledged = useRef(false);
   const latestKnownSequence = useRef<string | null>(null);
@@ -375,7 +397,14 @@ export default function MessengerRoomScreen() {
 
   const scrollToLatest = useCallback((animated: boolean) => {
     pendingScrollAnimation.current = animated;
-    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated }));
+    // The first frame commits the new cell; the second scrolls using the new
+    // content height. onContentSizeChange below remains a fallback for images
+    // and other cells whose final height becomes known later.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() =>
+        listRef.current?.scrollToEnd({ animated }),
+      ),
+    );
   }, []);
 
   const visibleMessages = messages;
@@ -483,6 +512,28 @@ export default function MessengerRoomScreen() {
     flushOutboxRef.current = flushOutbox;
   }, [flushOutbox]);
 
+  const clearInitialUnreadIfCovered = useCallback(
+    (sequence: string) => {
+      const unreadTail = initialUnreadTailSequence.current;
+      if (
+        !unreadTail ||
+        compareMessengerSequence(sequence, unreadTail) < 0
+      ) {
+        return;
+      }
+      initialUnreadTailSequence.current = null;
+      initialUnreadExpectedRef.current = false;
+      setInitialUnreadExpected(false);
+      setUnreadMarkerClientId(null);
+      messengerLog("info", "room.unread_block.completed", {
+        room_id: roomId,
+        read_sequence: sequence,
+        unread_tail_sequence: unreadTail,
+      });
+    },
+    [roomId],
+  );
+
   const acknowledgeLatest = useCallback(
     async (sequence: string) => {
       if (
@@ -495,6 +546,7 @@ export default function MessengerRoomScreen() {
       acknowledgedRead.current = { room_id: roomId, sequence };
       try {
         await queueMessengerReadReceipt(db, roomId, sequence, session?.user.id);
+        clearInitialUnreadIfCovered(sequence);
       } catch (error) {
         if (
           acknowledgedRead.current?.room_id === roomId &&
@@ -510,7 +562,7 @@ export default function MessengerRoomScreen() {
         throw error;
       }
     },
-    [db, roomId, session?.user.id],
+    [clearInitialUnreadIfCovered, db, roomId, session?.user.id],
   );
 
   const loadOlderMessages = useCallback(async () => {
@@ -684,6 +736,8 @@ export default function MessengerRoomScreen() {
           ) {
             expectedUnreadCount = 0;
           }
+          initialUnreadTailSequence.current =
+            expectedUnreadCount > 0 ? expectedLatestSequence : null;
           const cached = await loadCachedMessengerMessageWindow(db, roomId, {
             anchorSequence: initialUnreadBoundarySequence.current,
             hasUnread: expectedUnreadCount > 0,
@@ -1299,7 +1353,6 @@ export default function MessengerRoomScreen() {
     );
     setText("");
     setReplyingTo(null);
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setMessages((current) => mergeMessengerMessages(current, [optimistic]));
     nearLatest.current = true;
     scrollToLatest(true);
@@ -1905,6 +1958,7 @@ export default function MessengerRoomScreen() {
                   )}
                   <SwipeableMessage
                     enabled={canWrite && !item.pending && !item.deleted_at}
+                    animateEntry={Boolean(item.pending && mine)}
                     onReply={() => beginReply(item)}
                     onLongPress={() => {
                       if (!item.pending) {
