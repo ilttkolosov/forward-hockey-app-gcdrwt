@@ -107,9 +107,9 @@ export default function MessengerRoomsScreen() {
           }
         }
         const remote = await getMessengerRooms();
-        setRooms(remote);
-        void syncMessengerUnreadFromRooms(remote);
-        await cacheMessengerRooms(db, remote);
+        const reconciled = await cacheMessengerRooms(db, remote);
+        setRooms(reconciled);
+        void syncMessengerUnreadFromRooms(reconciled);
         setOffline(false);
         console.log(`[Messenger] Загружено комнат: ${remote.length}`);
         messengerLog("info", "rooms.sync.completed", {

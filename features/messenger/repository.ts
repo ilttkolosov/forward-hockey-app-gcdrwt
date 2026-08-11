@@ -103,16 +103,23 @@ function parsedRoom(row: RoomRow | null | undefined): MessengerRoom | null {
   if (!row) return null;
   const room = parseJson<MessengerRoom>(row.raw_json);
   if (!room || !row.local_read_sequence) return room;
-  const localReadSequence = newestSequence(
-    row.local_read_sequence,
+  return reconcileRoomWithLocalRead(room, row.local_read_sequence);
+}
+
+function reconcileRoomWithLocalRead(
+  room: MessengerRoom,
+  localReadSequence: string,
+): MessengerRoom {
+  const effectiveReadSequence = newestSequence(
+    localReadSequence,
     room.last_read_sequence,
   );
   return {
     ...room,
-    last_read_sequence: localReadSequence,
+    last_read_sequence: effectiveReadSequence,
     unread_count:
       room.last_message &&
-      !sequenceIsNewer(room.last_message.sequence, localReadSequence)
+      !sequenceIsNewer(room.last_message.sequence, effectiveReadSequence)
         ? 0
         : room.unread_count,
   };
@@ -150,12 +157,17 @@ export async function loadCachedMessengerRoom(
 export async function cacheMessengerRooms(
   db: SQLiteDatabase,
   rooms: MessengerRoom[],
-): Promise<void> {
+): Promise<MessengerRoom[]> {
+  const reconciledRooms: MessengerRoom[] = [];
   await enqueueMessengerWrite(db, () =>
     withMessengerTransaction(db, async (transaction) => {
       const existingRows = await transaction.getAllAsync<
         RoomRow & { id: string }
       >("SELECT id, raw_json FROM messenger_rooms");
+      const readStateRows = await transaction.getAllAsync<ReadStateRow>(
+        `SELECT room_id, local_read_sequence, synced_read_sequence, pending_read_sequence
+           FROM messenger_room_read_state`,
+      );
       const existingById = new Map(
         existingRows
           .map(
@@ -165,6 +177,11 @@ export async function cacheMessengerRooms(
             (entry): entry is readonly [string, MessengerRoom] =>
               entry[1] !== null,
           ),
+      );
+      const localReadByRoomId = new Map(
+        readStateRows.map(
+          (state) => [state.room_id, state.local_read_sequence] as const,
+        ),
       );
       await transaction.runAsync("DELETE FROM messenger_rooms");
       for (const room of rooms) {
@@ -176,7 +193,7 @@ export async function cacheMessengerRooms(
             room.last_message?.sequence || "0",
           ),
         );
-        const nextRoom: MessengerRoom =
+        const mergedRoom: MessengerRoom =
           keepLocalTail && existing
             ? {
                 ...room,
@@ -187,6 +204,18 @@ export async function cacheMessengerRooms(
                 ),
               }
             : room;
+        // A request for `/chat/rooms` may have started before the user read the
+        // visible tail and finish after it. Never let that older server
+        // snapshot move the device cursor backwards or resurrect its badge.
+        const localReadSequence = newestSequence(
+          localReadByRoomId.get(room.id) || "0",
+          existing?.last_read_sequence || "0",
+        );
+        const nextRoom = reconcileRoomWithLocalRead(
+          mergedRoom,
+          localReadSequence,
+        );
+        reconciledRooms.push(nextRoom);
         await transaction.runAsync(
           `INSERT INTO messenger_rooms
           (id, team_id, team_name, kind, title, sort_order, unread_count, updated_at, raw_json)
@@ -204,6 +233,7 @@ export async function cacheMessengerRooms(
       }
     }),
   );
+  return reconciledRooms;
 }
 
 export function markCachedMessengerRoomRead(

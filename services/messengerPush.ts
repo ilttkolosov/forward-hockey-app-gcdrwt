@@ -257,8 +257,8 @@ export async function processMessengerPushPayload(
     ]);
     if (!(await loadCachedMessengerRoom(db, message.room_id))) {
       const rooms = await getMessengerRooms();
-      await cacheMessengerRooms(db, rooms);
-      await syncMessengerUnreadFromRooms(rooms);
+      const reconciled = await cacheMessengerRooms(db, rooms);
+      await syncMessengerUnreadFromRooms(reconciled);
     }
     await cacheIncomingMessengerMessage(db, message, session.user.id);
     if (payload.unread_count === undefined) {

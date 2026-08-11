@@ -41,8 +41,8 @@ export default function MessengerPersistenceBridge() {
         if (active) await syncMessengerUnreadFromRooms(cached);
         if (!remote) return;
         const rooms = await getMessengerRooms();
-        await cacheMessengerRooms(db, rooms);
-        if (active) await syncMessengerUnreadFromRooms(rooms);
+        const reconciled = await cacheMessengerRooms(db, rooms);
+        if (active) await syncMessengerUnreadFromRooms(reconciled);
       } catch (error) {
         messengerLog("debug", "rooms.background_sync.deferred", {
           message: error instanceof Error ? error.message : String(error),
