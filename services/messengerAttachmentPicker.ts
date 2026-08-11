@@ -120,7 +120,39 @@ function resizeToLongestEdge(
 async function compressedPhoto(
   asset: ImagePicker.ImagePickerAsset,
 ): Promise<MessengerUploadFile> {
+  const startedAt = Date.now();
   const originalSize = await localFileSize(asset.uri, asset.fileSize);
+  const sourceIsJpeg =
+    asset.mimeType === "image/jpeg" ||
+    /\.jpe?g$/i.test(asset.fileName || asset.uri.split(/[?#]/)[0]);
+  if (
+    sourceIsJpeg &&
+    originalSize !== null &&
+    originalSize <= MAX_PHOTO_UPLOAD_BYTES &&
+    asset.width <= MAX_PHOTO_EDGE &&
+    asset.height <= MAX_PHOTO_EDGE
+  ) {
+    messengerLog("info", "photo.compression.skipped", {
+      reason: "already_upload_ready",
+      duration_ms: Date.now() - startedAt,
+      original_size_bytes: originalSize,
+      upload_size_bytes: originalSize,
+      image_width: asset.width,
+      image_height: asset.height,
+    });
+    return {
+      uri: asset.uri,
+      name: asset.fileName || `photo-${Date.now()}.jpg`,
+      type: "image/jpeg",
+      kind: "image",
+      size_bytes: originalSize,
+      original_size_bytes: originalSize,
+      width: asset.width,
+      height: asset.height,
+    };
+  }
+
+  let passCount = 1;
   let result = await ImageManipulator.manipulateAsync(
     asset.uri,
     resizeToLongestEdge(asset.width, asset.height, MAX_PHOTO_EDGE),
@@ -131,6 +163,7 @@ async function compressedPhoto(
   );
   let compressedSize = await localFileSize(result.uri);
   if (compressedSize !== null && compressedSize > MAX_PHOTO_UPLOAD_BYTES) {
+    passCount = 2;
     result = await ImageManipulator.manipulateAsync(
       result.uri,
       resizeToLongestEdge(result.width, result.height, SECOND_PASS_EDGE),
@@ -141,6 +174,14 @@ async function compressedPhoto(
     );
     compressedSize = await localFileSize(result.uri);
   }
+  messengerLog("info", "photo.compression.completed", {
+    duration_ms: Date.now() - startedAt,
+    pass_count: passCount,
+    original_size_bytes: originalSize,
+    upload_size_bytes: compressedSize,
+    image_width: result.width,
+    image_height: result.height,
+  });
   return {
     uri: result.uri,
     name: `photo-${Date.now()}.jpg`,

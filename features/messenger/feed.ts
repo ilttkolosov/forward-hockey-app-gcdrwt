@@ -1,6 +1,7 @@
 import type {
   MessengerMessage,
   MessengerOutboxItem,
+  MessengerPendingAttachmentSource,
   MessengerReaction,
   MessengerUser,
 } from "./types";
@@ -63,6 +64,76 @@ export function pendingMessengerMessage(
     },
     pending: true,
     send_error: item.last_error,
+    pending_attachment: null,
+  };
+}
+
+function pendingAttachmentLabel(
+  source: MessengerPendingAttachmentSource,
+): string {
+  if (source === "camera") return "Подготовка фотографии…";
+  if (source === "library") return "Подготовка медиа…";
+  if (source === "file") return "Подготовка файла…";
+  return "Определяем геопозицию…";
+}
+
+export function pendingMessengerAttachmentMessage(
+  roomId: string,
+  clientMessageId: string,
+  source: MessengerPendingAttachmentSource,
+  caption: string,
+  currentUser: MessengerUser,
+  replyTarget?: MessengerMessage,
+): MessengerMessage {
+  return {
+    id: `pending-${clientMessageId}`,
+    sequence: "0",
+    room_id: roomId,
+    client_message_id: clientMessageId,
+    kind:
+      source === "location" ? "location" : source === "file" ? "file" : "image",
+    text: source === "location" ? "" : caption,
+    created_at: new Date().toISOString(),
+    edited_at: null,
+    deleted_at: null,
+    author: {
+      id: currentUser.id,
+      username: currentUser.username,
+      display_name: currentUser.display_name,
+      avatar_url: currentUser.avatar_url,
+    },
+    media: null,
+    location: null,
+    reply_to: replyTarget
+      ? {
+          id: replyTarget.id,
+          kind: replyTarget.kind,
+          text: replyTarget.text,
+          deleted_at: replyTarget.deleted_at,
+          author: {
+            id: replyTarget.author.id,
+            display_name: replyTarget.author.display_name,
+          },
+        }
+      : null,
+    forwarded_from: null,
+    reactions: [],
+    delivery: {
+      status: "sent",
+      recipient_count: 0,
+      delivered_count: 0,
+      read_count: 0,
+    },
+    pending: true,
+    send_error: null,
+    pending_attachment: {
+      source,
+      stage: "preparing",
+      label: pendingAttachmentLabel(source),
+      local_uri: null,
+      file_name: null,
+      size_bytes: null,
+    },
   };
 }
 
@@ -73,8 +144,7 @@ function sameMessengerMessage(
   right: MessengerMessage,
 ): boolean {
   return (
-    left.id === right.id ||
-    left.client_message_id === right.client_message_id
+    left.id === right.id || left.client_message_id === right.client_message_id
   );
 }
 
@@ -85,6 +155,9 @@ function normalizedMessengerMessage(
     ...message,
     pending: message.pending ?? false,
     send_error: message.pending ? message.send_error : null,
+    pending_attachment: message.pending
+      ? (message.pending_attachment ?? null)
+      : null,
   };
 }
 
@@ -101,6 +174,9 @@ function mergeMessengerMessage(
       : incoming.reactions,
     pending: incoming.pending ?? false,
     send_error: incoming.pending ? incoming.send_error : null,
+    pending_attachment: incoming.pending
+      ? (incoming.pending_attachment ?? existing.pending_attachment ?? null)
+      : null,
   };
 }
 
@@ -140,7 +216,9 @@ function mergeMessengerMessagesAt(
     }
   }
 
-  return placement === "prepend" ? [...added, ...merged] : [...merged, ...added];
+  return placement === "prepend"
+    ? [...added, ...merged]
+    : [...merged, ...added];
 }
 
 /**

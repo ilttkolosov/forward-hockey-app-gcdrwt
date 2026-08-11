@@ -146,6 +146,18 @@ export interface MessengerForward {
   };
 }
 
+export type MessengerPendingAttachmentSource =
+  "camera" | "library" | "file" | "location";
+
+export interface MessengerPendingAttachment {
+  source: MessengerPendingAttachmentSource;
+  stage: "preparing" | "uploading" | "failed";
+  label: string;
+  local_uri: string | null;
+  file_name: string | null;
+  size_bytes: number | null;
+}
+
 export interface MessengerMessage {
   id: string;
   sequence: string;
@@ -175,6 +187,8 @@ export interface MessengerMessage {
   };
   pending?: boolean;
   send_error?: string | null;
+  /** Local-only preparation state. It is never sent to or cached by the API. */
+  pending_attachment?: MessengerPendingAttachment | null;
 }
 
 export interface MessengerOutboxItem {

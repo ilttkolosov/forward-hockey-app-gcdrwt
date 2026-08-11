@@ -1,5 +1,6 @@
 import * as Crypto from "expo-crypto";
 import * as Clipboard from "expo-clipboard";
+import { Image } from "expo-image";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import React, {
@@ -15,8 +16,10 @@ import {
   Alert,
   FlatList,
   ImageBackground,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
+  type KeyboardEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Platform,
@@ -41,6 +44,7 @@ import {
   firstUnreadMessengerMessage,
   lastReadMessengerMessage,
   mergeMessengerMessages,
+  pendingMessengerAttachmentMessage,
   pendingMessengerMessage,
   prependMessengerMessages,
 } from "../../../features/messenger/feed";
@@ -73,6 +77,7 @@ import type {
   MessengerMessage,
   MessengerMessageReceipt,
   MessengerOutboxItem,
+  MessengerPendingAttachment,
   MessengerReply,
   MessengerRoom,
 } from "../../../features/messenger/types";
@@ -107,6 +112,14 @@ import { colors } from "../../../styles/commonStyles";
 
 type MessengerAttachmentKind = "camera" | "library" | "file" | "location";
 type InitialAnchorMode = "read_anchor" | "unread_fallback" | "latest";
+
+interface PendingAttachmentRequest {
+  kind: MessengerAttachmentKind;
+  clientMessageId: string;
+  caption: string;
+  composerText: string;
+  replyTarget: MessengerMessage | null;
+}
 
 function SwipeableMessage({
   children,
@@ -262,6 +275,59 @@ function DeliveryChecks({ message }: { message: MessengerMessage }) {
   );
 }
 
+function pendingAttachmentSize(sizeBytes: number | null): string | null {
+  if (sizeBytes === null) return null;
+  if (sizeBytes < 1024) return `${sizeBytes} Б`;
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(0)} КБ`;
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} МБ`;
+}
+
+function PendingAttachmentView({
+  message,
+  pending,
+}: {
+  message: MessengerMessage;
+  pending: MessengerPendingAttachment;
+}) {
+  const failed = pending.stage === "failed";
+  const fileSize = pendingAttachmentSize(pending.size_bytes);
+  return (
+    <View style={styles.pendingAttachment}>
+      {message.kind === "image" && pending.local_uri ? (
+        <Image
+          source={pending.local_uri}
+          style={styles.pendingAttachmentImage}
+          contentFit="cover"
+          transition={120}
+        />
+      ) : null}
+      <View style={styles.pendingAttachmentStatus}>
+        {failed ? (
+          <Icon name="alert-circle-outline" size={21} color={colors.error} />
+        ) : (
+          <ActivityIndicator size="small" color={colors.primary} />
+        )}
+        <View style={styles.pendingAttachmentText}>
+          <Text
+            style={[
+              styles.pendingAttachmentLabel,
+              failed && styles.pendingAttachmentLabelFailed,
+            ]}
+            accessibilityLiveRegion="polite"
+          >
+            {pending.label}
+          </Text>
+          {pending.file_name || fileSize ? (
+            <Text style={styles.pendingAttachmentDetails} numberOfLines={1}>
+              {[pending.file_name, fileSize].filter(Boolean).join(" · ")}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+    </View>
+  );
+}
+
 function UnreadDivider() {
   return (
     <View style={styles.unreadDivider}>
@@ -358,7 +424,13 @@ export default function MessengerRoomScreen() {
   const attachmentLaunchTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  const pendingAttachmentKind = useRef<MessengerAttachmentKind | null>(null);
+  const pendingAttachmentRequest = useRef<PendingAttachmentRequest | null>(
+    null,
+  );
+  const keyboardScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const keyboardScrollPending = useRef(false);
   const actionDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingMessageAction = useRef<
     | { type: "forward"; message: MessengerMessage }
@@ -410,6 +482,49 @@ export default function MessengerRoomScreen() {
       requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated })),
     );
   }, []);
+
+  useEffect(() => {
+    const showEvent =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(
+      showEvent,
+      (event: KeyboardEvent) => {
+        if (Platform.OS === "ios") Keyboard.scheduleLayoutAnimation(event);
+        keyboardScrollPending.current = true;
+        nearLatest.current = true;
+        scrollToLatest(true);
+        if (keyboardScrollTimer.current) {
+          clearTimeout(keyboardScrollTimer.current);
+        }
+        keyboardScrollTimer.current = setTimeout(
+          () => {
+            scrollToLatest(true);
+            keyboardScrollPending.current = false;
+            keyboardScrollTimer.current = null;
+          },
+          Math.max(120, (event.duration || 250) + 80),
+        );
+      },
+    );
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      if (keyboardScrollTimer.current) {
+        clearTimeout(keyboardScrollTimer.current);
+        keyboardScrollTimer.current = null;
+      }
+      keyboardScrollPending.current = false;
+      if (nearLatest.current) scrollToLatest(false);
+    });
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+      if (keyboardScrollTimer.current) {
+        clearTimeout(keyboardScrollTimer.current);
+        keyboardScrollTimer.current = null;
+      }
+    };
+  }, [scrollToLatest]);
 
   const visibleMessages = messages;
   const waitingForInitialUnread =
@@ -1343,7 +1458,7 @@ export default function MessengerRoomScreen() {
         }
         clearInitialPositionTimers();
         pendingMessageAction.current = null;
-        pendingAttachmentKind.current = null;
+        pendingAttachmentRequest.current = null;
       };
     }, [
       db,
@@ -1437,15 +1552,47 @@ export default function MessengerRoomScreen() {
     [db, scrollToLatest],
   );
 
+  const updatePendingAttachment = useCallback(
+    (
+      clientMessageId: string,
+      update: (message: MessengerMessage) => MessengerMessage,
+    ) => {
+      setMessages((current) =>
+        current.map((message) =>
+          message.client_message_id === clientMessageId
+            ? update(message)
+            : message,
+        ),
+      );
+    },
+    [],
+  );
+
+  const removePendingAttachment = useCallback((clientMessageId: string) => {
+    setMessages((current) =>
+      current.filter(
+        (message) => message.client_message_id !== clientMessageId,
+      ),
+    );
+  }, []);
+
+  const restoreAttachmentComposer = useCallback(
+    (request: PendingAttachmentRequest) => {
+      if (request.composerText) {
+        setText((current) => current || request.composerText);
+      }
+      if (request.replyTarget) {
+        setReplyingTo((current) => current ?? request.replyTarget);
+      }
+    },
+    [],
+  );
+
   const sendUpload = useCallback(
-    async (file: MessengerUploadFile) => {
-      if (!roomId || !session || sending || !canMedia) return;
-      setSending(true);
-      setAttachmentMenuVisible(false);
-      const clientMessageId = Crypto.randomUUID();
+    async (file: MessengerUploadFile, request: PendingAttachmentRequest) => {
       messengerLog("info", "media.upload.started", {
         room_id: roomId,
-        client_message_id: clientMessageId,
+        client_message_id: request.clientMessageId,
         media_type: file.kind,
         mime_type: file.type,
         upload_size_bytes: file.size_bytes,
@@ -1454,102 +1601,80 @@ export default function MessengerRoomScreen() {
         original_size_bytes: file.original_size_bytes,
         image_width: file.width,
         image_height: file.height,
-        has_caption: Boolean(text.trim()),
+        has_caption: Boolean(request.caption),
       });
-      try {
-        const result = await sendMessengerMedia(
-          roomId,
-          clientMessageId,
-          file,
-          text,
-          replyingTo?.id,
-        );
-        await storeSentMessage(result.message);
-        if (result.message.media) {
-          void seedMessengerMediaCache(result.message.media, file.uri).catch(
-            (cacheError) =>
-              messengerLog("warn", "media.cache.seed_failed", {
-                asset_id: result.message.media?.id,
-                message:
-                  cacheError instanceof Error
-                    ? cacheError.message
-                    : "Не удалось сохранить локальную копию",
-              }),
-          );
+      const result = await sendMessengerMedia(
+        roomId,
+        request.clientMessageId,
+        file,
+        request.caption,
+        request.replyTarget?.id,
+      );
+      if (result.message.media) {
+        try {
+          // Seed before exposing the confirmed attachment. Otherwise the
+          // attachment view starts an unnecessary download of the same file.
+          await seedMessengerMediaCache(result.message.media, file.uri);
+        } catch (cacheError) {
+          messengerLog("warn", "media.cache.seed_failed", {
+            asset_id: result.message.media.id,
+            message:
+              cacheError instanceof Error
+                ? cacheError.message
+                : "Не удалось сохранить локальную копию",
+          });
         }
-        setText("");
-        setReplyingTo(null);
-        setOffline(false);
-        setSyncError(null);
-        messengerLog("info", "media.upload.completed", {
-          room_id: roomId,
-          message_id: result.message.id,
-          media_type: result.message.media?.type,
-          stored_size_bytes: result.message.media?.size_bytes,
-          stored_size_kb: result.message.media?.size_bytes
-            ? Math.round(result.message.media.size_bytes / 1024)
-            : null,
-        });
-      } catch (error) {
-        setOffline(isMessengerConnectionError(error));
-        const message = messengerErrorMessage(
-          error,
-          "Не удалось отправить вложение",
-        );
-        setSyncError(message);
-        messengerLog("warn", "media.upload.failed", {
-          room_id: roomId,
-          client_message_id: clientMessageId,
-          media_type: file.kind,
-          message,
-        });
-        Alert.alert("Вложение не отправлено", message);
-      } finally {
-        setSending(false);
       }
+      await storeSentMessage(result.message);
+      messengerLog("info", "media.upload.completed", {
+        room_id: roomId,
+        message_id: result.message.id,
+        media_type: result.message.media?.type,
+        stored_size_bytes: result.message.media?.size_bytes,
+        stored_size_kb: result.message.media?.size_bytes
+          ? Math.round(result.message.media.size_bytes / 1024)
+          : null,
+      });
     },
-    [
-      canMedia,
-      replyingTo?.id,
-      roomId,
-      sending,
-      session,
-      storeSentMessage,
-      text,
-    ],
+    [roomId, storeSentMessage],
   );
 
   const chooseAttachment = useCallback(
-    async (kind: MessengerAttachmentKind) => {
-      if (sending) {
-        messengerLog("debug", "attachment.action.skipped", {
-          kind,
-          room_id: roomId,
-          reason: "sending",
-        });
-        return;
-      }
-      let requestStarted = false;
-      setAttachmentMenuVisible(false);
+    async (request: PendingAttachmentRequest) => {
+      const { kind } = request;
+      let contentPrepared = false;
+      const preparationStartedAt = Date.now();
       messengerLog("debug", "attachment.action.started", {
         kind,
         room_id: roomId,
+        client_message_id: request.clientMessageId,
       });
       try {
         if (kind === "location") {
-          setSending(true);
           const location = await currentMessengerLocation();
-          const clientMessageId = Crypto.randomUUID();
+          contentPrepared = true;
+          updatePendingAttachment(request.clientMessageId, (message) => ({
+            ...message,
+            kind: "location",
+            location,
+            pending_attachment: message.pending_attachment
+              ? {
+                  ...message.pending_attachment,
+                  stage: "uploading",
+                  label: "Отправляем геопозицию…",
+                }
+              : null,
+          }));
           messengerLog("info", "location.send.started", {
             room_id: roomId,
-            client_message_id: clientMessageId,
+            client_message_id: request.clientMessageId,
+            preparation_duration_ms: Date.now() - preparationStartedAt,
           });
-          requestStarted = true;
           const result = await sendMessengerLocation(
             roomId,
-            clientMessageId,
+            request.clientMessageId,
             location,
-            replyingTo?.id,
+            request.replyTarget?.id,
           );
           await storeSentMessage(result.message);
           messengerLog("info", "location.send.completed", {
@@ -1558,7 +1683,6 @@ export default function MessengerRoomScreen() {
             latitude: result.message.location?.latitude,
             longitude: result.message.location?.longitude,
           });
-          setReplyingTo(null);
           setOffline(false);
           setSyncError(null);
           return;
@@ -1569,39 +1693,99 @@ export default function MessengerRoomScreen() {
             : kind === "library"
               ? await pickMessengerMedia()
               : await pickMessengerFile();
-        if (file) {
-          messengerLog("debug", "attachment.action.prepared", {
-            kind,
-            room_id: roomId,
-            media_type: file.kind,
-            size_bytes: file.size_bytes,
-          });
-          await sendUpload(file);
-        } else {
+        if (!file) {
           messengerLog("debug", "attachment.action.canceled", {
             kind,
             room_id: roomId,
+            client_message_id: request.clientMessageId,
           });
+          removePendingAttachment(request.clientMessageId);
+          restoreAttachmentComposer(request);
+          return;
         }
+        contentPrepared = true;
+        const uploadLabel =
+          file.kind === "image"
+            ? "Отправляем фотографию…"
+            : file.kind === "video"
+              ? "Отправляем видео…"
+              : "Отправляем файл…";
+        updatePendingAttachment(request.clientMessageId, (message) => ({
+          ...message,
+          kind: file.kind,
+          text: request.caption,
+          pending_attachment: message.pending_attachment
+            ? {
+                ...message.pending_attachment,
+                stage: "uploading",
+                label: uploadLabel,
+                local_uri: file.uri,
+                file_name: file.name,
+                size_bytes: file.size_bytes,
+              }
+            : null,
+        }));
+        messengerLog("debug", "attachment.action.prepared", {
+          kind,
+          room_id: roomId,
+          client_message_id: request.clientMessageId,
+          media_type: file.kind,
+          size_bytes: file.size_bytes,
+          preparation_duration_ms: Date.now() - preparationStartedAt,
+        });
+        await sendUpload(file, request);
+        setOffline(false);
+        setSyncError(null);
       } catch (error) {
         const message = messengerErrorMessage(
           error,
           kind === "location"
             ? "Не удалось отправить геопозицию"
-            : "Не удалось подготовить вложение",
+            : contentPrepared
+              ? "Не удалось отправить вложение"
+              : "Не удалось подготовить вложение",
         );
-        if (requestStarted) setOffline(isMessengerConnectionError(error));
+        if (contentPrepared) setOffline(isMessengerConnectionError(error));
         setSyncError(message);
-        messengerLog("warn", "attachment.action.failed", { kind, message });
+        updatePendingAttachment(request.clientMessageId, (pendingMessage) => ({
+          ...pendingMessage,
+          send_error: message,
+          pending_attachment: pendingMessage.pending_attachment
+            ? {
+                ...pendingMessage.pending_attachment,
+                stage: "failed",
+                label:
+                  kind === "location"
+                    ? "Геопозиция не отправлена"
+                    : "Вложение не отправлено",
+              }
+            : null,
+        }));
+        restoreAttachmentComposer(request);
+        messengerLog("warn", "attachment.action.failed", {
+          kind,
+          room_id: roomId,
+          client_message_id: request.clientMessageId,
+          content_prepared: contentPrepared,
+          duration_ms: Date.now() - preparationStartedAt,
+          message,
+        });
         Alert.alert(
           kind === "location" ? "Геопозиция не отправлена" : "Ошибка вложения",
           message,
         );
       } finally {
-        if (kind === "location") setSending(false);
+        setSending(false);
       }
     },
-    [replyingTo?.id, roomId, sendUpload, sending, storeSentMessage],
+    [
+      removePendingAttachment,
+      restoreAttachmentComposer,
+      roomId,
+      sendUpload,
+      storeSentMessage,
+      updatePendingAttachment,
+    ],
   );
 
   const runPendingAttachment = useCallback(() => {
@@ -1609,10 +1793,10 @@ export default function MessengerRoomScreen() {
       clearTimeout(attachmentLaunchTimer.current);
       attachmentLaunchTimer.current = null;
     }
-    const kind = pendingAttachmentKind.current;
-    if (!kind) return;
-    pendingAttachmentKind.current = null;
-    void chooseAttachment(kind);
+    const request = pendingAttachmentRequest.current;
+    if (!request) return;
+    pendingAttachmentRequest.current = null;
+    void chooseAttachment(request);
   }, [chooseAttachment]);
 
   const queueAttachment = useCallback(
@@ -1625,15 +1809,39 @@ export default function MessengerRoomScreen() {
         });
         return;
       }
-      pendingAttachmentKind.current = kind;
+      if (!roomId || !session || !canMedia) return;
+      const clientMessageId = Crypto.randomUUID();
+      const request: PendingAttachmentRequest = {
+        kind,
+        clientMessageId,
+        caption: kind === "location" ? "" : text.trim(),
+        composerText: kind === "location" ? "" : text,
+        replyTarget: replyingTo,
+      };
+      pendingAttachmentRequest.current = request;
+      const optimistic = pendingMessengerAttachmentMessage(
+        roomId,
+        clientMessageId,
+        kind,
+        request.caption,
+        session.user,
+        request.replyTarget ?? undefined,
+      );
+      setSending(true);
+      if (request.composerText) setText("");
+      if (request.replyTarget) setReplyingTo(null);
+      setMessages((current) => mergeMessengerMessages(current, [optimistic]));
+      nearLatest.current = true;
+      scrollToLatest(true);
       messengerLog("debug", "attachment.action.queued", {
         kind,
         room_id: roomId,
+        client_message_id: clientMessageId,
       });
       setAttachmentMenuVisible(false);
       if (Platform.OS === "web") {
-        pendingAttachmentKind.current = null;
-        void chooseAttachment(kind);
+        pendingAttachmentRequest.current = null;
+        void chooseAttachment(request);
         return;
       }
       if (attachmentLaunchTimer.current) {
@@ -1646,7 +1854,17 @@ export default function MessengerRoomScreen() {
         Platform.OS === "ios" ? 700 : 350,
       );
     },
-    [chooseAttachment, roomId, runPendingAttachment, sending],
+    [
+      canMedia,
+      chooseAttachment,
+      replyingTo,
+      roomId,
+      runPendingAttachment,
+      scrollToLatest,
+      sending,
+      session,
+      text,
+    ],
   );
 
   const toggleReaction = async (
@@ -1965,6 +2183,9 @@ export default function MessengerRoomScreen() {
             onLayout={(event) => {
               const height = Math.round(event.nativeEvent.layout.height);
               if (height !== feedHeight) setFeedHeight(height);
+              if (keyboardScrollPending.current) {
+                scrollToLatest(true);
+              }
             }}
             initialNumToRender={18}
             maxToRenderPerBatch={14}
@@ -1992,10 +2213,13 @@ export default function MessengerRoomScreen() {
               const mine = item.author.id === session?.user.id;
               const media = item.deleted_at ? null : (item.media ?? null);
               const location = item.deleted_at ? null : (item.location ?? null);
+              const pendingAttachment = item.deleted_at
+                ? null
+                : (item.pending_attachment ?? null);
               const body = item.deleted_at
                 ? "Сообщение удалено"
                 : item.text ||
-                  (!media && !location
+                  (!media && !location && !pendingAttachment
                     ? item.kind === "image"
                       ? "Фото"
                       : item.kind === "video"
@@ -2093,6 +2317,12 @@ export default function MessengerRoomScreen() {
                               accessToken={session.access_token}
                             />
                           )}
+                          {pendingAttachment ? (
+                            <PendingAttachmentView
+                              message={item}
+                              pending={pendingAttachment}
+                            />
+                          ) : null}
                           {body ? (
                             <Text
                               style={[
@@ -2676,6 +2906,11 @@ export default function MessengerRoomScreen() {
                 placeholder="Сообщение"
                 multiline
                 maxLength={4000}
+                onFocus={() => {
+                  keyboardScrollPending.current = true;
+                  nearLatest.current = true;
+                  scrollToLatest(true);
+                }}
               />
               <TouchableOpacity
                 style={[
@@ -2826,6 +3061,35 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontSize: 12,
     fontWeight: "800",
+  },
+  pendingAttachment: {
+    minWidth: 190,
+    maxWidth: 248,
+  },
+  pendingAttachmentImage: {
+    width: 224,
+    height: 164,
+    marginBottom: 7,
+    borderRadius: 11,
+    backgroundColor: "rgba(255, 255, 255, 0.55)",
+  },
+  pendingAttachmentStatus: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    minHeight: 36,
+  },
+  pendingAttachmentText: { flex: 1, minWidth: 0 },
+  pendingAttachmentLabel: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  pendingAttachmentLabelFailed: { color: colors.error },
+  pendingAttachmentDetails: {
+    marginTop: 2,
+    color: colors.textSecondary,
+    fontSize: 10,
   },
   messageText: { color: colors.text, fontSize: 15, lineHeight: 20 },
   emojiOnlyText: { fontSize: 38, lineHeight: 46 },
