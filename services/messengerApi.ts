@@ -6,6 +6,7 @@ import type {
   MessengerMessage,
   MessengerReaction,
   MessengerRoom,
+  MessengerRoomSettings,
   MessengerSession,
   MessengerUser,
 } from "../features/messenger/types";
@@ -316,6 +317,78 @@ export function createMessengerDirectRoom(teamId: string, userId: string) {
       body: JSON.stringify({ team_id: teamId, user_id: userId }),
     },
   );
+}
+
+export function createMessengerPrivateRoom(
+  teamId: string,
+  title: string,
+  memberUserIds: string[],
+) {
+  return messengerRequest<{ room: MessengerRoom; created: boolean }>(
+    "/chat/private-rooms",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        team_id: teamId,
+        title,
+        member_user_ids: memberUserIds,
+      }),
+    },
+  );
+}
+
+export function getMessengerRoomSettings(roomId: string) {
+  return messengerRequest<MessengerRoomSettings>(
+    `/chat/rooms/${roomId}/settings`,
+  );
+}
+
+export function updateMessengerRoomProfile(roomId: string, title: string) {
+  return messengerRequest<MessengerRoom>(`/chat/rooms/${roomId}/profile`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+}
+
+export function uploadMessengerRoomAvatar(
+  roomId: string,
+  file: { uri: string; name: string; type: string },
+) {
+  const form = new FormData();
+  form.append("file", file as unknown as Blob);
+  return messengerRequest<{ asset_id: string; url: string }>(
+    `/chat/rooms/${roomId}/avatar`,
+    { method: "PUT", body: form },
+  );
+}
+
+export function removeMessengerRoomAvatar(roomId: string) {
+  return messengerRequest<{ removed: true }>(`/chat/rooms/${roomId}/avatar`, {
+    method: "DELETE",
+  });
+}
+
+export function addMessengerPrivateRoomMember(roomId: string, userId: string) {
+  return messengerRequest<MessengerRoomSettings>(
+    `/chat/rooms/${roomId}/members`,
+    { method: "POST", body: JSON.stringify({ user_id: userId }) },
+  );
+}
+
+export function removeMessengerPrivateRoomMember(
+  roomId: string,
+  userId: string,
+) {
+  return messengerRequest<MessengerRoomSettings>(
+    `/chat/rooms/${roomId}/members/${userId}`,
+    { method: "DELETE" },
+  );
+}
+
+export function deleteMessengerPrivateRoom(roomId: string) {
+  return messengerRequest<{ deleted: true }>(`/chat/rooms/${roomId}`, {
+    method: "DELETE",
+  });
 }
 
 export function getMessengerMessages(

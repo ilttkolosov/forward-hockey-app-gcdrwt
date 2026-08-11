@@ -199,6 +199,24 @@ export async function pickMessengerMedia(): Promise<MessengerUploadFile | null> 
   return compressedPhoto(asset);
 }
 
+export async function pickMessengerAvatar(): Promise<MessengerUploadFile | null> {
+  if (Platform.OS !== "web") await mediaLibraryPermission();
+  messengerLog("debug", "attachment.picker.opening", { kind: "avatar" });
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ["images"],
+    allowsEditing: true,
+    aspect: [1, 1],
+    quality: 1,
+  });
+  messengerLog("debug", "attachment.picker.closed", {
+    kind: "avatar",
+    canceled: result.canceled,
+    asset_count: result.assets?.length ?? 0,
+  });
+  const asset = result.canceled ? null : result.assets[0];
+  return asset ? compressedPhoto(asset) : null;
+}
+
 export async function pickMessengerFile(): Promise<MessengerUploadFile | null> {
   const result = await DocumentPicker.getDocumentAsync({
     type: "*/*",

@@ -4,6 +4,8 @@ import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
+  Pressable,
   RefreshControl,
   StyleSheet,
   Text,
@@ -55,6 +57,7 @@ export default function MessengerRoomsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newChatVisible, setNewChatVisible] = useState(false);
   const connectionSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -64,15 +67,15 @@ export default function MessengerRoomsScreen() {
   const orderedRooms = useMemo(
     () =>
       [...rooms].sort((left, right) => {
-        const leftDirect =
-          left.room_type === "direct" || left.kind === "direct";
-        const rightDirect =
-          right.room_type === "direct" || right.kind === "direct";
-        if (leftDirect !== rightDirect) return leftDirect ? 1 : -1;
-        if (!leftDirect && left.sort_order !== right.sort_order) {
+        const leftPersonal =
+          left.room_type === "direct" || left.room_type === "private_group";
+        const rightPersonal =
+          right.room_type === "direct" || right.room_type === "private_group";
+        if (leftPersonal !== rightPersonal) return leftPersonal ? 1 : -1;
+        if (!leftPersonal && left.sort_order !== right.sort_order) {
           return left.sort_order - right.sort_order;
         }
-        if (leftDirect) {
+        if (leftPersonal) {
           const leftTime = left.last_message?.created_at || "";
           const rightTime = right.last_message?.created_at || "";
           if (leftTime !== rightTime) return rightTime.localeCompare(leftTime);
@@ -130,20 +133,23 @@ export default function MessengerRoomsScreen() {
     [db, isAuthenticated],
   );
 
-  const scheduleConnectionSync = useCallback(() => {
-    if (connectionSyncTimer.current) return;
-    const run = (): void => {
-      const elapsed = Date.now() - lastRoomsSyncFinishedAt.current;
-      const remaining = 10_000 - elapsed;
-      if (lastRoomsSyncFinishedAt.current > 0 && remaining > 0) {
-        connectionSyncTimer.current = setTimeout(run, remaining);
-        return;
-      }
-      connectionSyncTimer.current = null;
-      void loadRooms(false, false);
-    };
-    connectionSyncTimer.current = setTimeout(run, 250);
-  }, [loadRooms]);
+  const scheduleConnectionSync = useCallback(
+    (minimumInterval = 10_000) => {
+      if (connectionSyncTimer.current) return;
+      const run = (): void => {
+        const elapsed = Date.now() - lastRoomsSyncFinishedAt.current;
+        const remaining = minimumInterval - elapsed;
+        if (lastRoomsSyncFinishedAt.current > 0 && remaining > 0) {
+          connectionSyncTimer.current = setTimeout(run, remaining);
+          return;
+        }
+        connectionSyncTimer.current = null;
+        void loadRooms(false, false);
+      };
+      connectionSyncTimer.current = setTimeout(run, 250);
+    },
+    [loadRooms],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -193,6 +199,8 @@ export default function MessengerRoomsScreen() {
               };
             }),
           );
+        } else if (event.type === "room.updated") {
+          scheduleConnectionSync(0);
         } else if (
           event.type === "sync.required" ||
           event.type === "connection.ready"
@@ -219,6 +227,10 @@ export default function MessengerRoomsScreen() {
         canWrite: String(room.can_write),
         canMedia: String(room.can_send_media),
         canReact: String(room.can_react),
+        canManage: String(room.can_manage),
+        roomType: room.room_type,
+        teamId: room.team_id,
+        avatarUrl: room.avatar_url || "",
         lastReadSequence: room.last_read_sequence,
         latestSequence: room.last_message?.sequence || "",
         unreadCount: String(room.unread_count),
@@ -258,8 +270,8 @@ export default function MessengerRoomsScreen() {
         </View>
         <TouchableOpacity
           style={styles.iconButton}
-          onPress={() => router.push("/messenger/contacts")}
-          accessibilityLabel="Новое личное сообщение"
+          onPress={() => setNewChatVisible(true)}
+          accessibilityLabel="Новое сообщение или группа"
         >
           <Icon name="create-outline" size={25} color={colors.primary} />
         </TouchableOpacity>
@@ -312,6 +324,7 @@ export default function MessengerRoomsScreen() {
         }
         renderItem={({ item }) => {
           const direct = item.room_type === "direct" || item.kind === "direct";
+          const privateGroup = item.room_type === "private_group";
           return (
             <TouchableOpacity
               style={styles.roomCard}
@@ -325,9 +338,12 @@ export default function MessengerRoomsScreen() {
                   size={50}
                 />
               ) : (
-                <View style={styles.roomIcon}>
-                  <Icon name="chatbubbles" size={25} color={colors.primary} />
-                </View>
+                <AuthenticatedAvatar
+                  displayName={item.title}
+                  avatarUrl={item.avatar_url}
+                  accessToken={session?.access_token}
+                  size={50}
+                />
               )}
               <View style={styles.roomContent}>
                 <View style={styles.roomTitleRow}>
@@ -341,11 +357,16 @@ export default function MessengerRoomsScreen() {
                   )}
                 </View>
                 <View style={styles.roomKindRow}>
-                  {!direct && (
+                  {!direct && !privateGroup && (
                     <Icon name="pin" size={12} color={colors.primary} />
                   )}
                   <Text style={styles.teamName} numberOfLines={1}>
-                    {direct ? "Личный чат" : "Общий чат"} · {item.team_name}
+                    {direct
+                      ? "Личный чат"
+                      : privateGroup
+                        ? `Мини-группа${item.member_count ? ` · ${item.member_count}` : ""}`
+                        : "Общий чат"}{" "}
+                    · {item.team_name}
                   </Text>
                 </View>
                 <Text style={styles.preview} numberOfLines={1}>
@@ -381,6 +402,63 @@ export default function MessengerRoomsScreen() {
           </View>
         }
       />
+
+      <Modal
+        visible={newChatVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNewChatVisible(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setNewChatVisible(false)}
+        >
+          <Pressable
+            style={styles.newChatSheet}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <Text style={styles.newChatTitle}>Начать общение</Text>
+            <TouchableOpacity
+              style={styles.newChatAction}
+              onPress={() => {
+                setNewChatVisible(false);
+                router.push("/messenger/contacts");
+              }}
+            >
+              <View style={styles.newChatIcon}>
+                <Icon
+                  name="person-add-outline"
+                  size={23}
+                  color={colors.primary}
+                />
+              </View>
+              <View style={styles.newChatText}>
+                <Text style={styles.newChatActionTitle}>Личное сообщение</Text>
+                <Text style={styles.newChatActionSubtitle}>
+                  Выбрать доступный контакт
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.newChatAction}
+              onPress={() => {
+                setNewChatVisible(false);
+                router.push("/messenger/group/create");
+              }}
+            >
+              <View style={styles.newChatIcon}>
+                <Icon name="people-outline" size={24} color={colors.primary} />
+              </View>
+              <View style={styles.newChatText}>
+                <Text style={styles.newChatActionTitle}>Новая мини-группа</Text>
+                <Text style={styles.newChatActionSubtitle}>
+                  От трёх участников вместе с вами
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -468,6 +546,47 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     borderRadius: 12,
     backgroundColor: colors.accent,
+  },
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: "flex-end",
+    padding: 14,
+    backgroundColor: "rgba(16, 40, 68, 0.38)",
+  },
+  newChatSheet: {
+    padding: 18,
+    paddingBottom: 12,
+    borderRadius: 22,
+    backgroundColor: colors.surface,
+  },
+  newChatTitle: {
+    marginBottom: 8,
+    color: colors.text,
+    fontSize: 19,
+    fontWeight: "800",
+  },
+  newChatAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    minHeight: 68,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  newChatIcon: {
+    width: 46,
+    height: 46,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 15,
+    backgroundColor: "#EAF3FF",
+  },
+  newChatText: { flex: 1 },
+  newChatActionTitle: { color: colors.text, fontSize: 15, fontWeight: "800" },
+  newChatActionSubtitle: {
+    marginTop: 3,
+    color: colors.textSecondary,
+    fontSize: 12,
   },
   unreadText: { color: colors.white, fontSize: 12, fontWeight: "800" },
   empty: { alignItems: "center", padding: 36 },

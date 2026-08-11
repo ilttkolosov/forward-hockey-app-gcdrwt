@@ -145,29 +145,26 @@ function SwipeableMessage({
       bounciness: 5,
     }).start();
   }, [translateX]);
-  const messageGesture = useMemo(
-    () => {
-      const swipe = Gesture.Pan()
-        .enabled(enabled)
-        .activeOffsetX(-10)
-        .failOffsetY([-18, 18])
-        .onUpdate((event) => {
-          translateX.setValue(Math.max(-76, Math.min(0, event.translationX)));
-        })
-        .onEnd((event) => {
-          if (event.translationX <= -48) onReply();
-        })
-        .onFinalize(resetPosition)
-        .runOnJS(true);
-      const hold = Gesture.LongPress()
-        .minDuration(320)
-        .maxDistance(12)
-        .onStart(onLongPress)
-        .runOnJS(true);
-      return Gesture.Race(swipe, hold);
-    },
-    [enabled, onLongPress, onReply, resetPosition, translateX],
-  );
+  const messageGesture = useMemo(() => {
+    const swipe = Gesture.Pan()
+      .enabled(enabled)
+      .activeOffsetX(-10)
+      .failOffsetY([-18, 18])
+      .onUpdate((event) => {
+        translateX.setValue(Math.max(-76, Math.min(0, event.translationX)));
+      })
+      .onEnd((event) => {
+        if (event.translationX <= -48) onReply();
+      })
+      .onFinalize(resetPosition)
+      .runOnJS(true);
+    const hold = Gesture.LongPress()
+      .minDuration(320)
+      .maxDistance(12)
+      .onStart(onLongPress)
+      .runOnJS(true);
+    return Gesture.Race(swipe, hold);
+  }, [enabled, onLongPress, onReply, resetPosition, translateX]);
 
   return (
     <View style={styles.swipeShell}>
@@ -284,6 +281,10 @@ export default function MessengerRoomScreen() {
     canWrite?: string;
     canMedia?: string;
     canReact?: string;
+    canManage?: string;
+    roomType?: string;
+    teamId?: string;
+    avatarUrl?: string;
     lastReadSequence?: string;
     latestSequence?: string;
     unreadCount?: string;
@@ -293,6 +294,11 @@ export default function MessengerRoomScreen() {
   const canWrite = params.canWrite !== "false";
   const canMedia = params.canMedia !== "false";
   const canReact = params.canReact !== "false";
+  const [roomTitle, setRoomTitle] = useState(params.title || "Чат");
+  const [roomAvatarUrl, setRoomAvatarUrl] = useState(params.avatarUrl || null);
+  const [roomType, setRoomType] = useState(params.roomType || "group");
+  const [roomTeamId, setRoomTeamId] = useState(params.teamId || "");
+  const [canManage, setCanManage] = useState(params.canManage === "true");
   const [messages, setMessages] = useState<MessengerMessage[]>([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
@@ -367,18 +373,16 @@ export default function MessengerRoomScreen() {
   const initialAnchorMode = useRef<InitialAnchorMode>("latest");
   const initialAnchorSettling = useRef(false);
   const initialPositionStartedAt = useRef(0);
-  const initialPositionRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
+  const initialPositionRetryTimer = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const initialPositionFallbackTimer = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
   const nearLatest = useRef(true);
   const latestVisibleSequence = useRef<string | null>(null);
   const initialReadSequence = useRef(params.lastReadSequence || "0");
-  const initialUnreadBoundarySequence = useRef(
-    params.lastReadSequence || "0",
-  );
+  const initialUnreadBoundarySequence = useRef(params.lastReadSequence || "0");
   const initialUnreadTailSequence = useRef<string | null>(null);
   const initialUnreadExpectedRef = useRef(false);
   const initialReadAcknowledged = useRef(false);
@@ -387,6 +391,7 @@ export default function MessengerRoomScreen() {
     room_id: string;
     sequence: string;
   } | null>(null);
+  const roomFocusCount = useRef(0);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -402,9 +407,7 @@ export default function MessengerRoomScreen() {
     // content height. onContentSizeChange below remains a fallback for images
     // and other cells whose final height becomes known later.
     requestAnimationFrame(() =>
-      requestAnimationFrame(() =>
-        listRef.current?.scrollToEnd({ animated }),
-      ),
+      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated })),
     );
   }, []);
 
@@ -518,10 +521,7 @@ export default function MessengerRoomScreen() {
   const clearInitialUnreadIfCovered = useCallback(
     (sequence: string) => {
       const unreadTail = initialUnreadTailSequence.current;
-      if (
-        !unreadTail ||
-        compareMessengerSequence(sequence, unreadTail) < 0
-      ) {
+      if (!unreadTail || compareMessengerSequence(sequence, unreadTail) < 0) {
         return;
       }
       initialUnreadTailSequence.current = null;
@@ -837,9 +837,8 @@ export default function MessengerRoomScreen() {
               .latest_sequence || latestKnownSequence.current;
         const visibleConfirmedTail = initial
           ? localLatestSequence
-          : messagesRef.current
-              .filter((message) => !message.pending)
-              .at(-1)?.sequence;
+          : messagesRef.current.filter((message) => !message.pending).at(-1)
+              ?.sequence;
         const remoteIsContiguousWithFeed = Boolean(
           !visibleConfirmedTail ||
           !reconciliationCursor ||
@@ -865,10 +864,7 @@ export default function MessengerRoomScreen() {
           });
           receivedMessageCount = page.items.length;
           remoteHasMoreNewerMessages.current = page.page.has_more;
-          await applyRemoteMessages(
-            page.items,
-            remoteIsContiguousWithFeed,
-          );
+          await applyRemoteMessages(page.items, remoteIsContiguousWithFeed);
           if (page.page.latest_sequence) {
             latestSequence = page.page.latest_sequence;
           }
@@ -966,10 +962,7 @@ export default function MessengerRoomScreen() {
     const visibleSequence = latestVisibleSequence.current;
     if (
       visibleSequence &&
-      compareMessengerSequence(
-        visibleSequence,
-        initialReadSequence.current,
-      ) > 0
+      compareMessengerSequence(visibleSequence, initialReadSequence.current) > 0
     ) {
       initialReadSequence.current = visibleSequence;
       void acknowledgeLatest(visibleSequence).catch((error) =>
@@ -1230,12 +1223,37 @@ export default function MessengerRoomScreen() {
     connectionSyncTimer.current = setTimeout(run, 250);
   }, [flushOutbox, loadMessages]);
 
+  const refreshRoomIdentity = useCallback(async () => {
+    try {
+      const room = (await getMessengerRooms()).find(
+        (candidate) => candidate.id === roomId,
+      );
+      if (!room) {
+        router.replace("/messenger/rooms");
+        return;
+      }
+      setRoomTitle(room.title);
+      setRoomAvatarUrl(room.avatar_url);
+      setRoomType(room.room_type);
+      setRoomTeamId(room.team_id);
+      setCanManage(room.can_manage);
+    } catch (identityError) {
+      messengerLog("warn", "room.identity.sync_failed", {
+        room_id: roomId,
+        message: messengerErrorMessage(identityError),
+      });
+    }
+  }, [roomId, router]);
+
   useFocusEffect(
     useCallback(() => {
       if (!isAuthenticated) {
         router.replace("/messenger/register");
         return;
       }
+      const returningToRoom = roomFocusCount.current > 0;
+      roomFocusCount.current += 1;
+      if (returningToRoom) void refreshRoomIdentity();
       void loadMessages(true);
       const unsubscribe = subscribeMessengerRealtime((event) => {
         if (
@@ -1281,6 +1299,9 @@ export default function MessengerRoomScreen() {
           // reconciliation per ten seconds is sufficient and prevents the
           // request cascade visible in the diagnostic log.
           scheduleConnectionSync();
+        } else if (event.type === "room.updated" && event.room_id === roomId) {
+          if (event.deleted) router.replace("/messenger/rooms");
+          else void refreshRoomIdentity();
         } else if (
           event.type === "message.reaction_updated" &&
           event.room_id === roomId &&
@@ -1331,6 +1352,7 @@ export default function MessengerRoomScreen() {
       isAuthenticated,
       loadMessages,
       roomId,
+      refreshRoomIdentity,
       router,
       scheduleConnectionSync,
       session?.user.id,
@@ -1884,9 +1906,17 @@ export default function MessengerRoomScreen() {
           >
             <Icon name="chevron-back" size={28} color={colors.primary} />
           </TouchableOpacity>
+          {roomType !== "direct" ? (
+            <AuthenticatedAvatar
+              displayName={roomTitle}
+              avatarUrl={roomAvatarUrl}
+              accessToken={session?.access_token}
+              size={42}
+            />
+          ) : null}
           <View style={styles.headerText}>
             <Text style={styles.title} numberOfLines={1}>
-              {params.title || "Чат"}
+              {roomTitle}
             </Text>
             <Text style={styles.subtitle}>
               {offline
@@ -1896,6 +1926,26 @@ export default function MessengerRoomScreen() {
                   : "В сети"}
             </Text>
           </View>
+          {canManage ? (
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={() =>
+                router.push({
+                  pathname: "/messenger/group/[id]",
+                  params: {
+                    id: roomId,
+                    title: roomTitle,
+                    roomType,
+                    teamId: roomTeamId,
+                    avatarUrl: roomAvatarUrl || "",
+                  },
+                })
+              }
+              accessibilityLabel="Управление группой"
+            >
+              <Icon name="settings-outline" size={23} color={colors.primary} />
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         <ImageBackground
@@ -2283,22 +2333,11 @@ export default function MessengerRoomScreen() {
               ) : null}
               {actionMessage && !actionMessage.deleted_at ? (
                 <TouchableOpacity
-                  style={[styles.messageAction, styles.messageActionSubtle]}
+                  style={styles.messageAction}
                   onPress={() => queueMessageAction("forward", actionMessage)}
                 >
-                  <Icon
-                    name="arrow-redo"
-                    size={19}
-                    color={colors.textSecondary}
-                  />
-                  <Text
-                    style={[
-                      styles.messageActionText,
-                      styles.messageActionTextSubtle,
-                    ]}
-                  >
-                    Переслать
-                  </Text>
+                  <Icon name="arrow-redo" size={21} color={colors.primary} />
+                  <Text style={styles.messageActionText}>Переслать</Text>
                 </TouchableOpacity>
               ) : null}
             </Pressable>
@@ -2956,16 +2995,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#EAF3FF",
   },
   messageActionText: { color: colors.primary, fontSize: 15, fontWeight: "800" },
-  messageActionSubtle: {
-    minHeight: 40,
-    marginTop: 7,
-    backgroundColor: "rgba(23, 52, 87, 0.055)",
-  },
-  messageActionTextSubtle: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: "700",
-  },
   forwardSheet: {
     maxHeight: "82%",
     padding: 16,

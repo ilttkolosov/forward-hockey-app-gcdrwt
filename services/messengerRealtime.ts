@@ -12,6 +12,7 @@ export type MessengerRealtimeEvent =
   | { type: "connection.state"; connected: boolean; reason?: string }
   | { type: "sync.required" }
   | { type: "message.created"; message: MessengerMessage }
+  | { type: "room.updated"; room_id: string; deleted?: boolean }
   | {
       type: "message.receipt_updated";
       room_id: string;
@@ -127,11 +128,18 @@ export function connectMessengerRealtime(accessToken: string): void {
     },
   );
   nextSocket.on(
+    "room.updated",
+    (payload: { room_id: string; deleted?: boolean }) =>
+      publish({ type: "room.updated", ...payload }),
+  );
+  nextSocket.on(
     "message.receipt_updated",
-    (payload: Omit<
-      Extract<MessengerRealtimeEvent, { type: "message.receipt_updated" }>,
-      "type"
-    >) => publish({ type: "message.receipt_updated", ...payload }),
+    (
+      payload: Omit<
+        Extract<MessengerRealtimeEvent, { type: "message.receipt_updated" }>,
+        "type"
+      >,
+    ) => publish({ type: "message.receipt_updated", ...payload }),
   );
   nextSocket.on(
     "message.reaction_updated",
@@ -143,10 +151,12 @@ export function connectMessengerRealtime(accessToken: string): void {
   );
   nextSocket.on(
     "presence.updated",
-    (payload: Omit<
-      Extract<MessengerRealtimeEvent, { type: "presence.updated" }>,
-      "type"
-    >) => publish({ type: "presence.updated", ...payload }),
+    (
+      payload: Omit<
+        Extract<MessengerRealtimeEvent, { type: "presence.updated" }>,
+        "type"
+      >,
+    ) => publish({ type: "presence.updated", ...payload }),
   );
 }
 

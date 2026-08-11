@@ -64,7 +64,8 @@ export interface MessengerRoom {
   kind: string;
   title: string;
   sort_order: number;
-  room_type: "group" | "direct";
+  room_type: "group" | "direct" | "private_group";
+  avatar_url: string | null;
   peer: null | {
     id: string;
     display_name: string;
@@ -74,6 +75,8 @@ export interface MessengerRoom {
   can_write: boolean;
   can_send_media: boolean;
   can_react: boolean;
+  can_manage: boolean;
+  member_count: number | null;
   last_read_sequence: string;
   last_delivered_sequence: string;
   unread_count: number;
@@ -87,6 +90,22 @@ export interface MessengerRoom {
     location: MessengerLocation | null;
     author: { id: string; display_name: string; avatar_url: string | null };
   };
+}
+
+export interface MessengerPrivateRoomMember {
+  id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  last_seen_at: string | null;
+  is_admin: boolean;
+  joined_at: string;
+}
+
+export interface MessengerRoomSettings {
+  room: MessengerRoom;
+  can_manage_members: boolean;
+  members: MessengerPrivateRoomMember[];
 }
 
 export interface MessengerContact {
