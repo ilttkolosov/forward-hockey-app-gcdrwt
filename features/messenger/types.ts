@@ -155,6 +155,7 @@ export interface MessengerMessage {
     read_count: number;
   };
   pending?: boolean;
+  send_error?: string | null;
 }
 
 export interface MessengerOutboxItem {
@@ -165,4 +166,13 @@ export interface MessengerOutboxItem {
   created_at: string;
   attempts: number;
   last_error: string | null;
+}
+
+export interface MessengerMessageReceipt {
+  user_id: string;
+  display_name: string;
+  avatar_url: string | null;
+  delivered_at: string | null;
+  read_at: string | null;
+  status: "sent" | "delivered" | "read";
 }

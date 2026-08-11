@@ -102,6 +102,8 @@ export default function MessengerContactsScreen() {
           canWrite: String(result.room.can_write),
           canMedia: String(result.room.can_send_media),
           canReact: String(result.room.can_react),
+          lastReadSequence: result.room.last_read_sequence,
+          unreadCount: String(result.room.unread_count),
         },
       });
     } catch (openError) {

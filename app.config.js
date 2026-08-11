@@ -79,6 +79,15 @@ export default ({ config }) => {
         },
       ],
       [
+        "expo-media-library",
+        {
+          photosPermission:
+            "Разрешите доступ к медиатеке для просмотра сохранённых вложений мессенджера.",
+          savePhotosPermission:
+            "Разрешите сохранять фотографии и видео из мессенджера в медиатеку.",
+        },
+      ],
+      [
         "expo-location",
         {
           locationWhenInUsePermission:

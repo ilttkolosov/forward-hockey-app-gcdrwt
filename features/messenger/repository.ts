@@ -14,6 +14,10 @@ interface MessageRow {
   raw_json: string;
 }
 
+interface HistoryStateRow {
+  history_complete: number;
+}
+
 const messengerWriteQueues = new WeakMap<SQLiteDatabase, Promise<void>>();
 
 function enqueueMessengerWrite<T>(
@@ -51,6 +55,14 @@ function parseJson<T>(value: string): T | null {
   }
 }
 
+function sequenceIsNewer(candidate: string, current: string): boolean {
+  const left = candidate.replace(/^0+/, "") || "0";
+  const right = current.replace(/^0+/, "") || "0";
+  return left.length !== right.length
+    ? left.length > right.length
+    : left.localeCompare(right) > 0;
+}
+
 export async function loadCachedMessengerRooms(
   db: SQLiteDatabase,
 ): Promise<MessengerRoom[]> {
@@ -62,6 +74,17 @@ export async function loadCachedMessengerRooms(
   return rows
     .map((row) => parseJson<MessengerRoom>(row.raw_json))
     .filter((room): room is MessengerRoom => room !== null);
+}
+
+export async function loadCachedMessengerRoom(
+  db: SQLiteDatabase,
+  roomId: string,
+): Promise<MessengerRoom | null> {
+  const row = await db.getFirstAsync<RoomRow>(
+    "SELECT raw_json FROM messenger_rooms WHERE id = ?",
+    roomId,
+  );
+  return row ? parseJson<MessengerRoom>(row.raw_json) : null;
 }
 
 export async function cacheMessengerRooms(
@@ -89,6 +112,38 @@ export async function cacheMessengerRooms(
       }
     }),
   );
+}
+
+export function markCachedMessengerRoomRead(
+  db: SQLiteDatabase,
+  roomId: string,
+  sequence: string,
+): Promise<void> {
+  return enqueueMessengerWrite(db, async () => {
+    const row = await db.getFirstAsync<RoomRow>(
+      "SELECT raw_json FROM messenger_rooms WHERE id = ?",
+      roomId,
+    );
+    if (!row) return;
+    const room = parseJson<MessengerRoom>(row.raw_json);
+    if (!room) return;
+    const nextSequence = sequenceIsNewer(sequence, room.last_read_sequence)
+      ? sequence
+      : room.last_read_sequence;
+    const nextRoom: MessengerRoom = {
+      ...room,
+      last_read_sequence: nextSequence,
+      unread_count: 0,
+    };
+    await db.runAsync(
+      `UPDATE messenger_rooms
+          SET unread_count = 0, updated_at = ?, raw_json = ?
+        WHERE id = ?`,
+      new Date().toISOString(),
+      JSON.stringify(nextRoom),
+      roomId,
+    );
+  });
 }
 
 export async function loadCachedMessengerMessages(
@@ -177,6 +232,23 @@ export function removeMessengerOutboxItem(
   );
 }
 
+export function removeMessengerOutboxItems(
+  db: SQLiteDatabase,
+  clientMessageIds: string[],
+) {
+  if (!clientMessageIds.length) return Promise.resolve();
+  return enqueueMessengerWrite(db, () =>
+    withMessengerTransaction(db, async (transaction) => {
+      for (const clientMessageId of clientMessageIds) {
+        await transaction.runAsync(
+          "DELETE FROM messenger_outbox WHERE client_message_id = ?",
+          clientMessageId,
+        );
+      }
+    }),
+  );
+}
+
 export function markMessengerOutboxFailure(
   db: SQLiteDatabase,
   clientMessageId: string,
@@ -191,6 +263,37 @@ export function markMessengerOutboxFailure(
         ? error.message.slice(0, 500)
         : String(error).slice(0, 500),
       clientMessageId,
+    ),
+  );
+}
+
+export async function isMessengerRoomHistoryComplete(
+  db: SQLiteDatabase,
+  roomId: string,
+): Promise<boolean> {
+  const row = await db.getFirstAsync<HistoryStateRow>(
+    `SELECT history_complete
+       FROM messenger_room_cache_state
+      WHERE room_id = ?`,
+    roomId,
+  );
+  return row?.history_complete === 1;
+}
+
+export function markMessengerRoomHistoryComplete(
+  db: SQLiteDatabase,
+  roomId: string,
+) {
+  return enqueueMessengerWrite(db, () =>
+    db.runAsync(
+      `INSERT INTO messenger_room_cache_state
+        (room_id, history_complete, updated_at)
+       VALUES (?, 1, ?)
+       ON CONFLICT(room_id) DO UPDATE SET
+         history_complete = 1,
+         updated_at = excluded.updated_at`,
+      roomId,
+      new Date().toISOString(),
     ),
   );
 }

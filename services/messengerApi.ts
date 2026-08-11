@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import type {
   InvitationPreview,
   MessengerContact,
+  MessengerMessageReceipt,
   MessengerMessage,
   MessengerReaction,
   MessengerRoom,
@@ -315,11 +316,27 @@ export function createMessengerDirectRoom(teamId: string, userId: string) {
   );
 }
 
-export function getMessengerMessages(roomId: string) {
+export function getMessengerMessages(
+  roomId: string,
+  options: {
+    cursor?: string;
+    direction?: "before" | "after";
+    limit?: number;
+  } = {},
+) {
+  const query = new URLSearchParams();
+  query.set("limit", String(options.limit ?? 100));
+  if (options.cursor) query.set("cursor", options.cursor);
+  if (options.direction) query.set("direction", options.direction);
   return messengerRequest<{
     items: MessengerMessage[];
-    page: { latest_sequence: string | null };
-  }>(`/chat/rooms/${roomId}/messages?limit=100`);
+    page: {
+      direction: "latest" | "before" | "after";
+      has_more: boolean;
+      oldest_sequence: string | null;
+      latest_sequence: string | null;
+    };
+  }>(`/chat/rooms/${roomId}/messages?${query.toString()}`);
 }
 
 export function sendMessengerText(
@@ -418,6 +435,13 @@ export function forwardMessengerMessage(
       }),
     },
   );
+}
+
+export function getMessengerMessageReceipts(messageId: string) {
+  return messengerRequest<{
+    message_id: string;
+    recipients: MessengerMessageReceipt[];
+  }>(`/chat/messages/${messageId}/receipts`);
 }
 
 export function markMessengerDelivered(roomId: string, sequence: string) {

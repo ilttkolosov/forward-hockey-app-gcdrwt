@@ -2,7 +2,13 @@ import * as Crypto from "expo-crypto";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -10,7 +16,10 @@ import {
   FlatList,
   ImageBackground,
   KeyboardAvoidingView,
+  LayoutAnimation,
   Modal,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   PanResponder,
   Platform,
   Pressable,
@@ -26,27 +35,46 @@ import Svg, { Path } from "react-native-svg";
 import Icon from "../../../components/Icon";
 import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
+import {
+  applyOptimisticReaction,
+  firstUnreadMessengerMessage,
+  mergeMessengerMessages,
+  pendingMessengerMessage,
+} from "../../../features/messenger/feed";
+import MessageReceiptsModal from "../../../features/messenger/MessageReceiptsModal";
 import MessengerAttachmentView from "../../../features/messenger/MessengerAttachmentView";
+import {
+  DEFAULT_QUICK_REACTIONS,
+  loadQuickMessengerReactions,
+  rememberQuickMessengerReaction,
+  STANDARD_MESSENGER_REACTIONS,
+} from "../../../features/messenger/reactions";
 import {
   cacheMessengerMessages,
   enqueueMessengerText,
+  isMessengerRoomHistoryComplete,
+  loadCachedMessengerRoom,
   loadCachedMessengerMessages,
   loadMessengerOutbox,
+  markCachedMessengerRoomRead,
   markMessengerOutboxFailure,
+  markMessengerRoomHistoryComplete,
   removeMessengerOutboxItem,
+  removeMessengerOutboxItems,
 } from "../../../features/messenger/repository";
 import type {
-  MessengerMessage,
   MessengerContact,
+  MessengerMessage,
+  MessengerMessageReceipt,
   MessengerOutboxItem,
   MessengerReply,
   MessengerRoom,
-  MessengerUser,
 } from "../../../features/messenger/types";
 import {
   createMessengerDirectRoom,
   forwardMessengerMessage,
   getMessengerContacts,
+  getMessengerMessageReceipts,
   getMessengerMessages,
   getMessengerRooms,
   isMessengerConnectionError,
@@ -68,6 +96,7 @@ import {
   type MessengerUploadFile,
 } from "../../../services/messengerAttachmentPicker";
 import { seedMessengerMediaCache } from "../../../services/messengerMediaCache";
+import { saveMessengerMediaToDevice } from "../../../services/messengerMediaSave";
 import { colors } from "../../../styles/commonStyles";
 
 type MessengerAttachmentKind = "camera" | "library" | "file" | "location";
@@ -128,53 +157,6 @@ function SwipeableMessage({
   );
 }
 
-function pendingMessage(
-  item: MessengerOutboxItem,
-  currentUser: MessengerUser,
-  replyTarget?: MessengerMessage,
-): MessengerMessage {
-  return {
-    id: `pending-${item.client_message_id}`,
-    sequence: "0",
-    room_id: item.room_id,
-    client_message_id: item.client_message_id,
-    kind: "text",
-    text: item.text,
-    created_at: item.created_at,
-    edited_at: null,
-    deleted_at: null,
-    author: {
-      id: currentUser.id,
-      username: currentUser.username,
-      display_name: currentUser.display_name,
-      avatar_url: currentUser.avatar_url,
-    },
-    media: null,
-    location: null,
-    reply_to: replyTarget
-      ? {
-          id: replyTarget.id,
-          kind: replyTarget.kind,
-          text: replyTarget.text,
-          deleted_at: replyTarget.deleted_at,
-          author: {
-            id: replyTarget.author.id,
-            display_name: replyTarget.author.display_name,
-          },
-        }
-      : null,
-    forwarded_from: null,
-    reactions: [],
-    delivery: {
-      status: "sent",
-      recipient_count: 0,
-      delivered_count: 0,
-      read_count: 0,
-    },
-    pending: true,
-  };
-}
-
 function MessageTail({ mine }: { mine: boolean }) {
   return (
     <Svg
@@ -226,10 +208,15 @@ function DeliveryChecks({ message }: { message: MessengerMessage }) {
   if (message.pending) {
     return (
       <Text
-        style={[styles.pendingCheck, { color: colors.textSecondary }]}
-        accessibilityLabel="Ожидает отправки"
+        style={[
+          styles.pendingCheck,
+          { color: message.send_error ? colors.error : colors.textSecondary },
+        ]}
+        accessibilityLabel={
+          message.send_error ? "Ошибка отправки" : "Ожидает отправки"
+        }
       >
-        ◷
+        {message.send_error ? "!" : "◷"}
       </Text>
     );
   }
@@ -256,6 +243,8 @@ export default function MessengerRoomScreen() {
     canWrite?: string;
     canMedia?: string;
     canReact?: string;
+    lastReadSequence?: string;
+    unreadCount?: string;
   }>();
   const { session, isAuthenticated } = useMessengerAuth();
   const roomId = params.id;
@@ -263,7 +252,6 @@ export default function MessengerRoomScreen() {
   const canMedia = params.canMedia !== "false";
   const canReact = params.canReact !== "false";
   const [messages, setMessages] = useState<MessengerMessage[]>([]);
-  const [outbox, setOutbox] = useState<MessengerOutboxItem[]>([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -273,7 +261,13 @@ export default function MessengerRoomScreen() {
   const [actionMessage, setActionMessage] = useState<MessengerMessage | null>(
     null,
   );
-  const [reactionBusy, setReactionBusy] = useState(false);
+  const [reactionBusyIds, setReactionBusyIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [quickReactions, setQuickReactions] = useState<string[]>([
+    ...DEFAULT_QUICK_REACTIONS,
+  ]);
+  const [showAllReactions, setShowAllReactions] = useState(false);
   const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
   const [forwardingMessage, setForwardingMessage] =
     useState<MessengerMessage | null>(null);
@@ -284,108 +278,150 @@ export default function MessengerRoomScreen() {
   const [forwardLoading, setForwardLoading] = useState(false);
   const [forwardBusy, setForwardBusy] = useState<string | null>(null);
   const [forwardError, setForwardError] = useState<string | null>(null);
+  const [receiptMessage, setReceiptMessage] = useState<MessengerMessage | null>(
+    null,
+  );
+  const [receipts, setReceipts] = useState<MessengerMessageReceipt[]>([]);
+  const [receiptsLoading, setReceiptsLoading] = useState(false);
+  const [receiptsError, setReceiptsError] = useState<string | null>(null);
+  const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
+  const [listReady, setListReady] = useState(false);
+  const [initialDataReady, setInitialDataReady] = useState(false);
+  const [unreadMarkerClientId, setUnreadMarkerClientId] = useState<
+    string | null
+  >(null);
   const listRef = useRef<FlatList<MessengerMessage>>(null);
   const inputRef = useRef<TextInput>(null);
+  const messagesRef = useRef<MessengerMessage[]>([]);
   const refreshRunning = useRef(false);
   const flushRunning = useRef(false);
+  const flushRequested = useRef(false);
+  const flushOutboxRef = useRef<() => Promise<void>>(async () => undefined);
+  const historyHydrationRunning = useRef(false);
+  const reactionMutationIds = useRef<Set<string>>(new Set());
   const realtimeSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attachmentLaunchTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
   const pendingAttachmentKind = useRef<MessengerAttachmentKind | null>(null);
+  const actionDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingMessageAction = useRef<
+    | { type: "forward"; message: MessengerMessage }
+    | { type: "receipts"; message: MessengerMessage }
+    | null
+  >(null);
   const pendingScrollAnimation = useRef<boolean | null>(null);
+  const pendingInitialPosition = useRef(false);
+  const initialPositionConfigured = useRef(false);
+  const initialPositionAttempts = useRef(0);
+  const initialAnchorClientId = useRef<string | null>(null);
+  const nearLatest = useRef(true);
+  const initialReadSequence = useRef(params.lastReadSequence || "0");
+  const initialReadAcknowledged = useRef(false);
+  const latestKnownSequence = useRef<string | null>(null);
   const acknowledgedRead = useRef<{
     room_id: string;
     sequence: string;
   } | null>(null);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    void loadQuickMessengerReactions().then(setQuickReactions);
+  }, []);
 
   const scrollToLatest = useCallback((animated: boolean) => {
     pendingScrollAnimation.current = animated;
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated }));
   }, []);
 
-  const visibleMessages = useMemo(() => {
-    const pending = session
-      ? outbox.map((item) =>
-          pendingMessage(
-            item,
-            session.user,
-            messages.find((message) => message.id === item.reply_to_message_id),
-          ),
-        )
-      : [];
-    return [...messages, ...pending].sort(
-      (left, right) =>
-        new Date(left.created_at).getTime() -
-        new Date(right.created_at).getTime(),
-    );
-  }, [messages, outbox, session]);
-
-  const refreshOutbox = useCallback(async () => {
-    if (!roomId) return;
-    setOutbox(await loadMessengerOutbox(db, roomId));
-  }, [db, roomId]);
+  const visibleMessages = messages;
 
   const flushOutbox = useCallback(async () => {
-    if (flushRunning.current || !isAuthenticated) return;
+    if (!isAuthenticated) return;
+    if (flushRunning.current) {
+      flushRequested.current = true;
+      return;
+    }
     flushRunning.current = true;
     let firstError: unknown = null;
     try {
-      const pending = await loadMessengerOutbox(db, roomId);
-      messengerLog("debug", "outbox.flush.started", {
-        room_id: roomId,
-        pending_count: pending.length,
-      });
-      for (const item of pending) {
-        try {
-          messengerLog("debug", "outbox.item.sending", {
-            room_id: item.room_id,
-            client_message_id: item.client_message_id,
-            attempts: item.attempts,
-            has_reply: Boolean(item.reply_to_message_id),
-          });
-          const result = await sendMessengerText(
-            item.room_id,
-            item.client_message_id,
-            item.text,
-            item.reply_to_message_id,
-          );
+      const attempted = new Set<string>();
+      let stopForConnection = false;
+      while (!stopForConnection) {
+        const pending = (await loadMessengerOutbox(db, roomId)).filter(
+          (item) => !attempted.has(item.client_message_id),
+        );
+        if (!pending.length) break;
+        messengerLog("debug", "outbox.flush.started", {
+          room_id: roomId,
+          pending_count: pending.length,
+        });
+        for (const item of pending) {
+          attempted.add(item.client_message_id);
           try {
-            await cacheMessengerMessages(db, [result.message]);
-          } catch (cacheError) {
-            logMessageCacheFailure(result.message, cacheError);
+            messengerLog("debug", "outbox.item.sending", {
+              room_id: item.room_id,
+              client_message_id: item.client_message_id,
+              attempts: item.attempts,
+              has_reply: Boolean(item.reply_to_message_id),
+            });
+            const result = await sendMessengerText(
+              item.room_id,
+              item.client_message_id,
+              item.text,
+              item.reply_to_message_id,
+            );
+            setMessages((current) =>
+              mergeMessengerMessages(
+                current,
+                [result.message],
+                reactionMutationIds.current,
+              ),
+            );
+            try {
+              await cacheMessengerMessages(db, [result.message]);
+            } catch (cacheError) {
+              logMessageCacheFailure(result.message, cacheError);
+            }
+            await removeMessengerOutboxItem(db, item.client_message_id);
+            messengerLog("info", "outbox.item.sent", {
+              room_id: item.room_id,
+              client_message_id: item.client_message_id,
+              message_id: result.message.id,
+              created: result.created,
+            });
+          } catch (error) {
+            await markMessengerOutboxFailure(db, item.client_message_id, error);
+            firstError ??= error;
+            const message = messengerErrorMessage(
+              error,
+              "Не удалось отправить сообщение",
+            );
+            setMessages((current) =>
+              current.map((currentMessage) =>
+                currentMessage.client_message_id === item.client_message_id
+                  ? { ...currentMessage, pending: true, send_error: message }
+                  : currentMessage,
+              ),
+            );
+            messengerLog("warn", "outbox.item.failed", {
+              room_id: item.room_id,
+              client_message_id: item.client_message_id,
+              category: isMessengerConnectionError(error)
+                ? "connection"
+                : "server",
+              message,
+            });
+            if (isMessengerConnectionError(error)) {
+              stopForConnection = true;
+              break;
+            }
           }
-          await removeMessengerOutboxItem(db, item.client_message_id);
-          console.log(
-            `[Messenger] Сообщение ${item.client_message_id} отправлено из outbox`,
-          );
-          messengerLog("info", "outbox.item.sent", {
-            room_id: item.room_id,
-            client_message_id: item.client_message_id,
-            message_id: result.message.id,
-            created: result.created,
-          });
-        } catch (error) {
-          await markMessengerOutboxFailure(db, item.client_message_id, error);
-          firstError ??= error;
-          console.warn(
-            `[Messenger] Не удалось отправить outbox ${item.client_message_id}:`,
-            error,
-          );
-          messengerLog("warn", "outbox.item.failed", {
-            room_id: item.room_id,
-            client_message_id: item.client_message_id,
-            category: isMessengerConnectionError(error)
-              ? "connection"
-              : "server",
-            message: messengerErrorMessage(error),
-          });
-          // A rejected message must not block every message queued after it.
-          // On a real connection failure further attempts would only add delay.
-          if (isMessengerConnectionError(error)) break;
         }
       }
-      await refreshOutbox();
       messengerLog(firstError ? "warn" : "debug", "outbox.flush.finished", {
         room_id: roomId,
         failed: Boolean(firstError),
@@ -393,8 +429,16 @@ export default function MessengerRoomScreen() {
       if (firstError) throw firstError;
     } finally {
       flushRunning.current = false;
+      if (flushRequested.current && !firstError) {
+        flushRequested.current = false;
+        setTimeout(() => void flushOutboxRef.current(), 0);
+      }
     }
-  }, [db, isAuthenticated, refreshOutbox, roomId]);
+  }, [db, isAuthenticated, roomId]);
+
+  useEffect(() => {
+    flushOutboxRef.current = flushOutbox;
+  }, [flushOutbox]);
 
   const acknowledgeLatest = useCallback(
     async (sequence: string) => {
@@ -405,6 +449,15 @@ export default function MessengerRoomScreen() {
         return;
       }
       acknowledgedRead.current = { room_id: roomId, sequence };
+      try {
+        await markCachedMessengerRoomRead(db, roomId, sequence);
+      } catch (cacheError) {
+        messengerLog("warn", "room.read.cache_failed", {
+          room_id: roomId,
+          sequence,
+          message: messengerErrorMessage(cacheError),
+        });
+      }
       try {
         // Reading a room also advances its delivered cursor on the server, so
         // a separate /delivered request would only duplicate the same work.
@@ -419,30 +472,111 @@ export default function MessengerRoomScreen() {
         throw error;
       }
     },
-    [roomId],
+    [db, roomId],
+  );
+
+  const hydrateOlderHistory = useCallback(
+    async (oldestSequence: string | null, hasMore: boolean) => {
+      if (
+        !oldestSequence ||
+        !hasMore ||
+        historyHydrationRunning.current ||
+        (await isMessengerRoomHistoryComplete(db, roomId))
+      ) {
+        if (!hasMore) await markMessengerRoomHistoryComplete(db, roomId);
+        return;
+      }
+      historyHydrationRunning.current = true;
+      let cursor: string | null = oldestSequence;
+      let more: boolean = hasMore;
+      try {
+        while (cursor && more) {
+          const page = await getMessengerMessages(roomId, {
+            cursor,
+            direction: "before",
+            limit: 100,
+          });
+          if (!page.items.length) {
+            more = false;
+            break;
+          }
+          await cacheMessengerMessages(db, page.items);
+          setMessages((current) =>
+            mergeMessengerMessages(
+              current,
+              page.items,
+              reactionMutationIds.current,
+            ),
+          );
+          cursor = page.page.oldest_sequence;
+          more = page.page.has_more;
+        }
+        if (!more) await markMessengerRoomHistoryComplete(db, roomId);
+      } catch (error) {
+        messengerLog("warn", "room.history.hydration_failed", {
+          room_id: roomId,
+          message: messengerErrorMessage(error),
+        });
+      } finally {
+        historyHydrationRunning.current = false;
+      }
+    },
+    [db, roomId],
   );
 
   const loadMessages = useCallback(
-    async (scroll = false) => {
+    async (initial = false) => {
       if (!roomId || refreshRunning.current || !isAuthenticated) return;
       refreshRunning.current = true;
       const startedAt = Date.now();
       messengerLog("debug", "room.sync.started", {
         room_id: roomId,
-        scroll,
+        initial,
       });
+      let localItemsShown = false;
       try {
-        const cached = await loadCachedMessengerMessages(db, roomId);
-        if (cached.length) {
-          if (scroll) pendingScrollAnimation.current = false;
-          setMessages(cached);
-          setLoading(false);
+        if (initial && session) {
+          const [cached, pending, cachedRoom] = await Promise.all([
+            loadCachedMessengerMessages(db, roomId),
+            loadMessengerOutbox(db, roomId),
+            loadCachedMessengerRoom(db, roomId),
+          ]);
+          if (!params.lastReadSequence && cachedRoom) {
+            initialReadSequence.current = cachedRoom.last_read_sequence || "0";
+          }
+          const confirmedClientIds = new Set(
+            cached.map((message) => message.client_message_id),
+          );
+          const staleOutboxIds = pending
+            .filter((item) => confirmedClientIds.has(item.client_message_id))
+            .map((item) => item.client_message_id);
+          if (staleOutboxIds.length) {
+            void removeMessengerOutboxItems(db, staleOutboxIds);
+          }
+          const pendingMessages = pending
+            .filter((item) => !confirmedClientIds.has(item.client_message_id))
+            .map((item) =>
+              pendingMessengerMessage(
+                item,
+                session.user,
+                cached.find(
+                  (message) => message.id === item.reply_to_message_id,
+                ),
+              ),
+            );
+          const local = mergeMessengerMessages(cached, pendingMessages);
+          if (local.length) {
+            localItemsShown = true;
+            setMessages(local);
+            setLoading(false);
+            setInitialDataReady(true);
+          }
           messengerLog("debug", "room.cache.loaded", {
             room_id: roomId,
             message_count: cached.length,
+            pending_count: pendingMessages.length,
           });
         }
-        await refreshOutbox();
         let outboxError: unknown = null;
         try {
           await flushOutbox();
@@ -453,13 +587,41 @@ export default function MessengerRoomScreen() {
             messengerErrorMessage(error, "Не удалось отправить сообщение"),
           );
         }
-        const remote = await getMessengerMessages(roomId);
-        if (scroll) pendingScrollAnimation.current = false;
-        setMessages(remote.items);
+        const remote = await getMessengerMessages(roomId, { limit: 100 });
+        latestKnownSequence.current = remote.page.latest_sequence;
+        setMessages((current) =>
+          mergeMessengerMessages(
+            current,
+            remote.items,
+            reactionMutationIds.current,
+          ),
+        );
         await cacheMessengerMessages(db, remote.items);
+        if (remote.items.length) {
+          void removeMessengerOutboxItems(
+            db,
+            remote.items.map((message) => message.client_message_id),
+          );
+        }
         const latestSequence = remote.page.latest_sequence;
-        if (latestSequence) {
+        if (latestSequence && initialReadAcknowledged.current) {
           await acknowledgeLatest(latestSequence);
+        }
+        if (initial) {
+          if (!remote.page.has_more) {
+            await markMessengerRoomHistoryComplete(db, roomId);
+          } else if (localItemsShown) {
+            void hydrateOlderHistory(
+              remote.page.oldest_sequence,
+              remote.page.has_more,
+            );
+          } else {
+            await hydrateOlderHistory(
+              remote.page.oldest_sequence,
+              remote.page.has_more,
+            );
+          }
+          setInitialDataReady(true);
         }
         setOffline(false);
         if (!outboxError) setSyncError(null);
@@ -470,7 +632,6 @@ export default function MessengerRoomScreen() {
           outbox_error: Boolean(outboxError),
           duration_ms: Date.now() - startedAt,
         });
-        if (scroll) scrollToLatest(false);
       } catch (error) {
         setOffline(isMessengerConnectionError(error));
         setSyncError(
@@ -484,6 +645,7 @@ export default function MessengerRoomScreen() {
           duration_ms: Date.now() - startedAt,
         });
       } finally {
+        if (initial && !localItemsShown) setInitialDataReady(true);
         setLoading(false);
         refreshRunning.current = false;
       }
@@ -492,11 +654,113 @@ export default function MessengerRoomScreen() {
       acknowledgeLatest,
       db,
       flushOutbox,
+      hydrateOlderHistory,
       isAuthenticated,
-      refreshOutbox,
+      params.lastReadSequence,
       roomId,
-      scrollToLatest,
+      session,
     ],
+  );
+
+  const finishInitialPosition = useCallback(() => {
+    if (!pendingInitialPosition.current) return;
+    pendingInitialPosition.current = false;
+    setListReady(true);
+    if (initialReadAcknowledged.current) return;
+    initialReadAcknowledged.current = true;
+    const latestSequence =
+      latestKnownSequence.current ||
+      [...messagesRef.current].reverse().find((message) => !message.pending)
+        ?.sequence;
+    if (latestSequence) {
+      void acknowledgeLatest(latestSequence).catch((error) => {
+        initialReadAcknowledged.current = false;
+        console.warn("[Messenger] Не удалось отметить чат прочитанным:", error);
+      });
+    }
+  }, [acknowledgeLatest]);
+
+  const positionInitialMessages = useCallback(() => {
+    if (!pendingInitialPosition.current) return;
+    const current = messagesRef.current;
+    const anchorId = initialAnchorClientId.current;
+    const index = current.findIndex(
+      (message) => message.client_message_id === anchorId,
+    );
+    if (index < 0 || !current.length) {
+      finishInitialPosition();
+      return;
+    }
+    if (index === current.length - 1) {
+      listRef.current?.scrollToEnd({ animated: false });
+      setTimeout(finishInitialPosition, 40);
+      return;
+    }
+    listRef.current?.scrollToIndex({
+      index,
+      animated: false,
+      viewPosition: 0,
+      viewOffset: 10,
+    });
+    setTimeout(finishInitialPosition, 100);
+  }, [finishInitialPosition]);
+
+  useEffect(() => {
+    if (!initialDataReady || initialPositionConfigured.current || !session) {
+      return;
+    }
+    initialPositionConfigured.current = true;
+    const current = messagesRef.current;
+    if (!current.length) {
+      setListReady(true);
+      initialReadAcknowledged.current = true;
+      return;
+    }
+    const firstUnread = firstUnreadMessengerMessage(
+      current,
+      initialReadSequence.current,
+      session.user.id,
+    );
+    setUnreadMarkerClientId(firstUnread?.client_message_id ?? null);
+    initialAnchorClientId.current =
+      firstUnread?.client_message_id ??
+      current.at(-1)?.client_message_id ??
+      null;
+    nearLatest.current = !firstUnread;
+    pendingInitialPosition.current = true;
+    initialPositionAttempts.current = 0;
+    requestAnimationFrame(positionInitialMessages);
+  }, [initialDataReady, positionInitialMessages, session]);
+
+  const handleScrollToIndexFailed = useCallback(
+    (info: {
+      index: number;
+      highestMeasuredFrameIndex: number;
+      averageItemLength: number;
+    }) => {
+      if (!pendingInitialPosition.current) return;
+      initialPositionAttempts.current += 1;
+      listRef.current?.scrollToOffset({
+        offset: Math.max(0, info.averageItemLength * info.index),
+        animated: false,
+      });
+      if (initialPositionAttempts.current >= 2) {
+        setTimeout(finishInitialPosition, 60);
+      } else {
+        setTimeout(positionInitialMessages, 60);
+      }
+    },
+    [finishInitialPosition, positionInitialMessages],
+  );
+
+  const handleListScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } =
+        event.nativeEvent;
+      nearLatest.current =
+        contentOffset.y + layoutMeasurement.height >= contentSize.height - 120;
+    },
+    [],
   );
 
   const scheduleRealtimeSync = useCallback(
@@ -523,30 +787,29 @@ export default function MessengerRoomScreen() {
           event.message.room_id === roomId
         ) {
           const message = event.message;
-          pendingScrollAnimation.current = true;
-          setMessages((current) => {
-            const withoutDuplicate = current.filter(
-              (item) =>
-                item.id !== message.id &&
-                item.client_message_id !== message.client_message_id,
-            );
-            return [...withoutDuplicate, message].sort(
-              (left, right) =>
-                new Date(left.created_at).getTime() -
-                new Date(right.created_at).getTime(),
-            );
-          });
+          setMessages((current) =>
+            mergeMessengerMessages(
+              current,
+              [message],
+              reactionMutationIds.current,
+            ),
+          );
           void cacheMessengerMessages(db, [message]).catch((cacheError) =>
             logMessageCacheFailure(message, cacheError),
           );
-          void acknowledgeLatest(message.sequence).catch((error) =>
-            console.warn(
-              "[Messenger realtime] Не удалось подтвердить сообщение:",
-              error,
-            ),
-          );
-          scheduleRealtimeSync();
-          scrollToLatest(true);
+          void removeMessengerOutboxItem(db, message.client_message_id);
+          latestKnownSequence.current = message.sequence;
+          if (initialReadAcknowledged.current) {
+            void acknowledgeLatest(message.sequence).catch((error) =>
+              console.warn(
+                "[Messenger realtime] Не удалось подтвердить сообщение:",
+                error,
+              ),
+            );
+          }
+          if (nearLatest.current || message.author.id === session?.user.id) {
+            scrollToLatest(true);
+          }
         } else if (
           event.type === "message.receipt_updated" &&
           event.room_id === roomId
@@ -558,16 +821,21 @@ export default function MessengerRoomScreen() {
           }
         } else if (
           event.type === "sync.required" ||
-          event.type === "connection.ready" ||
-          (event.type === "message.reaction_updated" &&
-            event.room_id === roomId)
+          event.type === "connection.ready"
         ) {
+          void flushOutbox().catch(() => undefined);
           scheduleRealtimeSync(0);
+        } else if (
+          event.type === "message.reaction_updated" &&
+          event.room_id === roomId &&
+          !reactionMutationIds.current.has(event.message_id)
+        ) {
+          scheduleRealtimeSync(100);
         }
       });
       // Reconciliation is intentionally infrequent: Socket.IO performs normal
       // foreground delivery, while this timer protects against a lost event.
-      const timer = setInterval(() => void loadMessages(false), 30_000);
+      const timer = setInterval(() => void loadMessages(false), 45_000);
       return () => {
         unsubscribe();
         clearInterval(timer);
@@ -579,11 +847,17 @@ export default function MessengerRoomScreen() {
           clearTimeout(attachmentLaunchTimer.current);
           attachmentLaunchTimer.current = null;
         }
+        if (actionDismissTimer.current) {
+          clearTimeout(actionDismissTimer.current);
+          actionDismissTimer.current = null;
+        }
+        pendingMessageAction.current = null;
         pendingAttachmentKind.current = null;
       };
     }, [
       db,
       acknowledgeLatest,
+      flushOutbox,
       isAuthenticated,
       loadMessages,
       roomId,
@@ -594,51 +868,72 @@ export default function MessengerRoomScreen() {
     ]),
   );
 
-  const send = async () => {
+  const send = () => {
     const body = text.trim();
-    if (!body || !roomId || !session || sending) return;
-    setSending(true);
+    if (!body || !roomId || !session) return;
     const clientMessageId = Crypto.randomUUID();
     const createdAt = new Date().toISOString();
-    try {
-      await enqueueMessengerText(db, {
-        client_message_id: clientMessageId,
-        room_id: roomId,
-        text: body,
-        reply_to_message_id: replyingTo?.id || null,
-        created_at: createdAt,
-      });
-      messengerLog("info", "message.queued", {
-        room_id: roomId,
-        client_message_id: clientMessageId,
-        has_reply: Boolean(replyingTo?.id),
-      });
-      setText("");
-      setReplyingTo(null);
-      pendingScrollAnimation.current = true;
-      await refreshOutbox();
-      scrollToLatest(true);
-      await loadMessages(false);
-    } finally {
-      setSending(false);
-    }
+    const replyTarget = replyingTo;
+    const outboxItem: MessengerOutboxItem = {
+      client_message_id: clientMessageId,
+      room_id: roomId,
+      text: body,
+      reply_to_message_id: replyTarget?.id || null,
+      created_at: createdAt,
+      attempts: 0,
+      last_error: null,
+    };
+    const optimistic = pendingMessengerMessage(
+      outboxItem,
+      session.user,
+      replyTarget ?? undefined,
+    );
+    setText("");
+    setReplyingTo(null);
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setMessages((current) => mergeMessengerMessages(current, [optimistic]));
+    nearLatest.current = true;
+    scrollToLatest(true);
+    // Let React commit and paint the new bubble before touching SQLite or the
+    // network. Delivery metadata then changes independently on the same item.
+    requestAnimationFrame(() => {
+      void (async () => {
+        try {
+          await enqueueMessengerText(db, outboxItem);
+          messengerLog("info", "message.queued", {
+            room_id: roomId,
+            client_message_id: clientMessageId,
+            has_reply: Boolean(replyTarget?.id),
+          });
+          void flushOutbox().catch((error) => {
+            setOffline(isMessengerConnectionError(error));
+            setSyncError(
+              messengerErrorMessage(error, "Не удалось отправить сообщение"),
+            );
+          });
+        } catch (error) {
+          const message = messengerErrorMessage(
+            error,
+            "Не удалось сохранить сообщение локально",
+          );
+          setMessages((current) =>
+            current.map((item) =>
+              item.client_message_id === clientMessageId
+                ? { ...item, send_error: message }
+                : item,
+            ),
+          );
+          setSyncError(message);
+        }
+      })();
+    });
   };
 
   const storeSentMessage = useCallback(
     async (message: MessengerMessage) => {
-      pendingScrollAnimation.current = true;
-      setMessages((current) => {
-        const withoutDuplicate = current.filter(
-          (item) =>
-            item.id !== message.id &&
-            item.client_message_id !== message.client_message_id,
-        );
-        return [...withoutDuplicate, message].sort(
-          (left, right) =>
-            new Date(left.created_at).getTime() -
-            new Date(right.created_at).getTime(),
-        );
-      });
+      setMessages((current) =>
+        mergeMessengerMessages(current, [message], reactionMutationIds.current),
+      );
       try {
         await cacheMessengerMessages(db, [message]);
       } catch (cacheError) {
@@ -867,27 +1162,77 @@ export default function MessengerRoomScreen() {
     message: MessengerMessage,
     reaction: string,
   ) => {
-    if (!canReact || message.pending || reactionBusy) return;
-    setReactionBusy(true);
-    try {
-      const selected = message.reactions.some(
-        (item) => item.reaction === reaction && item.reacted_by_me,
+    if (
+      !canReact ||
+      message.pending ||
+      reactionMutationIds.current.has(message.id)
+    ) {
+      return;
+    }
+    const currentMessage =
+      messagesRef.current.find((item) => item.id === message.id) ?? message;
+    const previousReactions = currentMessage.reactions;
+    const selected = previousReactions.some(
+      (item) => item.reaction === reaction && item.reacted_by_me,
+    );
+    const nextReaction = selected ? null : reaction;
+    const optimisticReactions = applyOptimisticReaction(
+      previousReactions,
+      nextReaction,
+    );
+    reactionMutationIds.current.add(message.id);
+    setReactionBusyIds((current) => new Set(current).add(message.id));
+    const optimisticMessage = {
+      ...currentMessage,
+      reactions: optimisticReactions,
+    };
+    setMessages((current) =>
+      current.map((item) =>
+        item.id === message.id ? optimisticMessage : item,
+      ),
+    );
+    setActionMessage(null);
+    setShowAllReactions(false);
+    void cacheMessengerMessages(db, [optimisticMessage]).catch(() => undefined);
+    if (nextReaction) {
+      void rememberQuickMessengerReaction(nextReaction, quickReactions).then(
+        setQuickReactions,
       );
+    }
+    try {
       const result = selected
         ? await removeMessengerReaction(message.id)
         : await setMessengerReaction(message.id, reaction);
+      const confirmedMessage = {
+        ...optimisticMessage,
+        reactions: result.reactions,
+      };
       setMessages((current) =>
         current.map((item) =>
-          item.id === message.id
-            ? { ...item, reactions: result.reactions }
-            : item,
+          item.id === message.id ? confirmedMessage : item,
         ),
       );
-      setActionMessage(null);
+      void cacheMessengerMessages(db, [confirmedMessage]).catch(
+        () => undefined,
+      );
     } catch (error) {
+      const rolledBack = { ...currentMessage, reactions: previousReactions };
+      setMessages((current) =>
+        current.map((item) => (item.id === message.id ? rolledBack : item)),
+      );
+      void cacheMessengerMessages(db, [rolledBack]).catch(() => undefined);
       console.warn("[Messenger] Не удалось изменить реакцию:", error);
+      Alert.alert(
+        "Реакция не изменена",
+        messengerErrorMessage(error, "Повторите попытку позже"),
+      );
     } finally {
-      setReactionBusy(false);
+      reactionMutationIds.current.delete(message.id);
+      setReactionBusyIds((current) => {
+        const next = new Set(current);
+        next.delete(message.id);
+        return next;
+      });
     }
   };
 
@@ -896,6 +1241,7 @@ export default function MessengerRoomScreen() {
       if (!canWrite || message.pending) return;
       setReplyingTo(message);
       setActionMessage(null);
+      setShowAllReactions(false);
       requestAnimationFrame(() => inputRef.current?.focus());
     },
     [canWrite],
@@ -905,11 +1251,10 @@ export default function MessengerRoomScreen() {
     if (!message.text.trim()) return;
     await Clipboard.setStringAsync(message.text);
     setActionMessage(null);
+    setShowAllReactions(false);
   }, []);
 
-  const beginForward = useCallback(async (message: MessengerMessage) => {
-    if (message.pending || message.deleted_at) return;
-    setActionMessage(null);
+  const openForward = useCallback(async (message: MessengerMessage) => {
     setForwardingMessage(message);
     setForwardLoading(true);
     setForwardError(null);
@@ -932,6 +1277,78 @@ export default function MessengerRoomScreen() {
       setForwardLoading(false);
     }
   }, []);
+
+  const openReceipts = useCallback(async (message: MessengerMessage) => {
+    setReceiptMessage(message);
+    setReceipts([]);
+    setReceiptsLoading(true);
+    setReceiptsError(null);
+    try {
+      const result = await getMessengerMessageReceipts(message.id);
+      setReceipts(result.recipients);
+    } catch (error) {
+      setReceiptsError(
+        messengerErrorMessage(error, "Не удалось загрузить статусы"),
+      );
+    } finally {
+      setReceiptsLoading(false);
+    }
+  }, []);
+
+  const runPendingMessageAction = useCallback(() => {
+    if (actionDismissTimer.current) {
+      clearTimeout(actionDismissTimer.current);
+      actionDismissTimer.current = null;
+    }
+    const pending = pendingMessageAction.current;
+    if (!pending) return;
+    pendingMessageAction.current = null;
+    if (pending.type === "forward") void openForward(pending.message);
+    else void openReceipts(pending.message);
+  }, [openForward, openReceipts]);
+
+  const queueMessageAction = useCallback(
+    (type: "forward" | "receipts", message: MessengerMessage) => {
+      if (message.pending || message.deleted_at) return;
+      pendingMessageAction.current = { type, message };
+      setShowAllReactions(false);
+      setActionMessage(null);
+      if (actionDismissTimer.current) clearTimeout(actionDismissTimer.current);
+      actionDismissTimer.current = setTimeout(
+        runPendingMessageAction,
+        Platform.OS === "ios" ? 650 : 260,
+      );
+    },
+    [runPendingMessageAction],
+  );
+
+  const saveMessageAttachment = useCallback(
+    async (message: MessengerMessage) => {
+      if (!message.media || !session?.access_token || savingMessageId) return;
+      setSavingMessageId(message.id);
+      try {
+        const target = await saveMessengerMediaToDevice(
+          message.media,
+          session.access_token,
+        );
+        setActionMessage(null);
+        Alert.alert(
+          "Вложение сохранено",
+          target === "media_library"
+            ? "Файл добавлен в медиатеку устройства."
+            : "Файл передан в выбранную папку.",
+        );
+      } catch (error) {
+        Alert.alert(
+          "Не удалось сохранить",
+          error instanceof Error ? error.message : "Повторите попытку позже.",
+        );
+      } finally {
+        setSavingMessageId(null);
+      }
+    },
+    [savingMessageId, session?.access_token],
+  );
 
   const forwardTo = useCallback(
     async (busyKey: string, resolveTarget: () => Promise<MessengerRoom>) => {
@@ -1021,12 +1438,24 @@ export default function MessengerRoomScreen() {
           <FlatList
             ref={listRef}
             data={visibleMessages}
-            keyExtractor={(message) => message.id}
+            keyExtractor={(message) => message.client_message_id}
+            style={[styles.messageFeed, !listReady && styles.messageFeedHidden]}
             contentContainerStyle={
               visibleMessages.length ? styles.messageList : styles.emptyList
             }
+            initialNumToRender={18}
+            maxToRenderPerBatch={14}
+            windowSize={9}
+            maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+            onScroll={handleListScroll}
+            scrollEventThrottle={80}
+            onScrollToIndexFailed={handleScrollToIndexFailed}
             onContentSizeChange={() => {
               if (!visibleMessages.length) return;
+              if (pendingInitialPosition.current) {
+                positionInitialMessages();
+                return;
+              }
               const animated = pendingScrollAnimation.current;
               if (animated === null) return;
               pendingScrollAnimation.current = null;
@@ -1053,131 +1482,154 @@ export default function MessengerRoomScreen() {
               const emojiOnly =
                 !item.deleted_at && item.kind === "text" && isEmojiOnly(body);
               return (
-                <SwipeableMessage
-                  enabled={canWrite && !item.pending && !item.deleted_at}
-                  onReply={() => beginReply(item)}
-                >
-                  <View
-                    style={[
-                      styles.messageRow,
-                      mine ? styles.messageRowMine : styles.messageRowTheirs,
-                    ]}
+                <>
+                  {item.client_message_id === unreadMarkerClientId && (
+                    <View style={styles.unreadDivider}>
+                      <View style={styles.unreadDividerLine} />
+                      <Text style={styles.unreadDividerText}>
+                        Непрочитанные сообщения
+                      </Text>
+                      <View style={styles.unreadDividerLine} />
+                    </View>
+                  )}
+                  <SwipeableMessage
+                    enabled={canWrite && !item.pending && !item.deleted_at}
+                    onReply={() => beginReply(item)}
                   >
-                    {!mine && (
-                      <AuthenticatedAvatar
-                        displayName={item.author.display_name}
-                        avatarUrl={item.author.avatar_url}
-                        accessToken={session?.access_token}
-                        size={40}
-                      />
-                    )}
                     <View
                       style={[
-                        styles.messageColumn,
-                        mine && styles.messageColumnMine,
+                        styles.messageRow,
+                        mine ? styles.messageRowMine : styles.messageRowTheirs,
                       ]}
                     >
-                      <TouchableOpacity
-                        activeOpacity={0.94}
-                        delayLongPress={280}
-                        onLongPress={() =>
-                          !item.pending && setActionMessage(item)
-                        }
+                      {!mine && (
+                        <AuthenticatedAvatar
+                          displayName={item.author.display_name}
+                          avatarUrl={item.author.avatar_url}
+                          accessToken={session?.access_token}
+                          size={40}
+                        />
+                      )}
+                      <View
                         style={[
-                          styles.message,
-                          mine ? styles.mine : styles.theirs,
+                          styles.messageColumn,
+                          mine && styles.messageColumnMine,
                         ]}
-                        accessibilityHint="Удерживайте для меню или смахните влево, чтобы ответить"
                       >
-                        <MessageTail mine={mine} />
-                        {item.forwarded_from && (
-                          <View style={styles.forwardedHeader}>
-                            <Icon
-                              name="arrow-redo"
-                              size={14}
-                              color={colors.accent}
+                        <TouchableOpacity
+                          activeOpacity={0.94}
+                          delayLongPress={280}
+                          onLongPress={() => {
+                            if (!item.pending) {
+                              setShowAllReactions(false);
+                              setActionMessage(item);
+                            }
+                          }}
+                          style={[
+                            styles.message,
+                            mine ? styles.mine : styles.theirs,
+                          ]}
+                          accessibilityHint="Удерживайте для меню или смахните влево, чтобы ответить"
+                        >
+                          <MessageTail mine={mine} />
+                          {item.forwarded_from && (
+                            <View style={styles.forwardedHeader}>
+                              <Icon
+                                name="arrow-redo"
+                                size={14}
+                                color={colors.accent}
+                              />
+                              <Text
+                                style={styles.forwardedText}
+                                numberOfLines={1}
+                              >
+                                Переслано от{" "}
+                                {item.forwarded_from.author.display_name}
+                              </Text>
+                            </View>
+                          )}
+                          {item.reply_to && (
+                            <View style={styles.replyQuote}>
+                              <Text
+                                style={styles.replyAuthor}
+                                numberOfLines={1}
+                              >
+                                {item.reply_to.author.display_name}
+                              </Text>
+                              <Text style={styles.replyText} numberOfLines={1}>
+                                {replyPreview(item.reply_to)}
+                              </Text>
+                            </View>
+                          )}
+                          {!mine && (
+                            <Text style={styles.author} numberOfLines={1}>
+                              {item.author.display_name}
+                            </Text>
+                          )}
+                          {(media || location) && session?.access_token && (
+                            <MessengerAttachmentView
+                              media={media}
+                              location={location}
+                              accessToken={session.access_token}
+                              onLongPress={() => {
+                                setShowAllReactions(false);
+                                setActionMessage(item);
+                              }}
                             />
+                          )}
+                          {body ? (
                             <Text
-                              style={styles.forwardedText}
-                              numberOfLines={1}
+                              style={[
+                                styles.messageText,
+                                emojiOnly && styles.emojiOnlyText,
+                              ]}
                             >
-                              Переслано от{" "}
-                              {item.forwarded_from.author.display_name}
+                              {body}
                             </Text>
+                          ) : null}
+                          <View style={styles.messageMeta}>
+                            <Text style={styles.time}>
+                              {new Date(item.created_at).toLocaleTimeString(
+                                "ru-RU",
+                                { hour: "2-digit", minute: "2-digit" },
+                              )}
+                            </Text>
+                            {mine && <DeliveryChecks message={item} />}
                           </View>
-                        )}
-                        {item.reply_to && (
-                          <View style={styles.replyQuote}>
-                            <Text style={styles.replyAuthor} numberOfLines={1}>
-                              {item.reply_to.author.display_name}
-                            </Text>
-                            <Text style={styles.replyText} numberOfLines={1}>
-                              {replyPreview(item.reply_to)}
-                            </Text>
-                          </View>
-                        )}
-                        {!mine && (
-                          <Text style={styles.author} numberOfLines={1}>
-                            {item.author.display_name}
-                          </Text>
-                        )}
-                        {(media || location) && session?.access_token && (
-                          <MessengerAttachmentView
-                            media={media}
-                            location={location}
-                            accessToken={session.access_token}
-                          />
-                        )}
-                        {body ? (
-                          <Text
+                        </TouchableOpacity>
+                        {item.reactions.length > 0 && (
+                          <View
                             style={[
-                              styles.messageText,
-                              emojiOnly && styles.emojiOnlyText,
+                              styles.reactionSummary,
+                              mine && styles.reactionSummaryMine,
                             ]}
                           >
-                            {body}
-                          </Text>
-                        ) : null}
-                        <View style={styles.messageMeta}>
-                          <Text style={styles.time}>
-                            {new Date(item.created_at).toLocaleTimeString(
-                              "ru-RU",
-                              { hour: "2-digit", minute: "2-digit" },
-                            )}
-                          </Text>
-                          {mine && <DeliveryChecks message={item} />}
-                        </View>
-                      </TouchableOpacity>
-                      {item.reactions.length > 0 && (
-                        <View
-                          style={[
-                            styles.reactionSummary,
-                            mine && styles.reactionSummaryMine,
-                          ]}
-                        >
-                          {item.reactions.map((reaction) => (
-                            <TouchableOpacity
-                              key={reaction.reaction}
-                              style={[
-                                styles.reactionChip,
-                                reaction.reacted_by_me &&
-                                  styles.reactionChipSelected,
-                              ]}
-                              onPress={() =>
-                                void toggleReaction(item, reaction.reaction)
-                              }
-                              disabled={!canReact || reactionBusy}
-                            >
-                              <Text style={styles.reactionText}>
-                                {reaction.reaction} {reaction.count}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
-                        </View>
-                      )}
+                            {item.reactions.map((reaction) => (
+                              <TouchableOpacity
+                                key={reaction.reaction}
+                                style={[
+                                  styles.reactionChip,
+                                  reaction.reacted_by_me &&
+                                    styles.reactionChipSelected,
+                                ]}
+                                onPress={() =>
+                                  void toggleReaction(item, reaction.reaction)
+                                }
+                                disabled={
+                                  !canReact || reactionBusyIds.has(item.id)
+                                }
+                              >
+                                <Text style={styles.reactionText}>
+                                  {reaction.reaction} {reaction.count}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        )}
+                      </View>
                     </View>
-                  </View>
-                </SwipeableMessage>
+                  </SwipeableMessage>
+                </>
               );
             }}
             ListEmptyComponent={
@@ -1191,17 +1643,29 @@ export default function MessengerRoomScreen() {
               </View>
             }
           />
+          {!listReady && visibleMessages.length > 0 && (
+            <View style={styles.feedPositioning} pointerEvents="none">
+              <ActivityIndicator color={colors.primary} />
+            </View>
+          )}
         </ImageBackground>
 
         <Modal
           visible={Boolean(actionMessage)}
           transparent
           animationType="fade"
-          onRequestClose={() => setActionMessage(null)}
+          onRequestClose={() => {
+            setShowAllReactions(false);
+            setActionMessage(null);
+          }}
+          onDismiss={runPendingMessageAction}
         >
           <Pressable
             style={styles.modalBackdrop}
-            onPress={() => setActionMessage(null)}
+            onPress={() => {
+              setShowAllReactions(false);
+              setActionMessage(null);
+            }}
           >
             <Pressable
               style={styles.actionSheet}
@@ -1227,22 +1691,54 @@ export default function MessengerRoomScreen() {
                 </View>
               )}
               {canReact && actionMessage && (
-                <View style={styles.reactionPicker}>
-                  {["👍", "❤️", "😂", "😮", "😢", "👏", "🏒"].map(
-                    (reaction) => (
+                <View>
+                  <View style={styles.reactionPicker}>
+                    {quickReactions.map((reaction) => (
                       <TouchableOpacity
                         key={reaction}
                         style={styles.reactionButton}
                         onPress={() =>
                           void toggleReaction(actionMessage, reaction)
                         }
-                        disabled={reactionBusy}
+                        disabled={reactionBusyIds.has(actionMessage.id)}
                       >
                         <Text style={styles.reactionButtonText}>
                           {reaction}
                         </Text>
                       </TouchableOpacity>
-                    ),
+                    ))}
+                    <TouchableOpacity
+                      style={styles.reactionMoreButton}
+                      onPress={() => setShowAllReactions((current) => !current)}
+                      accessibilityLabel="Другие реакции"
+                    >
+                      <Icon
+                        name={showAllReactions ? "chevron-up" : "add"}
+                        size={22}
+                        color={colors.primary}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                  {showAllReactions && (
+                    <View style={styles.reactionPalette}>
+                      {STANDARD_MESSENGER_REACTIONS.map((reaction) => (
+                        <TouchableOpacity
+                          key={reaction}
+                          style={styles.reactionPaletteButton}
+                          onPress={() =>
+                            void toggleReaction(actionMessage, reaction)
+                          }
+                          disabled={reactionBusyIds.has(actionMessage.id)}
+                        >
+                          <Text style={styles.reactionPaletteText}>
+                            {reaction}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                      <Text style={styles.reactionPaletteHint}>
+                        Выбранная реакция попадёт в быстрый набор
+                      </Text>
+                    </View>
                   )}
                 </View>
               )}
@@ -1266,13 +1762,57 @@ export default function MessengerRoomScreen() {
                   </Text>
                 </TouchableOpacity>
               ) : null}
-              {actionMessage && !actionMessage.deleted_at ? (
+              {actionMessage?.media ? (
                 <TouchableOpacity
                   style={styles.messageAction}
-                  onPress={() => void beginForward(actionMessage)}
+                  onPress={() => void saveMessageAttachment(actionMessage)}
+                  disabled={savingMessageId === actionMessage.id}
                 >
-                  <Icon name="arrow-redo" size={21} color={colors.primary} />
-                  <Text style={styles.messageActionText}>Переслать</Text>
+                  {savingMessageId === actionMessage.id ? (
+                    <ActivityIndicator color={colors.primary} />
+                  ) : (
+                    <Icon
+                      name="download-outline"
+                      size={21}
+                      color={colors.primary}
+                    />
+                  )}
+                  <Text style={styles.messageActionText}>Сохранить</Text>
+                </TouchableOpacity>
+              ) : null}
+              {actionMessage &&
+              !actionMessage.pending &&
+              actionMessage.author.id === session?.user.id ? (
+                <TouchableOpacity
+                  style={styles.messageAction}
+                  onPress={() => queueMessageAction("receipts", actionMessage)}
+                >
+                  <Icon
+                    name="checkmark-done"
+                    size={21}
+                    color={colors.primary}
+                  />
+                  <Text style={styles.messageActionText}>Статусы</Text>
+                </TouchableOpacity>
+              ) : null}
+              {actionMessage && !actionMessage.deleted_at ? (
+                <TouchableOpacity
+                  style={[styles.messageAction, styles.messageActionSubtle]}
+                  onPress={() => queueMessageAction("forward", actionMessage)}
+                >
+                  <Icon
+                    name="arrow-redo"
+                    size={19}
+                    color={colors.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.messageActionText,
+                      styles.messageActionTextSubtle,
+                    ]}
+                  >
+                    Переслать
+                  </Text>
                 </TouchableOpacity>
               ) : null}
             </Pressable>
@@ -1328,8 +1868,7 @@ export default function MessengerRoomScreen() {
                     <TouchableOpacity
                       style={styles.forwardError}
                       onPress={() =>
-                        forwardingMessage &&
-                        void beginForward(forwardingMessage)
+                        forwardingMessage && void openForward(forwardingMessage)
                       }
                     >
                       <Icon
@@ -1476,6 +2015,19 @@ export default function MessengerRoomScreen() {
           </Pressable>
         </Modal>
 
+        <MessageReceiptsModal
+          visible={Boolean(receiptMessage)}
+          message={receiptMessage}
+          recipients={receipts}
+          accessToken={session?.access_token}
+          loading={receiptsLoading}
+          error={receiptsError}
+          onClose={() => setReceiptMessage(null)}
+          onRetry={() => {
+            if (receiptMessage) void openReceipts(receiptMessage);
+          }}
+        />
+
         <Modal
           visible={attachmentMenuVisible}
           transparent
@@ -1603,16 +2155,12 @@ export default function MessengerRoomScreen() {
               <TouchableOpacity
                 style={[
                   styles.sendButton,
-                  (!text.trim() || sending) && styles.sendButtonDisabled,
+                  !text.trim() && styles.sendButtonDisabled,
                 ]}
                 onPress={send}
-                disabled={!text.trim() || sending}
+                disabled={!text.trim()}
               >
-                {sending ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Icon name="send" size={23} color={colors.white} />
-                )}
+                <Icon name="send" size={23} color={colors.white} />
               </TouchableOpacity>
             </View>
           </View>
@@ -1657,8 +2205,32 @@ const styles = StyleSheet.create({
   headerText: { flex: 1, marginLeft: 6 },
   title: { fontSize: 19, fontWeight: "800", color: colors.text },
   subtitle: { marginTop: 2, fontSize: 12, color: colors.textSecondary },
+  messageFeed: { flex: 1 },
+  messageFeedHidden: { opacity: 0 },
+  feedPositioning: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   messageList: { padding: 14, paddingBottom: 20 },
   emptyList: { flexGrow: 1, justifyContent: "center" },
+  unreadDivider: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 2,
+    marginBottom: 12,
+  },
+  unreadDividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.primary,
+  },
+  unreadDividerText: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "800",
+  },
   swipeShell: { position: "relative", width: "100%" },
   swipeReplyCue: {
     position: "absolute",
@@ -1850,6 +2422,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(16, 40, 68, 0.38)",
   },
   actionSheet: {
+    maxHeight: "88%",
     padding: 16,
     borderRadius: 20,
     backgroundColor: colors.surface,
@@ -1884,6 +2457,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#EAF3FF",
   },
   messageActionText: { color: colors.primary, fontSize: 15, fontWeight: "800" },
+  messageActionSubtle: {
+    minHeight: 40,
+    marginTop: 7,
+    backgroundColor: "rgba(23, 52, 87, 0.055)",
+  },
+  messageActionTextSubtle: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: "700",
+  },
   forwardSheet: {
     maxHeight: "82%",
     padding: 16,
@@ -2012,7 +2595,6 @@ const styles = StyleSheet.create({
   },
   reactionPicker: {
     flexDirection: "row",
-    justifyContent: "space-between",
     gap: 4,
     marginBottom: 12,
   },
@@ -2025,6 +2607,40 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundAlt,
   },
   reactionButtonText: { fontSize: 23 },
+  reactionMoreButton: {
+    width: 38,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: "#EAF3FF",
+  },
+  reactionPalette: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 5,
+    marginTop: -5,
+    marginBottom: 12,
+    padding: 8,
+    borderRadius: 14,
+    backgroundColor: colors.backgroundAlt,
+  },
+  reactionPaletteButton: {
+    width: "12.5%",
+    minHeight: 38,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+  },
+  reactionPaletteText: { fontSize: 22 },
+  reactionPaletteHint: {
+    width: "100%",
+    marginTop: 3,
+    color: colors.textSecondary,
+    fontSize: 10,
+    textAlign: "center",
+  },
   readOnly: {
     padding: 14,
     borderTopWidth: 1,

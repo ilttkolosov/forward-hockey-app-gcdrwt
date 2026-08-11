@@ -20,24 +20,28 @@ import {
   cacheMessengerMedia,
   formatMessengerBytes,
 } from "../../services/messengerMediaCache";
+import { saveMessengerMediaToDevice } from "../../services/messengerMediaSave";
 import { colors } from "../../styles/commonStyles";
 
 interface MessengerAttachmentViewProps {
   media: MessengerMedia | null;
   location: MessengerLocation | null;
   accessToken: string;
+  onLongPress?: () => void;
 }
 
 export default function MessengerAttachmentView({
   media,
   location,
   accessToken,
+  onLongPress,
 }: MessengerAttachmentViewProps) {
   const insets = useSafeAreaInsets();
   const [localUri, setLocalUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewerVisible, setViewerVisible] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setLocalUri(null);
@@ -105,6 +109,29 @@ export default function MessengerAttachmentView({
     }
   };
 
+  const saveToDevice = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const target = await saveMessengerMediaToDevice(media, accessToken);
+      Alert.alert(
+        "Вложение сохранено",
+        target === "media_library"
+          ? "Файл добавлен в медиатеку устройства."
+          : "Файл передан в выбранную папку.",
+      );
+    } catch (saveError) {
+      Alert.alert(
+        "Не удалось сохранить",
+        saveError instanceof Error
+          ? saveError.message
+          : "Повторите попытку позже.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <>
       {media.type === "image" ? (
@@ -112,6 +139,8 @@ export default function MessengerAttachmentView({
           style={styles.imageFrame}
           activeOpacity={0.9}
           onPress={openViewer}
+          onLongPress={onLongPress}
+          delayLongPress={280}
         >
           {localUri ? (
             <Image
@@ -127,33 +156,49 @@ export default function MessengerAttachmentView({
           )}
         </TouchableOpacity>
       ) : (
-        <TouchableOpacity
-          style={styles.fileCard}
-          activeOpacity={0.84}
-          onPress={media.type === "video" ? openViewer : openFile}
-          disabled={loading}
-        >
-          <View style={styles.fileIcon}>
-            {loading ? (
-              <ActivityIndicator color={colors.white} />
+        <View style={styles.fileCard}>
+          <TouchableOpacity
+            style={styles.fileOpenAction}
+            activeOpacity={0.84}
+            onPress={media.type === "video" ? openViewer : openFile}
+            onLongPress={onLongPress}
+            delayLongPress={280}
+            disabled={loading}
+          >
+            <View style={styles.fileIcon}>
+              {loading ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Icon
+                  name={media.type === "video" ? "play" : "document-text"}
+                  size={23}
+                  color={colors.white}
+                />
+              )}
+            </View>
+            <View style={styles.attachmentText}>
+              <Text style={styles.attachmentTitle} numberOfLines={2}>
+                {media.original_name ||
+                  (media.type === "video" ? "Видео" : "Файл")}
+              </Text>
+              <Text style={styles.attachmentSubtitle}>
+                {formatMessengerBytes(media.size_bytes)} · Нажмите для просмотра
+              </Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.inlineSaveButton}
+            onPress={() => void saveToDevice()}
+            disabled={saving}
+            accessibilityLabel="Сохранить вложение"
+          >
+            {saving ? (
+              <ActivityIndicator color={colors.primary} />
             ) : (
-              <Icon
-                name={media.type === "video" ? "play" : "document-text"}
-                size={23}
-                color={colors.white}
-              />
+              <Icon name="download-outline" size={21} color={colors.primary} />
             )}
-          </View>
-          <View style={styles.attachmentText}>
-            <Text style={styles.attachmentTitle} numberOfLines={2}>
-              {media.original_name ||
-                (media.type === "video" ? "Видео" : "Файл")}
-            </Text>
-            <Text style={styles.attachmentSubtitle}>
-              {formatMessengerBytes(media.size_bytes)} · Нажмите для просмотра
-            </Text>
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+        </View>
       )}
 
       {error && (
@@ -185,6 +230,18 @@ export default function MessengerAttachmentView({
               {media.original_name ||
                 (media.type === "image" ? "Фотография" : "Видео")}
             </Text>
+            <TouchableOpacity
+              style={styles.viewerActionButton}
+              onPress={() => void saveToDevice()}
+              disabled={saving}
+              accessibilityLabel="Сохранить вложение"
+            >
+              {saving ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Icon name="download-outline" size={24} color={colors.white} />
+              )}
+            </TouchableOpacity>
             <TouchableOpacity
               style={[
                 styles.closeButton,
@@ -251,11 +308,24 @@ const styles = StyleSheet.create({
     minHeight: 66,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
     marginBottom: 4,
-    padding: 9,
     borderRadius: 13,
     backgroundColor: "rgba(255, 255, 255, 0.54)",
+  },
+  fileOpenAction: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    padding: 9,
+  },
+  inlineSaveButton: {
+    width: 44,
+    height: 56,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 3,
   },
   fileIcon: {
     width: 44,
@@ -289,6 +359,13 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(255,255,255,0.2)",
   },
   viewerTitle: { flex: 1, color: colors.white, fontWeight: "700" },
+  viewerActionButton: {
+    width: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 24,
+  },
   closeButton: {
     width: 48,
     height: 48,
