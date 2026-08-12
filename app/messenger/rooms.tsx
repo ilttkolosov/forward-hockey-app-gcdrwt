@@ -4,6 +4,7 @@ import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   Modal,
   Pressable,
   RefreshControl,
@@ -57,6 +58,10 @@ const BUILT_IN_ROOM_KINDS = new Set([
   "parent_committee",
   "coaching_staff",
 ]);
+
+function isPresetRoom(room: MessengerRoom): boolean {
+  return room.room_type === "group" && BUILT_IN_ROOM_KINDS.has(room.kind);
+}
 
 function isSameLocalDay(left: Date, right: Date): boolean {
   return (
@@ -369,7 +374,6 @@ export default function MessengerRoomsScreen() {
       <FlatList
         data={orderedRooms}
         keyExtractor={(room) => room.id}
-        ItemSeparatorComponent={() => <View style={styles.roomSeparator} />}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -379,10 +383,13 @@ export default function MessengerRoomsScreen() {
         contentContainerStyle={
           orderedRooms.length ? styles.list : styles.emptyList
         }
-        renderItem={({ item }) => {
+        renderItem={({ item, index }) => {
           const direct = item.room_type === "direct" || item.kind === "direct";
-          const preset =
-            item.room_type === "group" && BUILT_IN_ROOM_KINDS.has(item.kind);
+          const preset = isPresetRoom(item);
+          const hasNextRoom = index < orderedRooms.length - 1;
+          const nextRoom = orderedRooms[index + 1];
+          const separatesPresetRooms =
+            preset && nextRoom !== undefined && !isPresetRoom(nextRoom);
           const authorName = item.last_message
             ? item.last_message.author.id === session?.user.id
               ? "Вы"
@@ -392,69 +399,85 @@ export default function MessengerRoomsScreen() {
             item.last_message?.created_at,
           );
           return (
-            <TouchableOpacity
-              style={styles.roomRow}
-              onPress={() => openRoom(item)}
-              activeOpacity={0.68}
-              accessibilityRole="button"
-              accessibilityLabel={`${item.title}${
-                item.unread_count > 0
-                  ? `, непрочитанных сообщений: ${item.unread_count}`
-                  : ""
-              }`}
-            >
-              {direct && item.peer ? (
-                <AuthenticatedAvatar
-                  displayName={item.peer.display_name}
-                  avatarUrl={item.peer.avatar_url}
-                  accessToken={session?.access_token}
-                  size={62}
-                />
-              ) : (
-                <AuthenticatedAvatar
-                  displayName={item.title}
-                  avatarUrl={item.avatar_url}
-                  accessToken={session?.access_token}
-                  size={62}
-                />
-              )}
-              <View style={styles.roomContent}>
-                <View style={styles.roomTitleRow}>
-                  <Text style={styles.roomTitle} numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                  {preset && (
-                    <Icon
-                      name="pin-outline"
-                      type="material-community"
-                      size={16}
-                      color="#96A4AF"
-                      style={styles.presetPin}
-                    />
-                  )}
-                </View>
-                {!direct && item.last_message && (
-                  <Text style={styles.messageAuthor} numberOfLines={1}>
-                    {authorName}
-                  </Text>
+            <>
+              <TouchableOpacity
+                style={[styles.roomRow, preset && styles.presetRoomRow]}
+                onPress={() => openRoom(item)}
+                activeOpacity={0.68}
+                accessibilityRole="button"
+                accessibilityLabel={`${item.title}${
+                  item.unread_count > 0
+                    ? `, непрочитанных сообщений: ${item.unread_count}`
+                    : ""
+                }`}
+              >
+                {direct && item.peer ? (
+                  <AuthenticatedAvatar
+                    displayName={item.peer.display_name}
+                    avatarUrl={item.peer.avatar_url}
+                    accessToken={session?.access_token}
+                    size={62}
+                  />
+                ) : (
+                  <AuthenticatedAvatar
+                    displayName={item.title}
+                    avatarUrl={item.avatar_url}
+                    accessToken={session?.access_token}
+                    size={62}
+                  />
                 )}
-                <Text style={styles.preview} numberOfLines={1}>
-                  {lastMessageText(item)}
-                </Text>
-              </View>
-              <View style={styles.roomMeta}>
-                <Text style={styles.activityTime}>{activityTime}</Text>
-                <View style={styles.roomIndicators}>
-                  {item.unread_count > 0 && (
-                    <View style={styles.unreadBadge}>
-                      <Text style={styles.unreadText}>
-                        {item.unread_count > 999 ? "999+" : item.unread_count}
-                      </Text>
-                    </View>
+                <View style={styles.roomContent}>
+                  <View style={styles.roomTitleRow}>
+                    <Text style={styles.roomTitle} numberOfLines={1}>
+                      {item.title}
+                    </Text>
+                    {preset && (
+                      <Image
+                        source={require("../../assets/messenger/chat-pin.png")}
+                        style={styles.presetPin}
+                        resizeMode="contain"
+                        accessibilityIgnoresInvertColors
+                      />
+                    )}
+                  </View>
+                  {!direct && item.last_message && (
+                    <Text style={styles.messageAuthor} numberOfLines={1}>
+                      {authorName}
+                    </Text>
                   )}
+                  <Text style={styles.preview} numberOfLines={1}>
+                    {lastMessageText(item)}
+                  </Text>
                 </View>
-              </View>
-            </TouchableOpacity>
+                <View style={styles.roomMeta}>
+                  <Text style={styles.activityTime}>{activityTime}</Text>
+                  <View style={styles.roomIndicators}>
+                    {item.unread_count > 0 && (
+                      <View style={styles.unreadBadge}>
+                        <Text style={styles.unreadText}>
+                          {item.unread_count > 999 ? "999+" : item.unread_count}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </TouchableOpacity>
+              {hasNextRoom && (
+                <View
+                  style={[
+                    styles.roomSeparatorContainer,
+                    preset && styles.presetRoomSeparatorContainer,
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.roomSeparator,
+                      separatesPresetRooms && styles.presetBoundarySeparator,
+                    ]}
+                  />
+                </View>
+              )}
+            </>
           );
         }}
         ListEmptyComponent={
@@ -580,17 +603,24 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    minHeight: 88,
+    minHeight: 78,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 7,
     backgroundColor: colors.surface,
   },
-  roomSeparator: {
+  presetRoomRow: { backgroundColor: colors.backgroundAlt },
+  roomSeparatorContainer: {
     height: 1,
+    backgroundColor: colors.surface,
+  },
+  presetRoomSeparatorContainer: { backgroundColor: colors.backgroundAlt },
+  roomSeparator: {
+    flex: 1,
     marginLeft: 88,
     marginRight: 14,
     backgroundColor: "#D5DEE5",
   },
+  presetBoundarySeparator: { marginLeft: 0, marginRight: 0 },
   roomContent: {
     flex: 1,
     minWidth: 0,
@@ -608,7 +638,12 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: colors.text,
   },
-  presetPin: { marginLeft: 6 },
+  presetPin: {
+    width: 16,
+    height: 16,
+    marginLeft: 6,
+    tintColor: "#96A4AF",
+  },
   messageAuthor: {
     marginTop: 3,
     fontSize: 13,

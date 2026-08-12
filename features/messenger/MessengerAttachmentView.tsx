@@ -5,11 +5,13 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Modal,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -43,22 +45,27 @@ export default function MessengerAttachmentView({
   accessToken,
 }: MessengerAttachmentViewProps) {
   const insets = useSafeAreaInsets();
+  const { width: viewerWidth } = useWindowDimensions();
   const items = useMemo(
     () => (mediaItems?.length ? mediaItems : media ? [media] : []),
     [media, mediaItems],
+  );
+  const viewerItems = useMemo(
+    () => items.filter((item) => item.type !== "file"),
+    [items],
   );
   const itemIdentity = items.map((item) => item.id).join(":");
   const [localUris, setLocalUris] = useState<Record<string, string>>({});
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [viewerMedia, setViewerMedia] = useState<MessengerMedia | null>(null);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
 
   useEffect(() => {
     setLocalUris({});
     setLoadingIds(new Set());
     setErrors({});
-    setViewerMedia(null);
+    setViewerIndex(null);
   }, [itemIdentity]);
 
   const ensureLocal = useCallback(
@@ -95,6 +102,14 @@ export default function MessengerAttachmentView({
       .forEach((item) => void ensureLocal(item).catch(() => undefined));
   }, [ensureLocal, itemIdentity, items]);
 
+  useEffect(() => {
+    if (viewerIndex === null) return;
+    [viewerIndex - 1, viewerIndex, viewerIndex + 1].forEach((index) => {
+      const item = viewerItems[index];
+      if (item) void ensureLocal(item).catch(() => undefined);
+    });
+  }, [ensureLocal, viewerIndex, viewerItems]);
+
   if (location) return <MessengerLocationPreview location={location} />;
   if (!items.length) return null;
 
@@ -124,7 +139,10 @@ export default function MessengerAttachmentView({
     }
     try {
       await ensureLocal(item);
-      setViewerMedia(item);
+      const index = viewerItems.findIndex(
+        (candidate) => candidate.id === item.id,
+      );
+      if (index >= 0) setViewerIndex(index);
     } catch {
       // The tile keeps a visible retry state.
     }
@@ -217,7 +235,8 @@ export default function MessengerAttachmentView({
   const singleLocalUri = single ? localUris[single.id] : null;
   const singleLoading = single ? loadingIds.has(single.id) : false;
   const singleError = single ? errors[single.id] : null;
-  const viewerUri = viewerMedia ? localUris[viewerMedia.id] : null;
+  const viewerMedia =
+    viewerIndex === null ? null : (viewerItems[viewerIndex] ?? null);
 
   return (
     <>
@@ -294,11 +313,11 @@ export default function MessengerAttachmentView({
       )}
 
       <Modal
-        visible={Boolean(viewerMedia)}
+        visible={viewerIndex !== null}
         animationType="fade"
         presentationStyle="fullScreen"
         statusBarTranslucent={false}
-        onRequestClose={() => setViewerMedia(null)}
+        onRequestClose={() => setViewerIndex(null)}
       >
         <View
           style={[
@@ -314,6 +333,11 @@ export default function MessengerAttachmentView({
               {viewerMedia?.original_name ||
                 (viewerMedia?.type === "image" ? "Фотография" : "Видео")}
             </Text>
+            {viewerIndex !== null && viewerItems.length > 1 && (
+              <Text style={styles.viewerCounter}>
+                {viewerIndex + 1} из {viewerItems.length}
+              </Text>
+            )}
             {viewerMedia && (
               <TouchableOpacity
                 style={styles.viewerActionButton}
@@ -337,39 +361,97 @@ export default function MessengerAttachmentView({
                 styles.closeButton,
                 { marginRight: Math.max(insets.right, 8) },
               ]}
-              onPress={() => setViewerMedia(null)}
+              onPress={() => setViewerIndex(null)}
               hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
               accessibilityLabel="Закрыть просмотр"
             >
               <Icon name="close" size={28} color={colors.white} />
             </TouchableOpacity>
           </View>
-          <View style={styles.viewerContent}>
-            {viewerUri && viewerMedia?.type === "image" && (
-              <ScrollView
-                style={styles.zoomContainer}
-                contentContainerStyle={styles.zoomContent}
-                minimumZoomScale={1}
-                maximumZoomScale={4}
-                centerContent
-              >
-                <Image
-                  source={viewerUri}
-                  style={styles.fullImage}
-                  contentFit="contain"
-                />
-              </ScrollView>
-            )}
-            {viewerUri && viewerMedia?.type === "video" && (
-              <Video
-                source={{ uri: viewerUri }}
-                style={styles.fullVideo}
-                useNativeControls
-                resizeMode={ResizeMode.CONTAIN}
-                shouldPlay
-              />
-            )}
-          </View>
+          {viewerIndex !== null && (
+            <FlatList
+              key={`attachment-viewer-${viewerWidth}`}
+              style={styles.viewerPager}
+              data={viewerItems}
+              keyExtractor={(item) => item.id}
+              horizontal
+              pagingEnabled
+              bounces={false}
+              showsHorizontalScrollIndicator={false}
+              initialScrollIndex={viewerIndex}
+              getItemLayout={(_data, index) => ({
+                length: viewerWidth,
+                offset: viewerWidth * index,
+                index,
+              })}
+              onMomentumScrollEnd={(event) => {
+                const nextIndex = Math.round(
+                  event.nativeEvent.contentOffset.x / viewerWidth,
+                );
+                if (viewerItems[nextIndex]) setViewerIndex(nextIndex);
+              }}
+              renderItem={({ item, index }) => {
+                const localUri = localUris[item.id];
+                const loading = loadingIds.has(item.id);
+                const error = errors[item.id];
+                return (
+                  <View style={[styles.viewerPage, { width: viewerWidth }]}>
+                    {localUri && item.type === "image" && (
+                      <ScrollView
+                        style={styles.zoomContainer}
+                        contentContainerStyle={styles.zoomContent}
+                        minimumZoomScale={1}
+                        maximumZoomScale={4}
+                        centerContent
+                      >
+                        <Image
+                          source={localUri}
+                          style={styles.fullImage}
+                          contentFit="contain"
+                        />
+                      </ScrollView>
+                    )}
+                    {localUri && item.type === "video" && (
+                      <Video
+                        source={{ uri: localUri }}
+                        style={styles.fullVideo}
+                        useNativeControls
+                        resizeMode={ResizeMode.CONTAIN}
+                        shouldPlay={index === viewerIndex}
+                      />
+                    )}
+                    {!localUri && (
+                      <TouchableOpacity
+                        style={styles.viewerLoading}
+                        onPress={() =>
+                          void ensureLocal(item).catch(() => undefined)
+                        }
+                        disabled={loading}
+                      >
+                        {loading ? (
+                          <ActivityIndicator
+                            color={colors.white}
+                            size="large"
+                          />
+                        ) : (
+                          <>
+                            <Icon
+                              name="refresh-outline"
+                              size={34}
+                              color={colors.white}
+                            />
+                            <Text style={styles.viewerErrorText}>
+                              {error || "Нажмите, чтобы загрузить"}
+                            </Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              }}
+            />
+          )}
         </View>
       </Modal>
     </>
@@ -490,6 +572,12 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(255,255,255,0.2)",
   },
   viewerTitle: { flex: 1, color: colors.white, fontWeight: "700" },
+  viewerCounter: {
+    marginHorizontal: 8,
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 12,
+    fontWeight: "700",
+  },
   viewerActionButton: {
     width: 48,
     height: 48,
@@ -505,7 +593,21 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: "rgba(255,255,255,0.12)",
   },
-  viewerContent: { flex: 1, alignItems: "center", justifyContent: "center" },
+  viewerPager: { flex: 1 },
+  viewerPage: { flex: 1, alignItems: "center", justifyContent: "center" },
+  viewerLoading: {
+    flex: 1,
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    paddingHorizontal: 28,
+  },
+  viewerErrorText: {
+    color: colors.white,
+    fontSize: 13,
+    textAlign: "center",
+  },
   zoomContainer: { width: "100%", height: "100%" },
   zoomContent: { flexGrow: 1, alignItems: "center", justifyContent: "center" },
   fullImage: { width: "100%", height: "100%", minHeight: 500 },
