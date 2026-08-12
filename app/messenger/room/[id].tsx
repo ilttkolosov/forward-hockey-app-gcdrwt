@@ -93,6 +93,7 @@ import {
   getMessengerRoomMembers,
   getMessengerRooms,
   isMessengerConnectionError,
+  isMessengerUploadCancelledError,
   messengerErrorMessage,
   removeMessengerReaction,
   sendMessengerLocation,
@@ -603,6 +604,8 @@ export default function MessengerRoomScreen() {
   const pendingAttachmentRequest = useRef<PendingAttachmentRequest | null>(
     null,
   );
+  const activeMediaUpload = useRef<AbortController | null>(null);
+  const activeMediaUploadClientId = useRef<string | null>(null);
   const keyboardScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -1733,6 +1736,23 @@ export default function MessengerRoomScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      return () => {
+        const controller = activeMediaUpload.current;
+        const clientMessageId = activeMediaUploadClientId.current;
+        activeMediaUpload.current = null;
+        activeMediaUploadClientId.current = null;
+        if (!controller) return;
+        controller.abort();
+        messengerLog("info", "media.upload.cancelled_on_blur", {
+          room_id: roomId,
+          client_message_id: clientMessageId,
+        });
+      };
+    }, [roomId]),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
       if (!isAuthenticated) {
         router.replace("/messenger/register");
         return;
@@ -1968,7 +1988,7 @@ export default function MessengerRoomScreen() {
   );
 
   const sendUpload = useCallback(
-    async (request: MediaUploadRequest) => {
+    async (request: MediaUploadRequest, signal: AbortSignal) => {
       assertMessengerUploadLimits(request.files);
       const totalUploadBytes = request.files.reduce(
         (total, file) => total + (file.size_bytes ?? 0),
@@ -1992,6 +2012,7 @@ export default function MessengerRoomScreen() {
         request.caption,
         request.replyTarget?.id,
         ({ percent }) => {
+          if (signal.aborted) return;
           if (
             percent !== 100 &&
             lastShownPercent >= 0 &&
@@ -2010,6 +2031,7 @@ export default function MessengerRoomScreen() {
               : null,
           }));
         },
+        signal,
       );
       const serverAcceptedAt = Date.now();
       messengerLog("info", "media.upload.server_accepted", {
@@ -2272,6 +2294,10 @@ export default function MessengerRoomScreen() {
       caption,
       replyTarget,
     };
+    const uploadController = new AbortController();
+    activeMediaUpload.current?.abort();
+    activeMediaUpload.current = uploadController;
+    activeMediaUploadClientId.current = clientMessageId;
     const optimistic = pendingMessengerAttachmentMessage(
       roomId,
       clientMessageId,
@@ -2304,12 +2330,13 @@ export default function MessengerRoomScreen() {
     nearLatest.current = true;
     scrollToLatest(true);
     requestAnimationFrame(() => {
-      void sendUpload(request)
+      void sendUpload(request, uploadController.signal)
         .then(() => {
           setOffline(false);
           setSyncError(null);
         })
         .catch((error) => {
+          if (isMessengerUploadCancelledError(error)) return;
           const message = messengerErrorMessage(
             error,
             "Не удалось отправить вложение",
@@ -2335,7 +2362,12 @@ export default function MessengerRoomScreen() {
           });
           Alert.alert("Ошибка вложения", message);
         })
-        .finally(() => setSending(false));
+        .finally(() => {
+          if (activeMediaUpload.current !== uploadController) return;
+          activeMediaUpload.current = null;
+          activeMediaUploadClientId.current = null;
+          setSending(false);
+        });
     });
   }, [
     attachmentDraft,
@@ -2896,6 +2928,11 @@ export default function MessengerRoomScreen() {
                                 mediaItems={mediaItems}
                                 location={location}
                                 accessToken={session.access_token}
+                                deferAutomaticCache={
+                                  mine &&
+                                  activeMediaUploadClientId.current ===
+                                    item.client_message_id
+                                }
                               />
                             )}
                           {pendingAttachment ? (

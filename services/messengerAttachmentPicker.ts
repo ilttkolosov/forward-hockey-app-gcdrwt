@@ -25,7 +25,10 @@ export interface MessengerMediaPreparationProgress {
 
 const MAX_PHOTO_EDGE = 1600;
 const PHOTO_JPEG_QUALITY = 0.68;
-const MAX_PHOTO_UPLOAD_BYTES = 350 * 1024;
+// Small originals cost less to upload than to decode, recompress and copy.
+// Keep them byte-for-byte as selected; the server validates the real file
+// signature independently of the client-provided MIME type and filename.
+const PHOTO_COMPRESSION_SKIP_BYTES = 500 * 1024;
 const SECOND_PASS_EDGE = 1280;
 const SECOND_PASS_QUALITY = 0.58;
 const MAX_VIDEO_EDGE = 720;
@@ -156,26 +159,54 @@ function resizeToLongestEdge(
   ];
 }
 
+function originalPhotoType(
+  asset: ImagePicker.ImagePickerAsset,
+): { mimeType: string; extension: string } | null {
+  const mimeType = asset.mimeType?.toLowerCase();
+  const extension = (asset.fileName || asset.uri.split(/[?#]/)[0])
+    .match(/\.([a-z0-9]+)$/i)?.[1]
+    ?.toLowerCase();
+  const byMime: Record<string, string> = {
+    "image/avif": "avif",
+    "image/heic": "heic",
+    "image/heif": "heic",
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+  };
+  if (mimeType && byMime[mimeType]) {
+    return { mimeType, extension: byMime[mimeType] };
+  }
+  const byExtension: Record<string, string> = {
+    avif: "image/avif",
+    heic: "image/heic",
+    heif: "image/heif",
+    jpeg: "image/jpeg",
+    jpg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+  };
+  return extension && byExtension[extension]
+    ? { mimeType: byExtension[extension], extension }
+    : null;
+}
+
 /**
- * Converts every selected photo to a reasonably sized JPEG before upload.
- * The first pass is suitable for normal phone viewing. Detailed/noisy photos
- * that remain above 350 KiB receive a stronger second pass so the small test
- * server and mobile connections are not burdened by camera-sized originals.
+ * Leaves supported originals up to 500 KiB untouched. Larger photos are
+ * converted to a reasonably sized JPEG; detailed/noisy results that remain
+ * above the threshold receive a stronger second pass so mobile connections
+ * are not burdened by camera-sized originals.
  */
 async function compressedPhoto(
   asset: ImagePicker.ImagePickerAsset,
 ): Promise<MessengerUploadFile> {
   const startedAt = Date.now();
   const originalSize = await localFileSize(asset.uri, asset.fileSize);
-  const sourceIsJpeg =
-    asset.mimeType === "image/jpeg" ||
-    /\.jpe?g$/i.test(asset.fileName || asset.uri.split(/[?#]/)[0]);
+  const originalType = originalPhotoType(asset);
   if (
-    sourceIsJpeg &&
+    originalType &&
     originalSize !== null &&
-    originalSize <= MAX_PHOTO_UPLOAD_BYTES &&
-    asset.width <= MAX_PHOTO_EDGE &&
-    asset.height <= MAX_PHOTO_EDGE
+    originalSize <= PHOTO_COMPRESSION_SKIP_BYTES
   ) {
     messengerLog("info", "photo.compression.skipped", {
       reason: "already_upload_ready",
@@ -187,8 +218,8 @@ async function compressedPhoto(
     });
     return {
       uri: asset.uri,
-      name: asset.fileName || `photo-${Date.now()}.jpg`,
-      type: "image/jpeg",
+      name: asset.fileName || `photo-${Date.now()}.${originalType.extension}`,
+      type: originalType.mimeType,
       kind: "image",
       size_bytes: originalSize,
       original_size_bytes: originalSize,
@@ -207,7 +238,10 @@ async function compressedPhoto(
     },
   );
   let compressedSize = await localFileSize(result.uri);
-  if (compressedSize !== null && compressedSize > MAX_PHOTO_UPLOAD_BYTES) {
+  if (
+    compressedSize !== null &&
+    compressedSize > PHOTO_COMPRESSION_SKIP_BYTES
+  ) {
     passCount = 2;
     result = await ImageManipulator.manipulateAsync(
       result.uri,

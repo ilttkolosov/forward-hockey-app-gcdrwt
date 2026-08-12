@@ -68,6 +68,19 @@ export class MessengerApiError extends Error {
   }
 }
 
+export class MessengerUploadCancelledError extends Error {
+  constructor(message = "Загрузка отменена") {
+    super(message);
+    this.name = "MessengerUploadCancelledError";
+  }
+}
+
+export function isMessengerUploadCancelledError(
+  error: unknown,
+): error is MessengerUploadCancelledError {
+  return error instanceof MessengerUploadCancelledError;
+}
+
 /**
  * HTTP errors mean that the device reached the messenger server and received
  * a response. Only fetch-level failures should switch the UI to offline mode.
@@ -559,7 +572,10 @@ type MessengerMediaUploadResult = {
   created: boolean;
 };
 
-const MEDIA_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+// Slow mobile uplinks may legitimately need more than ten minutes for the
+// allowed 50 MiB. Cancel only a stalled transfer; continuing byte progress is
+// not an error and must not be cut off by an absolute wall-clock timeout.
+const MEDIA_UPLOAD_STALL_TIMEOUT_MS = 3 * 60 * 1000;
 
 async function sendSingleMessengerMedia(
   roomId: string,
@@ -568,8 +584,10 @@ async function sendSingleMessengerMedia(
   caption?: string,
   replyToMessageId?: string | null,
   onProgress?: (progress: MessengerUploadProgress) => void,
+  signal?: AbortSignal,
   noRefresh = false,
 ): Promise<MessengerMediaUploadResult> {
+  if (signal?.aborted) throw new MessengerUploadCancelledError();
   const startedAt = Date.now();
   const requestId = messengerRequestId();
   const session = await loadMessengerSession();
@@ -589,7 +607,26 @@ async function sendSingleMessengerMedia(
   }
 
   let lastPercent = -1;
-  const task = FileSystem.createUploadTask(
+  let lastProgressBytes = -1;
+  let lastLoggedPercent = -10;
+  let lastLoggedAt = startedAt;
+  let cancellation: "navigation" | "stalled" | null = null;
+  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+  let task: ReturnType<typeof FileSystem.createUploadTask>;
+  const cancel = (reason: "navigation" | "stalled") => {
+    if (cancellation) return;
+    cancellation = reason;
+    void task.cancelAsync().catch(() => undefined);
+  };
+  const armStallTimer = () => {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(
+      () => cancel("stalled"),
+      MEDIA_UPLOAD_STALL_TIMEOUT_MS,
+    );
+  };
+  const handleAbort = () => cancel("navigation");
+  task = FileSystem.createUploadTask(
     `${MESSENGER_API_BASE_URL}/chat/rooms/${roomId}/media`,
     file.uri,
     {
@@ -610,8 +647,31 @@ async function sendSingleMessengerMedia(
         0,
         Math.min(100, Math.round((totalBytesSent / total) * 100)),
       );
+      if (totalBytesSent > lastProgressBytes) {
+        lastProgressBytes = totalBytesSent;
+        armStallTimer();
+      }
       if (percent === lastPercent) return;
       lastPercent = percent;
+      const now = Date.now();
+      if (
+        percent === 100 ||
+        percent >= lastLoggedPercent + 10 ||
+        now - lastLoggedAt >= 15_000
+      ) {
+        lastLoggedPercent = percent;
+        lastLoggedAt = now;
+        const elapsedMs = Math.max(now - startedAt, 1);
+        messengerLog("debug", "api.media_native_upload.progress", {
+          request_id: requestId,
+          room_id: roomId,
+          percent,
+          sent_bytes: totalBytesSent,
+          total_bytes: totalBytesExpectedToSend,
+          elapsed_ms: elapsedMs,
+          average_kbps: Math.round((totalBytesSent * 8) / elapsedMs),
+        });
+      }
       onProgress?.({
         sent_bytes: totalBytesSent,
         total_bytes: totalBytesExpectedToSend,
@@ -619,12 +679,8 @@ async function sendSingleMessengerMedia(
       });
     },
   );
-
-  let timedOut = false;
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    void task.cancelAsync().catch(() => undefined);
-  }, MEDIA_UPLOAD_TIMEOUT_MS);
+  signal?.addEventListener("abort", handleAbort, { once: true });
+  armStallTimer();
 
   try {
     messengerLog("info", "api.media_native_upload.started", {
@@ -633,16 +689,26 @@ async function sendSingleMessengerMedia(
       file_type: file.type,
     });
     const response = await task.uploadAsync();
-    if (timedOut) {
-      throw new Error("Загрузка не завершилась за 10 минут");
+    if (cancellation === "navigation" || signal?.aborted) {
+      throw new MessengerUploadCancelledError();
+    }
+    if (cancellation === "stalled") {
+      throw new Error("Загрузка остановилась: три минуты не передавались данные");
     }
     if (!response) throw new Error("Загрузка была прервана");
+    const serverRequestId = Object.entries(response.headers).find(
+      ([name]) => name.toLowerCase() === "x-request-id",
+    )?.[1];
 
     messengerLog(
       response.status >= 200 && response.status < 300 ? "info" : "warn",
       "api.media_native_upload.response",
       {
-        request_id: requestId,
+        request_id: serverRequestId || requestId,
+        client_request_id:
+          serverRequestId && serverRequestId !== requestId
+            ? requestId
+            : undefined,
         room_id: roomId,
         status: response.status,
         duration_ms: Date.now() - startedAt,
@@ -662,6 +728,7 @@ async function sendSingleMessengerMedia(
         caption,
         replyToMessageId,
         onProgress,
+        signal,
         true,
       );
     }
@@ -670,28 +737,42 @@ async function sendSingleMessengerMedia(
       response.body,
     );
   } catch (error) {
-    const normalized = timedOut
-      ? new Error("Загрузка не завершилась за 10 минут", { cause: error })
-      : error;
-    messengerLog("warn", "api.media_native_upload.failure", {
-      request_id: requestId,
-      room_id: roomId,
-      duration_ms: Date.now() - startedAt,
-      message: messengerErrorMessage(normalized),
-    });
+    const normalized =
+      cancellation === "navigation" || signal?.aborted
+        ? new MessengerUploadCancelledError()
+        : cancellation === "stalled"
+          ? new Error(
+              "Загрузка остановилась: три минуты не передавались данные",
+              { cause: error },
+            )
+          : error;
+    messengerLog(
+      isMessengerUploadCancelledError(normalized) ? "info" : "warn",
+      isMessengerUploadCancelledError(normalized)
+        ? "api.media_native_upload.cancelled"
+        : "api.media_native_upload.failure",
+      {
+        request_id: requestId,
+        room_id: roomId,
+        duration_ms: Date.now() - startedAt,
+        message: messengerErrorMessage(normalized),
+      },
+    );
     throw normalized;
   } finally {
-    clearTimeout(timeout);
+    if (stallTimer) clearTimeout(stallTimer);
+    signal?.removeEventListener("abort", handleAbort);
   }
 }
 
-export function sendMessengerMedia(
+export async function sendMessengerMedia(
   roomId: string,
   clientMessageId: string,
   files: { uri: string; name: string; type: string }[],
   caption?: string,
   replyToMessageId?: string | null,
   onProgress?: (progress: MessengerUploadProgress) => void,
+  signal?: AbortSignal,
 ) {
   if (Platform.OS !== "web" && files.length === 1 && files[0]) {
     return sendSingleMessengerMedia(
@@ -701,6 +782,7 @@ export function sendMessengerMedia(
       caption,
       replyToMessageId,
       onProgress,
+      signal,
     );
   }
   const form = new FormData();
@@ -708,10 +790,15 @@ export function sendMessengerMedia(
   if (caption?.trim()) form.append("caption", caption.trim());
   if (replyToMessageId) form.append("reply_to_message_id", replyToMessageId);
   files.forEach((file) => form.append("files", file as unknown as Blob));
-  return messengerRequest<MessengerMediaUploadResult>(
-    `/chat/rooms/${roomId}/media`,
-    { method: "POST", body: form },
-  );
+  try {
+    return await messengerRequest<MessengerMediaUploadResult>(
+      `/chat/rooms/${roomId}/media`,
+      { method: "POST", body: form, signal },
+    );
+  } catch (error) {
+    if (signal?.aborted) throw new MessengerUploadCancelledError();
+    throw error;
+  }
 }
 
 export function sendMessengerLocation(

@@ -30,6 +30,7 @@ interface MessengerAttachmentViewProps {
   mediaItems?: MessengerMedia[];
   location: MessengerLocation | null;
   accessToken: string;
+  deferAutomaticCache?: boolean;
 }
 
 function withoutValue(values: Set<string>, value: string): Set<string> {
@@ -43,6 +44,7 @@ export default function MessengerAttachmentView({
   mediaItems,
   location,
   accessToken,
+  deferAutomaticCache = false,
 }: MessengerAttachmentViewProps) {
   const insets = useSafeAreaInsets();
   const { width: viewerWidth } = useWindowDimensions();
@@ -97,10 +99,11 @@ export default function MessengerAttachmentView({
   );
 
   useEffect(() => {
+    if (deferAutomaticCache) return;
     items
       .filter((item) => item.type === "image")
       .forEach((item) => void ensureLocal(item).catch(() => undefined));
-  }, [ensureLocal, itemIdentity, items]);
+  }, [deferAutomaticCache, ensureLocal, itemIdentity, items]);
 
   useEffect(() => {
     if (viewerIndex === null) return;
