@@ -124,6 +124,12 @@ import { refreshMessengerUnreadFromCache } from "../../../services/messengerUnre
 
 type MessengerAttachmentKind = "camera" | "library" | "file" | "location";
 type InitialAnchorMode = "read_anchor" | "unread_fallback" | "latest";
+type InitialPositionCompletionSource =
+  | "pending"
+  | "missing_anchor"
+  | "latest_content_size"
+  | "viewability"
+  | "timeout";
 
 interface PendingAttachmentRequest {
   kind: MessengerAttachmentKind;
@@ -627,6 +633,9 @@ export default function MessengerRoomScreen() {
   const initialAnchorClientId = useRef<string | null>(null);
   const initialAnchorMode = useRef<InitialAnchorMode>("latest");
   const initialAnchorSettling = useRef(false);
+  const initialListContentMeasured = useRef(false);
+  const initialPositionCompletionSource =
+    useRef<InitialPositionCompletionSource>("pending");
   const initialPositionStartedAt = useRef(0);
   const initialPositionRetryTimer = useRef<ReturnType<
     typeof setTimeout
@@ -1455,6 +1464,7 @@ export default function MessengerRoomScreen() {
       mode: initialAnchorMode.current,
       anchor_client_message_id: initialAnchorClientId.current,
       attempts: initialPositionAttempts.current,
+      completion_source: initialPositionCompletionSource.current,
       duration_ms: Date.now() - initialPositionStartedAt.current,
       elapsed_since_tap_ms: Date.now() - openedAt,
     });
@@ -1483,11 +1493,35 @@ export default function MessengerRoomScreen() {
       (message) => message.client_message_id === anchorId,
     );
     if (index < 0 || !current.length) {
+      initialPositionCompletionSource.current = "missing_anchor";
       finishInitialPosition();
       return;
     }
     if (initialAnchorMode.current === "latest") {
       listRef.current?.scrollToEnd({ animated: false });
+      // `onViewableItemsChanged` is not guaranteed to emit after an
+      // imperative, non-animated scroll (and repeatedly did not on iOS).
+      // The old code therefore kept a fully populated local feed at opacity
+      // zero until the four-second emergency timer fired. Content-size
+      // measurement is the reliable signal that `scrollToEnd` has a real
+      // layout to target; once it exists, complete the initial position
+      // directly instead of waiting for a viewability transition.
+      if (
+        !initialListContentMeasured.current ||
+        initialAnchorSettling.current
+      ) {
+        return;
+      }
+      initialAnchorSettling.current = true;
+      initialPositionCompletionSource.current = "latest_content_size";
+      requestAnimationFrame(() => {
+        if (!pendingInitialPosition.current) return;
+        listRef.current?.scrollToEnd({ animated: false });
+        initialPositionRetryTimer.current = setTimeout(
+          finishInitialPosition,
+          48,
+        );
+      });
       return;
     }
     listRef.current?.scrollToIndex({
@@ -1503,6 +1537,7 @@ export default function MessengerRoomScreen() {
       return;
     }
     initialAnchorSettling.current = true;
+    initialPositionCompletionSource.current = "viewability";
     requestAnimationFrame(() => {
       if (!pendingInitialPosition.current) return;
       const current = messagesRef.current;
@@ -1624,6 +1659,7 @@ export default function MessengerRoomScreen() {
         : "unread_fallback"
       : "latest";
     initialAnchorSettling.current = false;
+    initialPositionCompletionSource.current = "pending";
     nearLatest.current = !shouldAnchorUnreadBoundary;
     pendingInitialPosition.current = true;
     initialPositionAttempts.current = 0;
@@ -1649,6 +1685,7 @@ export default function MessengerRoomScreen() {
         mode: initialAnchorMode.current,
         attempts: initialPositionAttempts.current,
       });
+      initialPositionCompletionSource.current = "timeout";
       positionInitialMessages();
       initialPositionRetryTimer.current = setTimeout(
         finishInitialPosition,
@@ -1948,6 +1985,8 @@ export default function MessengerRoomScreen() {
         }
         messageNavigationTarget.current = null;
         clearInitialPositionTimers();
+        pendingInitialPosition.current = false;
+        initialAnchorSettling.current = false;
         pendingMessageAction.current = null;
         pendingAttachmentRequest.current = null;
       };
@@ -2820,6 +2859,7 @@ export default function MessengerRoomScreen() {
             viewabilityConfig={initialViewabilityConfig}
             onContentSizeChange={() => {
               if (!visibleMessages.length) return;
+              initialListContentMeasured.current = true;
               if (pendingInitialPosition.current) {
                 positionInitialMessages();
                 return;
