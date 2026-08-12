@@ -2303,7 +2303,10 @@ export default function MessengerRoomScreen() {
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        // Android is resized by windowSoftInputMode=adjustResize from
+        // app.config.js. Applying a second JS height correction here can
+        // double-shrink the feed on devices where adjustResize works.
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <View style={styles.header}>
           <TouchableOpacity
@@ -2379,6 +2382,10 @@ export default function MessengerRoomScreen() {
             initialNumToRender={18}
             maxToRenderPerBatch={14}
             windowSize={9}
+            keyboardDismissMode={
+              Platform.OS === "ios" ? "interactive" : "on-drag"
+            }
+            keyboardShouldPersistTaps="handled"
             maintainVisibleContentPosition={
               listReady ? { minIndexForVisible: 0 } : undefined
             }

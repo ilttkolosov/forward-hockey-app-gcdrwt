@@ -43,7 +43,12 @@ export default ({ config }) => {
         foregroundImage: "./assets/icons/myIcon.png",
         backgroundColor: "#ffffff",
       },
-      edgeToEdgeEnabled: true,
+      // The chat composer must participate in the Activity resize when the
+      // IME opens. Edge-to-edge currently prevents reliable adjustResize on
+      // a number of Android 13-15 vendor firmwares and leaves the composer
+      // underneath the keyboard.
+      edgeToEdgeEnabled: false,
+      softwareKeyboardLayoutMode: "resize",
       package: "com.kolosovaleksandr.Forward2014",
       ...(googleServicesFile ? { googleServicesFile } : {}),
       ...(googleMapsApiKey
