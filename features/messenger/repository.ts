@@ -664,6 +664,7 @@ export function cacheIncomingMessengerMessage(
               text: message.text,
               created_at: message.created_at,
               media: message.media,
+              media_items: message.media_items,
               location: message.location,
               author: {
                 id: message.author.id,

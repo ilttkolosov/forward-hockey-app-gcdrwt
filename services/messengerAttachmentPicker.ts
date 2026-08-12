@@ -22,6 +22,7 @@ const PHOTO_JPEG_QUALITY = 0.68;
 const MAX_PHOTO_UPLOAD_BYTES = 350 * 1024;
 const SECOND_PASS_EDGE = 1280;
 const SECOND_PASS_QUALITY = 0.58;
+export const MAX_MESSENGER_MEDIA_SELECTION = 10;
 
 function waitForPermissionDialogDismissal(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 250));
@@ -210,12 +211,14 @@ export async function takeMessengerPhoto(): Promise<MessengerUploadFile | null> 
   return asset ? compressedPhoto(asset) : null;
 }
 
-export async function pickMessengerMedia(): Promise<MessengerUploadFile | null> {
+export async function pickMessengerMedia(): Promise<MessengerUploadFile[]> {
   if (Platform.OS !== "web") await mediaLibraryPermission();
   messengerLog("debug", "attachment.picker.opening", { kind: "library" });
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ["images", "videos"],
-    allowsMultipleSelection: false,
+    allowsMultipleSelection: true,
+    selectionLimit: MAX_MESSENGER_MEDIA_SELECTION,
+    orderedSelection: true,
     quality: 1,
     videoMaxDuration: 180,
   });
@@ -224,20 +227,24 @@ export async function pickMessengerMedia(): Promise<MessengerUploadFile | null> 
     canceled: result.canceled,
     asset_count: result.assets?.length ?? 0,
   });
-  const asset = result.canceled ? null : result.assets[0];
-  if (!asset) return null;
-  if (asset.type === "video") {
-    const size = await localFileSize(asset.uri, asset.fileSize);
-    return {
-      uri: asset.uri,
-      name: asset.fileName || `video-${Date.now()}.mp4`,
-      type: asset.mimeType || "video/mp4",
-      kind: "video",
-      size_bytes: size,
-      original_size_bytes: size,
-    };
+  if (result.canceled) return [];
+  const files: MessengerUploadFile[] = [];
+  for (const asset of result.assets.slice(0, MAX_MESSENGER_MEDIA_SELECTION)) {
+    if (asset.type === "video") {
+      const size = await localFileSize(asset.uri, asset.fileSize);
+      files.push({
+        uri: asset.uri,
+        name: asset.fileName || `video-${Date.now()}.mp4`,
+        type: asset.mimeType || "video/mp4",
+        kind: "video",
+        size_bytes: size,
+        original_size_bytes: size,
+      });
+    } else {
+      files.push(await compressedPhoto(asset));
+    }
   }
-  return compressedPhoto(asset);
+  return files;
 }
 
 export async function pickMessengerAvatar(): Promise<MessengerUploadFile | null> {

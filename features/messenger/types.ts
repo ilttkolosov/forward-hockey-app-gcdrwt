@@ -100,6 +100,7 @@ export interface MessengerRoom {
     text: string;
     created_at: string;
     media: MessengerMedia | null;
+    media_items?: MessengerMedia[];
     location: MessengerLocation | null;
     author: { id: string; display_name: string; avatar_url: string | null };
   };
@@ -180,6 +181,12 @@ export interface MessengerPendingAttachment {
   local_uri: string | null;
   file_name: string | null;
   size_bytes: number | null;
+  items?: {
+    kind: "image" | "video" | "file";
+    local_uri: string;
+    file_name: string;
+    size_bytes: number | null;
+  }[];
 }
 
 export interface MessengerMessage {
@@ -199,6 +206,8 @@ export interface MessengerMessage {
     avatar_url: string | null;
   };
   media: MessengerMedia | null;
+  /** All attachments in display order. `media` remains the legacy first item. */
+  media_items: MessengerMedia[];
   location: MessengerLocation | null;
   reply_to: MessengerReply | null;
   forwarded_from: MessengerForward | null;

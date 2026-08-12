@@ -1,7 +1,7 @@
 import { ResizeMode, Video } from "expo-av";
 import { Image } from "expo-image";
 import * as Sharing from "expo-sharing";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -14,83 +14,93 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
-import type { MessengerLocation, MessengerMedia } from "./types";
-import MessengerLocationPreview from "./MessengerLocationPreview";
 import {
   cacheMessengerMedia,
   formatMessengerBytes,
 } from "../../services/messengerMediaCache";
 import { saveMessengerMediaToDevice } from "../../services/messengerMediaSave";
 import { colors } from "../../styles/commonStyles";
+import MessengerLocationPreview from "./MessengerLocationPreview";
+import type { MessengerLocation, MessengerMedia } from "./types";
 
 interface MessengerAttachmentViewProps {
   media: MessengerMedia | null;
+  mediaItems?: MessengerMedia[];
   location: MessengerLocation | null;
   accessToken: string;
 }
 
+function withoutValue(values: Set<string>, value: string): Set<string> {
+  const next = new Set(values);
+  next.delete(value);
+  return next;
+}
+
 export default function MessengerAttachmentView({
   media,
+  mediaItems,
   location,
   accessToken,
 }: MessengerAttachmentViewProps) {
   const insets = useSafeAreaInsets();
-  const [localUri, setLocalUri] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [viewerVisible, setViewerVisible] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const items = useMemo(
+    () => (mediaItems?.length ? mediaItems : media ? [media] : []),
+    [media, mediaItems],
+  );
+  const itemIdentity = items.map((item) => item.id).join(":");
+  const [localUris, setLocalUris] = useState<Record<string, string>>({});
+  const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [viewerMedia, setViewerMedia] = useState<MessengerMedia | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
 
   useEffect(() => {
-    setLocalUri(null);
-    setError(null);
-    setViewerVisible(false);
-  }, [media?.id]);
+    setLocalUris({});
+    setLoadingIds(new Set());
+    setErrors({});
+    setViewerMedia(null);
+  }, [itemIdentity]);
 
-  const ensureLocal = useCallback(async (): Promise<string> => {
-    if (!media) throw new Error("Вложение отсутствует");
-    if (localUri) return localUri;
-    setLoading(true);
-    setError(null);
-    try {
-      const uri = await cacheMessengerMedia(media, accessToken);
-      setLocalUri(uri);
-      return uri;
-    } catch (cacheError) {
-      const message =
-        cacheError instanceof Error
-          ? cacheError.message
-          : "Не удалось загрузить вложение";
-      setError(message);
-      throw cacheError;
-    } finally {
-      setLoading(false);
-    }
-  }, [accessToken, localUri, media]);
+  const ensureLocal = useCallback(
+    async (item: MessengerMedia): Promise<string> => {
+      const known = localUris[item.id];
+      if (known) return known;
+      setLoadingIds((current) => new Set(current).add(item.id));
+      setErrors((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      try {
+        const uri = await cacheMessengerMedia(item, accessToken);
+        setLocalUris((current) => ({ ...current, [item.id]: uri }));
+        return uri;
+      } catch (cacheError) {
+        const message =
+          cacheError instanceof Error
+            ? cacheError.message
+            : "Не удалось загрузить вложение";
+        setErrors((current) => ({ ...current, [item.id]: message }));
+        throw cacheError;
+      } finally {
+        setLoadingIds((current) => withoutValue(current, item.id));
+      }
+    },
+    [accessToken, localUris],
+  );
 
   useEffect(() => {
-    if (media?.type !== "image") return;
-    void ensureLocal().catch(() => undefined);
-  }, [ensureLocal, media?.type]);
+    items
+      .filter((item) => item.type === "image")
+      .forEach((item) => void ensureLocal(item).catch(() => undefined));
+  }, [ensureLocal, itemIdentity, items]);
 
-  if (location) {
-    return <MessengerLocationPreview location={location} />;
-  }
+  if (location) return <MessengerLocationPreview location={location} />;
+  if (!items.length) return null;
 
-  if (!media) return null;
-
-  const openViewer = async () => {
+  const openFile = async (item: MessengerMedia) => {
     try {
-      await ensureLocal();
-      setViewerVisible(true);
-    } catch {
-      // The inline error and retry action remain visible in the bubble.
-    }
-  };
-
-  const openFile = async () => {
-    try {
-      const uri = await ensureLocal();
+      const uri = await ensureLocal(item);
       if (!(await Sharing.isAvailableAsync())) {
         Alert.alert(
           "Файл сохранён",
@@ -99,19 +109,32 @@ export default function MessengerAttachmentView({
         return;
       }
       await Sharing.shareAsync(uri, {
-        dialogTitle: media.original_name,
-        mimeType: media.mime_type,
+        dialogTitle: item.original_name,
+        mimeType: item.mime_type,
       });
     } catch {
-      // Error is rendered below.
+      // The tile keeps a visible retry state.
     }
   };
 
-  const saveToDevice = async () => {
-    if (saving) return;
-    setSaving(true);
+  const openItem = async (item: MessengerMedia) => {
+    if (item.type === "file") {
+      await openFile(item);
+      return;
+    }
     try {
-      const target = await saveMessengerMediaToDevice(media, accessToken);
+      await ensureLocal(item);
+      setViewerMedia(item);
+    } catch {
+      // The tile keeps a visible retry state.
+    }
+  };
+
+  const saveToDevice = async (item: MessengerMedia) => {
+    if (savingId) return;
+    setSavingId(item.id);
+    try {
+      const target = await saveMessengerMediaToDevice(item, accessToken);
       Alert.alert(
         "Вложение сохранено",
         target === "media_library"
@@ -126,21 +149,89 @@ export default function MessengerAttachmentView({
           : "Повторите попытку позже.",
       );
     } finally {
-      setSaving(false);
+      setSavingId(null);
     }
   };
 
+  const renderAlbum = () => {
+    const columns = items.length > 4 ? 3 : 2;
+    const tileSize = columns === 3 ? 74 : 113;
+    return (
+      <View style={styles.albumGrid}>
+        {items.map((item) => {
+          const localUri = localUris[item.id];
+          const loading = loadingIds.has(item.id);
+          const failed = Boolean(errors[item.id]);
+          return (
+            <TouchableOpacity
+              key={item.id}
+              style={[styles.albumTile, { width: tileSize, height: tileSize }]}
+              activeOpacity={0.88}
+              onPress={() => void openItem(item)}
+              accessibilityLabel={`Открыть ${item.original_name}`}
+            >
+              {item.type === "image" && localUri ? (
+                <Image
+                  source={localUri}
+                  style={styles.albumImage}
+                  contentFit="cover"
+                  transition={120}
+                />
+              ) : (
+                <View style={styles.albumPlaceholder}>
+                  {loading ? (
+                    <ActivityIndicator color={colors.primary} />
+                  ) : (
+                    <Icon
+                      name={
+                        failed
+                          ? "alert-circle-outline"
+                          : item.type === "video"
+                            ? "play-circle"
+                            : "document-text"
+                      }
+                      size={item.type === "video" ? 34 : 29}
+                      color={failed ? colors.error : colors.primary}
+                    />
+                  )}
+                  {item.type !== "image" && (
+                    <Text style={styles.albumFileName} numberOfLines={2}>
+                      {item.original_name}
+                    </Text>
+                  )}
+                </View>
+              )}
+              {item.type === "video" && !loading && (
+                <View style={styles.albumTypeBadge}>
+                  <Icon name="videocam" size={13} color={colors.white} />
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    );
+  };
+
+  const single = items[0];
+  const singleLocalUri = single ? localUris[single.id] : null;
+  const singleLoading = single ? loadingIds.has(single.id) : false;
+  const singleError = single ? errors[single.id] : null;
+  const viewerUri = viewerMedia ? localUris[viewerMedia.id] : null;
+
   return (
     <>
-      {media.type === "image" ? (
+      {items.length > 1 ? (
+        renderAlbum()
+      ) : single.type === "image" ? (
         <TouchableOpacity
           style={styles.imageFrame}
           activeOpacity={0.9}
-          onPress={openViewer}
+          onPress={() => void openItem(single)}
         >
-          {localUri ? (
+          {singleLocalUri ? (
             <Image
-              source={localUri}
+              source={singleLocalUri}
               style={styles.previewImage}
               contentFit="cover"
               transition={140}
@@ -156,15 +247,15 @@ export default function MessengerAttachmentView({
           <TouchableOpacity
             style={styles.fileOpenAction}
             activeOpacity={0.84}
-            onPress={media.type === "video" ? openViewer : openFile}
-            disabled={loading}
+            onPress={() => void openItem(single)}
+            disabled={singleLoading}
           >
             <View style={styles.fileIcon}>
-              {loading ? (
+              {singleLoading ? (
                 <ActivityIndicator color={colors.white} />
               ) : (
                 <Icon
-                  name={media.type === "video" ? "play" : "document-text"}
+                  name={single.type === "video" ? "play" : "document-text"}
                   size={23}
                   color={colors.white}
                 />
@@ -172,21 +263,22 @@ export default function MessengerAttachmentView({
             </View>
             <View style={styles.attachmentText}>
               <Text style={styles.attachmentTitle} numberOfLines={2}>
-                {media.original_name ||
-                  (media.type === "video" ? "Видео" : "Файл")}
+                {single.original_name ||
+                  (single.type === "video" ? "Видео" : "Файл")}
               </Text>
               <Text style={styles.attachmentSubtitle}>
-                {formatMessengerBytes(media.size_bytes)} · Нажмите для просмотра
+                {formatMessengerBytes(single.size_bytes)} · Нажмите для
+                просмотра
               </Text>
             </View>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.inlineSaveButton}
-            onPress={() => void saveToDevice()}
-            disabled={saving}
+            onPress={() => void saveToDevice(single)}
+            disabled={Boolean(savingId)}
             accessibilityLabel="Сохранить вложение"
           >
-            {saving ? (
+            {savingId === single.id ? (
               <ActivityIndicator color={colors.primary} />
             ) : (
               <Icon name="download-outline" size={21} color={colors.primary} />
@@ -195,20 +287,18 @@ export default function MessengerAttachmentView({
         </View>
       )}
 
-      {error && (
-        <TouchableOpacity
-          onPress={media.type === "file" ? openFile : openViewer}
-        >
+      {singleError && items.length === 1 && (
+        <TouchableOpacity onPress={() => void openItem(single)}>
           <Text style={styles.errorText}>Не удалось загрузить · повторить</Text>
         </TouchableOpacity>
       )}
 
       <Modal
-        visible={viewerVisible}
+        visible={Boolean(viewerMedia)}
         animationType="fade"
         presentationStyle="fullScreen"
         statusBarTranslucent={false}
-        onRequestClose={() => setViewerVisible(false)}
+        onRequestClose={() => setViewerMedia(null)}
       >
         <View
           style={[
@@ -221,27 +311,33 @@ export default function MessengerAttachmentView({
         >
           <View style={styles.viewerHeader}>
             <Text style={styles.viewerTitle} numberOfLines={1}>
-              {media.original_name ||
-                (media.type === "image" ? "Фотография" : "Видео")}
+              {viewerMedia?.original_name ||
+                (viewerMedia?.type === "image" ? "Фотография" : "Видео")}
             </Text>
-            <TouchableOpacity
-              style={styles.viewerActionButton}
-              onPress={() => void saveToDevice()}
-              disabled={saving}
-              accessibilityLabel="Сохранить вложение"
-            >
-              {saving ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <Icon name="download-outline" size={24} color={colors.white} />
-              )}
-            </TouchableOpacity>
+            {viewerMedia && (
+              <TouchableOpacity
+                style={styles.viewerActionButton}
+                onPress={() => void saveToDevice(viewerMedia)}
+                disabled={Boolean(savingId)}
+                accessibilityLabel="Сохранить вложение"
+              >
+                {savingId === viewerMedia.id ? (
+                  <ActivityIndicator color={colors.white} />
+                ) : (
+                  <Icon
+                    name="download-outline"
+                    size={24}
+                    color={colors.white}
+                  />
+                )}
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={[
                 styles.closeButton,
                 { marginRight: Math.max(insets.right, 8) },
               ]}
-              onPress={() => setViewerVisible(false)}
+              onPress={() => setViewerMedia(null)}
               hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
               accessibilityLabel="Закрыть просмотр"
             >
@@ -249,7 +345,7 @@ export default function MessengerAttachmentView({
             </TouchableOpacity>
           </View>
           <View style={styles.viewerContent}>
-            {localUri && media.type === "image" && (
+            {viewerUri && viewerMedia?.type === "image" && (
               <ScrollView
                 style={styles.zoomContainer}
                 contentContainerStyle={styles.zoomContent}
@@ -258,15 +354,15 @@ export default function MessengerAttachmentView({
                 centerContent
               >
                 <Image
-                  source={localUri}
+                  source={viewerUri}
                   style={styles.fullImage}
                   contentFit="contain"
                 />
               </ScrollView>
             )}
-            {localUri && media.type === "video" && (
+            {viewerUri && viewerMedia?.type === "video" && (
               <Video
-                source={{ uri: localUri }}
+                source={{ uri: viewerUri }}
                 style={styles.fullVideo}
                 useNativeControls
                 resizeMode={ResizeMode.CONTAIN}
@@ -296,6 +392,47 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  albumGrid: {
+    width: 230,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 3,
+    marginHorizontal: -7,
+    marginTop: -3,
+    marginBottom: 5,
+    overflow: "hidden",
+    borderRadius: 13,
+  },
+  albumTile: {
+    overflow: "hidden",
+    borderRadius: 5,
+    backgroundColor: "rgba(255, 255, 255, 0.56)",
+  },
+  albumImage: { width: "100%", height: "100%" },
+  albumPlaceholder: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 6,
+  },
+  albumFileName: {
+    marginTop: 4,
+    color: colors.textSecondary,
+    fontSize: 9,
+    lineHeight: 11,
+    textAlign: "center",
+  },
+  albumTypeBadge: {
+    position: "absolute",
+    right: 5,
+    bottom: 5,
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: "rgba(27, 54, 93, 0.78)",
   },
   fileCard: {
     width: 235,

@@ -234,6 +234,7 @@ export default function MessengerRoomsScreen() {
                   text: message.text,
                   created_at: message.created_at,
                   media: message.media,
+                  media_items: message.media_items,
                   location: message.location,
                   author: {
                     id: message.author.id,
@@ -418,9 +419,20 @@ export default function MessengerRoomsScreen() {
                 />
               )}
               <View style={styles.roomContent}>
-                <Text style={styles.roomTitle} numberOfLines={1}>
-                  {item.title}
-                </Text>
+                <View style={styles.roomTitleRow}>
+                  <Text style={styles.roomTitle} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  {preset && (
+                    <Icon
+                      name="pin-outline"
+                      type="material-community"
+                      size={16}
+                      color="#96A4AF"
+                      style={styles.presetPin}
+                    />
+                  )}
+                </View>
                 {!direct && item.last_message && (
                   <Text style={styles.messageAuthor} numberOfLines={1}>
                     {authorName}
@@ -433,9 +445,6 @@ export default function MessengerRoomsScreen() {
               <View style={styles.roomMeta}>
                 <Text style={styles.activityTime}>{activityTime}</Text>
                 <View style={styles.roomIndicators}>
-                  {preset && (
-                    <Icon name="pin" size={18} color={colors.textSecondary} />
-                  )}
                   {item.unread_count > 0 && (
                     <View style={styles.unreadBadge}>
                       <Text style={styles.unreadText}>
@@ -577,10 +586,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   roomSeparator: {
-    height: StyleSheet.hairlineWidth,
+    height: 1,
     marginLeft: 88,
     marginRight: 14,
-    backgroundColor: colors.border,
+    backgroundColor: "#D5DEE5",
   },
   roomContent: {
     flex: 1,
@@ -588,7 +597,18 @@ const styles = StyleSheet.create({
     alignSelf: "stretch",
     justifyContent: "center",
   },
-  roomTitle: { fontSize: 16, fontWeight: "800", color: colors.text },
+  roomTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    minWidth: 0,
+  },
+  roomTitle: {
+    flexShrink: 1,
+    fontSize: 16,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  presetPin: { marginLeft: 6 },
   messageAuthor: {
     marginTop: 3,
     fontSize: 13,

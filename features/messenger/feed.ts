@@ -41,6 +41,7 @@ export function pendingMessengerMessage(
       avatar_url: currentUser.avatar_url,
     },
     media: null,
+    media_items: [],
     location: null,
     reply_to: replyTarget
       ? {
@@ -85,14 +86,24 @@ export function pendingMessengerAttachmentMessage(
   caption: string,
   currentUser: MessengerUser,
   replyTarget?: MessengerMessage,
+  attachments: {
+    kind: "image" | "video" | "file";
+    uri: string;
+    name: string;
+    size_bytes: number | null;
+  }[] = [],
 ): MessengerMessage {
+  const firstAttachment = attachments[0];
+  const messageKind =
+    source === "location"
+      ? "location"
+      : (firstAttachment?.kind ?? (source === "file" ? "file" : "image"));
   return {
     id: `pending-${clientMessageId}`,
     sequence: "0",
     room_id: roomId,
     client_message_id: clientMessageId,
-    kind:
-      source === "location" ? "location" : source === "file" ? "file" : "image",
+    kind: messageKind,
     text: source === "location" ? "" : caption,
     created_at: new Date().toISOString(),
     edited_at: null,
@@ -104,6 +115,7 @@ export function pendingMessengerAttachmentMessage(
       avatar_url: currentUser.avatar_url,
     },
     media: null,
+    media_items: [],
     location: null,
     reply_to: replyTarget
       ? {
@@ -132,9 +144,15 @@ export function pendingMessengerAttachmentMessage(
       source,
       stage: "preparing",
       label: pendingAttachmentLabel(source),
-      local_uri: null,
-      file_name: null,
-      size_bytes: null,
+      local_uri: firstAttachment?.uri ?? null,
+      file_name: firstAttachment?.name ?? null,
+      size_bytes: firstAttachment?.size_bytes ?? null,
+      items: attachments.map((attachment) => ({
+        kind: attachment.kind,
+        local_uri: attachment.uri,
+        file_name: attachment.name,
+        size_bytes: attachment.size_bytes,
+      })),
     },
   };
 }
@@ -153,8 +171,15 @@ function sameMessengerMessage(
 function normalizedMessengerMessage(
   message: MessengerMessage,
 ): MessengerMessage {
+  const mediaItems = message.media_items?.length
+    ? message.media_items
+    : message.media
+      ? [message.media]
+      : [];
   return {
     ...message,
+    media: message.media ?? mediaItems[0] ?? null,
+    media_items: mediaItems,
     pending: message.pending ?? false,
     send_error: message.pending ? message.send_error : null,
     pending_attachment: message.pending
@@ -168,9 +193,16 @@ function mergeMessengerMessage(
   incoming: MessengerMessage,
   protectedReactionIds: ReadonlySet<string>,
 ): MessengerMessage {
+  const mediaItems = incoming.media_items?.length
+    ? incoming.media_items
+    : incoming.media
+      ? [incoming.media]
+      : [];
   return {
     ...existing,
     ...incoming,
+    media: incoming.media ?? mediaItems[0] ?? null,
+    media_items: mediaItems,
     reactions: protectedReactionIds.has(incoming.id)
       ? existing.reactions
       : incoming.reactions,

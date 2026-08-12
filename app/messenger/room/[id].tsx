@@ -109,6 +109,7 @@ import {
 import { messengerLog } from "../../../services/messengerLogger";
 import {
   currentMessengerLocation,
+  MAX_MESSENGER_MEDIA_SELECTION,
   pickMessengerFile,
   pickMessengerMedia,
   takeMessengerPhoto,
@@ -124,9 +125,16 @@ type InitialAnchorMode = "read_anchor" | "unread_fallback" | "latest";
 
 interface PendingAttachmentRequest {
   kind: MessengerAttachmentKind;
+}
+
+interface AttachmentDraft {
+  source: Exclude<MessengerAttachmentKind, "location">;
+  files: MessengerUploadFile[];
+}
+
+interface MediaUploadRequest extends AttachmentDraft {
   clientMessageId: string;
   caption: string;
-  composerText: string;
   replyTarget: MessengerMessage | null;
 }
 
@@ -364,9 +372,54 @@ function PendingAttachmentView({
 }) {
   const failed = pending.stage === "failed";
   const fileSize = pendingAttachmentSize(pending.size_bytes);
+  const pendingItems = pending.items?.length
+    ? pending.items
+    : pending.local_uri && pending.file_name
+      ? [
+          {
+            kind:
+              message.kind === "video"
+                ? "video"
+                : message.kind === "file"
+                  ? "file"
+                  : "image",
+            local_uri: pending.local_uri,
+            file_name: pending.file_name,
+            size_bytes: pending.size_bytes,
+          } as const,
+        ]
+      : [];
+  const albumColumns = pendingItems.length > 4 ? 3 : 2;
+  const albumTileSize = albumColumns === 3 ? 72 : 110;
   return (
     <View style={styles.pendingAttachment}>
-      {message.kind === "image" && pending.local_uri ? (
+      {pendingItems.length > 1 ? (
+        <View style={styles.pendingAttachmentAlbum}>
+          {pendingItems.map((item, index) => (
+            <View
+              key={`${item.local_uri}:${index}`}
+              style={[
+                styles.pendingAttachmentAlbumTile,
+                { width: albumTileSize, height: albumTileSize },
+              ]}
+            >
+              {item.kind === "image" ? (
+                <Image
+                  source={item.local_uri}
+                  style={styles.pendingAttachmentAlbumImage}
+                  contentFit="cover"
+                />
+              ) : (
+                <Icon
+                  name={item.kind === "video" ? "play-circle" : "document-text"}
+                  size={28}
+                  color={colors.primary}
+                />
+              )}
+            </View>
+          ))}
+        </View>
+      ) : message.kind === "image" && pending.local_uri ? (
         <Image
           source={pending.local_uri}
           style={styles.pendingAttachmentImage}
@@ -392,7 +445,9 @@ function PendingAttachmentView({
           </Text>
           {pending.file_name || fileSize ? (
             <Text style={styles.pendingAttachmentDetails} numberOfLines={1}>
-              {[pending.file_name, fileSize].filter(Boolean).join(" · ")}
+              {pendingItems.length > 1
+                ? `${pendingItems.length} вложений`
+                : [pending.file_name, fileSize].filter(Boolean).join(" · ")}
             </Text>
           ) : null}
         </View>
@@ -478,6 +533,8 @@ export default function MessengerRoomScreen() {
   ]);
   const [showAllReactions, setShowAllReactions] = useState(false);
   const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
+  const [attachmentDraft, setAttachmentDraft] =
+    useState<AttachmentDraft | null>(null);
   const [forwardingMessage, setForwardingMessage] =
     useState<MessengerMessage | null>(null);
   const [forwardRooms, setForwardRooms] = useState<MessengerRoom[]>([]);
@@ -1796,7 +1853,7 @@ export default function MessengerRoomScreen() {
     ]),
   );
 
-  const send = () => {
+  const sendText = () => {
     const body = text.trim();
     if (!body || !roomId || !session) return;
     const clientMessageId = Crypto.randomUUID();
@@ -1889,56 +1946,43 @@ export default function MessengerRoomScreen() {
     [],
   );
 
-  const removePendingAttachment = useCallback((clientMessageId: string) => {
-    setMessages((current) =>
-      current.filter(
-        (message) => message.client_message_id !== clientMessageId,
-      ),
-    );
-  }, []);
-
-  const restoreAttachmentComposer = useCallback(
-    (request: PendingAttachmentRequest) => {
-      if (request.composerText) {
-        setText((current) => current || request.composerText);
-      }
-      if (request.replyTarget) {
-        setReplyingTo((current) => current ?? request.replyTarget);
-      }
-    },
-    [],
-  );
-
   const sendUpload = useCallback(
-    async (file: MessengerUploadFile, request: PendingAttachmentRequest) => {
+    async (request: MediaUploadRequest) => {
+      const totalUploadBytes = request.files.reduce(
+        (total, file) => total + (file.size_bytes ?? 0),
+        0,
+      );
       messengerLog("info", "media.upload.started", {
         room_id: roomId,
         client_message_id: request.clientMessageId,
-        media_type: file.kind,
-        mime_type: file.type,
-        upload_size_bytes: file.size_bytes,
-        upload_size_kb:
-          file.size_bytes === null ? null : Math.round(file.size_bytes / 1024),
-        original_size_bytes: file.original_size_bytes,
-        image_width: file.width,
-        image_height: file.height,
+        media_count: request.files.length,
+        media_types: request.files.map((file) => file.kind).join(","),
+        upload_size_bytes: totalUploadBytes,
+        upload_size_kb: Math.round(totalUploadBytes / 1024),
         has_caption: Boolean(request.caption),
       });
       const result = await sendMessengerMedia(
         roomId,
         request.clientMessageId,
-        file,
+        request.files,
         request.caption,
         request.replyTarget?.id,
       );
-      if (result.message.media) {
+      const confirmedMedia = result.message.media_items?.length
+        ? result.message.media_items
+        : result.message.media
+          ? [result.message.media]
+          : [];
+      for (const [index, media] of confirmedMedia.entries()) {
+        const file = request.files[index];
+        if (!file) continue;
         try {
           // Seed before exposing the confirmed attachment. Otherwise the
           // attachment view starts an unnecessary download of the same file.
-          await seedMessengerMediaCache(result.message.media, file.uri);
+          await seedMessengerMediaCache(media, file.uri);
         } catch (cacheError) {
           messengerLog("warn", "media.cache.seed_failed", {
-            asset_id: result.message.media.id,
+            asset_id: media.id,
             message:
               cacheError instanceof Error
                 ? cacheError.message
@@ -1950,11 +1994,11 @@ export default function MessengerRoomScreen() {
       messengerLog("info", "media.upload.completed", {
         room_id: roomId,
         message_id: result.message.id,
-        media_type: result.message.media?.type,
-        stored_size_bytes: result.message.media?.size_bytes,
-        stored_size_kb: result.message.media?.size_bytes
-          ? Math.round(result.message.media.size_bytes / 1024)
-          : null,
+        media_count: confirmedMedia.length,
+        stored_size_bytes: confirmedMedia.reduce(
+          (total, media) => total + media.size_bytes,
+          0,
+        ),
       });
     },
     [roomId, storeSentMessage],
@@ -1964,17 +2008,34 @@ export default function MessengerRoomScreen() {
     async (request: PendingAttachmentRequest) => {
       const { kind } = request;
       let contentPrepared = false;
+      let clientMessageId: string | null = null;
       const preparationStartedAt = Date.now();
       messengerLog("debug", "attachment.action.started", {
         kind,
         room_id: roomId,
-        client_message_id: request.clientMessageId,
       });
       try {
         if (kind === "location") {
+          if (!session) return;
+          clientMessageId = Crypto.randomUUID();
+          const replyTarget = replyingTo;
+          const optimistic = pendingMessengerAttachmentMessage(
+            roomId,
+            clientMessageId,
+            kind,
+            "",
+            session.user,
+            replyTarget ?? undefined,
+          );
+          if (replyTarget) setReplyingTo(null);
+          setMessages((current) =>
+            mergeMessengerMessages(current, [optimistic]),
+          );
+          nearLatest.current = true;
+          scrollToLatest(true);
           const location = await currentMessengerLocation();
           contentPrepared = true;
-          updatePendingAttachment(request.clientMessageId, (message) => ({
+          updatePendingAttachment(clientMessageId, (message) => ({
             ...message,
             kind: "location",
             location,
@@ -1989,14 +2050,14 @@ export default function MessengerRoomScreen() {
           if (nearLatest.current) scrollToLatest(true);
           messengerLog("info", "location.send.started", {
             room_id: roomId,
-            client_message_id: request.clientMessageId,
+            client_message_id: clientMessageId,
             preparation_duration_ms: Date.now() - preparationStartedAt,
           });
           const result = await sendMessengerLocation(
             roomId,
-            request.clientMessageId,
+            clientMessageId,
             location,
-            request.replyTarget?.id,
+            replyTarget?.id,
           );
           await storeSentMessage(result.message);
           messengerLog("info", "location.send.completed", {
@@ -2009,54 +2070,32 @@ export default function MessengerRoomScreen() {
           setSyncError(null);
           return;
         }
-        const file =
+        const files =
           kind === "camera"
-            ? await takeMessengerPhoto()
+            ? [await takeMessengerPhoto()].filter(
+                (file): file is MessengerUploadFile => file !== null,
+              )
             : kind === "library"
               ? await pickMessengerMedia()
-              : await pickMessengerFile();
-        if (!file) {
+              : [await pickMessengerFile()].filter(
+                  (file): file is MessengerUploadFile => file !== null,
+                );
+        if (!files.length) {
           messengerLog("debug", "attachment.action.canceled", {
             kind,
             room_id: roomId,
-            client_message_id: request.clientMessageId,
           });
-          removePendingAttachment(request.clientMessageId);
-          restoreAttachmentComposer(request);
           return;
         }
         contentPrepared = true;
-        const uploadLabel =
-          file.kind === "image"
-            ? "Отправляем фотографию…"
-            : file.kind === "video"
-              ? "Отправляем видео…"
-              : "Отправляем файл…";
-        updatePendingAttachment(request.clientMessageId, (message) => ({
-          ...message,
-          kind: file.kind,
-          text: request.caption,
-          pending_attachment: message.pending_attachment
-            ? {
-                ...message.pending_attachment,
-                stage: "uploading",
-                label: uploadLabel,
-                local_uri: file.uri,
-                file_name: file.name,
-                size_bytes: file.size_bytes,
-              }
-            : null,
-        }));
-        if (nearLatest.current) scrollToLatest(true);
+        setAttachmentDraft({ source: kind, files });
         messengerLog("debug", "attachment.action.prepared", {
           kind,
           room_id: roomId,
-          client_message_id: request.clientMessageId,
-          media_type: file.kind,
-          size_bytes: file.size_bytes,
+          media_count: files.length,
+          media_types: files.map((file) => file.kind).join(","),
           preparation_duration_ms: Date.now() - preparationStartedAt,
         });
-        await sendUpload(file, request);
         setOffline(false);
         setSyncError(null);
       } catch (error) {
@@ -2070,25 +2109,24 @@ export default function MessengerRoomScreen() {
         );
         if (contentPrepared) setOffline(isMessengerConnectionError(error));
         setSyncError(message);
-        updatePendingAttachment(request.clientMessageId, (pendingMessage) => ({
-          ...pendingMessage,
-          send_error: message,
-          pending_attachment: pendingMessage.pending_attachment
-            ? {
-                ...pendingMessage.pending_attachment,
-                stage: "failed",
-                label:
-                  kind === "location"
-                    ? "Геопозиция не отправлена"
-                    : "Вложение не отправлено",
-              }
-            : null,
-        }));
-        restoreAttachmentComposer(request);
+        if (clientMessageId) {
+          setReplyingTo((current) => current ?? replyingTo);
+          updatePendingAttachment(clientMessageId, (pendingMessage) => ({
+            ...pendingMessage,
+            send_error: message,
+            pending_attachment: pendingMessage.pending_attachment
+              ? {
+                  ...pendingMessage.pending_attachment,
+                  stage: "failed",
+                  label: "Геопозиция не отправлена",
+                }
+              : null,
+          }));
+        }
         messengerLog("warn", "attachment.action.failed", {
           kind,
           room_id: roomId,
-          client_message_id: request.clientMessageId,
+          client_message_id: clientMessageId,
           content_prepared: contentPrepared,
           duration_ms: Date.now() - preparationStartedAt,
           message,
@@ -2102,11 +2140,10 @@ export default function MessengerRoomScreen() {
       }
     },
     [
-      removePendingAttachment,
-      restoreAttachmentComposer,
+      replyingTo,
       roomId,
-      sendUpload,
       scrollToLatest,
+      session,
       storeSentMessage,
       updatePendingAttachment,
     ],
@@ -2134,33 +2171,12 @@ export default function MessengerRoomScreen() {
         return;
       }
       if (!roomId || !session || !canMedia) return;
-      const clientMessageId = Crypto.randomUUID();
-      const request: PendingAttachmentRequest = {
-        kind,
-        clientMessageId,
-        caption: kind === "location" ? "" : text.trim(),
-        composerText: kind === "location" ? "" : text,
-        replyTarget: replyingTo,
-      };
+      const request: PendingAttachmentRequest = { kind };
       pendingAttachmentRequest.current = request;
-      const optimistic = pendingMessengerAttachmentMessage(
-        roomId,
-        clientMessageId,
-        kind,
-        request.caption,
-        session.user,
-        request.replyTarget ?? undefined,
-      );
       setSending(true);
-      if (request.composerText) setText("");
-      if (request.replyTarget) setReplyingTo(null);
-      setMessages((current) => mergeMessengerMessages(current, [optimistic]));
-      nearLatest.current = true;
-      scrollToLatest(true);
       messengerLog("debug", "attachment.action.queued", {
         kind,
         room_id: roomId,
-        client_message_id: clientMessageId,
       });
       setAttachmentMenuVisible(false);
       if (Platform.OS === "web") {
@@ -2181,15 +2197,108 @@ export default function MessengerRoomScreen() {
     [
       canMedia,
       chooseAttachment,
-      replyingTo,
       roomId,
       runPendingAttachment,
-      scrollToLatest,
       sending,
       session,
-      text,
     ],
   );
+
+  const sendAttachmentDraft = useCallback(() => {
+    if (!attachmentDraft || !roomId || !session || sending) return;
+    const clientMessageId = Crypto.randomUUID();
+    const caption = text.trim();
+    const replyTarget = replyingTo;
+    const request: MediaUploadRequest = {
+      ...attachmentDraft,
+      clientMessageId,
+      caption,
+      replyTarget,
+    };
+    const optimistic = pendingMessengerAttachmentMessage(
+      roomId,
+      clientMessageId,
+      attachmentDraft.source,
+      caption,
+      session.user,
+      replyTarget ?? undefined,
+      attachmentDraft.files,
+    );
+    const uploadLabel =
+      attachmentDraft.files.length > 1
+        ? `Отправляем ${attachmentDraft.files.length} вложений…`
+        : attachmentDraft.files[0]?.kind === "image"
+          ? "Отправляем фотографию…"
+          : attachmentDraft.files[0]?.kind === "video"
+            ? "Отправляем видео…"
+            : "Отправляем файл…";
+    optimistic.pending_attachment = optimistic.pending_attachment
+      ? {
+          ...optimistic.pending_attachment,
+          stage: "uploading",
+          label: uploadLabel,
+        }
+      : null;
+    setText("");
+    setReplyingTo(null);
+    setAttachmentDraft(null);
+    setSending(true);
+    setMessages((current) => mergeMessengerMessages(current, [optimistic]));
+    nearLatest.current = true;
+    scrollToLatest(true);
+    requestAnimationFrame(() => {
+      void sendUpload(request)
+        .then(() => {
+          setOffline(false);
+          setSyncError(null);
+        })
+        .catch((error) => {
+          const message = messengerErrorMessage(
+            error,
+            "Не удалось отправить вложение",
+          );
+          setOffline(isMessengerConnectionError(error));
+          setSyncError(message);
+          updatePendingAttachment(clientMessageId, (pendingMessage) => ({
+            ...pendingMessage,
+            send_error: message,
+            pending_attachment: pendingMessage.pending_attachment
+              ? {
+                  ...pendingMessage.pending_attachment,
+                  stage: "failed",
+                  label: "Вложения не отправлены",
+                }
+              : null,
+          }));
+          messengerLog("warn", "media.upload.failed", {
+            room_id: roomId,
+            client_message_id: clientMessageId,
+            media_count: request.files.length,
+            message,
+          });
+          Alert.alert("Ошибка вложения", message);
+        })
+        .finally(() => setSending(false));
+    });
+  }, [
+    attachmentDraft,
+    replyingTo,
+    roomId,
+    scrollToLatest,
+    sendUpload,
+    sending,
+    session,
+    text,
+    updatePendingAttachment,
+  ]);
+
+  const send = () => {
+    if (attachmentDraft) {
+      sendAttachmentDraft();
+      return;
+    }
+    sendText();
+  };
 
   const toggleReaction = async (
     message: MessengerMessage,
@@ -2562,6 +2671,13 @@ export default function MessengerRoomScreen() {
             renderItem={({ item }) => {
               const mine = item.author.id === session?.user.id;
               const media = item.deleted_at ? null : (item.media ?? null);
+              const mediaItems = item.deleted_at
+                ? []
+                : item.media_items?.length
+                  ? item.media_items
+                  : media
+                    ? [media]
+                    : [];
               const location = item.deleted_at ? null : (item.location ?? null);
               const pendingAttachment = item.deleted_at
                 ? null
@@ -2569,7 +2685,7 @@ export default function MessengerRoomScreen() {
               const body = item.deleted_at
                 ? "Сообщение удалено"
                 : item.text ||
-                  (!media && !location && !pendingAttachment
+                  (!mediaItems.length && !location && !pendingAttachment
                     ? item.kind === "image"
                       ? "Фото"
                       : item.kind === "video"
@@ -2669,13 +2785,15 @@ export default function MessengerRoomScreen() {
                               {item.author.display_name}
                             </Text>
                           )}
-                          {(media || location) && session?.access_token && (
-                            <MessengerAttachmentView
-                              media={media}
-                              location={location}
-                              accessToken={session.access_token}
-                            />
-                          )}
+                          {(mediaItems.length > 0 || location) &&
+                            session?.access_token && (
+                              <MessengerAttachmentView
+                                media={media}
+                                mediaItems={mediaItems}
+                                location={location}
+                                accessToken={session.access_token}
+                              />
+                            )}
                           {pendingAttachment ? (
                             <PendingAttachmentView
                               message={item}
@@ -2692,6 +2810,35 @@ export default function MessengerRoomScreen() {
                               {body}
                             </Text>
                           ) : null}
+                          {item.reactions.length > 0 && (
+                            <View
+                              style={[
+                                styles.reactionSummary,
+                                mine && styles.reactionSummaryMine,
+                              ]}
+                            >
+                              {item.reactions.map((reaction) => (
+                                <TouchableOpacity
+                                  key={reaction.reaction}
+                                  style={[
+                                    styles.reactionChip,
+                                    reaction.reacted_by_me &&
+                                      styles.reactionChipSelected,
+                                  ]}
+                                  onPress={() =>
+                                    void toggleReaction(item, reaction.reaction)
+                                  }
+                                  disabled={
+                                    !canReact || reactionBusyIds.has(item.id)
+                                  }
+                                >
+                                  <Text style={styles.reactionText}>
+                                    {reaction.reaction} {reaction.count}
+                                  </Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          )}
                           <View style={styles.messageMeta}>
                             <Text style={styles.time}>
                               {new Date(item.created_at).toLocaleTimeString(
@@ -2702,35 +2849,6 @@ export default function MessengerRoomScreen() {
                             {mine && <DeliveryChecks message={item} />}
                           </View>
                         </View>
-                        {item.reactions.length > 0 && (
-                          <View
-                            style={[
-                              styles.reactionSummary,
-                              mine && styles.reactionSummaryMine,
-                            ]}
-                          >
-                            {item.reactions.map((reaction) => (
-                              <TouchableOpacity
-                                key={reaction.reaction}
-                                style={[
-                                  styles.reactionChip,
-                                  reaction.reacted_by_me &&
-                                    styles.reactionChipSelected,
-                                ]}
-                                onPress={() =>
-                                  void toggleReaction(item, reaction.reaction)
-                                }
-                                disabled={
-                                  !canReact || reactionBusyIds.has(item.id)
-                                }
-                              >
-                                <Text style={styles.reactionText}>
-                                  {reaction.reaction} {reaction.count}
-                                </Text>
-                              </TouchableOpacity>
-                            ))}
-                          </View>
-                        )}
                       </View>
                     </View>
                   </SwipeableMessage>
@@ -2893,7 +3011,8 @@ export default function MessengerRoomScreen() {
                   </Text>
                 </TouchableOpacity>
               ) : null}
-              {actionMessage?.media ? (
+              {actionMessage?.media &&
+              (actionMessage.media_items?.length ?? 1) <= 1 ? (
                 <TouchableOpacity
                   style={styles.messageAction}
                   onPress={() => void saveMessageAttachment(actionMessage)}
@@ -3215,8 +3334,9 @@ export default function MessengerRoomScreen() {
                 </TouchableOpacity>
               </View>
               <Text style={styles.attachmentHint}>
-                Фотографии автоматически уменьшаются до 1600 px и сжимаются
-                перед отправкой.
+                В медиатеке можно выбрать до {MAX_MESSENGER_MEDIA_SELECTION}{" "}
+                фото и видео. Фотографии автоматически уменьшаются до 1600 px и
+                сжимаются перед отправкой.
               </Text>
             </Pressable>
           </Pressable>
@@ -3252,12 +3372,74 @@ export default function MessengerRoomScreen() {
                 </TouchableOpacity>
               </View>
             )}
+            {attachmentDraft && (
+              <View style={styles.attachmentDraft}>
+                <ScrollView
+                  style={styles.attachmentDraftScroll}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.attachmentDraftItems}
+                >
+                  {attachmentDraft.files.map((file, index) => (
+                    <View
+                      key={`${file.uri}:${index}`}
+                      style={styles.attachmentDraftTile}
+                    >
+                      {file.kind === "image" ? (
+                        <Image
+                          source={file.uri}
+                          style={styles.attachmentDraftImage}
+                          contentFit="cover"
+                        />
+                      ) : (
+                        <View style={styles.attachmentDraftFile}>
+                          <Icon
+                            name={
+                              file.kind === "video"
+                                ? "play-circle"
+                                : "document-text"
+                            }
+                            size={27}
+                            color={colors.primary}
+                          />
+                        </View>
+                      )}
+                      {attachmentDraft.files.length > 1 && (
+                        <View style={styles.attachmentDraftIndex}>
+                          <Text style={styles.attachmentDraftIndexText}>
+                            {index + 1}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                </ScrollView>
+                <View style={styles.attachmentDraftSummary}>
+                  <Text style={styles.attachmentDraftTitle} numberOfLines={1}>
+                    {attachmentDraft.files.length === 1
+                      ? attachmentDraft.files[0]?.name
+                      : `${attachmentDraft.files.length} вложений`}
+                  </Text>
+                  <Text style={styles.attachmentDraftHint}>
+                    Добавьте подпись в поле сообщения
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.cancelAttachmentDraft}
+                  onPress={() => setAttachmentDraft(null)}
+                  disabled={sending}
+                  accessibilityLabel="Убрать выбранные вложения"
+                >
+                  <Icon name="close" size={21} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+            )}
             <View style={styles.composer}>
               {canMedia && (
                 <TouchableOpacity
                   style={styles.attachButton}
                   onPress={() => setAttachmentMenuVisible(true)}
-                  disabled={sending}
+                  disabled={sending || Boolean(attachmentDraft)}
                   accessibilityLabel="Добавить вложение"
                 >
                   <Icon name="add" size={30} color={colors.primary} />
@@ -3268,9 +3450,9 @@ export default function MessengerRoomScreen() {
                 style={styles.input}
                 value={text}
                 onChangeText={setText}
-                placeholder="Сообщение"
+                placeholder={attachmentDraft ? "Подпись" : "Сообщение"}
                 multiline
-                maxLength={4000}
+                maxLength={attachmentDraft ? 1000 : 4000}
                 onFocus={() => {
                   if (!nearLatest.current) return;
                   keyboardScrollPending.current = true;
@@ -3280,10 +3462,10 @@ export default function MessengerRoomScreen() {
               <TouchableOpacity
                 style={[
                   styles.sendButton,
-                  !text.trim() && styles.sendButtonDisabled,
+                  !text.trim() && !attachmentDraft && styles.sendButtonDisabled,
                 ]}
                 onPress={send}
-                disabled={!text.trim()}
+                disabled={sending || (!text.trim() && !attachmentDraft)}
               >
                 <Icon name="send" size={23} color={colors.white} />
               </TouchableOpacity>
@@ -3437,6 +3619,21 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     backgroundColor: "rgba(255, 255, 255, 0.55)",
   },
+  pendingAttachmentAlbum: {
+    width: 224,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+    marginBottom: 7,
+  },
+  pendingAttachmentAlbumTile: {
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    borderRadius: 9,
+    backgroundColor: "rgba(255, 255, 255, 0.62)",
+  },
+  pendingAttachmentAlbumImage: { width: "100%", height: "100%" },
   pendingAttachmentStatus: {
     flexDirection: "row",
     alignItems: "center",
@@ -3503,9 +3700,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 4,
-    marginTop: 4,
+    marginTop: 7,
+    marginBottom: 1,
   },
-  reactionSummaryMine: { justifyContent: "flex-end" },
+  reactionSummaryMine: { alignSelf: "flex-end", justifyContent: "flex-end" },
   reactionChip: {
     minHeight: 28,
     paddingHorizontal: 8,
@@ -3525,6 +3723,65 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
     backgroundColor: colors.background,
+  },
+  attachmentDraft: {
+    minHeight: 82,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    marginHorizontal: 10,
+    marginTop: 8,
+    padding: 7,
+    borderWidth: 1,
+    borderColor: "#C7DBF3",
+    borderRadius: 14,
+    backgroundColor: "#EAF3FF",
+  },
+  attachmentDraftItems: { gap: 5 },
+  attachmentDraftScroll: { maxWidth: 132, flexGrow: 0 },
+  attachmentDraftTile: {
+    width: 62,
+    height: 62,
+    overflow: "hidden",
+    borderRadius: 10,
+    backgroundColor: colors.backgroundAlt,
+  },
+  attachmentDraftImage: { width: "100%", height: "100%" },
+  attachmentDraftFile: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  attachmentDraftIndex: {
+    position: "absolute",
+    right: 4,
+    bottom: 4,
+    minWidth: 19,
+    height: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+    borderRadius: 10,
+    backgroundColor: "rgba(27, 54, 93, 0.82)",
+  },
+  attachmentDraftIndexText: {
+    color: colors.white,
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  attachmentDraftSummary: { flex: 1, minWidth: 90 },
+  attachmentDraftTitle: { color: colors.text, fontSize: 12, fontWeight: "800" },
+  attachmentDraftHint: {
+    marginTop: 3,
+    color: colors.textSecondary,
+    fontSize: 10,
+    lineHeight: 13,
+  },
+  cancelAttachmentDraft: {
+    width: 38,
+    height: 38,
+    alignItems: "center",
+    justifyContent: "center",
   },
   composer: {
     flexDirection: "row",

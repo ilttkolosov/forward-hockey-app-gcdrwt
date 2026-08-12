@@ -117,7 +117,11 @@ async function refreshMessengerSession(): Promise<MessengerSession> {
         "authentication_required",
       );
     }
-    for (let attempt = 0; attempt < REFRESH_RETRY_DELAYS_MS.length; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < REFRESH_RETRY_DELAYS_MS.length;
+      attempt += 1
+    ) {
       const delay = REFRESH_RETRY_DELAYS_MS[attempt] ?? 0;
       if (delay > 0) {
         await new Promise((resolve) => setTimeout(resolve, delay));
@@ -497,7 +501,7 @@ export function sendMessengerText(
 export function sendMessengerMedia(
   roomId: string,
   clientMessageId: string,
-  file: { uri: string; name: string; type: string },
+  files: { uri: string; name: string; type: string }[],
   caption?: string,
   replyToMessageId?: string | null,
 ) {
@@ -505,7 +509,7 @@ export function sendMessengerMedia(
   form.append("client_message_id", clientMessageId);
   if (caption?.trim()) form.append("caption", caption.trim());
   if (replyToMessageId) form.append("reply_to_message_id", replyToMessageId);
-  form.append("file", file as unknown as Blob);
+  files.forEach((file) => form.append("files", file as unknown as Blob));
   return messengerRequest<{ message: MessengerMessage; created: boolean }>(
     `/chat/rooms/${roomId}/media`,
     { method: "POST", body: form },
