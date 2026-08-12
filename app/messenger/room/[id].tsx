@@ -304,6 +304,24 @@ function lastSeenText(value: string | null): string {
   return `Последний раз в сети ${date} в ${time}`;
 }
 
+/**
+ * Gives every participant a stable muted color derived from the immutable
+ * user id. The color therefore stays the same across renders, app launches
+ * and devices without storing presentation state on the server.
+ */
+function messengerAuthorColor(userId: string): string {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < userId.length; index += 1) {
+    hash ^= userId.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  const unsignedHash = hash >>> 0;
+  const hue = unsignedHash % 360;
+  const saturation = 30 + ((unsignedHash >>> 9) % 8);
+  const lightness = 38 + ((unsignedHash >>> 17) % 6);
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+}
+
 type DirectPeerPresence = Pick<
   MessengerRoomMember,
   "id" | "online" | "last_seen_at"
@@ -2756,7 +2774,19 @@ export default function MessengerRoomScreen() {
                                 numberOfLines={1}
                               >
                                 Переслано от{" "}
-                                {item.forwarded_from.author.display_name}
+                                <Text
+                                  style={
+                                    roomType === "direct"
+                                      ? undefined
+                                      : {
+                                          color: messengerAuthorColor(
+                                            item.forwarded_from.author.id,
+                                          ),
+                                        }
+                                  }
+                                >
+                                  {item.forwarded_from.author.display_name}
+                                </Text>
                               </Text>
                             </View>
                           )}
@@ -2770,7 +2800,14 @@ export default function MessengerRoomScreen() {
                               accessibilityLabel="Перейти к исходному сообщению"
                             >
                               <Text
-                                style={styles.replyAuthor}
+                                style={[
+                                  styles.replyAuthor,
+                                  roomType !== "direct" && {
+                                    color: messengerAuthorColor(
+                                      item.reply_to.author.id,
+                                    ),
+                                  },
+                                ]}
                                 numberOfLines={1}
                               >
                                 {item.reply_to.author.display_name}
@@ -2781,7 +2818,15 @@ export default function MessengerRoomScreen() {
                             </Pressable>
                           )}
                           {!mine && (
-                            <Text style={styles.author} numberOfLines={1}>
+                            <Text
+                              style={[
+                                styles.author,
+                                roomType !== "direct" && {
+                                  color: messengerAuthorColor(item.author.id),
+                                },
+                              ]}
+                              numberOfLines={1}
+                            >
                               {item.author.display_name}
                             </Text>
                           )}
@@ -2810,43 +2855,53 @@ export default function MessengerRoomScreen() {
                               {body}
                             </Text>
                           ) : null}
-                          {item.reactions.length > 0 && (
-                            <View
-                              style={[
-                                styles.reactionSummary,
-                                mine && styles.reactionSummaryMine,
-                              ]}
-                            >
-                              {item.reactions.map((reaction) => (
-                                <TouchableOpacity
-                                  key={reaction.reaction}
-                                  style={[
-                                    styles.reactionChip,
-                                    reaction.reacted_by_me &&
-                                      styles.reactionChipSelected,
-                                  ]}
-                                  onPress={() =>
-                                    void toggleReaction(item, reaction.reaction)
-                                  }
-                                  disabled={
-                                    !canReact || reactionBusyIds.has(item.id)
-                                  }
-                                >
-                                  <Text style={styles.reactionText}>
-                                    {reaction.reaction} {reaction.count}
-                                  </Text>
-                                </TouchableOpacity>
-                              ))}
+                          <View style={styles.messageFooter}>
+                            {item.reactions.length > 0 && (
+                              <ScrollView
+                                horizontal
+                                nestedScrollEnabled
+                                showsHorizontalScrollIndicator={false}
+                                style={styles.reactionScroller}
+                                contentContainerStyle={styles.reactionSummary}
+                              >
+                                {item.reactions.map((reaction) => (
+                                  <TouchableOpacity
+                                    key={reaction.reaction}
+                                    style={[
+                                      styles.reactionChip,
+                                      reaction.reacted_by_me &&
+                                        styles.reactionChipSelected,
+                                    ]}
+                                    onPress={() =>
+                                      void toggleReaction(
+                                        item,
+                                        reaction.reaction,
+                                      )
+                                    }
+                                    disabled={
+                                      !canReact || reactionBusyIds.has(item.id)
+                                    }
+                                    accessibilityLabel={`${reaction.reaction}, реакций: ${reaction.count}`}
+                                  >
+                                    <Text style={styles.reactionText}>
+                                      {reaction.reaction}
+                                      {reaction.count >= 2
+                                        ? ` ${reaction.count}`
+                                        : ""}
+                                    </Text>
+                                  </TouchableOpacity>
+                                ))}
+                              </ScrollView>
+                            )}
+                            <View style={styles.messageMeta}>
+                              <Text style={styles.time}>
+                                {new Date(item.created_at).toLocaleTimeString(
+                                  "ru-RU",
+                                  { hour: "2-digit", minute: "2-digit" },
+                                )}
+                              </Text>
+                              {mine && <DeliveryChecks message={item} />}
                             </View>
-                          )}
-                          <View style={styles.messageMeta}>
-                            <Text style={styles.time}>
-                              {new Date(item.created_at).toLocaleTimeString(
-                                "ru-RU",
-                                { hour: "2-digit", minute: "2-digit" },
-                              )}
-                            </Text>
-                            {mine && <DeliveryChecks message={item} />}
                           </View>
                         </View>
                       </View>
@@ -3678,12 +3733,20 @@ const styles = StyleSheet.create({
   },
   replyAuthor: { color: colors.accent, fontSize: 12, fontWeight: "800" },
   replyText: { color: colors.textSecondary, fontSize: 12 },
-  messageMeta: {
+  messageFooter: {
     flexDirection: "row",
-    justifyContent: "flex-end",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 8,
+    marginTop: 5,
+  },
+  messageMeta: {
+    flexShrink: 0,
+    flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    marginTop: 4,
+    marginLeft: "auto",
+    minHeight: 28,
   },
   time: { color: colors.textSecondary, fontSize: 10 },
   pendingCheck: { fontSize: 12, fontWeight: "800" },
@@ -3698,12 +3761,10 @@ const styles = StyleSheet.create({
   checkTwo: { left: 5 },
   reactionSummary: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: 4,
-    marginTop: 7,
-    marginBottom: 1,
+    alignItems: "center",
   },
-  reactionSummaryMine: { alignSelf: "flex-end", justifyContent: "flex-end" },
+  reactionScroller: { flexGrow: 0, flexShrink: 1 },
   reactionChip: {
     minHeight: 28,
     paddingHorizontal: 8,
