@@ -1,3 +1,4 @@
+import * as FileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";
 import type {
   InvitationPreview,
@@ -47,6 +48,12 @@ interface ApiEnvelope<T> {
 interface RequestOptions extends RequestInit {
   public?: boolean;
   noRefresh?: boolean;
+}
+
+export interface MessengerUploadProgress {
+  sent_bytes: number;
+  total_bytes: number;
+  percent: number;
 }
 
 export class MessengerApiError extends Error {
@@ -102,6 +109,30 @@ async function parseResponse<T>(response: Response): Promise<T> {
       payload.error?.code || "request_failed",
       payload.error?.details,
     );
+  }
+  return payload.data;
+}
+
+function parseUploadResponse<T>(status: number, body: string): T {
+  let payload: (ApiEnvelope<T> & ApiErrorEnvelope) | null = null;
+  try {
+    payload = JSON.parse(body || "{}") as ApiEnvelope<T> & ApiErrorEnvelope;
+  } catch {
+    // Nginx may return a small HTML error page for transport-level limits.
+  }
+  if (status < 200 || status >= 300) {
+    throw new MessengerApiError(
+      payload?.error?.message ||
+        (status === 413
+          ? "Файл превышает допустимый размер"
+          : `Сервер отклонил загрузку (HTTP ${status})`),
+      status,
+      payload?.error?.code || (status === 413 ? "upload_too_large" : "request_failed"),
+      payload?.error?.details,
+    );
+  }
+  if (!payload || !("data" in payload)) {
+    throw new Error("Сервер вернул некорректный ответ на загрузку");
   }
   return payload.data;
 }
@@ -523,19 +554,161 @@ export function sendMessengerText(
   );
 }
 
+type MessengerMediaUploadResult = {
+  message: MessengerMessage;
+  created: boolean;
+};
+
+const MEDIA_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+
+async function sendSingleMessengerMedia(
+  roomId: string,
+  clientMessageId: string,
+  file: { uri: string; name: string; type: string },
+  caption?: string,
+  replyToMessageId?: string | null,
+  onProgress?: (progress: MessengerUploadProgress) => void,
+  noRefresh = false,
+): Promise<MessengerMediaUploadResult> {
+  const startedAt = Date.now();
+  const requestId = messengerRequestId();
+  const session = await loadMessengerSession();
+  const parameters: Record<string, string> = {
+    client_message_id: clientMessageId,
+    original_name: file.name,
+  };
+  if (caption?.trim()) parameters.caption = caption.trim();
+  if (replyToMessageId) parameters.reply_to_message_id = replyToMessageId;
+
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "x-request-id": requestId,
+  };
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+
+  let lastPercent = -1;
+  const task = FileSystem.createUploadTask(
+    `${MESSENGER_API_BASE_URL}/chat/rooms/${roomId}/media`,
+    file.uri,
+    {
+      httpMethod: "POST",
+      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+      fieldName: "files",
+      mimeType: file.type || "application/octet-stream",
+      parameters,
+      headers,
+      // A messenger upload belongs to the visible send operation. An iOS
+      // background session may silently retry a broken connection for a long
+      // time and leave the bubble looking permanently pending.
+      sessionType: FileSystem.FileSystemSessionType.FOREGROUND,
+    },
+    ({ totalBytesSent, totalBytesExpectedToSend }) => {
+      const total = Math.max(totalBytesExpectedToSend, 1);
+      const percent = Math.max(
+        0,
+        Math.min(100, Math.round((totalBytesSent / total) * 100)),
+      );
+      if (percent === lastPercent) return;
+      lastPercent = percent;
+      onProgress?.({
+        sent_bytes: totalBytesSent,
+        total_bytes: totalBytesExpectedToSend,
+        percent,
+      });
+    },
+  );
+
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    void task.cancelAsync().catch(() => undefined);
+  }, MEDIA_UPLOAD_TIMEOUT_MS);
+
+  try {
+    messengerLog("info", "api.media_native_upload.started", {
+      request_id: requestId,
+      room_id: roomId,
+      file_type: file.type,
+    });
+    const response = await task.uploadAsync();
+    if (timedOut) {
+      throw new Error("Загрузка не завершилась за 10 минут");
+    }
+    if (!response) throw new Error("Загрузка была прервана");
+
+    messengerLog(
+      response.status >= 200 && response.status < 300 ? "info" : "warn",
+      "api.media_native_upload.response",
+      {
+        request_id: requestId,
+        room_id: roomId,
+        status: response.status,
+        duration_ms: Date.now() - startedAt,
+      },
+    );
+
+    if (
+      response.status === 401 &&
+      !noRefresh &&
+      Boolean(session?.refresh_token)
+    ) {
+      await refreshMessengerSession();
+      return sendSingleMessengerMedia(
+        roomId,
+        clientMessageId,
+        file,
+        caption,
+        replyToMessageId,
+        onProgress,
+        true,
+      );
+    }
+    return parseUploadResponse<MessengerMediaUploadResult>(
+      response.status,
+      response.body,
+    );
+  } catch (error) {
+    const normalized = timedOut
+      ? new Error("Загрузка не завершилась за 10 минут", { cause: error })
+      : error;
+    messengerLog("warn", "api.media_native_upload.failure", {
+      request_id: requestId,
+      room_id: roomId,
+      duration_ms: Date.now() - startedAt,
+      message: messengerErrorMessage(normalized),
+    });
+    throw normalized;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export function sendMessengerMedia(
   roomId: string,
   clientMessageId: string,
   files: { uri: string; name: string; type: string }[],
   caption?: string,
   replyToMessageId?: string | null,
+  onProgress?: (progress: MessengerUploadProgress) => void,
 ) {
+  if (Platform.OS !== "web" && files.length === 1 && files[0]) {
+    return sendSingleMessengerMedia(
+      roomId,
+      clientMessageId,
+      files[0],
+      caption,
+      replyToMessageId,
+      onProgress,
+    );
+  }
   const form = new FormData();
   form.append("client_message_id", clientMessageId);
   if (caption?.trim()) form.append("caption", caption.trim());
   if (replyToMessageId) form.append("reply_to_message_id", replyToMessageId);
   files.forEach((file) => form.append("files", file as unknown as Blob));
-  return messengerRequest<{ message: MessengerMessage; created: boolean }>(
+  return messengerRequest<MessengerMediaUploadResult>(
     `/chat/rooms/${roomId}/media`,
     { method: "POST", body: form },
   );

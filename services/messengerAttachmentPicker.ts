@@ -17,6 +17,12 @@ export interface MessengerUploadFile {
   height?: number;
 }
 
+export interface MessengerMediaPreparationProgress {
+  item: number;
+  total: number;
+  percent: number;
+}
+
 const MAX_PHOTO_EDGE = 1600;
 const PHOTO_JPEG_QUALITY = 0.68;
 const MAX_PHOTO_UPLOAD_BYTES = 350 * 1024;
@@ -235,6 +241,7 @@ async function compressedPhoto(
 
 async function compressedVideo(
   asset: ImagePicker.ImagePickerAsset,
+  onProgress?: (percent: number) => void,
 ): Promise<MessengerUploadFile> {
   if (Platform.OS === "web") {
     throw new Error(
@@ -264,6 +271,7 @@ async function compressedVideo(
   }
 
   let lastLoggedProgress = -1;
+  onProgress?.(0);
   const uri = await Video.compress(
     asset.uri,
     {
@@ -279,6 +287,7 @@ async function compressedVideo(
         lastLoggedProgress = percent;
         messengerLog("debug", "video.compression.progress", { percent });
       }
+      onProgress?.(percent);
     },
   );
   const compressedSize = await localFileSize(uri);
@@ -317,7 +326,11 @@ export async function takeMessengerPhoto(): Promise<MessengerUploadFile | null> 
   return asset ? compressedPhoto(asset) : null;
 }
 
-export async function pickMessengerMedia(): Promise<MessengerUploadFile[]> {
+export async function pickMessengerMedia(
+  onPreparationProgress?: (
+    progress: MessengerMediaPreparationProgress,
+  ) => void,
+): Promise<MessengerUploadFile[]> {
   if (Platform.OS !== "web") await mediaLibraryPermission();
   messengerLog("debug", "attachment.picker.opening", { kind: "library" });
   const result = await ImagePicker.launchImageLibraryAsync({
@@ -335,9 +348,18 @@ export async function pickMessengerMedia(): Promise<MessengerUploadFile[]> {
   });
   if (result.canceled) return [];
   const files: MessengerUploadFile[] = [];
-  for (const asset of result.assets.slice(0, MAX_MESSENGER_MEDIA_SELECTION)) {
+  const selected = result.assets.slice(0, MAX_MESSENGER_MEDIA_SELECTION);
+  for (const [index, asset] of selected.entries()) {
     if (asset.type === "video") {
-      files.push(await compressedVideo(asset));
+      files.push(
+        await compressedVideo(asset, (percent) =>
+          onPreparationProgress?.({
+            item: index + 1,
+            total: selected.length,
+            percent,
+          }),
+        ),
+      );
     } else {
       files.push(await compressedPhoto(asset));
     }

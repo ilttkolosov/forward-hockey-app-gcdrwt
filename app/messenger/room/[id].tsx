@@ -554,6 +554,8 @@ export default function MessengerRoomScreen() {
   const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
   const [attachmentDraft, setAttachmentDraft] =
     useState<AttachmentDraft | null>(null);
+  const [attachmentPreparationLabel, setAttachmentPreparationLabel] =
+    useState<string | null>(null);
   const [forwardingMessage, setForwardingMessage] =
     useState<MessengerMessage | null>(null);
   const [forwardRooms, setForwardRooms] = useState<MessengerRoom[]>([]);
@@ -1972,6 +1974,7 @@ export default function MessengerRoomScreen() {
         (total, file) => total + (file.size_bytes ?? 0),
         0,
       );
+      const uploadStartedAt = Date.now();
       messengerLog("info", "media.upload.started", {
         room_id: roomId,
         client_message_id: request.clientMessageId,
@@ -1981,13 +1984,39 @@ export default function MessengerRoomScreen() {
         upload_size_kb: Math.round(totalUploadBytes / 1024),
         has_caption: Boolean(request.caption),
       });
+      let lastShownPercent = -1;
       const result = await sendMessengerMedia(
         roomId,
         request.clientMessageId,
         request.files,
         request.caption,
         request.replyTarget?.id,
+        ({ percent }) => {
+          if (
+            percent !== 100 &&
+            lastShownPercent >= 0 &&
+            percent < lastShownPercent + 5
+          ) {
+            return;
+          }
+          lastShownPercent = percent;
+          updatePendingAttachment(request.clientMessageId, (message) => ({
+            ...message,
+            pending_attachment: message.pending_attachment
+              ? {
+                  ...message.pending_attachment,
+                  label: `Загрузка: ${percent}%`,
+                }
+              : null,
+          }));
+        },
       );
+      const serverAcceptedAt = Date.now();
+      messengerLog("info", "media.upload.server_accepted", {
+        room_id: roomId,
+        message_id: result.message.id,
+        duration_ms: serverAcceptedAt - uploadStartedAt,
+      });
       const confirmedMedia = result.message.media_items?.length
         ? result.message.media_items
         : result.message.media
@@ -2019,9 +2048,10 @@ export default function MessengerRoomScreen() {
           (total, media) => total + media.size_bytes,
           0,
         ),
+        cache_seed_duration_ms: Date.now() - serverAcceptedAt,
       });
     },
-    [roomId, storeSentMessage],
+    [roomId, storeSentMessage, updatePendingAttachment],
   );
 
   const chooseAttachment = useCallback(
@@ -2096,7 +2126,13 @@ export default function MessengerRoomScreen() {
                 (file): file is MessengerUploadFile => file !== null,
               )
             : kind === "library"
-              ? await pickMessengerMedia()
+              ? await pickMessengerMedia(({ item, total, percent }) => {
+                  setAttachmentPreparationLabel(
+                    total > 1
+                      ? `Подготовка видео ${item} из ${total}: ${percent}%`
+                      : `Подготовка видео: ${percent}%`,
+                  );
+                })
               : [await pickMessengerFile()].filter(
                   (file): file is MessengerUploadFile => file !== null,
                 );
@@ -2156,6 +2192,7 @@ export default function MessengerRoomScreen() {
           message,
         );
       } finally {
+        setAttachmentPreparationLabel(null);
         setSending(false);
       }
     },
@@ -3421,6 +3458,14 @@ export default function MessengerRoomScreen() {
 
         {canWrite ? (
           <View style={styles.composerShell}>
+            {attachmentPreparationLabel && (
+              <View style={styles.attachmentPreparation}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={styles.attachmentPreparationText}>
+                  {attachmentPreparationLabel}
+                </Text>
+              </View>
+            )}
             {replyingTo && (
               <View style={styles.replyComposer}>
                 <View style={styles.replyComposerText}>
@@ -3836,6 +3881,20 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
     backgroundColor: colors.background,
+  },
+  attachmentPreparation: {
+    minHeight: 36,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+  },
+  attachmentPreparationText: {
+    flex: 1,
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "700",
   },
   attachmentDraft: {
     minHeight: 82,

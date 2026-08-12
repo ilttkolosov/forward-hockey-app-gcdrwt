@@ -105,6 +105,7 @@ export default ({ config }) => {
             "Разрешите доступ к геопозиции, чтобы отправлять своё местоположение в мессенджере.",
         },
       ],
+      "react-native-compressor",
       [
         "./plugins/withAppMetrica.js",
         {
