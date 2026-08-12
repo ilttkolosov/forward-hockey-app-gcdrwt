@@ -106,6 +106,7 @@ export default function MessengerRoomsScreen() {
     null,
   );
   const loadRoomsRunning = useRef(false);
+  const hasLoadedOnce = useRef(false);
   const lastRoomsSyncFinishedAt = useRef(0);
 
   const orderedRooms = useMemo(
@@ -130,24 +131,38 @@ export default function MessengerRoomsScreen() {
   );
 
   const loadRooms = useCallback(
-    async (showRefresh = false, includeCache = true) => {
+    async (
+      showRefresh = false,
+      includeCache = true,
+      fetchRemote = true,
+    ) => {
       if (!isAuthenticated || loadRoomsRunning.current) return;
       loadRoomsRunning.current = true;
       if (showRefresh) setRefreshing(true);
       setError(null);
       const startedAt = Date.now();
+      let cachedRoomCount = 0;
       messengerLog("debug", "rooms.sync.started", {
         include_cache: includeCache,
         manual_refresh: showRefresh,
+        fetch_remote: fetchRemote,
       });
       try {
         if (includeCache) {
           const cached = await loadCachedMessengerRooms(db);
+          cachedRoomCount = cached.length;
           if (cached.length) {
             setRooms(cached);
             void syncMessengerUnreadFromRooms(cached);
             setLoading(false);
           }
+        }
+        if (!fetchRemote) {
+          messengerLog("debug", "rooms.cache.completed", {
+            room_count: cachedRoomCount,
+            duration_ms: Date.now() - startedAt,
+          });
+          return;
         }
         const remote = await getMessengerRooms();
         const reconciled = await cacheMessengerRooms(db, remote);
@@ -160,6 +175,7 @@ export default function MessengerRoomsScreen() {
           duration_ms: Date.now() - startedAt,
         });
       } catch (loadError) {
+        if (fetchRemote) hasLoadedOnce.current = false;
         setOffline(isMessengerConnectionError(loadError));
         setError(messengerErrorMessage(loadError, "Не удалось обновить чаты"));
         messengerLog("warn", "rooms.sync.failed", {
@@ -173,7 +189,7 @@ export default function MessengerRoomsScreen() {
         setLoading(false);
         setRefreshing(false);
         loadRoomsRunning.current = false;
-        lastRoomsSyncFinishedAt.current = Date.now();
+        if (fetchRemote) lastRoomsSyncFinishedAt.current = Date.now();
       }
     },
     [db, isAuthenticated],
@@ -208,7 +224,9 @@ export default function MessengerRoomsScreen() {
         return;
       }
       if (status !== "authenticated") return;
-      void loadRooms();
+      const fetchRemote = !hasLoadedOnce.current;
+      hasLoadedOnce.current = true;
+      void loadRooms(false, true, fetchRemote);
       const unsubscribe = subscribeMessengerRealtime((event) => {
         if (event.type === "message.created") {
           const message = event.message;
@@ -272,6 +290,12 @@ export default function MessengerRoomsScreen() {
   );
 
   const openRoom = (room: MessengerRoom) => {
+    const openedAt = Date.now();
+    messengerLog("info", "room.open.requested", {
+      room_id: room.id,
+      cached_latest_sequence: room.last_message?.sequence || null,
+      unread_count: room.unread_count,
+    });
     router.push({
       pathname: "/messenger/room/[id]",
       params: {
@@ -293,6 +317,7 @@ export default function MessengerRoomsScreen() {
             : "",
         peerId: room.peer?.id || "",
         peerLastSeenAt: room.peer?.last_seen_at || "",
+        openedAt: String(openedAt),
       },
     });
   };

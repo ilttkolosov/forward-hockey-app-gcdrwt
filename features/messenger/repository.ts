@@ -45,6 +45,10 @@ export interface MessengerMessageWindowOptions {
 }
 
 const messengerWriteQueues = new WeakMap<SQLiteDatabase, Promise<void>>();
+const messengerRoomCacheWrites = new WeakMap<
+  SQLiteDatabase,
+  WeakMap<MessengerRoom[], Promise<MessengerRoom[]>>
+>();
 
 function enqueueMessengerWrite<T>(
   db: SQLiteDatabase,
@@ -154,13 +158,20 @@ export async function loadCachedMessengerRoom(
   return parsedRoom(row);
 }
 
-export async function cacheMessengerRooms(
+export function cacheMessengerRooms(
   db: SQLiteDatabase,
   rooms: MessengerRoom[],
 ): Promise<MessengerRoom[]> {
+  let writesForDatabase = messengerRoomCacheWrites.get(db);
+  if (!writesForDatabase) {
+    writesForDatabase = new WeakMap();
+    messengerRoomCacheWrites.set(db, writesForDatabase);
+  }
+  const existingWrite = writesForDatabase.get(rooms);
+  if (existingWrite) return existingWrite;
   const reconciledRooms: MessengerRoom[] = [];
-  await enqueueMessengerWrite(db, () =>
-    withMessengerTransaction(db, async (transaction) => {
+  const write = enqueueMessengerWrite(db, async () => {
+    await withMessengerTransaction(db, async (transaction) => {
       const existingRows = await transaction.getAllAsync<
         RoomRow & { id: string }
       >("SELECT id, raw_json FROM messenger_rooms");
@@ -231,9 +242,23 @@ export async function cacheMessengerRooms(
           JSON.stringify(nextRoom),
         );
       }
-    }),
+    });
+    return reconciledRooms;
+  });
+  writesForDatabase.set(rooms, write);
+  void write.then(
+    () => {
+      if (writesForDatabase?.get(rooms) === write) {
+        writesForDatabase.delete(rooms);
+      }
+    },
+    () => {
+      if (writesForDatabase?.get(rooms) === write) {
+        writesForDatabase.delete(rooms);
+      }
+    },
   );
-  return reconciledRooms;
+  return write;
 }
 
 export function markCachedMessengerRoomRead(

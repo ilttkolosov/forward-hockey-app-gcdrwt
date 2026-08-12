@@ -414,8 +414,26 @@ export async function logoutFromMessenger(): Promise<void> {
   }
 }
 
+let messengerRoomsRequest: Promise<MessengerRoom[]> | null = null;
+
+/**
+ * The persistence bridge, rooms screen and realtime recovery can all request
+ * the same snapshot during one foreground transition. Share that request so a
+ * navigation never competes with two or three identical HTTP/TLS exchanges.
+ */
 export function getMessengerRooms() {
-  return messengerRequest<MessengerRoom[]>("/chat/rooms");
+  if (messengerRoomsRequest) return messengerRoomsRequest;
+  const request = messengerRequest<MessengerRoom[]>("/chat/rooms");
+  messengerRoomsRequest = request;
+  void request.then(
+    () => {
+      if (messengerRoomsRequest === request) messengerRoomsRequest = null;
+    },
+    () => {
+      if (messengerRoomsRequest === request) messengerRoomsRequest = null;
+    },
+  );
+  return request;
 }
 
 export function leaveMessengerRoom(roomId: string) {

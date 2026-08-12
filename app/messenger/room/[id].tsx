@@ -507,6 +507,7 @@ export default function MessengerRoomScreen() {
     memberCount?: string;
     peerId?: string;
     peerLastSeenAt?: string;
+    openedAt?: string;
   }>();
   const { session, isAuthenticated } = useMessengerAuth();
   const roomId = params.id;
@@ -654,6 +655,12 @@ export default function MessengerRoomScreen() {
   const messageNavigationTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const openedAt = useRef(
+    (() => {
+      const value = Number(params.openedAt);
+      return Number.isFinite(value) && value > 0 ? value : Date.now();
+    })(),
+  ).current;
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -1128,40 +1135,36 @@ export default function MessengerRoomScreen() {
       });
       let localLatestSequence: string | null = null;
       let cachedLatestSequence: string | null = null;
+      let localSnapshotReady = false;
+      let localReadStateFallback: string | null = null;
       let expectedUnreadCount = Number(params.unreadCount || 0);
       if (!Number.isFinite(expectedUnreadCount)) expectedUnreadCount = 0;
       try {
         if (initial && session) {
-          const [pending, cachedRoom, historyComplete, cachedBounds] =
-            await Promise.all([
-              loadMessengerOutbox(db, roomId),
-              loadCachedMessengerRoom(db, roomId),
-              isMessengerRoomHistoryComplete(db, roomId),
-              loadCachedMessengerMessageBounds(db, roomId),
-            ]);
+          const cacheStartedAt = Date.now();
+          // Read the room/read cursor first. The previous implementation also
+          // normalised this value through the global SQLite write queue, so a
+          // first frame could wait behind unrelated room-card or receipt
+          // transactions even though all visible messages were already local.
+          const cachedRoom = await loadCachedMessengerRoom(db, roomId);
+          const roomStateLoadedAt = Date.now();
           const routeReadSequence = params.lastReadSequence || "0";
           const cachedReadSequence = cachedRoom?.last_read_sequence || "0";
-          const serverReadSequence =
+          const localReadSequence =
             compareMessengerSequence(routeReadSequence, cachedReadSequence) >= 0
               ? routeReadSequence
               : cachedReadSequence;
-          const localReadState = await loadMessengerLocalReadState(
-            db,
-            roomId,
-            serverReadSequence,
-          );
-          initialReadSequence.current = localReadState.local_read_sequence;
-          initialUnreadBoundarySequence.current =
-            localReadState.local_read_sequence;
+          initialReadSequence.current = localReadSequence;
+          initialUnreadBoundarySequence.current = localReadSequence;
+          localReadStateFallback = localReadSequence;
           if (params.unreadCount === undefined && cachedRoom) {
             expectedUnreadCount = cachedRoom.unread_count;
           }
           const expectedLatestCandidates = [
             params.latestSequence,
             cachedRoom?.last_message?.sequence,
-            cachedBounds.latest_sequence,
           ].filter((sequence): sequence is string => Boolean(sequence));
-          const expectedLatestSequence = expectedLatestCandidates.reduce<
+          let expectedLatestSequence = expectedLatestCandidates.reduce<
             string | null
           >(
             (latest, sequence) =>
@@ -1181,11 +1184,16 @@ export default function MessengerRoomScreen() {
           }
           initialUnreadTailSequence.current =
             expectedUnreadCount > 0 ? expectedLatestSequence : null;
-          const cached = await loadCachedMessengerMessageWindow(db, roomId, {
-            anchorSequence: initialUnreadBoundarySequence.current,
-            hasUnread: expectedUnreadCount > 0,
-            limit: 20,
-          });
+          const windowStartedAt = Date.now();
+          const [cached, pending] = await Promise.all([
+            loadCachedMessengerMessageWindow(db, roomId, {
+              anchorSequence: initialUnreadBoundarySequence.current,
+              hasUnread: expectedUnreadCount > 0,
+              limit: 20,
+            }),
+            loadMessengerOutbox(db, roomId),
+          ]);
+          const windowLoadedAt = Date.now();
           const confirmedClientIds = new Set(
             cached.map((message) => message.client_message_id),
           );
@@ -1218,10 +1226,42 @@ export default function MessengerRoomScreen() {
             // reconciliation starts below, but can no longer hold the feed in
             // a hidden/loading state.
             setInitialDataReady(true);
+            localSnapshotReady = true;
           }
           const localConfirmed = local.filter((message) => !message.pending);
           localLatestSequence = localConfirmed.at(-1)?.sequence ?? null;
+          messengerLog("info", "room.cache.first_window_ready", {
+            room_id: roomId,
+            window_message_count: cached.length,
+            pending_count: pendingMessages.length,
+            room_state_duration_ms: roomStateLoadedAt - cacheStartedAt,
+            window_duration_ms: windowLoadedAt - windowStartedAt,
+            total_duration_ms: windowLoadedAt - cacheStartedAt,
+            elapsed_since_tap_ms: windowLoadedAt - openedAt,
+          });
+
+          // Bounds and the complete-history marker are reconciliation
+          // metadata. They must be read only after the first local viewport
+          // has been handed to React.
+          const metadataStartedAt = Date.now();
+          const [historyComplete, cachedBounds] = await Promise.all([
+            isMessengerRoomHistoryComplete(db, roomId),
+            loadCachedMessengerMessageBounds(db, roomId),
+          ]);
           cachedLatestSequence = cachedBounds.latest_sequence;
+          if (
+            cachedLatestSequence &&
+            (!expectedLatestSequence ||
+              compareMessengerSequence(
+                cachedLatestSequence,
+                expectedLatestSequence,
+              ) > 0)
+          ) {
+            expectedLatestSequence = cachedLatestSequence;
+            if (expectedUnreadCount > 0) {
+              initialUnreadTailSequence.current = expectedLatestSequence;
+            }
+          }
           messengerLog("debug", "room.cache.loaded", {
             room_id: roomId,
             window_message_count: cached.length,
@@ -1234,7 +1274,30 @@ export default function MessengerRoomScreen() {
             unread_count: expectedUnreadCount,
             position_ready: local.length > 0,
             position_source: local.length > 0 ? "sqlite" : "network",
+            metadata_duration_ms: Date.now() - metadataStartedAt,
+            total_duration_ms: Date.now() - cacheStartedAt,
           });
+        }
+        if (initial && localSnapshotReady) {
+          // Give React two frames to commit and position the SQLite viewport
+          // before any outbox or REST reconciliation work is started.
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+        }
+        if (initial && localReadStateFallback) {
+          // Normalisation is still persisted, but it is deliberately detached
+          // from the critical first-frame path.
+          void loadMessengerLocalReadState(
+            db,
+            roomId,
+            localReadStateFallback,
+          ).catch((error) =>
+            messengerLog("debug", "room.read_state.normalization_deferred", {
+              room_id: roomId,
+              message: messengerErrorMessage(error),
+            }),
+          );
         }
         let outboxError: unknown = null;
         try {
@@ -1360,6 +1423,7 @@ export default function MessengerRoomScreen() {
       db,
       flushOutbox,
       isAuthenticated,
+      openedAt,
       params.lastReadSequence,
       params.latestSequence,
       params.unreadCount,
@@ -1392,6 +1456,7 @@ export default function MessengerRoomScreen() {
       anchor_client_message_id: initialAnchorClientId.current,
       attempts: initialPositionAttempts.current,
       duration_ms: Date.now() - initialPositionStartedAt.current,
+      elapsed_since_tap_ms: Date.now() - openedAt,
     });
     if (initialReadAcknowledged.current) return;
     initialReadAcknowledged.current = true;
@@ -1408,7 +1473,7 @@ export default function MessengerRoomScreen() {
         ),
       );
     }
-  }, [acknowledgeLatest, clearInitialPositionTimers, roomId]);
+  }, [acknowledgeLatest, clearInitialPositionTimers, openedAt, roomId]);
 
   const positionInitialMessages = useCallback(() => {
     if (!pendingInitialPosition.current) return;
@@ -1757,12 +1822,18 @@ export default function MessengerRoomScreen() {
         router.replace("/messenger/register");
         return;
       }
+      messengerLog("info", "room.screen.focused", {
+        room_id: roomId,
+        elapsed_since_tap_ms: Date.now() - openedAt,
+      });
       setMessengerActiveRoom(roomId);
       const returningToRoom = roomFocusCount.current > 0;
       roomFocusCount.current += 1;
-      if (returningToRoom) void refreshRoomIdentity();
-      void refreshRoomMembers();
       void loadMessages(true);
+      const roomDetailsFrame = requestAnimationFrame(() => {
+        if (returningToRoom) void refreshRoomIdentity();
+        void refreshRoomMembers();
+      });
       const unsubscribe = subscribeMessengerRealtime((event) => {
         if (event.type === "connection.state") {
           setRealtimeConnected(event.connected);
@@ -1855,6 +1926,7 @@ export default function MessengerRoomScreen() {
       // foreground delivery, while this timer protects against a lost event.
       const timer = setInterval(() => void loadMessages(false), 120_000);
       return () => {
+        cancelAnimationFrame(roomDetailsFrame);
         setMessengerActiveRoom(null);
         unsubscribe();
         clearInterval(timer);
@@ -1885,6 +1957,7 @@ export default function MessengerRoomScreen() {
       clearInitialPositionTimers,
       isAuthenticated,
       loadMessages,
+      openedAt,
       roomId,
       refreshRoomIdentity,
       refreshRoomMembers,
@@ -2929,9 +3002,10 @@ export default function MessengerRoomScreen() {
                                 location={location}
                                 accessToken={session.access_token}
                                 deferAutomaticCache={
-                                  mine &&
-                                  activeMediaUploadClientId.current ===
-                                    item.client_message_id
+                                  !listReady ||
+                                  (mine &&
+                                    activeMediaUploadClientId.current ===
+                                      item.client_message_id)
                                 }
                               />
                             )}
