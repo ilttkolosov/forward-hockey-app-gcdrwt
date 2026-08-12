@@ -1,3 +1,5 @@
+import { fetch as expoFetch } from "expo/fetch";
+import { File as ExpoFile } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";
 import type {
@@ -614,15 +616,172 @@ type MessengerMediaUploadResult = {
   created: boolean;
 };
 
+type MessengerMediaUploadFile = {
+  uri: string;
+  name: string;
+  type: string;
+  size_bytes?: number | null;
+};
+
 // Slow mobile uplinks may legitimately need more than ten minutes for the
 // allowed 50 MiB. Cancel only a stalled transfer; continuing byte progress is
 // not an error and must not be cut off by an absolute wall-clock timeout.
 const MEDIA_UPLOAD_STALL_TIMEOUT_MS = 3 * 60 * 1000;
 
+// The legacy FileSystem multipart implementation copies the complete source
+// into a second temporary multipart file and delivers URLSession callbacks on
+// iOS's main queue. That is useful for progress on large payloads, but it made
+// even a 250 KiB image take several seconds while a busy chat was rendering.
+// For small files use Expo's current fetch/File transport: it buffers at most
+// 1 MiB, avoids the legacy temporary upload file and runs URLSession delegates
+// away from the UI queue. Large files retain native byte progress and bounded
+// memory use below.
+const BUFFERED_MEDIA_UPLOAD_MAX_BYTES = 1024 * 1024;
+
+function shouldUseBufferedMediaUpload(file: MessengerMediaUploadFile) {
+  return (
+    typeof file.size_bytes === "number" &&
+    file.size_bytes >= 0 &&
+    file.size_bytes <= BUFFERED_MEDIA_UPLOAD_MAX_BYTES
+  );
+}
+
+async function sendBufferedSingleMessengerMedia(
+  roomId: string,
+  clientMessageId: string,
+  file: MessengerMediaUploadFile,
+  caption?: string,
+  replyToMessageId?: string | null,
+  onProgress?: (progress: MessengerUploadProgress) => void,
+  signal?: AbortSignal,
+  noRefresh = false,
+): Promise<MessengerMediaUploadResult> {
+  if (signal?.aborted) throw new MessengerUploadCancelledError();
+  const startedAt = Date.now();
+  const requestId = messengerRequestId();
+  const session = await loadMessengerSession();
+  const form = new FormData();
+  form.append("client_message_id", clientMessageId);
+  form.append("original_name", file.name);
+  if (caption?.trim()) form.append("caption", caption.trim());
+  if (replyToMessageId) form.append("reply_to_message_id", replyToMessageId);
+  form.append("files", new ExpoFile(file.uri) as unknown as Blob);
+
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "x-request-id": requestId,
+  };
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+
+  const controller = new AbortController();
+  let stalled = false;
+  const handleAbort = () => controller.abort();
+  signal?.addEventListener("abort", handleAbort, { once: true });
+  const stallTimer = setTimeout(() => {
+    stalled = true;
+    controller.abort();
+  }, MEDIA_UPLOAD_STALL_TIMEOUT_MS);
+
+  messengerLog("info", "api.media_buffered_upload.started", {
+    request_id: requestId,
+    room_id: roomId,
+    file_type: file.type,
+    file_size_bytes: file.size_bytes,
+    preparation_duration_ms: Date.now() - startedAt,
+  });
+
+  try {
+    const response = await expoFetch(
+      `${MESSENGER_API_BASE_URL}/chat/rooms/${roomId}/media`,
+      {
+        method: "POST",
+        headers,
+        body: form,
+        signal: controller.signal,
+      },
+    );
+    const headersReceivedAt = Date.now();
+    const body = await response.text();
+    const serverRequestId = response.headers.get("x-request-id") || requestId;
+
+    messengerLog(
+      response.ok ? "info" : "warn",
+      "api.media_buffered_upload.response",
+      {
+        request_id: serverRequestId,
+        client_request_id:
+          serverRequestId !== requestId ? requestId : undefined,
+        room_id: roomId,
+        status: response.status,
+        headers_duration_ms: headersReceivedAt - startedAt,
+        response_body_duration_ms: Date.now() - headersReceivedAt,
+        duration_ms: Date.now() - startedAt,
+      },
+    );
+
+    if (
+      response.status === 401 &&
+      !noRefresh &&
+      Boolean(session?.refresh_token)
+    ) {
+      await refreshMessengerSession();
+      return sendBufferedSingleMessengerMedia(
+        roomId,
+        clientMessageId,
+        file,
+        caption,
+        replyToMessageId,
+        onProgress,
+        signal,
+        true,
+      );
+    }
+    const result = parseUploadResponse<MessengerMediaUploadResult>(
+      response.status,
+      body,
+    );
+    const totalBytes = file.size_bytes ?? 0;
+    onProgress?.({
+      sent_bytes: totalBytes,
+      total_bytes: totalBytes,
+      percent: 100,
+    });
+    return result;
+  } catch (error) {
+    const normalized =
+      signal?.aborted || (!stalled && controller.signal.aborted)
+        ? new MessengerUploadCancelledError()
+        : stalled
+          ? new Error(
+              "Загрузка остановилась: три минуты не передавались данные",
+              { cause: error },
+            )
+          : error;
+    messengerLog(
+      isMessengerUploadCancelledError(normalized) ? "info" : "warn",
+      isMessengerUploadCancelledError(normalized)
+        ? "api.media_buffered_upload.cancelled"
+        : "api.media_buffered_upload.failure",
+      {
+        request_id: requestId,
+        room_id: roomId,
+        duration_ms: Date.now() - startedAt,
+        message: messengerErrorMessage(normalized),
+      },
+    );
+    throw normalized;
+  } finally {
+    clearTimeout(stallTimer);
+    signal?.removeEventListener("abort", handleAbort);
+  }
+}
+
 async function sendSingleMessengerMedia(
   roomId: string,
   clientMessageId: string,
-  file: { uri: string; name: string; type: string },
+  file: MessengerMediaUploadFile,
   caption?: string,
   replyToMessageId?: string | null,
   onProgress?: (progress: MessengerUploadProgress) => void,
@@ -810,13 +969,33 @@ async function sendSingleMessengerMedia(
 export async function sendMessengerMedia(
   roomId: string,
   clientMessageId: string,
-  files: { uri: string; name: string; type: string }[],
+  files: MessengerMediaUploadFile[],
   caption?: string,
   replyToMessageId?: string | null,
   onProgress?: (progress: MessengerUploadProgress) => void,
   signal?: AbortSignal,
 ) {
   if (Platform.OS !== "web" && files.length === 1 && files[0]) {
+    const transport = shouldUseBufferedMediaUpload(files[0])
+      ? "expo_fetch_buffered"
+      : "legacy_native_progress";
+    messengerLog("info", "api.media_upload.transport_selected", {
+      room_id: roomId,
+      transport,
+      file_size_bytes: files[0].size_bytes,
+      buffered_limit_bytes: BUFFERED_MEDIA_UPLOAD_MAX_BYTES,
+    });
+    if (transport === "expo_fetch_buffered") {
+      return sendBufferedSingleMessengerMedia(
+        roomId,
+        clientMessageId,
+        files[0],
+        caption,
+        replyToMessageId,
+        onProgress,
+        signal,
+      );
+    }
     return sendSingleMessengerMedia(
       roomId,
       clientMessageId,
