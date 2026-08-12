@@ -56,6 +56,16 @@ export interface MessengerUploadProgress {
   percent: number;
 }
 
+interface MessengerMessagesResponse {
+  items: MessengerMessage[];
+  page: {
+    direction: "latest" | "before" | "after";
+    has_more: boolean;
+    oldest_sequence: string | null;
+    latest_sequence: string | null;
+  };
+}
+
 export class MessengerApiError extends Error {
   constructor(
     message: string,
@@ -537,6 +547,11 @@ export function deleteMessengerPrivateRoom(roomId: string) {
   });
 }
 
+const messengerMessageRequests = new Map<
+  string,
+  Promise<MessengerMessagesResponse>
+>();
+
 export function getMessengerMessages(
   roomId: string,
   options: {
@@ -549,15 +564,24 @@ export function getMessengerMessages(
   query.set("limit", String(options.limit ?? 100));
   if (options.cursor) query.set("cursor", options.cursor);
   if (options.direction) query.set("direction", options.direction);
-  return messengerRequest<{
-    items: MessengerMessage[];
-    page: {
-      direction: "latest" | "before" | "after";
-      has_more: boolean;
-      oldest_sequence: string | null;
-      latest_sequence: string | null;
-    };
-  }>(`/chat/rooms/${roomId}/messages?${query.toString()}`);
+  const path = `/chat/rooms/${roomId}/messages?${query.toString()}`;
+  const running = messengerMessageRequests.get(path);
+  if (running) return running;
+  const request = messengerRequest<MessengerMessagesResponse>(path);
+  messengerMessageRequests.set(path, request);
+  void request.then(
+    () => {
+      if (messengerMessageRequests.get(path) === request) {
+        messengerMessageRequests.delete(path);
+      }
+    },
+    () => {
+      if (messengerMessageRequests.get(path) === request) {
+        messengerMessageRequests.delete(path);
+      }
+    },
+  );
+  return request;
 }
 
 export function getMessengerMessage(messageId: string) {

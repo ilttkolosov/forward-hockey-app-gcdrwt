@@ -8,6 +8,7 @@ import {
   cacheMessengerRooms,
   loadCachedMessengerRooms,
 } from "./repository";
+import { warmMessengerRoomWindows } from "./cacheWarmup";
 import { flushMessengerReadReceipts } from "../../services/messengerReadSync";
 import { subscribeMessengerRealtime } from "../../services/messengerRealtime";
 import { messengerLog } from "../../services/messengerLogger";
@@ -43,10 +44,15 @@ export default function MessengerPersistenceBridge() {
       try {
         const cached = await loadCachedMessengerRooms(db);
         if (active) await syncMessengerUnreadFromRooms(cached);
+        // Start from the persisted room cards immediately, before the remote
+        // room snapshot returns. This gives never-opened rooms the maximum
+        // possible head start and never blocks app or messenger navigation.
+        void warmMessengerRoomWindows(db, cached);
         if (!remote) return;
         const rooms = await getMessengerRooms();
         const reconciled = await cacheMessengerRooms(db, rooms);
         if (active) await syncMessengerUnreadFromRooms(reconciled);
+        void warmMessengerRoomWindows(db, reconciled);
       } catch (error) {
         messengerLog("debug", "rooms.background_sync.deferred", {
           message: error instanceof Error ? error.message : String(error),
