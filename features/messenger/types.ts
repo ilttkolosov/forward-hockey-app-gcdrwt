@@ -41,7 +41,7 @@ export type MessengerLoginResult =
   MessengerSession | MessengerPasswordChangeRequired;
 
 export type MessengerMessageKind =
-  "text" | "image" | "video" | "file" | "location";
+  "text" | "image" | "video" | "file" | "location" | "system";
 
 export interface MessengerMedia {
   id: string;
@@ -89,6 +89,7 @@ export interface MessengerRoom {
   can_send_media: boolean;
   can_react: boolean;
   can_manage: boolean;
+  can_leave: boolean;
   member_count: number | null;
   last_read_sequence: string;
   last_delivered_sequence: string;

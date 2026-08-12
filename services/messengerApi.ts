@@ -342,6 +342,23 @@ export function removeMessengerAvatar() {
   });
 }
 
+export async function deleteMessengerAccount() {
+  const result = await messengerRequest<{ deleted: true }>("/users/me", {
+    method: "DELETE",
+    body: JSON.stringify({ confirmation: "DELETE_MY_ACCOUNT" }),
+  });
+  const cleanup = await Promise.allSettled([
+    clearMessengerSession(),
+    clearMessengerPasswordChange(),
+  ]);
+  if (cleanup.some((item) => item.status === "rejected")) {
+    console.warn(
+      "[Messenger] Сервер удалил профиль, но защищённое хранилище будет очищено повторно при следующем запуске",
+    );
+  }
+  return result;
+}
+
 export async function logoutFromMessenger(): Promise<void> {
   try {
     await messengerRequest("/auth/logout", { method: "POST" });
@@ -355,6 +372,14 @@ export async function logoutFromMessenger(): Promise<void> {
 
 export function getMessengerRooms() {
   return messengerRequest<MessengerRoom[]>("/chat/rooms");
+}
+
+export function leaveMessengerRoom(roomId: string) {
+  return messengerRequest<{
+    left: true;
+    room_id: string;
+    room_type: "direct" | "private_group";
+  }>(`/chat/rooms/${roomId}/membership`, { method: "DELETE" });
 }
 
 export function getMessengerContacts(teamId?: string) {

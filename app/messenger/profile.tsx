@@ -1,11 +1,13 @@
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useSQLiteContext } from "expo-sqlite";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -18,7 +20,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
+import { clearMessengerLocalData } from "../../features/messenger/repository";
+import type { MessengerRoom } from "../../features/messenger/types";
 import {
+  deleteMessengerAccount,
+  getMessengerRooms,
+  leaveMessengerRoom,
+  messengerErrorMessage,
   removeMessengerAvatar,
   updateMessengerProfile,
   uploadMessengerAvatar,
@@ -31,7 +39,21 @@ import {
 } from "../../services/messengerMediaCache";
 import { colors } from "../../styles/commonStyles";
 
+function newDeletionChallenge(): { left: number; right: number } {
+  return {
+    left: 10 + Math.floor(Math.random() * 90),
+    right: 10 + Math.floor(Math.random() * 90),
+  };
+}
+
+function roomTypeLabel(room: MessengerRoom): string {
+  if (room.room_type === "direct") return "Личный чат";
+  if (room.room_type === "private_group") return "Мини-группа";
+  return "Системная группа";
+}
+
 export default function MessengerProfileScreen() {
+  const db = useSQLiteContext();
   const router = useRouter();
   const params = useLocalSearchParams<{ firstRun?: string }>();
   const { session, isAuthenticated, refreshUser } = useMessengerAuth();
@@ -44,6 +66,16 @@ export default function MessengerProfileScreen() {
   const [cacheBusy, setCacheBusy] = useState(false);
   const [cacheBytes, setCacheBytes] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [rooms, setRooms] = useState<MessengerRoom[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState(true);
+  const [roomsError, setRoomsError] = useState<string | null>(null);
+  const [leavingRoomId, setLeavingRoomId] = useState<string | null>(null);
+  const [deletionVisible, setDeletionVisible] = useState(false);
+  const [deletionChallenge, setDeletionChallenge] =
+    useState(newDeletionChallenge);
+  const [deletionAnswer, setDeletionAnswer] = useState("");
+  const [deletionBusy, setDeletionBusy] = useState(false);
+  const [deletionError, setDeletionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) router.replace("/messenger/register");
@@ -65,6 +97,30 @@ export default function MessengerProfileScreen() {
         }),
       );
   }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let active = true;
+    setRoomsLoading(true);
+    setRoomsError(null);
+    void getMessengerRooms()
+      .then((items) => {
+        if (active) setRooms(items);
+      })
+      .catch((loadError) => {
+        if (active) {
+          setRoomsError(
+            messengerErrorMessage(loadError, "Не удалось загрузить группы и чаты"),
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setRoomsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isAuthenticated]);
 
   const chooseAvatar = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -179,6 +235,96 @@ export default function MessengerProfileScreen() {
         },
       ],
     );
+  };
+
+  const openRoom = (room: MessengerRoom) => {
+    router.push({
+      pathname: "/messenger/room/[id]",
+      params: {
+        id: room.id,
+        title: room.title,
+        canWrite: String(room.can_write),
+        canMedia: String(room.can_send_media),
+        canReact: String(room.can_react),
+        canManage: String(room.can_manage),
+        roomType: room.room_type,
+        teamId: room.team_id,
+        avatarUrl: room.avatar_url || "",
+        lastReadSequence: room.last_read_sequence,
+        latestSequence: room.last_message?.sequence || "",
+        unreadCount: String(room.unread_count),
+        memberCount:
+          typeof room.member_count === "number" ? String(room.member_count) : "",
+        peerId: room.peer?.id || "",
+        peerLastSeenAt: room.peer?.last_seen_at || "",
+      },
+    });
+  };
+
+  const performLeaveRoom = async (room: MessengerRoom) => {
+    setLeavingRoomId(room.id);
+    setRoomsError(null);
+    try {
+      await leaveMessengerRoom(room.id);
+      setRooms((current) => current.filter((item) => item.id !== room.id));
+    } catch (leaveError) {
+      setRoomsError(
+        messengerErrorMessage(leaveError, "Не удалось выйти из группы или чата"),
+      );
+    } finally {
+      setLeavingRoomId(null);
+    }
+  };
+
+  const confirmLeaveRoom = (room: MessengerRoom) => {
+    if (!room.can_leave) return;
+    const direct = room.room_type === "direct";
+    Alert.alert(
+      direct ? "Удалить личный чат?" : "Выйти из группы?",
+      direct
+        ? "Чат исчезнет из вашего списка, а второй участник увидит служебное сообщение. Открыть чат снова можно через контакты."
+        : "В группе появится служебное сообщение о выходе. Если вы администратор, управление будет передано другому участнику.",
+      [
+        { text: "Отмена", style: "cancel" },
+        {
+          text: direct ? "Удалить" : "Выйти",
+          style: "destructive",
+          onPress: () => void performLeaveRoom(room),
+        },
+      ],
+    );
+  };
+
+  const openAccountDeletion = () => {
+    setDeletionChallenge(newDeletionChallenge());
+    setDeletionAnswer("");
+    setDeletionError(null);
+    setDeletionVisible(true);
+  };
+
+  const deletionAnswerIsCorrect =
+    /^\d+$/.test(deletionAnswer.trim()) &&
+    Number(deletionAnswer) === deletionChallenge.left + deletionChallenge.right;
+
+  const permanentlyDeleteAccount = async () => {
+    if (!deletionAnswerIsCorrect || deletionBusy) return;
+    setDeletionBusy(true);
+    setDeletionError(null);
+    try {
+      await deleteMessengerAccount();
+      await Promise.allSettled([
+        clearMessengerLocalData(db),
+        clearMessengerMediaCache(),
+      ]);
+      setDeletionVisible(false);
+      router.replace("/messenger/register");
+    } catch (deleteError) {
+      setDeletionError(
+        messengerErrorMessage(deleteError, "Не удалось удалить профиль"),
+      );
+    } finally {
+      setDeletionBusy(false);
+    }
   };
 
   if (!session) return null;
@@ -300,8 +446,185 @@ export default function MessengerProfileScreen() {
               )}
             </TouchableOpacity>
           </View>
+
+          <View style={styles.roomsCard}>
+            <View style={styles.sectionHeadingRow}>
+              <View style={styles.sectionHeadingText}>
+                <Text style={styles.sectionTitle}>Группы и чаты</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Доступные системные группы и ваши диалоги
+                </Text>
+              </View>
+              {roomsLoading && (
+                <ActivityIndicator size="small" color={colors.primary} />
+              )}
+            </View>
+            {roomsError && <Text style={styles.roomsError}>{roomsError}</Text>}
+            {!roomsLoading && rooms.length === 0 ? (
+              <Text style={styles.emptyRoomsText}>Доступных групп и чатов пока нет.</Text>
+            ) : (
+              rooms.map((room, index) => (
+                <View
+                  key={room.id}
+                  style={[
+                    styles.roomRow,
+                    index < rooms.length - 1 && styles.roomRowBorder,
+                  ]}
+                >
+                  <TouchableOpacity
+                    style={styles.roomOpenTarget}
+                    onPress={() => openRoom(room)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Открыть ${room.title}`}
+                  >
+                    <AuthenticatedAvatar
+                      displayName={room.title}
+                      avatarUrl={room.avatar_url}
+                      accessToken={session.access_token}
+                      size={46}
+                    />
+                    <View style={styles.roomText}>
+                      <Text style={styles.roomTitle} numberOfLines={1}>
+                        {room.title}
+                      </Text>
+                      <Text style={styles.roomSubtitle} numberOfLines={1}>
+                        {roomTypeLabel(room)} · {room.team_name}
+                      </Text>
+                    </View>
+                    <Icon
+                      name="chevron-forward"
+                      size={19}
+                      color={colors.textSecondary}
+                    />
+                  </TouchableOpacity>
+                  {room.can_leave ? (
+                    <TouchableOpacity
+                      style={styles.leaveRoomButton}
+                      onPress={() => confirmLeaveRoom(room)}
+                      disabled={leavingRoomId !== null}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        room.room_type === "direct"
+                          ? `Удалить чат ${room.title}`
+                          : `Выйти из группы ${room.title}`
+                      }
+                    >
+                      {leavingRoomId === room.id ? (
+                        <ActivityIndicator size="small" color={colors.error} />
+                      ) : (
+                        <Icon
+                          name="log-out-outline"
+                          size={21}
+                          color={colors.error}
+                        />
+                      )}
+                    </TouchableOpacity>
+                  ) : (
+                    <View
+                      style={styles.systemRoomMark}
+                      accessibilityLabel="Из системной группы выйти нельзя"
+                    >
+                      <Icon
+                        name="lock-closed-outline"
+                        size={16}
+                        color={colors.textSecondary}
+                      />
+                    </View>
+                  )}
+                </View>
+              ))
+            )}
+          </View>
+
+          <View style={styles.dangerCard}>
+            <View style={styles.dangerIcon}>
+              <Icon name="trash-outline" size={24} color={colors.error} />
+            </View>
+            <View style={styles.dangerText}>
+              <Text style={styles.dangerTitle}>Удаление профиля</Text>
+              <Text style={styles.dangerSubtitle}>
+                Профиль, сообщения, медиа, роли, сессии и исходное приглашение
+                будут удалены без возможности восстановления.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.deleteProfileButton}
+              onPress={openAccountDeletion}
+              accessibilityRole="button"
+            >
+              <Text style={styles.deleteProfileButtonText}>Удалить профиль</Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={deletionVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!deletionBusy) setDeletionVisible(false);
+        }}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <View style={styles.deletionDialog}>
+            <View style={styles.deletionDialogIcon}>
+              <Icon name="warning-outline" size={30} color={colors.error} />
+            </View>
+            <Text style={styles.deletionDialogTitle}>Удалить профиль навсегда?</Text>
+            <Text style={styles.deletionDialogText}>
+              Это действие необратимо. Для подтверждения решите пример и введите
+              ответ:
+            </Text>
+            <Text style={styles.deletionEquation}>
+              {deletionChallenge.left} + {deletionChallenge.right} = ?
+            </Text>
+            <TextInput
+              style={styles.deletionInput}
+              value={deletionAnswer}
+              onChangeText={(value) => {
+                setDeletionAnswer(value.replace(/[^0-9]/g, ""));
+                setDeletionError(null);
+              }}
+              keyboardType="number-pad"
+              maxLength={3}
+              autoFocus
+              editable={!deletionBusy}
+              placeholder="Ответ"
+              accessibilityLabel="Ответ на пример для удаления профиля"
+            />
+            {deletionError && (
+              <Text style={styles.deletionError}>{deletionError}</Text>
+            )}
+            <View style={styles.deletionActions}>
+              <TouchableOpacity
+                style={styles.cancelDeletionButton}
+                onPress={() => setDeletionVisible(false)}
+                disabled={deletionBusy}
+              >
+                <Text style={styles.cancelDeletionText}>Отмена</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.confirmDeletionButton,
+                  (!deletionAnswerIsCorrect || deletionBusy) && styles.disabled,
+                ]}
+                onPress={() => void permanentlyDeleteAccount()}
+                disabled={!deletionAnswerIsCorrect || deletionBusy}
+              >
+                {deletionBusy ? (
+                  <ActivityIndicator size="small" color={colors.white} />
+                ) : (
+                  <Text style={styles.confirmDeletionText}>Удалить навсегда</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -366,6 +689,195 @@ const styles = StyleSheet.create({
   },
   cacheButton: { paddingVertical: 10, paddingHorizontal: 4 },
   cacheButtonText: { color: colors.error, fontSize: 12, fontWeight: "800" },
+  roomsCard: {
+    marginHorizontal: 18,
+    marginTop: 14,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 18,
+    backgroundColor: colors.surface,
+  },
+  sectionHeadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingBottom: 12,
+  },
+  sectionHeadingText: { flex: 1, minWidth: 0 },
+  sectionTitle: { color: colors.text, fontSize: 17, fontWeight: "800" },
+  sectionSubtitle: {
+    marginTop: 3,
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  roomsError: {
+    marginBottom: 12,
+    color: colors.error,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  emptyRoomsText: {
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    color: colors.textSecondary,
+    fontSize: 13,
+  },
+  roomRow: { flexDirection: "row", alignItems: "center", minHeight: 68 },
+  roomRowBorder: { borderBottomWidth: 1, borderBottomColor: colors.border },
+  roomOpenTarget: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 67,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 11,
+    paddingVertical: 8,
+  },
+  roomText: { flex: 1, minWidth: 0 },
+  roomTitle: { color: colors.text, fontSize: 14, fontWeight: "800" },
+  roomSubtitle: { marginTop: 4, color: colors.textSecondary, fontSize: 11 },
+  leaveRoomButton: {
+    width: 44,
+    height: 48,
+    marginLeft: 3,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  systemRoomMark: {
+    width: 44,
+    height: 48,
+    marginLeft: 3,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dangerCard: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 12,
+    marginHorizontal: 18,
+    marginTop: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#F3C8C4",
+    borderRadius: 18,
+    backgroundColor: "#FFF8F7",
+  },
+  dangerIcon: {
+    width: 46,
+    height: 46,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 15,
+    backgroundColor: "#FDECEA",
+  },
+  dangerText: { flex: 1, minWidth: 0 },
+  dangerTitle: { color: colors.error, fontSize: 15, fontWeight: "800" },
+  dangerSubtitle: {
+    marginTop: 3,
+    color: colors.textSecondary,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  deleteProfileButton: {
+    width: "100%",
+    minHeight: 46,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.error,
+    borderRadius: 14,
+    backgroundColor: colors.surface,
+  },
+  deleteProfileButtonText: { color: colors.error, fontSize: 14, fontWeight: "800" },
+  modalBackdrop: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 22,
+    backgroundColor: "rgba(15, 27, 42, 0.55)",
+  },
+  deletionDialog: {
+    width: "100%",
+    maxWidth: 430,
+    padding: 22,
+    borderRadius: 22,
+    backgroundColor: colors.surface,
+  },
+  deletionDialogIcon: {
+    width: 54,
+    height: 54,
+    alignSelf: "center",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
+    backgroundColor: "#FDECEA",
+  },
+  deletionDialogTitle: {
+    marginTop: 14,
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  deletionDialogText: {
+    marginTop: 10,
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: "center",
+  },
+  deletionEquation: {
+    marginTop: 18,
+    color: colors.primary,
+    fontSize: 25,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  deletionInput: {
+    minHeight: 50,
+    marginTop: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    color: colors.text,
+    fontSize: 19,
+    fontWeight: "800",
+    textAlign: "center",
+    backgroundColor: colors.backgroundAlt,
+  },
+  deletionError: {
+    marginTop: 10,
+    color: colors.error,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: "center",
+  },
+  deletionActions: { flexDirection: "row", gap: 10, marginTop: 18 },
+  cancelDeletionButton: {
+    flex: 1,
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+  },
+  cancelDeletionText: { color: colors.text, fontWeight: "800" },
+  confirmDeletionButton: {
+    flex: 1.35,
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 14,
+    backgroundColor: colors.error,
+  },
+  confirmDeletionText: { color: colors.white, fontSize: 13, fontWeight: "800" },
   avatarWrap: { marginBottom: 16 },
   avatarPreview: { width: 112, height: 112, borderRadius: 56 },
   photoButton: {

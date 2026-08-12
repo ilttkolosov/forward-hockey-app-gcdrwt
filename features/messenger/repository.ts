@@ -794,3 +794,15 @@ export function markMessengerRoomHistoryComplete(
     ),
   );
 }
+
+export function clearMessengerLocalData(db: SQLiteDatabase): Promise<void> {
+  return enqueueMessengerWrite(db, () =>
+    withMessengerTransaction(db, async (transaction) => {
+      await transaction.runAsync("DELETE FROM messenger_outbox");
+      await transaction.runAsync("DELETE FROM messenger_messages");
+      await transaction.runAsync("DELETE FROM messenger_room_read_state");
+      await transaction.runAsync("DELETE FROM messenger_room_cache_state");
+      await transaction.runAsync("DELETE FROM messenger_rooms");
+    }),
+  );
+}

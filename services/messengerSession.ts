@@ -99,10 +99,13 @@ export async function saveMessengerSession(
 }
 
 export async function clearMessengerSession(): Promise<void> {
-  await writeValue(SESSION_KEY, null);
-  memorySession = null;
-  listeners.forEach((listener) => listener(null));
-  console.log("[Messenger] Локальная сессия удалена");
+  try {
+    await writeValue(SESSION_KEY, null);
+  } finally {
+    memorySession = null;
+    listeners.forEach((listener) => listener(null));
+    console.log("[Messenger] Локальная сессия удалена");
+  }
 }
 
 export async function loadMessengerPasswordChange(): Promise<MessengerPasswordChangeRequired | null> {
@@ -130,8 +133,11 @@ export async function saveMessengerPasswordChange(
 }
 
 export async function clearMessengerPasswordChange(): Promise<void> {
-  await writeValue(PASSWORD_CHANGE_KEY, null);
-  memoryPasswordChange = null;
+  try {
+    await writeValue(PASSWORD_CHANGE_KEY, null);
+  } finally {
+    memoryPasswordChange = null;
+  }
 }
 
 export async function getMessengerDeviceId(): Promise<string> {

@@ -2716,6 +2716,26 @@ export default function MessengerRoomScreen() {
                     : "");
               const emojiOnly =
                 !item.deleted_at && item.kind === "text" && isEmojiOnly(body);
+              if (item.kind === "system") {
+                return (
+                  <View collapsable={false}>
+                    {item.client_message_id === unreadMarkerClientId && (
+                      <UnreadDivider />
+                    )}
+                    <View style={styles.systemMessageRow}>
+                      <View style={styles.systemMessage}>
+                        <Text style={styles.systemMessageText}>{body}</Text>
+                        <Text style={styles.systemMessageTime}>
+                          {new Date(item.created_at).toLocaleTimeString("ru-RU", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                );
+              }
               return (
                 <View collapsable={false}>
                   {item.client_message_id === unreadMarkerClientId && (
@@ -3613,6 +3633,32 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   swipeShell: { position: "relative", width: "100%" },
+  systemMessageRow: {
+    width: "100%",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  systemMessage: {
+    maxWidth: "88%",
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 7,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: "rgba(74, 144, 226, 0.22)",
+    borderRadius: 13,
+    backgroundColor: "rgba(234, 243, 255, 0.9)",
+  },
+  systemMessageText: {
+    flexShrink: 1,
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  systemMessageTime: { color: colors.textSecondary, fontSize: 9 },
   messageRow: {
     width: "100%",
     flexDirection: "row",
