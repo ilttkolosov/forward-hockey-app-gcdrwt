@@ -22,7 +22,45 @@ const PHOTO_JPEG_QUALITY = 0.68;
 const MAX_PHOTO_UPLOAD_BYTES = 350 * 1024;
 const SECOND_PASS_EDGE = 1280;
 const SECOND_PASS_QUALITY = 0.58;
+const MAX_VIDEO_EDGE = 720;
+const VIDEO_TARGET_BITRATE = 1_500_000;
 export const MAX_MESSENGER_MEDIA_SELECTION = 10;
+export const MAX_MESSENGER_UPLOAD_BYTES = 50 * 1024 * 1024;
+
+function megabytes(bytes: number): string {
+  return `${Math.ceil(bytes / (1024 * 1024))} МБ`;
+}
+
+function assertKnownSize(
+  file: Pick<MessengerUploadFile, "name" | "size_bytes">,
+): number {
+  if (file.size_bytes === null) {
+    throw new Error(
+      `Не удалось определить размер файла «${file.name}». Выберите другой файл`,
+    );
+  }
+  return file.size_bytes;
+}
+
+export function assertMessengerUploadLimits(
+  files: readonly MessengerUploadFile[],
+): void {
+  let totalBytes = 0;
+  for (const file of files) {
+    const size = assertKnownSize(file);
+    if (size > MAX_MESSENGER_UPLOAD_BYTES) {
+      throw new Error(
+        `Файл «${file.name}» занимает ${megabytes(size)}. Максимальный размер — 50 МБ`,
+      );
+    }
+    totalBytes += size;
+  }
+  if (totalBytes > MAX_MESSENGER_UPLOAD_BYTES) {
+    throw new Error(
+      `Общий размер выбранных вложений — ${megabytes(totalBytes)}. За одно сообщение можно отправить не более 50 МБ`,
+    );
+  }
+}
 
 function waitForPermissionDialogDismissal(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 250));
@@ -195,6 +233,74 @@ async function compressedPhoto(
   };
 }
 
+async function compressedVideo(
+  asset: ImagePicker.ImagePickerAsset,
+): Promise<MessengerUploadFile> {
+  if (Platform.OS === "web") {
+    throw new Error(
+      "Сжатие видео доступно только в мобильном приложении",
+    );
+  }
+
+  const startedAt = Date.now();
+  const originalSize = await localFileSize(asset.uri, asset.fileSize);
+  messengerLog("info", "video.compression.started", {
+    original_size_bytes: originalSize,
+    video_width: asset.width,
+    video_height: asset.height,
+    duration_ms: asset.duration,
+  });
+
+  let Video: typeof import("react-native-compressor")["Video"];
+  try {
+    ({ Video } = await import("react-native-compressor"));
+  } catch (error) {
+    messengerLog("warn", "video.compressor.unavailable", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw new Error(
+      "Модуль сжатия видео недоступен. Установите новую сборку приложения",
+    );
+  }
+
+  let lastLoggedProgress = -1;
+  const uri = await Video.compress(
+    asset.uri,
+    {
+      compressionMethod: "manual",
+      maxSize: MAX_VIDEO_EDGE,
+      bitrate: VIDEO_TARGET_BITRATE,
+      minimumFileSizeForCompress: 0,
+      progressDivider: 10,
+    },
+    (progress) => {
+      const percent = Math.round(progress * 100);
+      if (percent >= lastLoggedProgress + 10 || percent === 100) {
+        lastLoggedProgress = percent;
+        messengerLog("debug", "video.compression.progress", { percent });
+      }
+    },
+  );
+  const compressedSize = await localFileSize(uri);
+  const file: MessengerUploadFile = {
+    uri,
+    name: `video-${Date.now()}.mp4`,
+    type: "video/mp4",
+    kind: "video",
+    size_bytes: compressedSize,
+    original_size_bytes: originalSize,
+  };
+  assertMessengerUploadLimits([file]);
+  messengerLog("info", "video.compression.completed", {
+    duration_ms: Date.now() - startedAt,
+    original_size_bytes: originalSize,
+    upload_size_bytes: compressedSize,
+    target_max_edge: MAX_VIDEO_EDGE,
+    target_bitrate: VIDEO_TARGET_BITRATE,
+  });
+  return file;
+}
+
 export async function takeMessengerPhoto(): Promise<MessengerUploadFile | null> {
   if (Platform.OS !== "web") await cameraPermission();
   messengerLog("debug", "attachment.picker.opening", { kind: "camera" });
@@ -231,19 +337,12 @@ export async function pickMessengerMedia(): Promise<MessengerUploadFile[]> {
   const files: MessengerUploadFile[] = [];
   for (const asset of result.assets.slice(0, MAX_MESSENGER_MEDIA_SELECTION)) {
     if (asset.type === "video") {
-      const size = await localFileSize(asset.uri, asset.fileSize);
-      files.push({
-        uri: asset.uri,
-        name: asset.fileName || `video-${Date.now()}.mp4`,
-        type: asset.mimeType || "video/mp4",
-        kind: "video",
-        size_bytes: size,
-        original_size_bytes: size,
-      });
+      files.push(await compressedVideo(asset));
     } else {
       files.push(await compressedPhoto(asset));
     }
   }
+  assertMessengerUploadLimits(files);
   return files;
 }
 
@@ -274,7 +373,7 @@ export async function pickMessengerFile(): Promise<MessengerUploadFile | null> {
   const asset = result.canceled ? null : result.assets[0];
   if (!asset) return null;
   const size = await localFileSize(asset.uri, asset.size);
-  return {
+  const file: MessengerUploadFile = {
     uri: asset.uri,
     name: asset.name || `file-${Date.now()}`,
     type: asset.mimeType || "application/octet-stream",
@@ -282,6 +381,8 @@ export async function pickMessengerFile(): Promise<MessengerUploadFile | null> {
     size_bytes: size,
     original_size_bytes: size,
   };
+  assertMessengerUploadLimits([file]);
+  return file;
 }
 
 export async function currentMessengerLocation(): Promise<{

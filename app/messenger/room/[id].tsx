@@ -108,6 +108,7 @@ import {
 } from "../../../services/messengerRealtime";
 import { messengerLog } from "../../../services/messengerLogger";
 import {
+  assertMessengerUploadLimits,
   currentMessengerLocation,
   MAX_MESSENGER_MEDIA_SELECTION,
   pickMessengerFile,
@@ -1966,6 +1967,7 @@ export default function MessengerRoomScreen() {
 
   const sendUpload = useCallback(
     async (request: MediaUploadRequest) => {
+      assertMessengerUploadLimits(request.files);
       const totalUploadBytes = request.files.reduce(
         (total, file) => total + (file.size_bytes ?? 0),
         0,
@@ -3410,8 +3412,8 @@ export default function MessengerRoomScreen() {
               </View>
               <Text style={styles.attachmentHint}>
                 В медиатеке можно выбрать до {MAX_MESSENGER_MEDIA_SELECTION}{" "}
-                фото и видео. Фотографии автоматически уменьшаются до 1600 px и
-                сжимаются перед отправкой.
+                фото и видео. Медиа автоматически сжимаются перед отправкой.
+                Максимальный размер файла или всех вложений сообщения — 50 МБ.
               </Text>
             </Pressable>
           </Pressable>
@@ -3542,7 +3544,11 @@ export default function MessengerRoomScreen() {
                 onPress={send}
                 disabled={sending || (!text.trim() && !attachmentDraft)}
               >
-                <Icon name="send" size={23} color={colors.white} />
+                {sending ? (
+                  <ActivityIndicator size="small" color={colors.white} />
+                ) : (
+                  <Icon name="send" size={23} color={colors.white} />
+                )}
               </TouchableOpacity>
             </View>
           </View>
