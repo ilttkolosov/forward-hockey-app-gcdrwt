@@ -81,6 +81,7 @@ import type {
   MessengerPendingAttachment,
   MessengerReply,
   MessengerRoom,
+  MessengerRoomMember,
 } from "../../../features/messenger/types";
 import {
   createMessengerDirectRoom,
@@ -89,6 +90,7 @@ import {
   getMessengerContacts,
   getMessengerMessageReceipts,
   getMessengerMessages,
+  getMessengerRoomMembers,
   getMessengerRooms,
   isMessengerConnectionError,
   messengerErrorMessage,
@@ -100,6 +102,7 @@ import {
 } from "../../../services/messengerApi";
 import { queueMessengerReadReceipt } from "../../../services/messengerReadSync";
 import {
+  getMessengerRealtimeConnectionState,
   setMessengerActiveRoom,
   subscribeMessengerRealtime,
 } from "../../../services/messengerRealtime";
@@ -243,6 +246,61 @@ function incrementMessengerSequence(value: string): string {
   return digits.join("");
 }
 
+function participantCountText(count: number | null): string {
+  if (count === null) return "Участники загружаются";
+  const absolute = Math.abs(count);
+  const lastTwo = absolute % 100;
+  const last = absolute % 10;
+  const noun =
+    lastTwo >= 11 && lastTwo <= 14
+      ? "участников"
+      : last === 1
+        ? "участник"
+        : last >= 2 && last <= 4
+          ? "участника"
+          : "участников";
+  return `${count} ${noun}`;
+}
+
+function lastSeenText(value: string | null): string {
+  if (!value) return "Не в сети";
+  const seen = new Date(value);
+  if (Number.isNaN(seen.getTime())) return "Не в сети";
+  const now = new Date();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  );
+  const startOfSeen = new Date(
+    seen.getFullYear(),
+    seen.getMonth(),
+    seen.getDate(),
+  );
+  const dayDifference = Math.round(
+    (startOfToday.getTime() - startOfSeen.getTime()) / 86_400_000,
+  );
+  const time = seen.toLocaleTimeString("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  if (dayDifference === 0) return `Последний раз в сети сегодня в ${time}`;
+  if (dayDifference === 1) return `Последний раз в сети вчера в ${time}`;
+  const date = seen.toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "short",
+    ...(seen.getFullYear() === now.getFullYear()
+      ? {}
+      : { year: "numeric" as const }),
+  });
+  return `Последний раз в сети ${date} в ${time}`;
+}
+
+type DirectPeerPresence = Pick<
+  MessengerRoomMember,
+  "id" | "online" | "last_seen_at"
+>;
+
 function logMessageCacheFailure(
   message: MessengerMessage,
   error: unknown,
@@ -371,6 +429,9 @@ export default function MessengerRoomScreen() {
     unreadCount?: string;
     pushMessageId?: string;
     pushSequence?: string;
+    memberCount?: string;
+    peerId?: string;
+    peerLastSeenAt?: string;
   }>();
   const { session, isAuthenticated } = useMessengerAuth();
   const roomId = params.id;
@@ -381,13 +442,30 @@ export default function MessengerRoomScreen() {
   const [roomAvatarUrl, setRoomAvatarUrl] = useState(params.avatarUrl || null);
   const [roomType, setRoomType] = useState(params.roomType || "group");
   const [roomTeamId, setRoomTeamId] = useState(params.teamId || "");
-  const [canManage, setCanManage] = useState(params.canManage === "true");
+  const [roomMemberCount, setRoomMemberCount] = useState<number | null>(() => {
+    const initial = Number(params.memberCount);
+    return params.memberCount && Number.isFinite(initial) ? initial : null;
+  });
+  const [peerPresence, setPeerPresence] = useState<DirectPeerPresence | null>(
+    () =>
+      params.peerId
+        ? {
+            id: params.peerId,
+            online: false,
+            last_seen_at: params.peerLastSeenAt || null,
+          }
+        : null,
+  );
   const [messages, setMessages] = useState<MessengerMessage[]>([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [offline, setOffline] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [roomDetailsReady, setRoomDetailsReady] = useState(false);
+  const [realtimeConnected, setRealtimeConnected] = useState(
+    getMessengerRealtimeConnectionState,
+  );
   const [replyingTo, setReplyingTo] = useState<MessengerMessage | null>(null);
   const [actionMessage, setActionMessage] = useState<MessengerMessage | null>(
     null,
@@ -619,12 +697,8 @@ export default function MessengerRoomScreen() {
           messengerErrorMessage(error, "Не удалось открыть исходное сообщение"),
         );
       }
-    }, [
-      beginManualFeedNavigation,
-      db,
-      positionMessageNavigationTarget,
-      roomId,
-    ],
+    },
+    [beginManualFeedNavigation, db, positionMessageNavigationTarget, roomId],
   );
 
   useEffect(() => {
@@ -1517,6 +1591,34 @@ export default function MessengerRoomScreen() {
     connectionSyncTimer.current = setTimeout(run, 250);
   }, [flushOutbox, loadMessages]);
 
+  const refreshRoomMembers = useCallback(async () => {
+    if (!roomId || !session) return;
+    try {
+      const members = await getMessengerRoomMembers(roomId);
+      if (roomType === "direct") {
+        const peer = members.find((member) => member.id !== session.user.id);
+        if (peer) {
+          setPeerPresence({
+            id: peer.id,
+            online: peer.online,
+            last_seen_at: peer.last_seen_at,
+          });
+        }
+      } else {
+        setRoomMemberCount(members.length);
+      }
+      setOffline(false);
+    } catch (membersError) {
+      if (isMessengerConnectionError(membersError)) setOffline(true);
+      messengerLog("warn", "room.members.sync_failed", {
+        room_id: roomId,
+        message: messengerErrorMessage(membersError),
+      });
+    } finally {
+      setRoomDetailsReady(true);
+    }
+  }, [roomId, roomType, session]);
+
   const refreshRoomIdentity = useCallback(async () => {
     try {
       const room = (await getMessengerRooms()).find(
@@ -1530,7 +1632,19 @@ export default function MessengerRoomScreen() {
       setRoomAvatarUrl(room.avatar_url);
       setRoomType(room.room_type);
       setRoomTeamId(room.team_id);
-      setCanManage(room.can_manage);
+      if (typeof room.member_count === "number") {
+        setRoomMemberCount(room.member_count);
+      }
+      if (room.peer) {
+        setPeerPresence((current) => ({
+          id: room.peer!.id,
+          online: current?.id === room.peer!.id ? current.online : false,
+          last_seen_at:
+            current?.id === room.peer!.id
+              ? current.last_seen_at
+              : room.peer!.last_seen_at,
+        }));
+      }
     } catch (identityError) {
       messengerLog("warn", "room.identity.sync_failed", {
         room_id: roomId,
@@ -1549,9 +1663,26 @@ export default function MessengerRoomScreen() {
       const returningToRoom = roomFocusCount.current > 0;
       roomFocusCount.current += 1;
       if (returningToRoom) void refreshRoomIdentity();
+      void refreshRoomMembers();
       void loadMessages(true);
       const unsubscribe = subscribeMessengerRealtime((event) => {
-        if (
+        if (event.type === "connection.state") {
+          setRealtimeConnected(event.connected);
+          if (event.connected) {
+            setOffline(false);
+            scheduleConnectionSync();
+          }
+        } else if (event.type === "presence.updated") {
+          setPeerPresence((current) =>
+            current?.id === event.user_id
+              ? {
+                  id: current.id,
+                  online: event.online,
+                  last_seen_at: event.last_seen_at,
+                }
+              : current,
+          );
+        } else if (
           event.type === "message.created" &&
           event.message.room_id === roomId
         ) {
@@ -1589,6 +1720,7 @@ export default function MessengerRoomScreen() {
           event.type === "sync.required" ||
           event.type === "connection.ready"
         ) {
+          if (event.type === "connection.ready") setRealtimeConnected(true);
           // A weak connection may emit several reconnect/ready pairs in quick
           // succession. The live events already update the feed, so one REST
           // reconciliation per ten seconds is sufficient and prevents the
@@ -1596,7 +1728,10 @@ export default function MessengerRoomScreen() {
           scheduleConnectionSync();
         } else if (event.type === "room.updated" && event.room_id === roomId) {
           if (event.deleted) router.replace("/messenger/rooms");
-          else void refreshRoomIdentity();
+          else {
+            void refreshRoomIdentity();
+            void refreshRoomMembers();
+          }
         } else if (
           event.type === "message.reaction_updated" &&
           event.room_id === roomId &&
@@ -1654,6 +1789,7 @@ export default function MessengerRoomScreen() {
       loadMessages,
       roomId,
       refreshRoomIdentity,
+      refreshRoomMembers,
       router,
       scheduleConnectionSync,
       scrollToLatest,
@@ -2296,13 +2432,32 @@ export default function MessengerRoomScreen() {
     return "Сообщение";
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.loading}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </SafeAreaView>
-    );
-  }
+  const roomSubtitle =
+    !initialDataReady || !roomDetailsReady
+      ? "Обновление"
+      : offline || !realtimeConnected
+        ? "Нет соединения с сервером"
+        : syncError
+          ? "Ошибка синхронизации"
+          : roomType === "direct"
+            ? peerPresence?.online
+              ? "В сети"
+              : lastSeenText(peerPresence?.last_seen_at ?? null)
+            : participantCountText(roomMemberCount);
+
+  const openGroupSettings = () => {
+    if (roomType === "direct") return;
+    router.push({
+      pathname: "/messenger/group/[id]",
+      params: {
+        id: roomId,
+        title: roomTitle,
+        roomType,
+        teamId: roomTeamId,
+        avatarUrl: roomAvatarUrl || "",
+      },
+    });
+  };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
@@ -2322,45 +2477,37 @@ export default function MessengerRoomScreen() {
             <Icon name="chevron-back" size={28} color={colors.primary} />
           </TouchableOpacity>
           {roomType !== "direct" ? (
-            <AuthenticatedAvatar
-              displayName={roomTitle}
-              avatarUrl={roomAvatarUrl}
-              accessToken={session?.access_token}
-              size={42}
-            />
-          ) : null}
-          <View style={styles.headerText}>
-            <Text style={styles.title} numberOfLines={1}>
-              {roomTitle}
-            </Text>
-            <Text style={styles.subtitle}>
-              {offline
-                ? "Нет сети · сообщения сохранены"
-                : syncError
-                  ? `Ошибка синхронизации: ${syncError}`
-                  : "В сети"}
-            </Text>
-          </View>
-          {canManage ? (
             <TouchableOpacity
-              style={styles.iconButton}
-              onPress={() =>
-                router.push({
-                  pathname: "/messenger/group/[id]",
-                  params: {
-                    id: roomId,
-                    title: roomTitle,
-                    roomType,
-                    teamId: roomTeamId,
-                    avatarUrl: roomAvatarUrl || "",
-                  },
-                })
-              }
-              accessibilityLabel="Управление группой"
+              style={styles.groupHeaderTarget}
+              onPress={openGroupSettings}
+              accessibilityRole="button"
+              accessibilityLabel="Открыть информацию и настройки группы"
             >
-              <Icon name="settings-outline" size={23} color={colors.primary} />
+              <AuthenticatedAvatar
+                displayName={roomTitle}
+                avatarUrl={roomAvatarUrl}
+                accessToken={session?.access_token}
+                size={42}
+              />
+              <View style={styles.headerText}>
+                <Text style={styles.title} numberOfLines={1}>
+                  {roomTitle}
+                </Text>
+                <Text style={styles.subtitle} numberOfLines={1}>
+                  {roomSubtitle}
+                </Text>
+              </View>
             </TouchableOpacity>
-          ) : null}
+          ) : (
+            <View style={styles.headerText}>
+              <Text style={styles.title} numberOfLines={1}>
+                {roomTitle}
+              </Text>
+              <Text style={styles.subtitle} numberOfLines={1}>
+                {roomSubtitle}
+              </Text>
+            </View>
+          )}
         </View>
 
         <ImageBackground
@@ -2591,14 +2738,20 @@ export default function MessengerRoomScreen() {
               );
             }}
             ListEmptyComponent={
-              <View style={styles.empty}>
-                <Icon
-                  name="chatbox-ellipses-outline"
-                  size={56}
-                  color={colors.textSecondary}
-                />
-                <Text style={styles.emptyTitle}>Начните общение</Text>
-              </View>
+              loading ? (
+                <View style={styles.empty}>
+                  <ActivityIndicator size="large" color={colors.primary} />
+                </View>
+              ) : (
+                <View style={styles.empty}>
+                  <Icon
+                    name="chatbox-ellipses-outline"
+                    size={56}
+                    color={colors.textSecondary}
+                  />
+                  <Text style={styles.emptyTitle}>Начните общение</Text>
+                </View>
+              )
             }
             ListFooterComponent={
               waitingForInitialUnread ? (
@@ -3173,6 +3326,12 @@ const styles = StyleSheet.create({
     height: 44,
     alignItems: "center",
     justifyContent: "center",
+  },
+  groupHeaderTarget: {
+    flex: 1,
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
   },
   headerText: { flex: 1, marginLeft: 6 },
   title: { fontSize: 19, fontWeight: "800", color: colors.text },

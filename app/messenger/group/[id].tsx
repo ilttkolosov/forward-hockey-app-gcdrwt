@@ -22,13 +22,14 @@ import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
 import type {
   MessengerContact,
-  MessengerPrivateRoomMember,
+  MessengerRoomMember,
   MessengerRoomSettings,
 } from "../../../features/messenger/types";
 import {
   addMessengerPrivateRoomMember,
   deleteMessengerPrivateRoom,
   getMessengerContacts,
+  getMessengerRoomMembers,
   getMessengerRoomSettings,
   messengerErrorMessage,
   removeMessengerPrivateRoomMember,
@@ -46,6 +47,8 @@ function contactKey(contact: MessengerContact): string {
   return `${contact.team_id}:${contact.id}`;
 }
 
+type GroupParticipant = MessengerRoomMember & { is_admin: boolean };
+
 export default function MessengerGroupSettingsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -58,6 +61,7 @@ export default function MessengerGroupSettingsScreen() {
   const { session, isAuthenticated } = useMessengerAuth();
   const roomId = params.id;
   const [settings, setSettings] = useState<MessengerRoomSettings | null>(null);
+  const [participants, setParticipants] = useState<GroupParticipant[]>([]);
   const [contacts, setContacts] = useState<MessengerContact[]>([]);
   const [title, setTitle] = useState(params.title || "");
   const [selectedAvatar, setSelectedAvatar] =
@@ -72,8 +76,20 @@ export default function MessengerGroupSettingsScreen() {
     if (!isAuthenticated || !roomId) return;
     setError(null);
     try {
-      const next = await getMessengerRoomSettings(roomId);
+      const [next, roomMembers] = await Promise.all([
+        getMessengerRoomSettings(roomId),
+        getMessengerRoomMembers(roomId),
+      ]);
+      const privateMembers = new Map(
+        next.members.map((member) => [member.id, member]),
+      );
       setSettings(next);
+      setParticipants(
+        roomMembers.map((member) => ({
+          ...member,
+          is_admin: privateMembers.get(member.id)?.is_admin ?? false,
+        })),
+      );
       setTitle(next.room.title);
       setSelectedAvatar(null);
       if (next.can_manage_members) {
@@ -104,8 +120,8 @@ export default function MessengerGroupSettingsScreen() {
   );
 
   const memberIds = useMemo(
-    () => new Set(settings?.members.map((member) => member.id) || []),
-    [settings?.members],
+    () => new Set(participants.map((member) => member.id)),
+    [participants],
   );
   const availableContacts = useMemo(
     () =>
@@ -118,7 +134,7 @@ export default function MessengerGroupSettingsScreen() {
   );
 
   const chooseAvatar = async () => {
-    if (saving) return;
+    if (!settings?.can_manage_profile || saving) return;
     try {
       const file = await pickMessengerAvatar();
       if (file) {
@@ -134,7 +150,7 @@ export default function MessengerGroupSettingsScreen() {
   };
 
   const save = async () => {
-    if (!settings || saving) return;
+    if (!settings?.can_manage_profile || saving) return;
     const nextTitle = title.trim();
     if (nextTitle.length < 2) {
       setError("Название должно содержать не менее двух символов.");
@@ -170,7 +186,8 @@ export default function MessengerGroupSettingsScreen() {
       setSelectedAvatar(null);
       return;
     }
-    if (!settings?.room.avatar_url || saving) return;
+    if (!settings?.can_manage_profile || !settings.room.avatar_url || saving)
+      return;
     Alert.alert(
       "Удалить аватар группы?",
       "Вместо него будут показаны инициалы.",
@@ -205,7 +222,8 @@ export default function MessengerGroupSettingsScreen() {
     setMemberBusy(contact.id);
     setError(null);
     try {
-      setSettings(await addMessengerPrivateRoomMember(roomId, contact.id));
+      await addMessengerPrivateRoomMember(roomId, contact.id);
+      await load();
       setAddVisible(false);
     } catch (addError) {
       setError(
@@ -216,7 +234,7 @@ export default function MessengerGroupSettingsScreen() {
     }
   };
 
-  const removeMember = (member: MessengerPrivateRoomMember) => {
+  const removeMember = (member: GroupParticipant) => {
     if (member.is_admin || memberBusy) return;
     Alert.alert(
       "Исключить участника?",
@@ -230,7 +248,7 @@ export default function MessengerGroupSettingsScreen() {
             setMemberBusy(member.id);
             setError(null);
             void removeMessengerPrivateRoomMember(roomId, member.id)
-              .then(setSettings)
+              .then(() => load())
               .catch((removeError) =>
                 setError(
                   messengerErrorMessage(
@@ -292,9 +310,13 @@ export default function MessengerGroupSettingsScreen() {
             <Icon name="chevron-back" size={28} color={colors.primary} />
           </TouchableOpacity>
           <View style={styles.headerText}>
-            <Text style={styles.headerTitle}>Управление группой</Text>
+            <Text style={styles.headerTitle}>
+              {settings?.can_manage_profile ? "Управление группой" : "О группе"}
+            </Text>
             <Text style={styles.headerSubtitle}>
-              Изменения увидят все участники
+              {settings?.can_manage_profile
+                ? "Изменения увидят все участники"
+                : "Информация и участники группы"}
             </Text>
           </View>
         </View>
@@ -343,54 +365,86 @@ export default function MessengerGroupSettingsScreen() {
                 )}
               </View>
               <TouchableOpacity
-                style={styles.secondaryButton}
+                style={[
+                  styles.secondaryButton,
+                  !settings.can_manage_profile && styles.disabled,
+                ]}
                 onPress={chooseAvatar}
+                disabled={!settings.can_manage_profile || saving}
               >
-                <Icon name="camera" size={20} color={colors.primary} />
-                <Text style={styles.secondaryButtonText}>Выбрать аватар</Text>
+                <Icon
+                  name="camera"
+                  size={20}
+                  color={
+                    settings.can_manage_profile
+                      ? colors.primary
+                      : colors.textSecondary
+                  }
+                />
+                <Text
+                  style={[
+                    styles.secondaryButtonText,
+                    !settings.can_manage_profile && styles.readOnlyControlText,
+                  ]}
+                >
+                  Выбрать аватар
+                </Text>
               </TouchableOpacity>
-              {(selectedAvatar || settings.room.avatar_url) && (
-                <TouchableOpacity onPress={removeAvatar} disabled={saving}>
-                  <Text style={styles.removeAvatarText}>
-                    {selectedAvatar ? "Отменить выбор" : "Удалить аватар"}
-                  </Text>
-                </TouchableOpacity>
-              )}
+              {settings.can_manage_profile &&
+                (selectedAvatar || settings.room.avatar_url) && (
+                  <TouchableOpacity onPress={removeAvatar} disabled={saving}>
+                    <Text style={styles.removeAvatarText}>
+                      {selectedAvatar ? "Отменить выбор" : "Удалить аватар"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
 
               <Text style={styles.label}>Название группы</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  !settings.can_manage_profile && styles.readOnlyInput,
+                ]}
                 value={title}
                 onChangeText={setTitle}
                 maxLength={80}
                 placeholder="Название группы"
+                editable={settings.can_manage_profile && !saving}
               />
               {error ? <Text style={styles.errorText}>{error}</Text> : null}
-              <TouchableOpacity
-                style={[
-                  styles.saveButton,
-                  (saving || title.trim().length < 2) && styles.disabled,
-                ]}
-                onPress={() => void save()}
-                disabled={saving || title.trim().length < 2}
-              >
-                {saving ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Text style={styles.saveButtonText}>Сохранить изменения</Text>
-                )}
-              </TouchableOpacity>
+              {settings.can_manage_profile ? (
+                <TouchableOpacity
+                  style={[
+                    styles.saveButton,
+                    (saving || title.trim().length < 2) && styles.disabled,
+                  ]}
+                  onPress={() => void save()}
+                  disabled={saving || title.trim().length < 2}
+                >
+                  {saving ? (
+                    <ActivityIndicator color={colors.white} />
+                  ) : (
+                    <Text style={styles.saveButtonText}>
+                      Сохранить изменения
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              ) : (
+                <Text style={styles.readOnlyHint}>
+                  Изменение названия и аватара вам недоступно.
+                </Text>
+              )}
             </View>
 
-            {settings.can_manage_members ? (
-              <View style={styles.card}>
-                <View style={styles.sectionHeader}>
-                  <View>
-                    <Text style={styles.sectionTitle}>Участники</Text>
-                    <Text style={styles.sectionSubtitle}>
-                      {settings.members.length} в группе
-                    </Text>
-                  </View>
+            <View style={styles.card}>
+              <View style={styles.sectionHeader}>
+                <View>
+                  <Text style={styles.sectionTitle}>Участники</Text>
+                  <Text style={styles.sectionSubtitle}>
+                    {participants.length} в группе
+                  </Text>
+                </View>
+                {settings.can_manage_members ? (
                   <TouchableOpacity
                     style={styles.addButton}
                     onPress={() => setAddVisible(true)}
@@ -398,52 +452,54 @@ export default function MessengerGroupSettingsScreen() {
                     <Icon name="person-add" size={19} color={colors.primary} />
                     <Text style={styles.addButtonText}>Добавить</Text>
                   </TouchableOpacity>
-                </View>
-                {settings.members.map((member) => (
-                  <View key={member.id} style={styles.memberRow}>
-                    <AuthenticatedAvatar
-                      displayName={member.display_name}
-                      avatarUrl={member.avatar_url}
-                      accessToken={session.access_token}
-                      size={44}
-                    />
-                    <View style={styles.memberText}>
-                      <Text style={styles.memberName} numberOfLines={1}>
-                        {member.display_name}
-                      </Text>
-                      <Text style={styles.memberRole}>
-                        {member.is_admin
-                          ? "Администратор · создатель"
-                          : "Участник"}
-                      </Text>
-                    </View>
-                    {!member.is_admin ? (
-                      memberBusy === member.id ? (
-                        <ActivityIndicator color={colors.primary} />
-                      ) : (
-                        <TouchableOpacity
-                          style={styles.removeMemberButton}
-                          onPress={() => removeMember(member)}
-                          accessibilityLabel={`Исключить ${member.display_name}`}
-                        >
-                          <Icon
-                            name="remove-circle-outline"
-                            size={23}
-                            color={colors.error}
-                          />
-                        </TouchableOpacity>
-                      )
-                    ) : (
-                      <Icon
-                        name="shield-checkmark"
-                        size={22}
-                        color={colors.primary}
-                      />
-                    )}
-                  </View>
-                ))}
+                ) : null}
               </View>
-            ) : null}
+              {participants.map((member) => (
+                <View key={member.id} style={styles.memberRow}>
+                  <AuthenticatedAvatar
+                    displayName={member.display_name}
+                    avatarUrl={member.avatar_url}
+                    accessToken={session.access_token}
+                    size={44}
+                  />
+                  <View style={styles.memberText}>
+                    <Text style={styles.memberName} numberOfLines={1}>
+                      {member.display_name}
+                    </Text>
+                    <Text style={styles.memberRole}>
+                      {member.is_admin
+                        ? "Администратор · создатель"
+                        : member.id === session.user.id
+                          ? "Участник · Вы"
+                          : "Участник"}
+                    </Text>
+                  </View>
+                  {settings.can_manage_members && !member.is_admin ? (
+                    memberBusy === member.id ? (
+                      <ActivityIndicator color={colors.primary} />
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.removeMemberButton}
+                        onPress={() => removeMember(member)}
+                        accessibilityLabel={`Исключить ${member.display_name}`}
+                      >
+                        <Icon
+                          name="remove-circle-outline"
+                          size={23}
+                          color={colors.error}
+                        />
+                      </TouchableOpacity>
+                    )
+                  ) : member.is_admin ? (
+                    <Icon
+                      name="shield-checkmark"
+                      size={22}
+                      color={colors.primary}
+                    />
+                  ) : null}
+                </View>
+              ))}
+            </View>
 
             {settings.can_manage_members ? (
               <TouchableOpacity
@@ -603,6 +659,17 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     color: colors.text,
     backgroundColor: colors.backgroundAlt,
+  },
+  readOnlyInput: {
+    color: colors.textSecondary,
+    backgroundColor: "#F2F4F7",
+  },
+  readOnlyControlText: { color: colors.textSecondary },
+  readOnlyHint: {
+    marginTop: 12,
+    color: colors.textSecondary,
+    textAlign: "center",
+    fontSize: 12,
   },
   errorText: { marginTop: 9, color: colors.error, fontSize: 12 },
   saveButton: {

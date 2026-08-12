@@ -102,8 +102,18 @@ export interface MessengerPrivateRoomMember {
   joined_at: string;
 }
 
+export interface MessengerRoomMember {
+  id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  online: boolean;
+  last_seen_at: string | null;
+}
+
 export interface MessengerRoomSettings {
   room: MessengerRoom;
+  can_manage_profile: boolean;
   can_manage_members: boolean;
   members: MessengerPrivateRoomMember[];
 }

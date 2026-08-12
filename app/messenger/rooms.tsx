@@ -239,6 +239,12 @@ export default function MessengerRoomsScreen() {
         lastReadSequence: room.last_read_sequence,
         latestSequence: room.last_message?.sequence || "",
         unreadCount: String(room.unread_count),
+        memberCount:
+          typeof room.member_count === "number"
+            ? String(room.member_count)
+            : "",
+        peerId: room.peer?.id || "",
+        peerLastSeenAt: room.peer?.last_seen_at || "",
       },
     });
   };

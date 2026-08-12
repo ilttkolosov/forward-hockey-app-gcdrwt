@@ -6,6 +6,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import { usePathname } from "expo-router";
 import { AppState } from "react-native";
 import type { MessengerSession } from "../features/messenger/types";
 import {
@@ -23,6 +24,7 @@ import {
   connectMessengerRealtime,
   disconnectMessengerRealtime,
   resumeMessengerRealtime,
+  setMessengerPresenceActive,
 } from "../services/messengerRealtime";
 
 type MessengerAuthStatus = "loading" | "authenticated" | "unauthenticated";
@@ -48,6 +50,7 @@ const MessengerAuthContext = createContext<MessengerAuthContextValue | null>(
 );
 
 export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
+  const pathname = usePathname();
   const [status, setStatus] = useState<MessengerAuthStatus>("loading");
   const [session, setSession] = useState<MessengerSession | null>(null);
 
@@ -82,6 +85,21 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
     if (accessToken) connectMessengerRealtime(accessToken);
     else disconnectMessengerRealtime();
   }, [session?.access_token]);
+
+  useEffect(() => {
+    const insideCommunication =
+      Boolean(session?.access_token) &&
+      pathname.startsWith("/messenger") &&
+      !pathname.startsWith("/messenger/register");
+    setMessengerPresenceActive(insideCommunication);
+  }, [pathname, session?.access_token]);
+
+  useEffect(
+    () => () => {
+      setMessengerPresenceActive(false);
+    },
+    [],
+  );
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {

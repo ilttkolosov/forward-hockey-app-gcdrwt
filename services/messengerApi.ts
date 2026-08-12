@@ -6,6 +6,7 @@ import type {
   MessengerMessage,
   MessengerReaction,
   MessengerRoom,
+  MessengerRoomMember,
   MessengerRoomSettings,
   MessengerPushRegistration,
   MessengerSession,
@@ -341,6 +342,12 @@ export function createMessengerPrivateRoom(
 export function getMessengerRoomSettings(roomId: string) {
   return messengerRequest<MessengerRoomSettings>(
     `/chat/rooms/${roomId}/settings`,
+  );
+}
+
+export function getMessengerRoomMembers(roomId: string) {
+  return messengerRequest<MessengerRoomMember[]>(
+    `/chat/rooms/${roomId}/members`,
   );
 }
 

@@ -38,10 +38,13 @@ type RealtimeListener = (event: MessengerRealtimeEvent) => void;
 
 const listeners = new Set<RealtimeListener>();
 const ACTIVE_ROOM_REFRESH_INTERVAL_MS = 20_000;
+const PRESENCE_REFRESH_INTERVAL_MS = 25_000;
 let socket: Socket | null = null;
 let activeAccessToken: string | null = null;
 let visibleRoomId: string | null = null;
+let presenceRequested = false;
 let activeRoomRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let presenceRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let appStateSubscription: NativeEventSubscription | null = null;
 
 function activeRoomIdForServer(): string | null {
@@ -53,10 +56,25 @@ function announceActiveRoom(): void {
   socket.emit("room.focus", { room_id: activeRoomIdForServer() });
 }
 
+function presenceActiveForServer(): boolean {
+  return AppState.currentState === "active" && presenceRequested;
+}
+
+function announcePresenceActivity(): void {
+  if (!socket?.connected) return;
+  socket.emit("presence.activity", { active: presenceActiveForServer() });
+}
+
 function stopActiveRoomRefresh(): void {
   if (!activeRoomRefreshTimer) return;
   clearInterval(activeRoomRefreshTimer);
   activeRoomRefreshTimer = null;
+}
+
+function stopPresenceRefresh(): void {
+  if (!presenceRefreshTimer) return;
+  clearInterval(presenceRefreshTimer);
+  presenceRefreshTimer = null;
 }
 
 function synchronizeActiveRoomRefresh(): void {
@@ -68,6 +86,15 @@ function synchronizeActiveRoomRefresh(): void {
   );
 }
 
+function synchronizePresenceRefresh(): void {
+  stopPresenceRefresh();
+  if (!socket?.connected || !presenceActiveForServer()) return;
+  presenceRefreshTimer = setInterval(
+    announcePresenceActivity,
+    PRESENCE_REFRESH_INTERVAL_MS,
+  );
+}
+
 function ensureAppStateSubscription(): void {
   if (appStateSubscription) return;
   appStateSubscription = AppState.addEventListener("change", () => {
@@ -76,6 +103,8 @@ function ensureAppStateSubscription(): void {
     // the remaining safeguards.
     announceActiveRoom();
     synchronizeActiveRoomRefresh();
+    announcePresenceActivity();
+    synchronizePresenceRefresh();
   });
 }
 
@@ -92,6 +121,7 @@ function publish(event: MessengerRealtimeEvent): void {
 function closeSocket(reason: string): void {
   if (!socket) return;
   stopActiveRoomRefresh();
+  stopPresenceRefresh();
   socket.removeAllListeners();
   socket.io.removeAllListeners();
   socket.disconnect();
@@ -114,6 +144,8 @@ export function connectMessengerRealtime(accessToken: string): void {
     else {
       announceActiveRoom();
       synchronizeActiveRoomRefresh();
+      announcePresenceActivity();
+      synchronizePresenceRefresh();
     }
     return;
   }
@@ -124,7 +156,7 @@ export function connectMessengerRealtime(accessToken: string): void {
   const nextSocket = io(`${MESSENGER_SERVER_ORIGIN}/messenger`, {
     path: "/socket.io",
     transports: ["websocket"],
-    auth: { access_token: accessToken },
+    auth: { access_token: accessToken, presence_managed: true },
     autoConnect: true,
     forceNew: true,
     reconnection: true,
@@ -140,19 +172,30 @@ export function connectMessengerRealtime(accessToken: string): void {
     console.log("[Messenger realtime] Соединение установлено");
     announceActiveRoom();
     synchronizeActiveRoomRefresh();
+    announcePresenceActivity();
+    synchronizePresenceRefresh();
     publish({ type: "connection.state", connected: true });
   });
   nextSocket.on("disconnect", (reason) => {
     stopActiveRoomRefresh();
+    stopPresenceRefresh();
     console.log(`[Messenger realtime] Соединение закрыто: ${reason}`);
     publish({ type: "connection.state", connected: false, reason });
   });
   nextSocket.on("connect_error", (error) => {
     // Never log the handshake or access token.
     console.warn(`[Messenger realtime] Ошибка подключения: ${error.message}`);
+    publish({
+      type: "connection.state",
+      connected: false,
+      reason: error.message,
+    });
   });
   nextSocket.io.on("reconnect_attempt", () => {
-    nextSocket.auth = { access_token: activeAccessToken };
+    nextSocket.auth = {
+      access_token: activeAccessToken,
+      presence_managed: true,
+    };
   });
   nextSocket.io.on("reconnect", () => {
     publish({ type: "sync.required" });
@@ -160,6 +203,13 @@ export function connectMessengerRealtime(accessToken: string): void {
   nextSocket.on(
     "connection.ready",
     (payload: { user_id: string; session_id: string; room_ids: string[] }) => {
+      // The server authenticates inside its connection handler. Re-announce
+      // scoped state here so an event emitted immediately on the transport's
+      // `connect` callback cannot arrive before authentication is ready.
+      announceActiveRoom();
+      announcePresenceActivity();
+      synchronizeActiveRoomRefresh();
+      synchronizePresenceRefresh();
       publish({ type: "connection.ready", ...payload });
       publish({ type: "sync.required" });
     },
@@ -211,7 +261,9 @@ export function connectMessengerRealtime(accessToken: string): void {
 
 export function disconnectMessengerRealtime(): void {
   visibleRoomId = null;
+  presenceRequested = false;
   announceActiveRoom();
+  announcePresenceActivity();
   activeAccessToken = null;
   closeSocket("signed_out");
   appStateSubscription?.remove();
@@ -225,6 +277,8 @@ export function resumeMessengerRealtime(): void {
   else {
     announceActiveRoom();
     synchronizeActiveRoomRefresh();
+    announcePresenceActivity();
+    synchronizePresenceRefresh();
     publish({ type: "sync.required" });
   }
 }
@@ -232,6 +286,18 @@ export function resumeMessengerRealtime(): void {
 /** The room feed currently visible to the user on this device. */
 export function getMessengerActiveRoomId(): string | null {
   return activeRoomIdForServer();
+}
+
+export function getMessengerRealtimeConnectionState(): boolean {
+  return socket?.connected === true;
+}
+
+/** Presence is true only while an authenticated user is inside «Общение». */
+export function setMessengerPresenceActive(active: boolean): void {
+  presenceRequested = active;
+  ensureAppStateSubscription();
+  announcePresenceActivity();
+  synchronizePresenceRefresh();
 }
 
 /**
