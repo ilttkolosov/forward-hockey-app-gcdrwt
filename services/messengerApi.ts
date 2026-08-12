@@ -3,6 +3,7 @@ import type {
   InvitationPreview,
   MessengerContact,
   MessengerMessageReceipt,
+  MessengerLoginResult,
   MessengerMessage,
   MessengerReaction,
   MessengerRoom,
@@ -13,9 +14,11 @@ import type {
   MessengerUser,
 } from "../features/messenger/types";
 import {
+  clearMessengerPasswordChange,
   clearMessengerSession,
   getMessengerDeviceId,
   loadMessengerSession,
+  saveMessengerPasswordChange,
   saveMessengerSession,
 } from "./messengerSession";
 import { messengerLog, messengerRequestId } from "./messengerLogger";
@@ -228,11 +231,17 @@ async function sessionContext() {
 }
 
 export async function loginToMessenger(username: string, password: string) {
-  const result = await messengerRequest<MessengerSession>("/auth/login", {
+  const result = await messengerRequest<MessengerLoginResult>("/auth/login", {
     public: true,
     method: "POST",
     body: JSON.stringify({ username, password, ...(await sessionContext()) }),
   });
+  if ("password_change_required" in result) {
+    await clearMessengerSession();
+    await saveMessengerPasswordChange(result);
+    return result;
+  }
+  await clearMessengerPasswordChange();
   await saveMessengerSession(result);
   return result;
 }
@@ -249,7 +258,31 @@ export async function registerInMessenger(payload: {
     method: "POST",
     body: JSON.stringify({ ...payload, ...(await sessionContext()) }),
   });
+  await clearMessengerPasswordChange();
   await saveMessengerSession(result);
+  return result;
+}
+
+export async function completeMessengerPasswordChange(
+  changeToken: string,
+  password: string,
+  passwordConfirmation: string,
+) {
+  const result = await messengerRequest<MessengerSession>(
+    "/auth/complete-password-reset",
+    {
+      public: true,
+      method: "POST",
+      body: JSON.stringify({
+        change_token: changeToken,
+        password,
+        password_confirmation: passwordConfirmation,
+        ...(await sessionContext()),
+      }),
+    },
+  );
+  await saveMessengerSession(result);
+  await clearMessengerPasswordChange();
   return result;
 }
 
@@ -299,6 +332,7 @@ export async function logoutFromMessenger(): Promise<void> {
     console.warn("[Messenger] Серверный выход не подтверждён:", error);
   } finally {
     await clearMessengerSession();
+    await clearMessengerPasswordChange();
   }
 }
 

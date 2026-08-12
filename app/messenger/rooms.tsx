@@ -156,6 +156,10 @@ export default function MessengerRoomsScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (status === "password_change_required") {
+        router.replace("/messenger/change-password");
+        return;
+      }
       if (status === "unauthenticated") {
         router.replace("/messenger/register");
         return;

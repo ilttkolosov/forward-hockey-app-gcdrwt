@@ -27,6 +27,19 @@ export interface MessengerSession {
   user: MessengerUser;
 }
 
+export interface MessengerPasswordChangeRequired {
+  password_change_required: true;
+  change_token: string;
+  change_token_expires_at: string;
+  user: {
+    id: string;
+    username: string;
+  };
+}
+
+export type MessengerLoginResult =
+  MessengerSession | MessengerPasswordChangeRequired;
+
 export type MessengerMessageKind =
   "text" | "image" | "video" | "file" | "location";
 

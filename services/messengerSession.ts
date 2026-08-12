@@ -1,12 +1,17 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
-import type { MessengerSession } from "../features/messenger/types";
+import type {
+  MessengerPasswordChangeRequired,
+  MessengerSession,
+} from "../features/messenger/types";
 
 const SESSION_KEY = "forward_messenger_session_v1";
+const PASSWORD_CHANGE_KEY = "forward_messenger_password_change_v1";
 const DEVICE_ID_KEY = "forward_messenger_device_id_v1";
 
 let memorySession: MessengerSession | null | undefined;
+let memoryPasswordChange: MessengerPasswordChangeRequired | null | undefined;
 const listeners = new Set<(session: MessengerSession | null) => void>();
 
 async function secureStoreAvailable(): Promise<boolean> {
@@ -63,6 +68,35 @@ export async function clearMessengerSession(): Promise<void> {
   memorySession = null;
   listeners.forEach((listener) => listener(null));
   console.log("[Messenger] Локальная сессия удалена");
+}
+
+export async function loadMessengerPasswordChange(): Promise<MessengerPasswordChangeRequired | null> {
+  if (memoryPasswordChange !== undefined) return memoryPasswordChange;
+  try {
+    const stored = await readValue(PASSWORD_CHANGE_KEY);
+    memoryPasswordChange = stored
+      ? (JSON.parse(stored) as MessengerPasswordChangeRequired)
+      : null;
+  } catch (error) {
+    console.warn(
+      "[Messenger] Не удалось прочитать токен обязательной смены пароля:",
+      error,
+    );
+    memoryPasswordChange = null;
+  }
+  return memoryPasswordChange;
+}
+
+export async function saveMessengerPasswordChange(
+  passwordChange: MessengerPasswordChangeRequired,
+): Promise<void> {
+  await writeValue(PASSWORD_CHANGE_KEY, JSON.stringify(passwordChange));
+  memoryPasswordChange = passwordChange;
+}
+
+export async function clearMessengerPasswordChange(): Promise<void> {
+  await writeValue(PASSWORD_CHANGE_KEY, null);
+  memoryPasswordChange = null;
 }
 
 export async function getMessengerDeviceId(): Promise<string> {

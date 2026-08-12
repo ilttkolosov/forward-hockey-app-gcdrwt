@@ -60,7 +60,8 @@ function extractInviteToken(value: string): string | null {
 export default function MessengerRegistrationScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ token?: string }>();
-  const { isAuthenticated, login, register } = useMessengerAuth();
+  const { isAuthenticated, passwordChange, login, register } =
+    useMessengerAuth();
   const [mode, setMode] = useState<ScreenMode>("invite");
   const [inviteValue, setInviteValue] = useState(params.token || "");
   const [inviteToken, setInviteToken] = useState<string | null>(null);
@@ -69,6 +70,7 @@ export default function MessengerRegistrationScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -79,6 +81,10 @@ export default function MessengerRegistrationScreen() {
     if (isAuthenticated && !registeringNewAccount)
       router.replace("/messenger/rooms");
   }, [isAuthenticated, registeringNewAccount, router]);
+
+  useEffect(() => {
+    if (passwordChange) router.replace("/messenger/change-password");
+  }, [passwordChange, router]);
 
   const checkInvitation = useCallback(async (value: string) => {
     const token = extractInviteToken(value);
@@ -147,6 +153,14 @@ export default function MessengerRegistrationScreen() {
 
   const submitRegistration = async () => {
     if (!inviteToken || !preview) return;
+    if (password.length < 6) {
+      setError("Пароль должен содержать не менее 6 символов.");
+      return;
+    }
+    if (password !== passwordConfirmation) {
+      setError("Введённые пароли не совпадают.");
+      return;
+    }
     setRegisteringNewAccount(true);
     setBusy(true);
     setError(null);
@@ -212,8 +226,12 @@ export default function MessengerRegistrationScreen() {
     setBusy(true);
     setError(null);
     try {
-      await login(username.trim(), password);
-      router.replace("/messenger/rooms");
+      const result = await login(username.trim(), password);
+      router.replace(
+        result === "password_change_required"
+          ? "/messenger/change-password"
+          : "/messenger/rooms",
+      );
     } catch (loginError) {
       setError(
         loginError instanceof Error ? loginError.message : "Не удалось войти",
@@ -388,9 +406,19 @@ export default function MessengerRegistrationScreen() {
                 style={styles.input}
                 value={password}
                 onChangeText={setPassword}
-                placeholder="Пароль (не менее 10 символов)"
+                placeholder="Пароль (не менее 6 символов)"
                 secureTextEntry
                 autoCapitalize="none"
+                maxLength={128}
+              />
+              <TextInput
+                style={styles.input}
+                value={passwordConfirmation}
+                onChangeText={setPasswordConfirmation}
+                placeholder="Повторите пароль"
+                secureTextEntry
+                autoCapitalize="none"
+                maxLength={128}
               />
               <TextInput
                 style={styles.input}

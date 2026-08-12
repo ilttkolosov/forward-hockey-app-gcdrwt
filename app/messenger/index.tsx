@@ -15,6 +15,10 @@ export default function MessengerEntryScreen() {
     );
   }
 
+  if (status === "password_change_required") {
+    return <Redirect href="/messenger/change-password" />;
+  }
+
   return (
     <Redirect
       href={isAuthenticated ? "/messenger/rooms" : "/messenger/register"}

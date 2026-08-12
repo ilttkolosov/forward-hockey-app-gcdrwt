@@ -644,6 +644,7 @@ function RootLayoutContent() {
         <Stack.Screen name="mobilegames/[id]" />
         <Stack.Screen name="messenger/index" />
         <Stack.Screen name="messenger/register" />
+        <Stack.Screen name="messenger/change-password" />
         <Stack.Screen name="messenger/rooms" />
         <Stack.Screen name="messenger/room/[id]" />
       </Stack>
