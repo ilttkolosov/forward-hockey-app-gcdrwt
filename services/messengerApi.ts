@@ -90,6 +90,7 @@ function messengerErrorDetails(error: unknown): string | undefined {
 }
 
 let refreshPromise: Promise<MessengerSession> | null = null;
+const REFRESH_RETRY_DELAYS_MS = [0, 400, 1_200] as const;
 
 async function parseResponse<T>(response: Response): Promise<T> {
   const payload = (await response.json().catch(() => ({}))) as ApiEnvelope<T> &
@@ -116,24 +117,36 @@ async function refreshMessengerSession(): Promise<MessengerSession> {
         "authentication_required",
       );
     }
-    const response = await fetch(`${MESSENGER_API_BASE_URL}/auth/refresh`, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ refresh_token: session.refresh_token }),
-    });
-    try {
-      const refreshed = await parseResponse<MessengerSession>(response);
-      await saveMessengerSession(refreshed);
-      return refreshed;
-    } catch (error) {
-      if (error instanceof MessengerApiError && error.status === 401) {
-        await clearMessengerSession();
+    for (let attempt = 0; attempt < REFRESH_RETRY_DELAYS_MS.length; attempt += 1) {
+      const delay = REFRESH_RETRY_DELAYS_MS[attempt] ?? 0;
+      if (delay > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
-      throw error;
+      try {
+        const response = await fetch(`${MESSENGER_API_BASE_URL}/auth/refresh`, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ refresh_token: session.refresh_token }),
+        });
+        const refreshed = await parseResponse<MessengerSession>(response);
+        await saveMessengerSession(refreshed);
+        return refreshed;
+      } catch (error) {
+        if (error instanceof MessengerApiError) {
+          if (error.status === 401) await clearMessengerSession();
+          throw error;
+        }
+        if (attempt === REFRESH_RETRY_DELAYS_MS.length - 1) throw error;
+        messengerLog("info", "auth.refresh.retry", {
+          attempt: attempt + 2,
+          reason: "connection_lost",
+        });
+      }
     }
+    throw new Error("Не удалось обновить сессию");
   })().finally(() => {
     refreshPromise = null;
   });

@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
+import { AppState } from "react-native";
 import type {
   MessengerPasswordChangeRequired,
   MessengerSession,
@@ -12,6 +13,7 @@ const DEVICE_ID_KEY = "forward_messenger_device_id_v1";
 
 let memorySession: MessengerSession | null | undefined;
 let memoryPasswordChange: MessengerPasswordChangeRequired | null | undefined;
+let sessionReadPromise: Promise<MessengerSession | null> | null = null;
 const listeners = new Set<(session: MessengerSession | null) => void>();
 
 async function secureStoreAvailable(): Promise<boolean> {
@@ -34,7 +36,11 @@ async function writeValue(key: string, value: string | null): Promise<void> {
     if (value === null) await SecureStore.deleteItemAsync(key);
     else
       await SecureStore.setItemAsync(key, value, {
-        keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+        // A silent PUSH can wake the process while the screen is locked. The
+        // session still needs to be readable after the first device unlock;
+        // otherwise a temporary Keychain denial can look like a signed-out
+        // user until the React Native process is restarted.
+        keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
       });
     return;
   }
@@ -44,14 +50,43 @@ async function writeValue(key: string, value: string | null): Promise<void> {
 
 export async function loadMessengerSession(): Promise<MessengerSession | null> {
   if (memorySession !== undefined) return memorySession;
-  try {
-    const stored = await readValue(SESSION_KEY);
-    memorySession = stored ? (JSON.parse(stored) as MessengerSession) : null;
-  } catch (error) {
-    console.warn("[Messenger] Не удалось прочитать защищённую сессию:", error);
-    memorySession = null;
-  }
-  return memorySession;
+  if (sessionReadPromise) return sessionReadPromise;
+
+  sessionReadPromise = (async () => {
+    try {
+      const stored = await readValue(SESSION_KEY);
+      if (!stored) {
+        // A background Keychain read can transiently report no value while the
+        // phone is locked. Cache a definitive absence only in the foreground,
+        // where the storage is fully available.
+        if (AppState.currentState === "active") memorySession = null;
+        return null;
+      }
+
+      const parsed = JSON.parse(stored) as MessengerSession;
+      memorySession = parsed;
+      try {
+        // Re-save sessions written by older builds with the background-safe
+        // accessibility level. This is a storage migration, not a rotation.
+        await writeValue(SESSION_KEY, stored);
+      } catch (migrationError) {
+        console.warn(
+          "[Messenger] Не удалось обновить режим хранения сессии:",
+          migrationError,
+        );
+      }
+      return parsed;
+    } catch (error) {
+      console.warn("[Messenger] Не удалось прочитать защищённую сессию:", error);
+      // Never turn a temporary Keychain failure into an in-memory logout.
+      // Keeping the value undefined makes the next foreground call retry.
+      return memorySession ?? null;
+    }
+  })().finally(() => {
+    sessionReadPromise = null;
+  });
+
+  return sessionReadPromise;
 }
 
 export async function saveMessengerSession(

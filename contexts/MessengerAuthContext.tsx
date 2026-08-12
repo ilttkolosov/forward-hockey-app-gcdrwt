@@ -139,7 +139,17 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
-      if (nextState === "active") resumeMessengerRealtime();
+      if (nextState !== "active") return;
+      // A background notification may have attempted to read iOS Keychain
+      // while the phone was locked. Retry once the device is active instead
+      // of treating that temporary storage denial as a logout.
+      void loadMessengerSession().then((restored) => {
+        if (!restored) return;
+        setSession(restored);
+        setPasswordChange(null);
+        setStatus("authenticated");
+      });
+      resumeMessengerRealtime();
     });
     return () => subscription.remove();
   }, []);

@@ -49,6 +49,44 @@ function sequenceIsNewer(candidate: string, current: string): boolean {
     : left.localeCompare(right) > 0;
 }
 
+const BUILT_IN_ROOM_KINDS = new Set([
+  "players",
+  "coach_team",
+  "parents",
+  "coach_parents",
+  "parent_committee",
+  "coaching_staff",
+]);
+
+function isSameLocalDay(left: Date, right: Date): boolean {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  );
+}
+
+function twoDigits(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function formatRoomActivityTime(iso: string | undefined): string {
+  if (!iso) return "";
+  const activity = new Date(iso);
+  if (Number.isNaN(activity.getTime())) return "";
+  const now = new Date();
+  if (isSameLocalDay(activity, now)) {
+    return `${twoDigits(activity.getHours())}:${twoDigits(activity.getMinutes())}`;
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (isSameLocalDay(activity, yesterday)) return "Вчера";
+  const date = `${twoDigits(activity.getDate())}.${twoDigits(activity.getMonth() + 1)}`;
+  return activity.getFullYear() === now.getFullYear()
+    ? date
+    : `${date}.${String(activity.getFullYear()).slice(-2)}`;
+}
+
 export default function MessengerRoomsScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
@@ -330,6 +368,7 @@ export default function MessengerRoomsScreen() {
       <FlatList
         data={orderedRooms}
         keyExtractor={(room) => room.id}
+        ItemSeparatorComponent={() => <View style={styles.roomSeparator} />}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -341,66 +380,71 @@ export default function MessengerRoomsScreen() {
         }
         renderItem={({ item }) => {
           const direct = item.room_type === "direct" || item.kind === "direct";
-          const privateGroup = item.room_type === "private_group";
+          const preset =
+            item.room_type === "group" && BUILT_IN_ROOM_KINDS.has(item.kind);
+          const authorName = item.last_message
+            ? item.last_message.author.id === session?.user.id
+              ? "Вы"
+              : item.last_message.author.display_name
+            : "";
+          const activityTime = formatRoomActivityTime(
+            item.last_message?.created_at,
+          );
           return (
             <TouchableOpacity
-              style={styles.roomCard}
+              style={styles.roomRow}
               onPress={() => openRoom(item)}
+              activeOpacity={0.68}
+              accessibilityRole="button"
+              accessibilityLabel={`${item.title}${
+                item.unread_count > 0
+                  ? `, непрочитанных сообщений: ${item.unread_count}`
+                  : ""
+              }`}
             >
               {direct && item.peer ? (
                 <AuthenticatedAvatar
                   displayName={item.peer.display_name}
                   avatarUrl={item.peer.avatar_url}
                   accessToken={session?.access_token}
-                  size={50}
+                  size={62}
                 />
               ) : (
                 <AuthenticatedAvatar
                   displayName={item.title}
                   avatarUrl={item.avatar_url}
                   accessToken={session?.access_token}
-                  size={50}
+                  size={62}
                 />
               )}
               <View style={styles.roomContent}>
-                <View style={styles.roomTitleRow}>
-                  <Text style={styles.roomTitle} numberOfLines={1}>
-                    {item.title}
+                <Text style={styles.roomTitle} numberOfLines={1}>
+                  {item.title}
+                </Text>
+                {!direct && item.last_message && (
+                  <Text style={styles.messageAuthor} numberOfLines={1}>
+                    {authorName}
                   </Text>
-                  {item.unread_count > 0 && (
-                    <View style={styles.unreadBadge}>
-                      <Text style={styles.unreadText}>{item.unread_count}</Text>
-                    </View>
-                  )}
-                </View>
-                <View style={styles.roomKindRow}>
-                  {!direct && !privateGroup && (
-                    <Icon name="pin" size={12} color={colors.primary} />
-                  )}
-                  <Text style={styles.teamName} numberOfLines={1}>
-                    {direct
-                      ? "Личный чат"
-                      : privateGroup
-                        ? "Мини-группа"
-                        : "Общий чат"}
-                  </Text>
-                </View>
+                )}
                 <Text style={styles.preview} numberOfLines={1}>
-                  {item.last_message
-                    ? `${
-                        item.last_message.author.id === session?.user.id
-                          ? "Вы"
-                          : item.last_message.author.display_name
-                      }: `
-                    : ""}
                   {lastMessageText(item)}
                 </Text>
               </View>
-              <Icon
-                name="chevron-forward"
-                size={20}
-                color={colors.textSecondary}
-              />
+              <View style={styles.roomMeta}>
+                <Text style={styles.activityTime}>{activityTime}</Text>
+                <View style={styles.roomIndicators}>
+                  {preset && (
+                    <Icon name="pin" size={18} color={colors.textSecondary} />
+                  )}
+                  {item.unread_count > 0 && (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadText}>
+                        {item.unread_count > 999 ? "999+" : item.unread_count}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
             </TouchableOpacity>
           );
         }}
@@ -521,39 +565,56 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF4E5",
   },
   warningText: { flex: 1, color: colors.text, fontSize: 13 },
-  list: { padding: 14, paddingBottom: 32 },
+  list: { paddingBottom: 32 },
   emptyList: { flexGrow: 1, justifyContent: "center" },
-  roomCard: {
+  roomRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    minHeight: 92,
-    marginBottom: 10,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 16,
+    minHeight: 88,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     backgroundColor: colors.surface,
   },
-  roomIcon: {
-    width: 50,
-    height: 50,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 16,
-    backgroundColor: "#EAF3FF",
+  roomSeparator: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 88,
+    marginRight: 14,
+    backgroundColor: colors.border,
   },
-  roomContent: { flex: 1, minWidth: 0 },
-  roomTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  roomTitle: { flex: 1, fontSize: 16, fontWeight: "800", color: colors.text },
-  roomKindRow: {
+  roomContent: {
+    flex: 1,
+    minWidth: 0,
+    alignSelf: "stretch",
+    justifyContent: "center",
+  },
+  roomTitle: { fontSize: 16, fontWeight: "800", color: colors.text },
+  messageAuthor: {
+    marginTop: 3,
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.primary,
+  },
+  preview: { marginTop: 3, fontSize: 13, color: colors.textSecondary },
+  roomMeta: {
+    minWidth: 48,
+    alignSelf: "stretch",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    paddingVertical: 1,
+  },
+  activityTime: {
+    minHeight: 18,
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  roomIndicators: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    marginTop: 2,
+    justifyContent: "flex-end",
+    gap: 7,
+    minHeight: 26,
   },
-  teamName: { flexShrink: 1, fontSize: 12, color: colors.textSecondary },
-  preview: { marginTop: 6, fontSize: 13, color: colors.textSecondary },
   unreadBadge: {
     minWidth: 24,
     height: 24,
