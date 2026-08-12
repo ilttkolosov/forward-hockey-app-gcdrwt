@@ -1,4 +1,5 @@
 import { io, type Socket } from "socket.io-client";
+import { AppState, type NativeEventSubscription } from "react-native";
 import type { MessengerMessage } from "../features/messenger/types";
 import { MESSENGER_SERVER_ORIGIN } from "./messengerApi";
 
@@ -36,8 +37,47 @@ export type MessengerRealtimeEvent =
 type RealtimeListener = (event: MessengerRealtimeEvent) => void;
 
 const listeners = new Set<RealtimeListener>();
+const ACTIVE_ROOM_REFRESH_INTERVAL_MS = 20_000;
 let socket: Socket | null = null;
 let activeAccessToken: string | null = null;
+let visibleRoomId: string | null = null;
+let activeRoomRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let appStateSubscription: NativeEventSubscription | null = null;
+
+function activeRoomIdForServer(): string | null {
+  return AppState.currentState === "active" ? visibleRoomId : null;
+}
+
+function announceActiveRoom(): void {
+  if (!socket?.connected) return;
+  socket.emit("room.focus", { room_id: activeRoomIdForServer() });
+}
+
+function stopActiveRoomRefresh(): void {
+  if (!activeRoomRefreshTimer) return;
+  clearInterval(activeRoomRefreshTimer);
+  activeRoomRefreshTimer = null;
+}
+
+function synchronizeActiveRoomRefresh(): void {
+  stopActiveRoomRefresh();
+  if (!socket?.connected || !activeRoomIdForServer()) return;
+  activeRoomRefreshTimer = setInterval(
+    announceActiveRoom,
+    ACTIVE_ROOM_REFRESH_INTERVAL_MS,
+  );
+}
+
+function ensureAppStateSubscription(): void {
+  if (appStateSubscription) return;
+  appStateSubscription = AppState.addEventListener("change", () => {
+    // Clear the server marker before Android/iOS suspends the process. If the
+    // event cannot leave the device, disconnect cleanup and the Redis TTL are
+    // the remaining safeguards.
+    announceActiveRoom();
+    synchronizeActiveRoomRefresh();
+  });
+}
 
 function publish(event: MessengerRealtimeEvent): void {
   listeners.forEach((listener) => {
@@ -51,6 +91,7 @@ function publish(event: MessengerRealtimeEvent): void {
 
 function closeSocket(reason: string): void {
   if (!socket) return;
+  stopActiveRoomRefresh();
   socket.removeAllListeners();
   socket.io.removeAllListeners();
   socket.disconnect();
@@ -70,11 +111,16 @@ export function connectMessengerRealtime(accessToken: string): void {
   }
   if (socket && activeAccessToken === accessToken) {
     if (!socket.connected) socket.connect();
+    else {
+      announceActiveRoom();
+      synchronizeActiveRoomRefresh();
+    }
     return;
   }
 
   closeSocket("token_changed");
   activeAccessToken = accessToken;
+  ensureAppStateSubscription();
   const nextSocket = io(`${MESSENGER_SERVER_ORIGIN}/messenger`, {
     path: "/socket.io",
     transports: ["websocket"],
@@ -92,9 +138,12 @@ export function connectMessengerRealtime(accessToken: string): void {
 
   nextSocket.on("connect", () => {
     console.log("[Messenger realtime] Соединение установлено");
+    announceActiveRoom();
+    synchronizeActiveRoomRefresh();
     publish({ type: "connection.state", connected: true });
   });
   nextSocket.on("disconnect", (reason) => {
+    stopActiveRoomRefresh();
     console.log(`[Messenger realtime] Соединение закрыто: ${reason}`);
     publish({ type: "connection.state", connected: false, reason });
   });
@@ -161,15 +210,39 @@ export function connectMessengerRealtime(accessToken: string): void {
 }
 
 export function disconnectMessengerRealtime(): void {
+  visibleRoomId = null;
+  announceActiveRoom();
   activeAccessToken = null;
   closeSocket("signed_out");
+  appStateSubscription?.remove();
+  appStateSubscription = null;
 }
 
 /** Called when React Native returns from the background. */
 export function resumeMessengerRealtime(): void {
   if (!socket || !activeAccessToken) return;
   if (!socket.connected) socket.connect();
-  else publish({ type: "sync.required" });
+  else {
+    announceActiveRoom();
+    synchronizeActiveRoomRefresh();
+    publish({ type: "sync.required" });
+  }
+}
+
+/** The room feed currently visible to the user on this device. */
+export function getMessengerActiveRoomId(): string | null {
+  return activeRoomIdForServer();
+}
+
+/**
+ * Publishes transient viewing context. It is used only to suppress a PUSH for
+ * this exact device/session and never replaces message read receipts.
+ */
+export function setMessengerActiveRoom(roomId: string | null): void {
+  visibleRoomId = roomId || null;
+  ensureAppStateSubscription();
+  announceActiveRoom();
+  synchronizeActiveRoomRefresh();
 }
 
 export function subscribeMessengerRealtime(

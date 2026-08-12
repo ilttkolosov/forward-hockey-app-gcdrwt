@@ -261,7 +261,9 @@ export default function MessengerRoomsScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.iconButton}
-          onPress={() => router.back()}
+          onPress={() => router.dismissTo("/")}
+          accessibilityRole="button"
+          accessibilityLabel="Вернуться на главный экран"
         >
           <Icon name="chevron-back" size={28} color={colors.primary} />
         </TouchableOpacity>

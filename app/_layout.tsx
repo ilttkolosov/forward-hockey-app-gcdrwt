@@ -53,6 +53,7 @@ import {
   processMessengerPushPayload,
 } from '../services/messengerPush';
 import { remotePushNotificationsSupported } from '../services/runtimeEnvironment';
+import { getMessengerActiveRoomId } from '../services/messengerRealtime';
 global.Buffer = Buffer;
 
 Notifications.setNotificationHandler({
@@ -60,13 +61,19 @@ Notifications.setNotificationHandler({
     const messengerPush = normalizeMessengerPushPayload(
       notification.request.content.data,
     );
-    const messengerDeliveredInForeground =
-      AppState.currentState === 'active' && messengerPush !== null;
+    const messengerBadgeUpdate = messengerPush?.type === 'messenger.badge';
+    const messengerDeliveredToVisibleRoom =
+      AppState.currentState === 'active'
+      && messengerPush?.type === 'messenger.message'
+      && Boolean(messengerPush.room_id)
+      && messengerPush.room_id === getMessengerActiveRoomId();
+    const suppressVisualNotification =
+      messengerBadgeUpdate || messengerDeliveredToVisibleRoom;
 
     return {
-      shouldShowBanner: !messengerDeliveredInForeground,
-      shouldShowList: !messengerDeliveredInForeground,
-      shouldPlaySound: !messengerDeliveredInForeground,
+      shouldShowBanner: !suppressVisualNotification,
+      shouldShowList: !suppressVisualNotification,
+      shouldPlaySound: !suppressVisualNotification,
       // The server-provided badge remains the source of truth even when the
       // foreground banner is suppressed. Realtime updates the visible feed.
       shouldSetBadge: true,

@@ -120,6 +120,34 @@ const ensurePushPermissions = async (): Promise<boolean> => {
   return true;
 };
 
+const getMatchPushSubscriptionStatus = async (): Promise<boolean> => {
+  if (!remotePushNotificationsSupported) return false;
+  const permission = await Notifications.getPermissionsAsync();
+  if (permission.status !== 'granted') return false;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OPERATION_TIMEOUT_MS);
+  try {
+    const token = await getProjectExpoPushToken();
+    const response = await fetch(
+      'https://www.hc-forward.com/wp-json/app/v1/push-subscription',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+        signal: controller.signal,
+      },
+    );
+    const result = await response.json();
+    if (!response.ok || result.status !== 'success') {
+      throw new Error(result.error || 'Не удалось проверить подписку');
+    }
+    return result.data?.is_subscribed === true;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
 const errorMessage = (error: unknown, fallback: string): string => (
   error instanceof Error ? error.message : fallback
 );
@@ -132,6 +160,7 @@ export default function SettingsScreen() {
   const [trainingNotificationsEnabled, setTrainingNotificationsState] = useState(false);
   const [trainingLeadMinutes, setTrainingLeadState] = useState(60);
   const [isChecking, setIsChecking] = useState(true);
+  const [messengerChecking, setMessengerChecking] = useState(true);
   const [trainingOperation, setTrainingOperation] = useState(false);
   const [messengerOperation, setMessengerOperation] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -139,17 +168,17 @@ export default function SettingsScreen() {
   const [showError, setShowError] = useState(false);
 
   useEffect(() => {
-    const loadSettings = async () => {
+    let active = true;
+    const loadLocalSettings = async () => {
       try {
-        const [pushValue, trainingSettings, messengerState] = await Promise.all([
+        const [pushValue, trainingSettings] = await Promise.all([
           AsyncStorage.getItem(PUSH_ENABLED_KEY),
           getTrainingNotificationSettings(),
-          messengerPushStatus(),
         ]);
+        if (!active) return;
         setMatchNotificationsEnabled(
           remotePushNotificationsSupported && pushValue === 'true',
         );
-        setMessengerNotificationsEnabled(messengerState.enabled);
         setTrainingNotificationsState(trainingSettings.enabled);
         setTrainingLeadState(trainingSettings.leadMinutes);
         console.log(
@@ -160,11 +189,35 @@ export default function SettingsScreen() {
       } catch (error) {
         console.warn('[Настройки] Не удалось загрузить параметры уведомлений:', error);
       } finally {
-        setIsChecking(false);
+        if (active) setIsChecking(false);
       }
     };
-    void loadSettings();
+
+    // The page is rendered from local state immediately. Network checks then
+    // reconcile the switches without delaying navigation to Settings.
+    void loadLocalSettings();
+    void messengerPushStatus()
+      .then((state) => {
+        if (active) setMessengerNotificationsEnabled(state.enabled);
+      })
+      .catch((error) => {
+        console.warn('[Настройки] Проверка PUSH мессенджера отложена:', error);
+      })
+      .finally(() => {
+        if (active) setMessengerChecking(false);
+      });
+    void getMatchPushSubscriptionStatus()
+      .then(async (enabled) => {
+        await AsyncStorage.setItem(PUSH_ENABLED_KEY, String(enabled));
+        if (active) setMatchNotificationsEnabled(enabled);
+      })
+      .catch((error) => {
+        console.warn('[Настройки] Проверка подписки на матчи отложена:', error);
+      });
     trackScreenView('Настройки');
+    return () => {
+      active = false;
+    };
   }, []);
 
   const showOperation = (message: string) => {
@@ -317,7 +370,7 @@ export default function SettingsScreen() {
                   : 'Станет доступно после активации учётной записи мессенджера'}
               </Text>
             </View>
-            {isChecking ? (
+            {messengerChecking ? (
               <ActivityIndicator color={colors.primary} />
             ) : (
               <Switch

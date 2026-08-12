@@ -99,7 +99,10 @@ import {
   setMessengerReaction,
 } from "../../../services/messengerApi";
 import { queueMessengerReadReceipt } from "../../../services/messengerReadSync";
-import { subscribeMessengerRealtime } from "../../../services/messengerRealtime";
+import {
+  setMessengerActiveRoom,
+  subscribeMessengerRealtime,
+} from "../../../services/messengerRealtime";
 import { messengerLog } from "../../../services/messengerLogger";
 import {
   currentMessengerLocation,
@@ -1542,6 +1545,7 @@ export default function MessengerRoomScreen() {
         router.replace("/messenger/register");
         return;
       }
+      setMessengerActiveRoom(roomId);
       const returningToRoom = roomFocusCount.current > 0;
       roomFocusCount.current += 1;
       if (returningToRoom) void refreshRoomIdentity();
@@ -1618,6 +1622,7 @@ export default function MessengerRoomScreen() {
       // foreground delivery, while this timer protects against a lost event.
       const timer = setInterval(() => void loadMessages(false), 120_000);
       return () => {
+        setMessengerActiveRoom(null);
         unsubscribe();
         clearInterval(timer);
         if (connectionSyncTimer.current) {

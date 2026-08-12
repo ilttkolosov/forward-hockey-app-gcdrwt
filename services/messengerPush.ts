@@ -205,7 +205,12 @@ export async function messengerPushStatus(): Promise<{
   const preferred = await loadMessengerPushPreference(session.user.id);
   try {
     const registration = await getMessengerPushRegistration();
-    const enabled = Boolean(preferred && registration?.enabled);
+    // The server registration is the durable source of truth across app
+    // upgrades. Older builds did not always have the per-user local key, so
+    // requiring both values made an existing registration appear disabled.
+    // An explicit opt-out disables the server row, therefore restoring an
+    // enabled row cannot silently undo a user's choice.
+    const enabled = Boolean(registration?.enabled);
     await AsyncStorage.setItem(enabledKey(session.user.id), String(enabled));
     return { enabled, registration };
   } catch (error) {
@@ -219,7 +224,14 @@ export async function messengerPushStatus(): Promise<{
 export async function syncMessengerPushRegistration(): Promise<void> {
   if (!remotePushNotificationsSupported) return;
   const session = await loadMessengerSession();
-  if (!session || !(await loadMessengerPushPreference(session.user.id))) return;
+  if (!session) return;
+  const localPreference = await loadMessengerPushPreference(session.user.id);
+  if (!localPreference) {
+    // Recover a registration created by a previous application version before
+    // deciding that PUSH is disabled locally.
+    const status = await messengerPushStatus();
+    if (!status.enabled) return;
+  }
   if (!(await ensureNotificationPermission(false))) {
     await AsyncStorage.setItem(enabledKey(session.user.id), "false");
     await unregisterMessengerPushToken().catch(() => undefined);

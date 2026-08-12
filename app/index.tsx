@@ -86,6 +86,27 @@ const quickNavStyles = StyleSheet.create({
   },
 });
 
+const footerLinkStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginVertical: 24,
+    paddingHorizontal: 16,
+  },
+  button: {
+    width: '46%',
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  text: {
+    fontSize: 14,
+  },
+});
+
 const headerStyles = StyleSheet.create({
   headerContainer: {
     marginBottom: 24,
@@ -317,7 +338,10 @@ export default function HomeScreen() {
           </Link>
 
           {/* Командный мессенджер */}
-          <Link href="/messenger" asChild>
+          <Link
+            href={isMessengerAuthenticated ? "/messenger/rooms" : "/messenger/register"}
+            asChild
+          >
             <TouchableOpacity style={quickNavStyles.item}>
               {isMessengerAuthenticated && messengerUnreadCount > 0 && (
                 <View style={quickNavStyles.unreadBadge}>
@@ -352,17 +376,30 @@ export default function HomeScreen() {
           </View>
         )}
         {/* Ссылки "Настройки" и "О программе" в одной строке */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginVertical: 24, paddingHorizontal: 32 }}>
+        <View style={footerLinkStyles.row}>
           <Link href="/settings" asChild>
-            <Text style={[commonStyles.textSecondary, { fontSize: 14 }]}>
-              Настройки
-            </Text>
+            <TouchableOpacity
+              style={footerLinkStyles.button}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Открыть настройки"
+            >
+              <Text style={[commonStyles.textSecondary, footerLinkStyles.text]}>
+                Настройки
+              </Text>
+            </TouchableOpacity>
           </Link>
-          <Text style={[commonStyles.textSecondary, { fontSize: 14, paddingHorizontal: 8 }]}></Text>
           <Link href="/about" asChild>
-            <Text style={[commonStyles.textSecondary, { fontSize: 14 }]}>
-              О программе
-            </Text>
+            <TouchableOpacity
+              style={footerLinkStyles.button}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Открыть информацию о программе"
+            >
+              <Text style={[commonStyles.textSecondary, footerLinkStyles.text]}>
+                О программе
+              </Text>
+            </TouchableOpacity>
           </Link>
         </View>
       </ScrollView>
