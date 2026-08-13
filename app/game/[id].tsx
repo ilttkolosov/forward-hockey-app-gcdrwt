@@ -126,10 +126,40 @@ const isAllowedVKEmbedNavigation = (requestUrl: string): boolean => {
   }
 };
 
-const shouldAllowVideoNavigation = (sourceUrl: string, requestUrl: string): boolean => {
+const BLOCKED_VIDEO_NAVIGATION_TYPES = new Set(['click', 'formsubmit', 'formresubmit']);
+
+const shouldAllowVideoNavigation = (
+  sourceUrl: string,
+  requestUrl: string,
+  isTopFrame: boolean | undefined,
+  navigationType: string
+): boolean => {
   // Keep the existing behavior for non-VK sources (for example YouTube).
-  // VK embeds stay inside the player instead of navigating to the full VK UI.
-  return parseVKVideoUrl(sourceUrl) === null || isAllowedVKEmbedNavigation(requestUrl);
+  if (parseVKVideoUrl(sourceUrl) === null) return true;
+
+  // iOS reports navigation requests from VK's internal frames as well. They
+  // are required for player bootstrap, authentication and media delivery.
+  if (isTopFrame === false) return true;
+
+  if (isAllowedVKEmbedNavigation(requestUrl)) return true;
+
+  // Allow redirects/reloads used while the embedded player initializes, but
+  // do not let a user click navigate the top-level WebView to the full VK UI.
+  return !BLOCKED_VIDEO_NAVIGATION_TYPES.has(navigationType);
+};
+
+const getVideoLogContext = (url: string): Record<string, string> => {
+  try {
+    const parsedUrl = new URL(url);
+    const video = parseVKVideoUrl(url);
+    return {
+      host: parsedUrl.hostname || parsedUrl.protocol.replace(':', ''),
+      path: parsedUrl.pathname,
+      ...(video ? { owner_id: video.ownerId, video_id: video.videoId } : {}),
+    };
+  } catch {
+    return { host: 'invalid', path: '' };
+  }
 };
 
 
@@ -597,6 +627,7 @@ export default function GameDetailsScreen() {
 
   const f2fLoadedRef = useRef(false);
   const [videoModalUrl, setVideoModalUrl] = useState<string | null>(null);
+  const videoLoadStartedAtRef = useRef<number | null>(null);
 
   // === АНИМАЦИЯ ПРОКРУТКИ ===
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -1102,9 +1133,57 @@ export default function GameDetailsScreen() {
                 scrollEnabled={false}
                 showsHorizontalScrollIndicator={false}
                 showsVerticalScrollIndicator={false}
-                onShouldStartLoadWithRequest={(request) =>
-                  shouldAllowVideoNavigation(sp_video, request.url)
-                }
+                onShouldStartLoadWithRequest={(request) => {
+                  const allowed = shouldAllowVideoNavigation(
+                    sp_video,
+                    request.url,
+                    request.isTopFrame,
+                    request.navigationType
+                  );
+                  if (!allowed) {
+                    console.log('[GameVideo][navigation.blocked]', {
+                      game_id: id,
+                      navigation_type: request.navigationType,
+                      ...getVideoLogContext(request.url),
+                    });
+                  }
+                  return allowed;
+                }}
+                onLoadStart={({ nativeEvent }) => {
+                  videoLoadStartedAtRef.current = Date.now();
+                  console.log('[GameVideo][load.started]', {
+                    game_id: id,
+                    ...getVideoLogContext(nativeEvent.url),
+                  });
+                }}
+                onLoadEnd={({ nativeEvent }) => {
+                  const startedAt = videoLoadStartedAtRef.current;
+                  videoLoadStartedAtRef.current = null;
+                  console.log('[GameVideo][load.completed]', {
+                    game_id: id,
+                    duration_ms: startedAt ? Date.now() - startedAt : null,
+                    ...getVideoLogContext(nativeEvent.url),
+                  });
+                }}
+                onError={({ nativeEvent }) => {
+                  const startedAt = videoLoadStartedAtRef.current;
+                  videoLoadStartedAtRef.current = null;
+                  console.warn('[GameVideo][load.error]', {
+                    game_id: id,
+                    duration_ms: startedAt ? Date.now() - startedAt : null,
+                    code: nativeEvent.code,
+                    description: nativeEvent.description,
+                    ...getVideoLogContext(nativeEvent.url),
+                  });
+                }}
+                onHttpError={({ nativeEvent }) => {
+                  console.warn('[GameVideo][http_error]', {
+                    game_id: id,
+                    status: nativeEvent.statusCode,
+                    description: nativeEvent.description,
+                    ...getVideoLogContext(nativeEvent.url),
+                  });
+                }}
               />
             </View>
           </View>
@@ -1247,7 +1326,12 @@ export default function GameDetailsScreen() {
               showsHorizontalScrollIndicator={false}
               showsVerticalScrollIndicator={false}
               onShouldStartLoadWithRequest={(request) =>
-                shouldAllowVideoNavigation(videoModalUrl, request.url)
+                shouldAllowVideoNavigation(
+                  videoModalUrl,
+                  request.url,
+                  request.isTopFrame,
+                  request.navigationType
+                )
               }
               onFullscreenVideoWillDismiss={() => setVideoModalUrl(null)}
             />
