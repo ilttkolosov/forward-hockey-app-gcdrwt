@@ -126,6 +126,8 @@ import {
   type MessengerUploadFile,
 } from "../../../services/messengerAttachmentPicker";
 import {
+  beginLocalMessengerMediaUpload,
+  endLocalMessengerMediaUpload,
   prefetchMessengerImages,
   seedMessengerMediaCache,
 } from "../../../services/messengerMediaCache";
@@ -446,7 +448,9 @@ function DeliveryChecks({ message }: { message: MessengerMessage }) {
   const read = message.delivery.status === "read";
   const double = message.delivery.status !== "sent";
   const label = read ? "Прочитано" : double ? "Доставлено" : "Отправлено";
-  const color = read ? colors.accent : colors.textSecondary;
+  // A neutral graphite is intentionally farther from the blue read state
+  // than the global secondary text colour, which has a subtle blue-green cast.
+  const color = read ? colors.accent : "#555D64";
   return (
     <View style={styles.checkPair} accessibilityLabel={label}>
       <Text style={[styles.checkMark, styles.checkOne, { color }]}>✓</Text>
@@ -534,6 +538,7 @@ function PendingAttachmentView({
   pending: MessengerPendingAttachment;
 }) {
   const failed = pending.stage === "failed";
+  const committed = pending.stage === "committed";
   const fileSize = pendingAttachmentSize(pending.size_bytes);
   const pendingItems = pending.items?.length
     ? pending.items
@@ -590,31 +595,33 @@ function PendingAttachmentView({
           transition={120}
         />
       ) : null}
-      <View style={styles.pendingAttachmentStatus}>
-        {failed ? (
-          <Icon name="alert-circle-outline" size={21} color={colors.error} />
-        ) : (
-          <ActivityIndicator size="small" color={colors.primary} />
-        )}
-        <View style={styles.pendingAttachmentText}>
-          <Text
-            style={[
-              styles.pendingAttachmentLabel,
-              failed && styles.pendingAttachmentLabelFailed,
-            ]}
-            accessibilityLiveRegion="polite"
-          >
-            {pending.label}
-          </Text>
-          {pending.file_name || fileSize ? (
-            <Text style={styles.pendingAttachmentDetails} numberOfLines={1}>
-              {pendingItems.length > 1
-                ? `${pendingItems.length} вложений`
-                : [pending.file_name, fileSize].filter(Boolean).join(" · ")}
+      {!committed && (
+        <View style={styles.pendingAttachmentStatus}>
+          {failed ? (
+            <Icon name="alert-circle-outline" size={21} color={colors.error} />
+          ) : (
+            <ActivityIndicator size="small" color={colors.primary} />
+          )}
+          <View style={styles.pendingAttachmentText}>
+            <Text
+              style={[
+                styles.pendingAttachmentLabel,
+                failed && styles.pendingAttachmentLabelFailed,
+              ]}
+              accessibilityLiveRegion="polite"
+            >
+              {pending.label}
             </Text>
-          ) : null}
+            {pending.file_name || fileSize ? (
+              <Text style={styles.pendingAttachmentDetails} numberOfLines={1}>
+                {pendingItems.length > 1
+                  ? `${pendingItems.length} вложений`
+                  : [pending.file_name, fileSize].filter(Boolean).join(" · ")}
+              </Text>
+            ) : null}
+          </View>
         </View>
-      </View>
+      )}
       {!failed &&
       pending.stage === "uploading" &&
       pending.source !== "location" ? (
@@ -1566,11 +1573,11 @@ export default function MessengerRoomScreen() {
               ?.sequence;
         const remoteIsContiguousWithFeed = Boolean(
           !visibleConfirmedTail ||
-          !reconciliationCursor ||
-          compareMessengerSequence(
-            visibleConfirmedTail,
-            reconciliationCursor,
-          ) === 0,
+            !reconciliationCursor ||
+            compareMessengerSequence(
+              visibleConfirmedTail,
+              reconciliationCursor,
+            ) === 0,
         );
         let latestSequence = reconciliationCursor || localLatestSequence;
         let receivedMessageCount = 0;
@@ -2411,89 +2418,100 @@ export default function MessengerRoomScreen() {
   const sendUpload = useCallback(
     async (request: MediaUploadRequest, signal: AbortSignal) => {
       assertMessengerUploadLimits(request.files);
-      const totalUploadBytes = request.files.reduce(
-        (total, file) => total + (file.size_bytes ?? 0),
-        0,
-      );
-      const uploadStartedAt = Date.now();
-      messengerLog("info", "media.upload.started", {
-        room_id: roomId,
-        client_message_id: request.clientMessageId,
-        media_count: request.files.length,
-        media_types: request.files.map((file) => file.kind).join(","),
-        upload_size_bytes: totalUploadBytes,
-        upload_size_kb: Math.round(totalUploadBytes / 1024),
-        has_caption: Boolean(request.caption),
-      });
-      let lastShownPercent = -1;
-      const result = await sendMessengerMedia(
-        roomId,
-        request.clientMessageId,
-        request.files,
-        request.caption,
-        request.replyTarget?.id,
-        ({ percent }) => {
-          if (signal.aborted) return;
-          if (
-            percent !== 100 &&
-            lastShownPercent >= 0 &&
-            percent < lastShownPercent + 5
-          ) {
-            return;
-          }
-          lastShownPercent = percent;
-          updatePendingAttachment(request.clientMessageId, (message) => ({
-            ...message,
-            pending_attachment: message.pending_attachment
-              ? {
-                  ...message.pending_attachment,
-                  label: `Загрузка: ${percent}%`,
-                  progress_percent: percent,
-                }
-              : null,
-          }));
-        },
-        signal,
-      );
-      const serverAcceptedAt = Date.now();
-      messengerLog("info", "media.upload.server_accepted", {
-        room_id: roomId,
-        message_id: result.message.id,
-        duration_ms: serverAcceptedAt - uploadStartedAt,
-      });
-      const confirmedMedia = result.message.media_items?.length
-        ? result.message.media_items
-        : result.message.media
-          ? [result.message.media]
-          : [];
-      for (const [index, media] of confirmedMedia.entries()) {
-        const file = request.files[index];
-        if (!file) continue;
-        try {
-          // Seed before exposing the confirmed attachment. Otherwise the
-          // attachment view starts an unnecessary download of the same file.
-          await seedMessengerMediaCache(media, file.uri);
-        } catch (cacheError) {
-          messengerLog("warn", "media.cache.seed_failed", {
-            asset_id: media.id,
-            message:
-              cacheError instanceof Error
-                ? cacheError.message
-                : "Не удалось сохранить локальную копию",
-          });
-        }
-      }
-      await storeSentMessage(result.message);
-      messengerLog("info", "media.upload.completed", {
-        room_id: roomId,
-        message_id: result.message.id,
-        media_count: confirmedMedia.length,
-        stored_size_bytes: confirmedMedia.reduce(
-          (total, media) => total + media.size_bytes,
+      beginLocalMessengerMediaUpload(request.clientMessageId);
+      try {
+        const totalUploadBytes = request.files.reduce(
+          (total, file) => total + (file.size_bytes ?? 0),
           0,
-        ),
-        cache_seed_duration_ms: Date.now() - serverAcceptedAt,
-      });
+        );
+        const uploadStartedAt = Date.now();
+        messengerLog("info", "media.upload.started", {
+          room_id: roomId,
+          client_message_id: request.clientMessageId,
+          media_count: request.files.length,
+          media_types: request.files.map((file) => file.kind).join(","),
+          upload_size_bytes: totalUploadBytes,
+          upload_size_kb: Math.round(totalUploadBytes / 1024),
+          has_caption: Boolean(request.caption),
+        });
+        let lastShownPercent = -1;
+        const result = await sendMessengerMedia(
+          roomId,
+          request.clientMessageId,
+          request.files,
+          request.caption,
+          request.replyTarget?.id,
+          ({ percent }) => {
+            if (signal.aborted) return;
+            if (
+              percent !== 100 &&
+              lastShownPercent >= 0 &&
+              percent < lastShownPercent + 5
+            ) {
+              return;
+            }
+            lastShownPercent = percent;
+            updatePendingAttachment(request.clientMessageId, (message) => ({
+              ...message,
+              pending_attachment: message.pending_attachment
+                ? {
+                    ...message.pending_attachment,
+                    label: `Загрузка: ${percent}%`,
+                    progress_percent: percent,
+                  }
+                : null,
+            }));
+          },
+          signal,
+        );
+        const serverAcceptedAt = Date.now();
+        messengerLog("info", "media.upload.server_accepted", {
+          room_id: roomId,
+          message_id: result.message.id,
+          duration_ms: serverAcceptedAt - uploadStartedAt,
+        });
+        const confirmedMedia = result.message.media_items?.length
+          ? result.message.media_items
+          : result.message.media
+            ? [result.message.media]
+            : [];
+        for (const [index, media] of confirmedMedia.entries()) {
+          const file = request.files[index];
+          if (!file) continue;
+          try {
+            // Seed before exposing the confirmed attachment. Otherwise the
+            // attachment view starts an unnecessary download of the same file.
+            await seedMessengerMediaCache(media, file.uri);
+          } catch (cacheError) {
+            messengerLog("warn", "media.cache.seed_failed", {
+              asset_id: media.id,
+              message:
+                cacheError instanceof Error
+                  ? cacheError.message
+                  : "Не удалось сохранить локальную копию",
+            });
+          }
+        }
+        // Cache seeding has completed (or explicitly failed), so the next render
+        // can safely switch from the picker URI to the confirmed attachment.
+        updatePendingAttachment(request.clientMessageId, (message) => ({
+          ...message,
+          pending_attachment: null,
+        }));
+        await storeSentMessage(result.message);
+        messengerLog("info", "media.upload.completed", {
+          room_id: roomId,
+          message_id: result.message.id,
+          media_count: confirmedMedia.length,
+          stored_size_bytes: confirmedMedia.reduce(
+            (total, media) => total + media.size_bytes,
+            0,
+          ),
+          cache_seed_duration_ms: Date.now() - serverAcceptedAt,
+        });
+      } finally {
+        endLocalMessengerMediaUpload(request.clientMessageId);
+      }
     },
     [roomId, storeSentMessage, updatePendingAttachment],
   );
@@ -3505,16 +3523,16 @@ export default function MessengerRoomScreen() {
   );
   const actionMessageEditable = Boolean(
     actionMessageMutable &&
-    actionMessage &&
-    editableMessengerMessage(actionMessage),
+      actionMessage &&
+      editableMessengerMessage(actionMessage),
   );
   const editingTextChanged = Boolean(
     editingMessage && text.trim() !== editingMessage.text.trim(),
   );
   const canSubmitEdit = Boolean(
     editingMessage &&
-    editingTextChanged &&
-    (editingMessage.kind !== "text" || text.trim()),
+      editingTextChanged &&
+      (editingMessage.kind !== "text" || text.trim()),
   );
   const canSubmitComposer = editingMessage
     ? canSubmitEdit
@@ -3832,7 +3850,8 @@ export default function MessengerRoomScreen() {
                               {item.author.display_name}
                             </Text>
                           )}
-                          {(mediaItems.length > 0 || location) &&
+                          {!pendingAttachment &&
+                            (mediaItems.length > 0 || location) &&
                             session?.access_token && (
                               <MessengerAttachmentView
                                 media={media}

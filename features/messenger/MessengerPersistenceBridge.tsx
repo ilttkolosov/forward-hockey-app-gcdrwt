@@ -19,7 +19,10 @@ import {
   subscribeMessengerRealtime,
 } from "../../services/messengerRealtime";
 import { messengerLog } from "../../services/messengerLogger";
-import { prefetchMessengerImages } from "../../services/messengerMediaCache";
+import {
+  hasLocalMessengerMediaUpload,
+  prefetchMessengerImages,
+} from "../../services/messengerMediaCache";
 import {
   getMessengerContactAliases,
   getMessengerRooms,
@@ -200,14 +203,22 @@ export default function MessengerPersistenceBridge() {
     };
     const unsubscribeRealtime = subscribeMessengerRealtime((event) => {
       if (event.type === "message.created") {
-        prefetchMessengerImages(
-          event.message.media_items?.length
-            ? event.message.media_items
-            : event.message.media
-              ? [event.message.media]
-              : [],
-          session.access_token,
-        );
+        if (!hasLocalMessengerMediaUpload(event.message.client_message_id)) {
+          prefetchMessengerImages(
+            event.message.media_items?.length
+              ? event.message.media_items
+              : event.message.media
+                ? [event.message.media]
+                : [],
+            session.access_token,
+          );
+        } else {
+          messengerLog("debug", "media.cache.local_upload_preserved", {
+            room_id: event.message.room_id,
+            message_id: event.message.id,
+            client_message_id: event.message.client_message_id,
+          });
+        }
         persistRealtimeMessage(event.message);
       } else if (event.type === "message.updated") {
         prefetchMessengerImages(

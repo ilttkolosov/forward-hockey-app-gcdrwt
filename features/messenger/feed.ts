@@ -305,6 +305,23 @@ function mergeMessengerMessage(
     : incoming.media
       ? [incoming.media]
       : [];
+  // Socket.IO can publish the committed server message before the HTTP upload
+  // response reaches the sender. Keep the device-local preview during that
+  // short interval instead of replacing it with a server URL and starting a
+  // redundant download. The next confirmed merge (after cache seeding) clears
+  // this local-only field because `existing.pending` is then already false.
+  const committedLocalAttachment =
+    !incoming.pending &&
+    existing.pending &&
+    existing.pending_attachment &&
+    existing.pending_attachment.source !== "location"
+      ? {
+          ...existing.pending_attachment,
+          stage: "committed" as const,
+          label: "Отправлено",
+          progress_percent: 100,
+        }
+      : null;
   return {
     ...existing,
     ...incoming,
@@ -318,7 +335,7 @@ function mergeMessengerMessage(
     send_error: incoming.pending ? incoming.send_error : null,
     pending_attachment: incoming.pending
       ? (incoming.pending_attachment ?? existing.pending_attachment ?? null)
-      : null,
+      : committedLocalAttachment,
   };
 }
 

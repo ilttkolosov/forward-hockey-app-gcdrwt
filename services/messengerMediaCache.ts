@@ -5,6 +5,24 @@ import { messengerLog, messengerRequestId } from "./messengerLogger";
 
 const CACHE_ROOT = `${FileSystem.cacheDirectory || ""}forward-messenger-media/`;
 const downloads = new Map<string, Promise<string>>();
+const localMediaUploads = new Set<string>();
+
+/**
+ * Marks a media message whose source files exist on this exact device. The
+ * realtime event can arrive before the upload response, so background
+ * persistence uses this marker to avoid downloading our own files again.
+ */
+export function beginLocalMessengerMediaUpload(clientMessageId: string): void {
+  localMediaUploads.add(clientMessageId);
+}
+
+export function endLocalMessengerMediaUpload(clientMessageId: string): void {
+  localMediaUploads.delete(clientMessageId);
+}
+
+export function hasLocalMessengerMediaUpload(clientMessageId: string): boolean {
+  return localMediaUploads.has(clientMessageId);
+}
 
 function responseHeader(
   headers: Record<string, string>,
@@ -154,9 +172,7 @@ export async function cacheMessengerMedia(
       downloaded_bytes: downloadedBytes,
       expected_bytes: expectedBytes,
       throughput_kbps:
-        durationMs > 0
-          ? Math.round((downloadedBytes * 8) / durationMs)
-          : null,
+        durationMs > 0 ? Math.round((downloadedBytes * 8) / durationMs) : null,
       server_timing: responseHeader(result.headers, "server-timing"),
       delivery: responseHeader(result.headers, "x-media-delivery"),
     });

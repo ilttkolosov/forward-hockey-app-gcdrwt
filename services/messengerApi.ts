@@ -738,6 +738,11 @@ const MEDIA_UPLOAD_STALL_TIMEOUT_MS = 3 * 60 * 1000;
 // iOS; the server's 50 MiB limit bounds the buffered multipart body. Android
 // keeps native progress for large files and uses expo/fetch for small ones.
 const BUFFERED_MEDIA_UPLOAD_MAX_BYTES = 1024 * 1024;
+// React Native's legacy FormData transport can spend tens of seconds sending
+// a sub-megabyte album on iOS even though each file is already local. Expo's
+// Blob-aware fetch path avoids that bridge copy. Keep the batch cap bounded so
+// larger albums do not create an excessive in-memory multipart body.
+const BUFFERED_MEDIA_BATCH_UPLOAD_MAX_BYTES = 8 * 1024 * 1024;
 const EXPO_FETCH_MEDIA_UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 const MEDIA_UPLOAD_PROGRESS_POLL_INTERVAL_MS = 1_250;
 const MEDIA_UPLOAD_PROGRESS_STEP_PERCENT = 10;
@@ -748,6 +753,18 @@ function shouldUseBufferedMediaUpload(file: MessengerMediaUploadFile) {
     file.size_bytes >= 0 &&
     file.size_bytes <= BUFFERED_MEDIA_UPLOAD_MAX_BYTES
   );
+}
+
+function shouldUseBufferedMediaBatch(files: MessengerMediaUploadFile[]) {
+  if (files.length < 2) return false;
+  let totalBytes = 0;
+  for (const file of files) {
+    if (typeof file.size_bytes !== "number" || file.size_bytes < 0) {
+      return false;
+    }
+    totalBytes += file.size_bytes;
+  }
+  return totalBytes <= BUFFERED_MEDIA_BATCH_UPLOAD_MAX_BYTES;
 }
 
 function startServerUploadProgressPolling(
@@ -853,10 +870,10 @@ function startServerUploadProgressPolling(
   return stop;
 }
 
-async function sendBufferedSingleMessengerMedia(
+async function sendBufferedMessengerMedia(
   roomId: string,
   clientMessageId: string,
-  file: MessengerMediaUploadFile,
+  files: MessengerMediaUploadFile[],
   caption?: string,
   replyToMessageId?: string | null,
   onProgress?: (progress: MessengerUploadProgress) => void,
@@ -869,10 +886,14 @@ async function sendBufferedSingleMessengerMedia(
   const session = await loadMessengerSession();
   const form = new FormData();
   form.append("client_message_id", clientMessageId);
-  form.append("original_name", file.name);
+  if (files.length === 1 && files[0]) {
+    form.append("original_name", files[0].name);
+  }
   if (caption?.trim()) form.append("caption", caption.trim());
   if (replyToMessageId) form.append("reply_to_message_id", replyToMessageId);
-  form.append("files", new ExpoFile(file.uri) as unknown as Blob);
+  files.forEach((file) => {
+    form.append("files", new ExpoFile(file.uri) as unknown as Blob, file.name);
+  });
 
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -893,7 +914,7 @@ async function sendBufferedSingleMessengerMedia(
   }, EXPO_FETCH_MEDIA_UPLOAD_TIMEOUT_MS);
   const stopProgressPolling = startServerUploadProgressPolling(
     requestId,
-    file.size_bytes ?? 0,
+    files.reduce((total, file) => total + (file.size_bytes ?? 0), 0),
     session?.access_token,
     onProgress,
   );
@@ -901,8 +922,12 @@ async function sendBufferedSingleMessengerMedia(
   messengerLog("info", "api.media_buffered_upload.started", {
     request_id: requestId,
     room_id: roomId,
-    file_type: file.type,
-    file_size_bytes: file.size_bytes,
+    media_count: files.length,
+    media_types: files.map((file) => file.type).join(","),
+    upload_size_bytes: files.reduce(
+      (total, file) => total + (file.size_bytes ?? 0),
+      0,
+    ),
     upload_timeout_ms: EXPO_FETCH_MEDIA_UPLOAD_TIMEOUT_MS,
     preparation_duration_ms: Date.now() - startedAt,
   });
@@ -943,10 +968,10 @@ async function sendBufferedSingleMessengerMedia(
     ) {
       stopProgressPolling();
       await refreshMessengerSession();
-      return sendBufferedSingleMessengerMedia(
+      return sendBufferedMessengerMedia(
         roomId,
         clientMessageId,
-        file,
+        files,
         caption,
         replyToMessageId,
         onProgress,
@@ -958,7 +983,10 @@ async function sendBufferedSingleMessengerMedia(
       response.status,
       body,
     );
-    const totalBytes = file.size_bytes ?? 0;
+    const totalBytes = files.reduce(
+      (total, file) => total + (file.size_bytes ?? 0),
+      0,
+    );
     stopProgressPolling();
     onProgress?.({
       sent_bytes: totalBytes,
@@ -1194,6 +1222,33 @@ export async function sendMessengerMedia(
   onProgress?: (progress: MessengerUploadProgress) => void,
   signal?: AbortSignal,
 ) {
+  if (
+    Platform.OS !== "web" &&
+    files.length > 1 &&
+    shouldUseBufferedMediaBatch(files)
+  ) {
+    const totalBytes = files.reduce(
+      (total, file) => total + (file.size_bytes ?? 0),
+      0,
+    );
+    messengerLog("info", "api.media_upload.transport_selected", {
+      room_id: roomId,
+      platform: Platform.OS,
+      transport: "expo_fetch_buffered_batch",
+      media_count: files.length,
+      upload_size_bytes: totalBytes,
+      buffered_limit_bytes: BUFFERED_MEDIA_BATCH_UPLOAD_MAX_BYTES,
+    });
+    return sendBufferedMessengerMedia(
+      roomId,
+      clientMessageId,
+      files,
+      caption,
+      replyToMessageId,
+      onProgress,
+      signal,
+    );
+  }
   if (Platform.OS !== "web" && files.length === 1 && files[0]) {
     const useExpoFetch =
       Platform.OS === "ios" || shouldUseBufferedMediaUpload(files[0]);
@@ -1208,10 +1263,10 @@ export async function sendMessengerMedia(
       buffered_limit_bytes: BUFFERED_MEDIA_UPLOAD_MAX_BYTES,
     });
     if (transport === "expo_fetch_buffered") {
-      return sendBufferedSingleMessengerMedia(
+      return sendBufferedMessengerMedia(
         roomId,
         clientMessageId,
-        files[0],
+        [files[0]],
         caption,
         replyToMessageId,
         onProgress,
