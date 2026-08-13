@@ -12,10 +12,11 @@ import type { MessengerPushRegistration } from "../features/messenger/types";
 import { getDatabase } from "../database/repository";
 import {
   getMessengerMessage,
-  getMessengerPushRegistration,
+  getMessengerPushPreference,
   getMessengerRooms,
   markMessengerDelivered,
   registerMessengerPushToken,
+  unregisterMessengerPushDevice,
   unregisterMessengerPushToken,
 } from "./messengerApi";
 import { messengerLog } from "./messengerLogger";
@@ -38,6 +39,8 @@ const SHARED_EXPO_PUSH_TOKEN_KEY = "expo_push_token";
 let enableMessengerPushInFlight: Promise<MessengerPushRegistration> | null =
   null;
 let observedNativePushToken: string | null = null;
+
+type NotificationPermissionRequest = "never" | "explicit" | "restore";
 
 export interface MessengerPushPayload {
   type: "messenger.message" | "messenger.badge";
@@ -124,11 +127,16 @@ export async function getProjectExpoPushToken(): Promise<string> {
 }
 
 async function ensureNotificationPermission(
-  request: boolean,
+  request: NotificationPermissionRequest,
 ): Promise<boolean> {
   if (!remotePushNotificationsSupported) return false;
   let permission = await Notifications.getPermissionsAsync();
-  if (permission.status !== "granted" && request) {
+  const shouldRequest =
+    permission.status !== "granted" &&
+    permission.canAskAgain &&
+    (request === "explicit" ||
+      (request === "restore" && permission.status === "undetermined"));
+  if (shouldRequest) {
     permission = await Notifications.requestPermissionsAsync({
       ios: {
         allowAlert: true,
@@ -155,7 +163,11 @@ export async function enableMessengerPush(
   const operation = (async () => {
     const session = await loadMessengerSession();
     if (!session) throw new Error("Сначала войдите в командный мессенджер");
-    if (!(await ensureNotificationPermission(requestPermission))) {
+    if (
+      !(await ensureNotificationPermission(
+        requestPermission ? "explicit" : "never",
+      ))
+    ) {
       throw new Error(
         "Разрешение на уведомления не выдано. Его можно включить в настройках устройства.",
       );
@@ -184,10 +196,6 @@ export async function enableMessengerPush(
 export async function disableMessengerPush(): Promise<void> {
   const session = await loadMessengerSession();
   if (!session) return;
-  if (!remotePushNotificationsSupported) {
-    await AsyncStorage.setItem(enabledKey(session.user.id), "false");
-    return;
-  }
   try {
     await unregisterMessengerPushToken();
   } finally {
@@ -200,30 +208,31 @@ export async function disableMessengerPush(): Promise<void> {
 
 export async function messengerPushStatus(): Promise<{
   enabled: boolean;
+  permissionGranted: boolean;
   registration: MessengerPushRegistration | null;
 }> {
   const session = await loadMessengerSession();
-  if (!session) return { enabled: false, registration: null };
-  if (!remotePushNotificationsSupported) {
-    await AsyncStorage.setItem(enabledKey(session.user.id), "false");
-    return { enabled: false, registration: null };
+  if (!session) {
+    return { enabled: false, permissionGranted: false, registration: null };
   }
   const preferred = await loadMessengerPushPreference(session.user.id);
+  const permissionGranted = remotePushNotificationsSupported
+    ? await ensureNotificationPermission("never")
+    : false;
   try {
-    const registration = await getMessengerPushRegistration();
-    // The server registration is the durable source of truth across app
-    // upgrades. Older builds did not always have the per-user local key, so
-    // requiring both values made an existing registration appear disabled.
-    // An explicit opt-out disables the server row, therefore restoring an
-    // enabled row cannot silently undo a user's choice.
-    const enabled = Boolean(registration?.enabled);
+    const preference = await getMessengerPushPreference();
+    const enabled = Boolean(preference.enabled);
     await AsyncStorage.setItem(enabledKey(session.user.id), String(enabled));
-    return { enabled, registration };
+    return {
+      enabled,
+      permissionGranted,
+      registration: preference.current_registration,
+    };
   } catch (error) {
     messengerLog("debug", "push.registration.status_deferred", {
       message: error instanceof Error ? error.message : String(error),
     });
-    return { enabled: preferred, registration: null };
+    return { enabled: preferred, permissionGranted, registration: null };
   }
 }
 
@@ -231,16 +240,18 @@ export async function syncMessengerPushRegistration(): Promise<void> {
   if (!remotePushNotificationsSupported) return;
   const session = await loadMessengerSession();
   if (!session) return;
-  const localPreference = await loadMessengerPushPreference(session.user.id);
-  if (!localPreference) {
-    // Recover a registration created by a previous application version before
-    // deciding that PUSH is disabled locally.
-    const status = await messengerPushStatus();
-    if (!status.enabled) return;
+  const status = await messengerPushStatus();
+  if (!status.enabled) {
+    await unregisterMessengerPushDevice().catch(() => undefined);
+    return;
   }
-  if (!(await ensureNotificationPermission(false))) {
-    await AsyncStorage.setItem(enabledKey(session.user.id), "false");
-    await unregisterMessengerPushToken().catch(() => undefined);
+  if (!(await ensureNotificationPermission("restore"))) {
+    // The account-level choice stays enabled so another authorized device is
+    // unaffected. This installation is disabled until the OS grants access.
+    await unregisterMessengerPushDevice().catch(() => undefined);
+    messengerLog("info", "push.device.permission_missing", {
+      user_id: session.user.id,
+    });
     return;
   }
   await enableMessengerPush(false);
@@ -251,7 +262,7 @@ export async function syncMessengerPushTokenRotation(
 ): Promise<void> {
   if (!remotePushNotificationsSupported) return;
   const session = await loadMessengerSession();
-  if (!session || !(await loadMessengerPushPreference(session.user.id))) return;
+  if (!session) return;
 
   const identity = nativePushTokenIdentity(session.user.id, token);
   if (observedNativePushToken === identity) return;

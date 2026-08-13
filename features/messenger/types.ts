@@ -307,3 +307,9 @@ export interface MessengerPushRegistration {
   last_success_at?: string | null;
   last_error_code?: string | null;
 }
+
+export interface MessengerPushPreference {
+  enabled: boolean;
+  updated_at: string | null;
+  current_registration: MessengerPushRegistration | null;
+}

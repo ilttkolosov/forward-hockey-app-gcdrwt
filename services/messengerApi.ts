@@ -14,6 +14,7 @@ import type {
   MessengerRoom,
   MessengerRoomMember,
   MessengerRoomSettings,
+  MessengerPushPreference,
   MessengerPushRegistration,
   MessengerSession,
   MessengerUser,
@@ -1470,6 +1471,10 @@ export function getMessengerPushRegistration() {
   );
 }
 
+export function getMessengerPushPreference() {
+  return messengerRequest<MessengerPushPreference>("/push/preference");
+}
+
 export function registerMessengerPushToken(
   expoPushToken: string,
   platform: "ios" | "android",
@@ -1487,4 +1492,11 @@ export function unregisterMessengerPushToken() {
   return messengerRequest<{ unregistered: true }>("/push/registration", {
     method: "DELETE",
   });
+}
+
+export function unregisterMessengerPushDevice() {
+  return messengerRequest<{ unregistered: true }>(
+    "/push/registration/device",
+    { method: "DELETE" },
+  );
 }

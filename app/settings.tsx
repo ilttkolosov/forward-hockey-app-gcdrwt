@@ -157,6 +157,7 @@ export default function SettingsScreen() {
   const { isAuthenticated: isMessengerAuthenticated } = useMessengerAuth();
   const [matchNotificationsEnabled, setMatchNotificationsEnabled] = useState(false);
   const [messengerNotificationsEnabled, setMessengerNotificationsEnabled] = useState(false);
+  const [messengerPermissionGranted, setMessengerPermissionGranted] = useState(false);
   const [trainingNotificationsEnabled, setTrainingNotificationsState] = useState(false);
   const [trainingLeadMinutes, setTrainingLeadState] = useState(60);
   const [isChecking, setIsChecking] = useState(true);
@@ -198,7 +199,10 @@ export default function SettingsScreen() {
     void loadLocalSettings();
     void messengerPushStatus()
       .then((state) => {
-        if (active) setMessengerNotificationsEnabled(state.enabled);
+        if (active) {
+          setMessengerNotificationsEnabled(state.enabled);
+          setMessengerPermissionGranted(state.permissionGranted);
+        }
       })
       .catch((error) => {
         console.warn('[Настройки] Проверка PUSH мессенджера отложена:', error);
@@ -291,8 +295,12 @@ export default function SettingsScreen() {
         : 'Отключение уведомлений о сообщениях…',
     );
     try {
-      if (value) await enableMessengerPush(true);
-      else await disableMessengerPush();
+      if (value) {
+        await enableMessengerPush(true);
+        setMessengerPermissionGranted(true);
+      } else {
+        await disableMessengerPush();
+      }
       setModalVisible(false);
     } catch (error) {
       setMessengerNotificationsEnabled(!value);
@@ -365,6 +373,8 @@ export default function SettingsScreen() {
               <Text style={styles.settingSubtitle}>
                 {!remotePushNotificationsSupported
                   ? 'Недоступны в Expo Go — используйте development или preview-сборку'
+                  : messengerNotificationsEnabled && !messengerPermissionGranted
+                  ? 'Включены в учётной записи, но запрещены в настройках этого устройства'
                   : isMessengerAuthenticated
                   ? 'Получать новые сообщения мессенджера со звуком и бейджем непрочитанных'
                   : 'Станет доступно после активации учётной записи мессенджера'}
