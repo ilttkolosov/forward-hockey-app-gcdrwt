@@ -37,6 +37,11 @@ export default function MessengerVideoPlayer({
   });
 
   useEffect(() => {
+    setFirstFrameReady(false);
+    setPlaybackError(null);
+  }, [uri]);
+
+  useEffect(() => {
     if (!active) {
       player.pause();
       return;

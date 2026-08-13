@@ -34,6 +34,22 @@ export function messengerMediaCachePath(media: MessengerMedia): string {
   return `${CACHE_ROOT}${media.id}.${extensionFor(media)}`;
 }
 
+/** Returns a local media URI without starting a network download. */
+export async function getCachedMessengerMediaUri(
+  media: MessengerMedia,
+): Promise<string | null> {
+  if (!FileSystem.cacheDirectory) return null;
+  try {
+    const destination = messengerMediaCachePath(media);
+    const info = await FileSystem.getInfoAsync(destination);
+    return info.exists && !info.isDirectory && info.size > 0
+      ? destination
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function cacheMessengerMedia(
   media: MessengerMedia,
   accessToken: string,

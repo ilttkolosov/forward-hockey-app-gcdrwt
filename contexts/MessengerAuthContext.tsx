@@ -32,9 +32,13 @@ import {
   resumeMessengerRealtime,
   setMessengerPresenceActive,
 } from "../services/messengerRealtime";
+import { cancelAllManagedMessengerMediaUploads } from "../services/messengerMediaUploadManager";
 
 type MessengerAuthStatus =
-  "loading" | "authenticated" | "unauthenticated" | "password_change_required";
+  | "loading"
+  | "authenticated"
+  | "unauthenticated"
+  | "password_change_required";
 
 interface MessengerAuthContextValue {
   status: MessengerAuthStatus;
@@ -119,7 +123,10 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
   useEffect(() => {
     const accessToken = session?.access_token;
     if (accessToken) connectMessengerRealtime(accessToken);
-    else disconnectMessengerRealtime();
+    else {
+      cancelAllManagedMessengerMediaUploads();
+      disconnectMessengerRealtime();
+    }
   }, [session?.access_token]);
 
   useEffect(() => {

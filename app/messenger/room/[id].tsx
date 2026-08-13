@@ -118,6 +118,7 @@ import {
   type MessengerUploadFile,
 } from "../../../services/messengerAttachmentPicker";
 import { seedMessengerMediaCache } from "../../../services/messengerMediaCache";
+import { runManagedMessengerMediaUpload } from "../../../services/messengerMediaUploadManager";
 import { saveMessengerMediaToDevice } from "../../../services/messengerMediaSave";
 import { colors } from "../../../styles/commonStyles";
 import { refreshMessengerUnreadFromCache } from "../../../services/messengerUnread";
@@ -144,6 +145,11 @@ interface MediaUploadRequest extends AttachmentDraft {
   clientMessageId: string;
   caption: string;
   replyTarget: MessengerMessage | null;
+}
+
+function equalStringSets(left: Set<string>, right: Set<string>): boolean {
+  if (left.size !== right.size) return false;
+  return Array.from(left).every((value) => right.has(value));
 }
 
 function SwipeableMessage({
@@ -444,10 +450,7 @@ function PendingUploadProgress({
         />
       ) : (
         <View
-          style={[
-            styles.pendingUploadFill,
-            { width: `${clampedPercent}%` },
-          ]}
+          style={[styles.pendingUploadFill, { width: `${clampedPercent}%` }]}
         />
       )}
     </View>
@@ -632,8 +635,9 @@ export default function MessengerRoomScreen() {
   const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
   const [attachmentDraft, setAttachmentDraft] =
     useState<AttachmentDraft | null>(null);
-  const [attachmentPreparationLabel, setAttachmentPreparationLabel] =
-    useState<string | null>(null);
+  const [attachmentPreparationLabel, setAttachmentPreparationLabel] = useState<
+    string | null
+  >(null);
   const [forwardingMessage, setForwardingMessage] =
     useState<MessengerMessage | null>(null);
   const [forwardRooms, setForwardRooms] = useState<MessengerRoom[]>([]);
@@ -651,6 +655,10 @@ export default function MessengerRoomScreen() {
   const [receiptsError, setReceiptsError] = useState<string | null>(null);
   const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
   const [listReady, setListReady] = useState(false);
+  const [roomScreenActive, setRoomScreenActive] = useState(false);
+  const [viewableMessageIds, setViewableMessageIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [initialDataReady, setInitialDataReady] = useState(false);
   const [initialUnreadExpected, setInitialUnreadExpected] = useState(false);
   const [unreadMarkerClientId, setUnreadMarkerClientId] = useState<
@@ -681,8 +689,6 @@ export default function MessengerRoomScreen() {
   const pendingAttachmentRequest = useRef<PendingAttachmentRequest | null>(
     null,
   );
-  const activeMediaUpload = useRef<AbortController | null>(null);
-  const activeMediaUploadClientId = useRef<string | null>(null);
   const keyboardScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -1419,11 +1425,11 @@ export default function MessengerRoomScreen() {
               ?.sequence;
         const remoteIsContiguousWithFeed = Boolean(
           !visibleConfirmedTail ||
-          !reconciliationCursor ||
-          compareMessengerSequence(
-            visibleConfirmedTail,
-            reconciliationCursor,
-          ) === 0,
+            !reconciliationCursor ||
+            compareMessengerSequence(
+              visibleConfirmedTail,
+              reconciliationCursor,
+            ) === 0,
         );
         let latestSequence = reconciliationCursor || localLatestSequence;
         let receivedMessageCount = 0;
@@ -1640,6 +1646,16 @@ export default function MessengerRoomScreen() {
 
   const handleViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken<MessengerMessage>[] }) => {
+      const nextViewableMessageIds = new Set(
+        viewableItems
+          .filter((token) => token.isViewable)
+          .map((token) => token.item.client_message_id),
+      );
+      setViewableMessageIds((current) =>
+        equalStringSets(current, nextViewableMessageIds)
+          ? current
+          : nextViewableMessageIds,
+      );
       const latestVisible = viewableItems
         .filter((token) => token.isViewable && !token.item.pending)
         .map((token) => token.item.sequence)
@@ -1908,27 +1924,11 @@ export default function MessengerRoomScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      return () => {
-        const controller = activeMediaUpload.current;
-        const clientMessageId = activeMediaUploadClientId.current;
-        activeMediaUpload.current = null;
-        activeMediaUploadClientId.current = null;
-        if (!controller) return;
-        controller.abort();
-        messengerLog("info", "media.upload.cancelled_on_blur", {
-          room_id: roomId,
-          client_message_id: clientMessageId,
-        });
-      };
-    }, [roomId]),
-  );
-
-  useFocusEffect(
-    useCallback(() => {
       if (!isAuthenticated) {
         router.replace("/messenger/register");
         return;
       }
+      setRoomScreenActive(true);
       messengerLog("info", "room.screen.focused", {
         room_id: roomId,
         elapsed_since_tap_ms: Date.now() - openedAt,
@@ -2033,6 +2033,8 @@ export default function MessengerRoomScreen() {
       // foreground delivery, while this timer protects against a lost event.
       const timer = setInterval(() => void loadMessages(false), 120_000);
       return () => {
+        setRoomScreenActive(false);
+        setViewableMessageIds(new Set());
         cancelAnimationFrame(roomDetailsFrame);
         setMessengerActiveRoom(null);
         unsubscribe();
@@ -2477,10 +2479,6 @@ export default function MessengerRoomScreen() {
       caption,
       replyTarget,
     };
-    const uploadController = new AbortController();
-    activeMediaUpload.current?.abort();
-    activeMediaUpload.current = uploadController;
-    activeMediaUploadClientId.current = clientMessageId;
     const optimistic = pendingMessengerAttachmentMessage(
       roomId,
       clientMessageId,
@@ -2514,7 +2512,11 @@ export default function MessengerRoomScreen() {
     nearLatest.current = true;
     scrollToLatest(true);
     requestAnimationFrame(() => {
-      void sendUpload(request, uploadController.signal)
+      void runManagedMessengerMediaUpload({
+        roomId,
+        clientMessageId,
+        run: (signal) => sendUpload(request, signal),
+      })
         .then(() => {
           setOffline(false);
           setSyncError(null);
@@ -2548,9 +2550,6 @@ export default function MessengerRoomScreen() {
           Alert.alert("Ошибка вложения", message);
         })
         .finally(() => {
-          if (activeMediaUpload.current !== uploadController) return;
-          activeMediaUpload.current = null;
-          activeMediaUploadClientId.current = null;
           setSending(false);
         });
     });
@@ -2983,10 +2982,13 @@ export default function MessengerRoomScreen() {
                       <View style={styles.systemMessage}>
                         <Text style={styles.systemMessageText}>{body}</Text>
                         <Text style={styles.systemMessageTime}>
-                          {new Date(item.created_at).toLocaleTimeString("ru-RU", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                          {new Date(item.created_at).toLocaleTimeString(
+                            "ru-RU",
+                            {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            },
+                          )}
                         </Text>
                       </View>
                     </View>
@@ -3114,11 +3116,10 @@ export default function MessengerRoomScreen() {
                                 mediaItems={mediaItems}
                                 location={location}
                                 accessToken={session.access_token}
-                                deferAutomaticCache={
-                                  !listReady ||
-                                  (mine &&
-                                    activeMediaUploadClientId.current ===
-                                      item.client_message_id)
+                                deferAutomaticCache={!listReady}
+                                playbackEnabled={
+                                  roomScreenActive &&
+                                  viewableMessageIds.has(item.client_message_id)
                                 }
                               />
                             )}

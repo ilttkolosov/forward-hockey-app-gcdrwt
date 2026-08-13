@@ -24,6 +24,7 @@ import Icon from "../../components/Icon";
 import {
   cacheMessengerMedia,
   formatMessengerBytes,
+  getCachedMessengerMediaUri,
 } from "../../services/messengerMediaCache";
 import { tryPreviewMessengerFile } from "../../services/messengerNativeFilePreview";
 import { saveMessengerMediaToDevice } from "../../services/messengerMediaSave";
@@ -39,6 +40,7 @@ interface MessengerAttachmentViewProps {
   location: MessengerLocation | null;
   accessToken: string;
   deferAutomaticCache?: boolean;
+  playbackEnabled?: boolean;
 }
 
 function withoutValue(values: Set<string>, value: string): Set<string> {
@@ -53,6 +55,7 @@ export default function MessengerAttachmentView({
   location,
   accessToken,
   deferAutomaticCache = false,
+  playbackEnabled = false,
 }: MessengerAttachmentViewProps) {
   const insets = useSafeAreaInsets();
   const { width: viewerWidth } = useWindowDimensions();
@@ -71,7 +74,6 @@ export default function MessengerAttachmentView({
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [openingFileId, setOpeningFileId] = useState<string | null>(null);
-  const [inlineVideoId, setInlineVideoId] = useState<string | null>(null);
   const openingFileRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -79,8 +81,25 @@ export default function MessengerAttachmentView({
     setLoadingIds(new Set());
     setErrors({});
     setViewerIndex(null);
-    setInlineVideoId(null);
   }, [itemIdentity]);
+
+  useEffect(() => {
+    if (!playbackEnabled) {
+      setViewerIndex(null);
+      return;
+    }
+    const video =
+      items.length === 1 && items[0]?.type === "video" ? items[0] : null;
+    if (!video || localUris[video.id]) return;
+    let active = true;
+    void getCachedMessengerMediaUri(video).then((uri) => {
+      if (!active || !uri) return;
+      setLocalUris((current) => ({ ...current, [video.id]: uri }));
+    });
+    return () => {
+      active = false;
+    };
+  }, [itemIdentity, items, localUris, playbackEnabled]);
 
   const ensureLocal = useCallback(
     async (item: MessengerMedia): Promise<string> => {
@@ -202,10 +221,6 @@ export default function MessengerAttachmentView({
     }
     try {
       await ensureLocal(item);
-      if (item.type === "video" && items.length === 1) {
-        setInlineVideoId(item.id);
-        return;
-      }
       const index = viewerItems.findIndex(
         (candidate) => candidate.id === item.id,
       );
@@ -312,26 +327,35 @@ export default function MessengerAttachmentView({
             </View>
           )}
         </TouchableOpacity>
-      ) : single.type === "video" &&
-        singleLocalUri &&
-        inlineVideoId === single.id ? (
+      ) : single.type === "video" && singleLocalUri && playbackEnabled ? (
         <View style={styles.inlineVideoCard}>
           <MessengerVideoPlayer
             uri={singleLocalUri}
-            active
-            autoPlay
+            active={playbackEnabled}
             style={styles.inlineVideo}
             onFallback={() => void openFile(single)}
           />
           <View style={styles.inlineVideoFooter}>
-            <View style={styles.inlineVideoText}>
+            <TouchableOpacity
+              style={styles.inlineVideoText}
+              activeOpacity={0.74}
+              onPress={() => setViewerIndex(0)}
+              accessibilityLabel="Развернуть видео на весь экран"
+            >
               <Text style={styles.attachmentTitle} numberOfLines={1}>
                 {single.original_name || "Видео"}
               </Text>
               <Text style={styles.attachmentSubtitle}>
                 {formatMessengerBytes(single.size_bytes)}
               </Text>
-            </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.inlineVideoSaveButton}
+              onPress={() => setViewerIndex(0)}
+              accessibilityLabel="Развернуть видео на весь экран"
+            >
+              <Icon name="expand-outline" size={21} color={colors.primary} />
+            </TouchableOpacity>
             <TouchableOpacity
               style={styles.inlineVideoSaveButton}
               onPress={() => void saveToDevice(single)}
@@ -514,7 +538,7 @@ export default function MessengerAttachmentView({
                       <MessengerVideoPlayer
                         uri={localUri}
                         style={styles.fullVideo}
-                        active={index === viewerIndex}
+                        active={playbackEnabled && index === viewerIndex}
                         autoPlay
                         onFallback={() => void openFile(item)}
                       />
