@@ -283,6 +283,28 @@ export function mergeMessengerMessages(
   );
 }
 
+/**
+ * Applies server changes only to bubbles already present in the current
+ * window. This is used by mutation reconciliation: edits and tombstones must
+ * be refreshed without appending a detached recent page or changing scroll
+ * position when the user is reading older history.
+ */
+export function reconcileMessengerMessageUpdates(
+  current: MessengerMessage[],
+  incoming: MessengerMessage[],
+  protectedReactionIds: ReadonlySet<string> = new Set(),
+): MessengerMessage[] {
+  if (!current.length || !incoming.length) return current;
+  return current.map((existing) => {
+    const replacement = incoming.find((candidate) =>
+      sameMessengerMessage(existing, candidate),
+    );
+    return replacement
+      ? mergeMessengerMessage(existing, replacement, protectedReactionIds)
+      : existing;
+  });
+}
+
 /** Adds an older, already sorted history page above the visible feed. */
 export function prependMessengerMessages(
   current: MessengerMessage[],

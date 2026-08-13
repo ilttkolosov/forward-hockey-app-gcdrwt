@@ -20,7 +20,7 @@ export default ({ config }) => {
     // to users is restored per platform by withAppDisplayName below.
     name: "ForwardHockey14",
     slug: "Forward",
-    version: "1.0.65",
+    version: "1.0.66",
     orientation: "portrait",
     icon: "./assets/icons/myIcon.png",
     userInterfaceStyle: "light",

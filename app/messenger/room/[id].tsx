@@ -47,6 +47,7 @@ import {
   pendingMessengerAttachmentMessage,
   pendingMessengerMessage,
   prependMessengerMessages,
+  reconcileMessengerMessageUpdates,
 } from "../../../features/messenger/feed";
 import MessageReceiptsModal from "../../../features/messenger/MessageReceiptsModal";
 import MessengerAttachmentView from "../../../features/messenger/MessengerAttachmentView";
@@ -1513,6 +1514,7 @@ export default function MessengerRoomScreen() {
         );
         let latestSequence = reconciliationCursor || localLatestSequence;
         let receivedMessageCount = 0;
+        let reconciledMessageCount = 0;
         let syncDirection: "after" | "latest" = "latest";
 
         if (reconciliationCursor) {
@@ -1521,14 +1523,32 @@ export default function MessengerRoomScreen() {
           // reconnects continue from the advanced cursor without repainting
           // old cells.
           syncDirection = "after";
-          const page = await getMessengerMessages(roomId, {
-            cursor: reconciliationCursor,
-            direction: "after",
-            limit: 20,
-          });
+          const [page, recent] = await Promise.all([
+            getMessengerMessages(roomId, {
+              cursor: reconciliationCursor,
+              direction: "after",
+              limit: 20,
+            }),
+            // Sequence cursors discover newly created messages, but an edit or
+            // deletion keeps its original sequence. Re-read a bounded recent
+            // window so a mutation missed while the socket was disconnected
+            // is still repaired on open/reconnect/poll.
+            getMessengerMessages(roomId, { limit: 100 }),
+          ]);
           receivedMessageCount = page.items.length;
+          reconciledMessageCount = recent.items.length;
           remoteHasMoreNewerMessages.current = page.page.has_more;
           await applyRemoteMessages(page.items, remoteIsContiguousWithFeed);
+          if (recent.items.length) {
+            setMessages((current) =>
+              reconcileMessengerMessageUpdates(
+                current,
+                recent.items,
+                reactionMutationIds.current,
+              ),
+            );
+            await cacheMessengerMessages(db, recent.items);
+          }
           if (page.page.latest_sequence) {
             latestSequence = page.page.latest_sequence;
           }
@@ -1560,6 +1580,7 @@ export default function MessengerRoomScreen() {
         messengerLog("info", "room.sync.completed", {
           room_id: roomId,
           message_count: receivedMessageCount,
+          reconciled_message_count: reconciledMessageCount,
           latest_sequence: latestSequence,
           direction: syncDirection,
           outbox_error: Boolean(outboxError),
@@ -2077,11 +2098,16 @@ export default function MessengerRoomScreen() {
           ) {
             setText("");
           }
+          // The server broadcasts one mutation payload to every recipient.
+          // `reacted_by_me` is device/user-specific, so preserve the local
+          // reaction view while replacing the message body and tombstone.
+          const protectedReactionIds = new Set(reactionMutationIds.current);
+          protectedReactionIds.add(incoming.id);
           setMessages((current) =>
-            current.map((message) =>
-              message.id === incoming.id
-                ? { ...incoming, reactions: message.reactions }
-                : message,
+            reconcileMessengerMessageUpdates(
+              current,
+              [incoming],
+              protectedReactionIds,
             ),
           );
           setActionMessage((current) =>
