@@ -629,14 +629,14 @@ type MessengerMediaUploadFile = {
 const MEDIA_UPLOAD_STALL_TIMEOUT_MS = 3 * 60 * 1000;
 
 // The legacy FileSystem multipart implementation copies the complete source
-// into a second temporary multipart file and delivers URLSession callbacks on
-// iOS's main queue. That is useful for progress on large payloads, but it made
-// even a 250 KiB image take several seconds while a busy chat was rendering.
-// For small files use Expo's current fetch/File transport: it buffers at most
-// 1 MiB, avoids the legacy temporary upload file and runs URLSession delegates
-// away from the UI queue. Large files retain native byte progress and bounded
-// memory use below.
+// into a second temporary multipart file and uses an iOS URLSession upload
+// task. Production timing showed that path delivering only about 2.2 Mbit/s
+// while nginx and local storage were idle. Expo SDK 54 recommends File +
+// expo/fetch for uploads; use it for every allowed single file on iOS. The
+// server's 50 MiB limit bounds the in-memory multipart body. Android retains
+// native byte progress for large files and uses expo/fetch for small payloads.
 const BUFFERED_MEDIA_UPLOAD_MAX_BYTES = 1024 * 1024;
+const EXPO_FETCH_MEDIA_UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 
 function shouldUseBufferedMediaUpload(file: MessengerMediaUploadFile) {
   return (
@@ -676,19 +676,20 @@ async function sendBufferedSingleMessengerMedia(
   }
 
   const controller = new AbortController();
-  let stalled = false;
+  let timedOut = false;
   const handleAbort = () => controller.abort();
   signal?.addEventListener("abort", handleAbort, { once: true });
-  const stallTimer = setTimeout(() => {
-    stalled = true;
+  const timeoutTimer = setTimeout(() => {
+    timedOut = true;
     controller.abort();
-  }, MEDIA_UPLOAD_STALL_TIMEOUT_MS);
+  }, EXPO_FETCH_MEDIA_UPLOAD_TIMEOUT_MS);
 
   messengerLog("info", "api.media_buffered_upload.started", {
     request_id: requestId,
     room_id: roomId,
     file_type: file.type,
     file_size_bytes: file.size_bytes,
+    upload_timeout_ms: EXPO_FETCH_MEDIA_UPLOAD_TIMEOUT_MS,
     preparation_duration_ms: Date.now() - startedAt,
   });
 
@@ -751,13 +752,12 @@ async function sendBufferedSingleMessengerMedia(
     return result;
   } catch (error) {
     const normalized =
-      signal?.aborted || (!stalled && controller.signal.aborted)
+      signal?.aborted || (!timedOut && controller.signal.aborted)
         ? new MessengerUploadCancelledError()
-        : stalled
-          ? new Error(
-              "Загрузка остановилась: три минуты не передавались данные",
-              { cause: error },
-            )
+        : timedOut
+          ? new Error("Загрузка превысила допустимые 15 минут", {
+              cause: error,
+            })
           : error;
     messengerLog(
       isMessengerUploadCancelledError(normalized) ? "info" : "warn",
@@ -773,7 +773,7 @@ async function sendBufferedSingleMessengerMedia(
     );
     throw normalized;
   } finally {
-    clearTimeout(stallTimer);
+    clearTimeout(timeoutTimer);
     signal?.removeEventListener("abort", handleAbort);
   }
 }
@@ -976,11 +976,14 @@ export async function sendMessengerMedia(
   signal?: AbortSignal,
 ) {
   if (Platform.OS !== "web" && files.length === 1 && files[0]) {
-    const transport = shouldUseBufferedMediaUpload(files[0])
+    const useExpoFetch =
+      Platform.OS === "ios" || shouldUseBufferedMediaUpload(files[0]);
+    const transport = useExpoFetch
       ? "expo_fetch_buffered"
       : "legacy_native_progress";
     messengerLog("info", "api.media_upload.transport_selected", {
       room_id: roomId,
+      platform: Platform.OS,
       transport,
       file_size_bytes: files[0].size_bytes,
       buffered_limit_bytes: BUFFERED_MEDIA_UPLOAD_MAX_BYTES,
@@ -1128,3 +1131,4 @@ export function unregisterMessengerPushToken() {
     method: "DELETE",
   });
 }
+
