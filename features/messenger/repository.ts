@@ -712,6 +712,70 @@ export function cacheIncomingMessengerMessage(
   );
 }
 
+/** Persists an edit/tombstone while preserving per-device reaction state. */
+export function cacheUpdatedMessengerMessage(
+  db: SQLiteDatabase,
+  incoming: MessengerMessage,
+): Promise<void> {
+  return enqueueMessengerWrite(db, () =>
+    withMessengerTransaction(db, async (transaction) => {
+      const existingRow = await transaction.getFirstAsync<MessageRow>(
+        "SELECT raw_json FROM messenger_messages WHERE id = ?",
+        incoming.id,
+      );
+      const existing = existingRow
+        ? parseJson<MessengerMessage>(existingRow.raw_json)
+        : null;
+      const message: MessengerMessage = {
+        ...incoming,
+        reactions: existing?.reactions ?? incoming.reactions,
+      };
+      await transaction.runAsync(
+        `INSERT INTO messenger_messages
+          (id, room_id, sequence, client_message_id, created_at, raw_json)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           sequence = excluded.sequence,
+           client_message_id = excluded.client_message_id,
+           created_at = excluded.created_at,
+           raw_json = excluded.raw_json`,
+        message.id,
+        message.room_id,
+        message.sequence,
+        message.client_message_id,
+        message.created_at,
+        JSON.stringify(message),
+      );
+
+      const roomRow = await transaction.getFirstAsync<RoomRow>(
+        "SELECT raw_json FROM messenger_rooms WHERE id = ?",
+        message.room_id,
+      );
+      const room = roomRow ? parseJson<MessengerRoom>(roomRow.raw_json) : null;
+      if (!room || room.last_message?.id !== message.id) return;
+      const nextRoom: MessengerRoom = {
+        ...room,
+        last_message: {
+          ...room.last_message,
+          kind: message.kind,
+          text: message.deleted_at ? "Сообщение удалено" : message.text,
+          media: message.deleted_at ? null : message.media,
+          media_items: message.deleted_at ? [] : message.media_items,
+          location: message.deleted_at ? null : message.location,
+        },
+      };
+      await transaction.runAsync(
+        `UPDATE messenger_rooms
+            SET updated_at = ?, raw_json = ?
+          WHERE id = ?`,
+        new Date().toISOString(),
+        JSON.stringify(nextRoom),
+        message.room_id,
+      );
+    }),
+  );
+}
+
 export function enqueueMessengerText(
   db: SQLiteDatabase,
   item: Omit<MessengerOutboxItem, "attempts" | "last_error">,
@@ -727,6 +791,31 @@ export function enqueueMessengerText(
       item.reply_to_message_id,
       item.created_at,
     ),
+  );
+}
+
+export function replaceMessengerOutboxItem(
+  db: SQLiteDatabase,
+  previousClientMessageId: string,
+  item: Omit<MessengerOutboxItem, "attempts" | "last_error">,
+) {
+  return enqueueMessengerWrite(db, () =>
+    withMessengerTransaction(db, async (transaction) => {
+      await transaction.runAsync(
+        "DELETE FROM messenger_outbox WHERE client_message_id = ?",
+        previousClientMessageId,
+      );
+      await transaction.runAsync(
+        `INSERT INTO messenger_outbox
+          (client_message_id, room_id, text, reply_to_message_id, created_at, attempts, last_error)
+         VALUES (?, ?, ?, ?, ?, 0, NULL)`,
+        item.client_message_id,
+        item.room_id,
+        item.text,
+        item.reply_to_message_id,
+        item.created_at,
+      );
+    }),
   );
 }
 

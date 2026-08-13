@@ -131,11 +131,7 @@ export default function MessengerRoomsScreen() {
   );
 
   const loadRooms = useCallback(
-    async (
-      showRefresh = false,
-      includeCache = true,
-      fetchRemote = true,
-    ) => {
+    async (showRefresh = false, includeCache = true, fetchRemote = true) => {
       if (!isAuthenticated || loadRoomsRunning.current) return;
       loadRoomsRunning.current = true;
       if (showRefresh) setRefreshing(true);
@@ -270,6 +266,30 @@ export default function MessengerRoomsScreen() {
             void syncMessengerUnreadFromRooms(next);
             return next;
           });
+        } else if (event.type === "message.updated") {
+          const message = event.message;
+          setRooms((current) =>
+            current.map((room) =>
+              room.id === message.room_id &&
+              room.last_message?.id === message.id
+                ? {
+                    ...room,
+                    last_message: {
+                      ...room.last_message,
+                      kind: message.kind,
+                      text: message.deleted_at
+                        ? "Сообщение удалено"
+                        : message.text,
+                      media: message.deleted_at ? null : message.media,
+                      media_items: message.deleted_at
+                        ? []
+                        : message.media_items,
+                      location: message.deleted_at ? null : message.location,
+                    },
+                  }
+                : room,
+            ),
+          );
         } else if (event.type === "room.updated") {
           scheduleConnectionSync(0);
         } else if (

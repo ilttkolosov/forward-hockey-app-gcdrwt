@@ -13,6 +13,7 @@ export type MessengerRealtimeEvent =
   | { type: "connection.state"; connected: boolean; reason?: string }
   | { type: "sync.required" }
   | { type: "message.created"; message: MessengerMessage }
+  | { type: "message.updated"; message: MessengerMessage }
   | { type: "room.updated"; room_id: string; deleted?: boolean }
   | {
       type: "message.receipt_updated";
@@ -224,6 +225,13 @@ export function connectMessengerRealtime(accessToken: string): void {
     (payload: { message?: MessengerMessage }) => {
       if (payload.message)
         publish({ type: "message.created", message: payload.message });
+    },
+  );
+  nextSocket.on(
+    "message.updated",
+    (payload: { message?: MessengerMessage }) => {
+      if (payload.message)
+        publish({ type: "message.updated", message: payload.message });
     },
   );
   nextSocket.on(

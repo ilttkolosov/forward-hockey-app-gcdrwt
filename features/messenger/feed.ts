@@ -90,7 +90,11 @@ export function pendingMessengerAttachmentMessage(
     kind: "image" | "video" | "file";
     uri: string;
     name: string;
+    type: string;
     size_bytes: number | null;
+    original_size_bytes: number | null;
+    width?: number;
+    height?: number;
   }[] = [],
 ): MessengerMessage {
   const firstAttachment = attachments[0];
@@ -152,7 +156,11 @@ export function pendingMessengerAttachmentMessage(
         kind: attachment.kind,
         local_uri: attachment.uri,
         file_name: attachment.name,
+        mime_type: attachment.type,
         size_bytes: attachment.size_bytes,
+        original_size_bytes: attachment.original_size_bytes,
+        width: attachment.width,
+        height: attachment.height,
       })),
     },
   };

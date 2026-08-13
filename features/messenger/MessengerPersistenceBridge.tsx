@@ -5,6 +5,7 @@ import * as Notifications from "expo-notifications";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import {
   cacheIncomingMessengerMessage,
+  cacheUpdatedMessengerMessage,
   cacheMessengerRooms,
   loadCachedMessengerRooms,
 } from "./repository";
@@ -85,6 +86,16 @@ export default function MessengerPersistenceBridge() {
     const unsubscribeRealtime = subscribeMessengerRealtime((event) => {
       if (event.type === "message.created") {
         persistRealtimeMessage(event.message);
+      } else if (event.type === "message.updated") {
+        void cacheUpdatedMessengerMessage(db, event.message)
+          .then(() => synchronizeRooms(false))
+          .catch((error) =>
+            messengerLog("warn", "realtime.message_update.cache_failed", {
+              room_id: event.message.room_id,
+              message_id: event.message.id,
+              message: error instanceof Error ? error.message : String(error),
+            }),
+          );
       } else if (
         event.type === "connection.ready" ||
         event.type === "sync.required"

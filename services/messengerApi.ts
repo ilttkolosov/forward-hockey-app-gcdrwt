@@ -152,7 +152,8 @@ function parseUploadResponse<T>(status: number, body: string): T {
           ? "Файл превышает допустимый размер"
           : `Сервер отклонил загрузку (HTTP ${status})`),
       status,
-      payload?.error?.code || (status === 413 ? "upload_too_large" : "request_failed"),
+      payload?.error?.code ||
+        (status === 413 ? "upload_too_large" : "request_failed"),
       payload?.error?.details,
     );
   }
@@ -592,6 +593,23 @@ export function getMessengerMessage(messageId: string) {
   );
 }
 
+export function updateMessengerMessage(messageId: string, text: string) {
+  return messengerRequest<{ message: MessengerMessage }>(
+    `/chat/messages/${encodeURIComponent(messageId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ text }),
+    },
+  );
+}
+
+export function deleteMessengerMessage(messageId: string) {
+  return messengerRequest<{ message: MessengerMessage }>(
+    `/chat/messages/${encodeURIComponent(messageId)}`,
+    { method: "DELETE" },
+  );
+}
+
 export function sendMessengerText(
   roomId: string,
   clientMessageId: string,
@@ -1008,7 +1026,9 @@ async function sendSingleMessengerMedia(
       throw new MessengerUploadCancelledError();
     }
     if (cancellation === "stalled") {
-      throw new Error("Загрузка остановилась: три минуты не передавались данные");
+      throw new Error(
+        "Загрузка остановилась: три минуты не передавались данные",
+      );
     }
     if (!response) throw new Error("Загрузка была прервана");
     const serverRequestId = Object.entries(response.headers).find(
@@ -1283,4 +1303,3 @@ export function unregisterMessengerPushToken() {
     method: "DELETE",
   });
 }
-

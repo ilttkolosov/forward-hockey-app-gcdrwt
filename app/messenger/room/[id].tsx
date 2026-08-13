@@ -58,6 +58,7 @@ import {
 } from "../../../features/messenger/reactions";
 import {
   cacheMessengerMessages,
+  cacheUpdatedMessengerMessage,
   enqueueMessengerText,
   isMessengerRoomHistoryComplete,
   loadCachedMessengerMessageBounds,
@@ -72,6 +73,7 @@ import {
   markMessengerRoomHistoryComplete,
   removeMessengerOutboxItem,
   removeMessengerOutboxItems,
+  replaceMessengerOutboxItem,
 } from "../../../features/messenger/repository";
 import type {
   MessengerContact,
@@ -85,6 +87,7 @@ import type {
 } from "../../../features/messenger/types";
 import {
   createMessengerDirectRoom,
+  deleteMessengerMessage,
   forwardMessengerMessage,
   getMessengerMessage,
   getMessengerContacts,
@@ -100,6 +103,7 @@ import {
   sendMessengerMedia,
   sendMessengerText,
   setMessengerReaction,
+  updateMessengerMessage,
 } from "../../../services/messengerApi";
 import { queueMessengerReadReceipt } from "../../../services/messengerReadSync";
 import {
@@ -145,6 +149,64 @@ interface MediaUploadRequest extends AttachmentDraft {
   clientMessageId: string;
   caption: string;
   replyTarget: MessengerMessage | null;
+}
+
+const MESSAGE_MUTATION_WINDOW_MS = 3 * 60 * 1000;
+
+function messageMutationAvailable(
+  message: MessengerMessage,
+  currentUserId: string | undefined,
+): boolean {
+  if (
+    message.pending ||
+    message.deleted_at ||
+    message.author.id !== currentUserId ||
+    message.kind === "system"
+  ) {
+    return false;
+  }
+  const createdAt = Date.parse(message.created_at);
+  if (!Number.isFinite(createdAt)) return false;
+  const age = Date.now() - createdAt;
+  return age >= 0 && age <= MESSAGE_MUTATION_WINDOW_MS;
+}
+
+function editableMessengerMessage(message: MessengerMessage): boolean {
+  return (
+    message.kind === "text" ||
+    message.kind === "image" ||
+    message.kind === "video" ||
+    message.kind === "file"
+  );
+}
+
+function fallbackUploadMimeType(
+  fileName: string,
+  kind: MessengerUploadFile["kind"],
+): string {
+  const extension = fileName.split(".").pop()?.toLowerCase();
+  const known: Record<string, string> = {
+    avif: "image/avif",
+    heic: "image/heic",
+    heif: "image/heif",
+    jpeg: "image/jpeg",
+    jpg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+    mov: "video/quicktime",
+    mp4: "video/mp4",
+    webm: "video/webm",
+    pdf: "application/pdf",
+    txt: "text/plain",
+  };
+  return (
+    (extension ? known[extension] : undefined) ||
+    (kind === "image"
+      ? "image/jpeg"
+      : kind === "video"
+        ? "video/mp4"
+        : "application/octet-stream")
+  );
 }
 
 function equalStringSets(left: Set<string>, right: Set<string>): boolean {
@@ -226,7 +288,7 @@ function SwipeableMessage({
   );
 }
 
-function MessageTail({ mine }: { mine: boolean }) {
+function MessageTail({ mine, deleted }: { mine: boolean; deleted?: boolean }) {
   return (
     <Svg
       width={14}
@@ -241,7 +303,7 @@ function MessageTail({ mine }: { mine: boolean }) {
             ? "M1 0 C2 7 5 12 13 15 C8 15 3 13 0 10 Z"
             : "M13 0 C12 7 9 12 1 15 C6 15 11 13 14 10 Z"
         }
-        fill={mine ? "#D9EBFB" : "#FCFEFF"}
+        fill={deleted ? "#EDF1F4" : mine ? "#D9EBFB" : "#FCFEFF"}
       />
     </Svg>
   );
@@ -622,9 +684,15 @@ export default function MessengerRoomScreen() {
     getMessengerRealtimeConnectionState,
   );
   const [replyingTo, setReplyingTo] = useState<MessengerMessage | null>(null);
+  const [editingMessage, setEditingMessage] = useState<MessengerMessage | null>(
+    null,
+  );
   const [actionMessage, setActionMessage] = useState<MessengerMessage | null>(
     null,
   );
+  const [messageMutationBusyId, setMessageMutationBusyId] = useState<
+    string | null
+  >(null);
   const [reactionBusyIds, setReactionBusyIds] = useState<Set<string>>(
     new Set(),
   );
@@ -671,6 +739,7 @@ export default function MessengerRoomScreen() {
   const listRef = useRef<FlatList<MessengerMessage>>(null);
   const inputRef = useRef<TextInput>(null);
   const messagesRef = useRef<MessengerMessage[]>([]);
+  const editingMessageRef = useRef<MessengerMessage | null>(null);
   const refreshRunning = useRef(false);
   const flushRunning = useRef(false);
   const flushRequested = useRef(false);
@@ -750,6 +819,10 @@ export default function MessengerRoomScreen() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    editingMessageRef.current = editingMessage;
+  }, [editingMessage]);
 
   useEffect(() => {
     void loadQuickMessengerReactions().then(setQuickReactions);
@@ -971,6 +1044,13 @@ export default function MessengerRoomScreen() {
               attempts: item.attempts,
               has_reply: Boolean(item.reply_to_message_id),
             });
+            setMessages((current) =>
+              current.map((message) =>
+                message.client_message_id === item.client_message_id
+                  ? { ...message, send_error: null }
+                  : message,
+              ),
+            );
             const result = await sendMessengerText(
               item.room_id,
               item.client_message_id,
@@ -1425,11 +1505,11 @@ export default function MessengerRoomScreen() {
               ?.sequence;
         const remoteIsContiguousWithFeed = Boolean(
           !visibleConfirmedTail ||
-            !reconciliationCursor ||
-            compareMessengerSequence(
-              visibleConfirmedTail,
-              reconciliationCursor,
-            ) === 0,
+          !reconciliationCursor ||
+          compareMessengerSequence(
+            visibleConfirmedTail,
+            reconciliationCursor,
+          ) === 0,
         );
         let latestSequence = reconciliationCursor || localLatestSequence;
         let receivedMessageCount = 0;
@@ -1986,6 +2066,39 @@ export default function MessengerRoomScreen() {
           if (nearLatest.current) {
             scrollToLatest(true);
           }
+        } else if (
+          event.type === "message.updated" &&
+          event.message.room_id === roomId
+        ) {
+          const incoming = event.message;
+          if (
+            incoming.deleted_at &&
+            editingMessageRef.current?.id === incoming.id
+          ) {
+            setText("");
+          }
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === incoming.id
+                ? { ...incoming, reactions: message.reactions }
+                : message,
+            ),
+          );
+          setActionMessage((current) =>
+            current?.id === incoming.id
+              ? { ...incoming, reactions: current.reactions }
+              : current,
+          );
+          setEditingMessage((current) =>
+            current?.id === incoming.id
+              ? incoming.deleted_at
+                ? null
+                : { ...incoming, reactions: current.reactions }
+              : current,
+          );
+          void cacheUpdatedMessengerMessage(db, incoming).catch((cacheError) =>
+            logMessageCacheFailure(incoming, cacheError),
+          );
         } else if (
           event.type === "message.receipt_updated" &&
           event.room_id === roomId
@@ -2565,7 +2678,318 @@ export default function MessengerRoomScreen() {
     updatePendingAttachment,
   ]);
 
+  const retryFailedMessage = useCallback(
+    async (failedMessage: MessengerMessage) => {
+      if (
+        !failedMessage.pending ||
+        !failedMessage.send_error ||
+        !session ||
+        sending
+      ) {
+        return;
+      }
+      setShowAllReactions(false);
+      setActionMessage(null);
+      const clientMessageId = Crypto.randomUUID();
+      const createdAt = new Date().toISOString();
+      const replyTarget = failedMessage.reply_to
+        ? (messagesRef.current.find(
+            (message) => message.id === failedMessage.reply_to?.id,
+          ) ?? null)
+        : null;
+
+      if (!failedMessage.pending_attachment) {
+        const outboxItem: MessengerOutboxItem = {
+          client_message_id: clientMessageId,
+          room_id: roomId,
+          text: failedMessage.text,
+          reply_to_message_id: failedMessage.reply_to?.id ?? null,
+          created_at: createdAt,
+          attempts: 0,
+          last_error: null,
+        };
+        try {
+          await replaceMessengerOutboxItem(
+            db,
+            failedMessage.client_message_id,
+            outboxItem,
+          );
+          const optimistic = pendingMessengerMessage(
+            outboxItem,
+            session.user,
+            replyTarget ?? undefined,
+          );
+          optimistic.reply_to = failedMessage.reply_to;
+          setMessages((current) =>
+            mergeMessengerMessages(
+              current.filter(
+                (message) =>
+                  message.client_message_id !== failedMessage.client_message_id,
+              ),
+              [optimistic],
+            ),
+          );
+          nearLatest.current = true;
+          scrollToLatest(true);
+          void flushOutbox().catch((error) => {
+            setOffline(isMessengerConnectionError(error));
+            setSyncError(
+              messengerErrorMessage(error, "Не удалось отправить сообщение"),
+            );
+          });
+        } catch (error) {
+          Alert.alert(
+            "Не удалось повторить отправку",
+            messengerErrorMessage(error, "Локальная очередь недоступна"),
+          );
+        }
+        return;
+      }
+
+      const pending = failedMessage.pending_attachment;
+      if (pending.source === "location") {
+        if (!failedMessage.location) {
+          Alert.alert(
+            "Не удалось повторить отправку",
+            "Координаты больше недоступны. Отправьте геопозицию заново.",
+          );
+          return;
+        }
+        const optimistic = pendingMessengerAttachmentMessage(
+          roomId,
+          clientMessageId,
+          "location",
+          "",
+          session.user,
+          replyTarget ?? undefined,
+        );
+        optimistic.location = failedMessage.location;
+        optimistic.reply_to = failedMessage.reply_to;
+        optimistic.pending_attachment = optimistic.pending_attachment
+          ? {
+              ...optimistic.pending_attachment,
+              stage: "uploading",
+              label: "Отправляем геопозицию…",
+            }
+          : null;
+        setSending(true);
+        setMessages((current) =>
+          mergeMessengerMessages(
+            current.filter(
+              (message) =>
+                message.client_message_id !== failedMessage.client_message_id,
+            ),
+            [optimistic],
+          ),
+        );
+        nearLatest.current = true;
+        scrollToLatest(true);
+        try {
+          const result = await sendMessengerLocation(
+            roomId,
+            clientMessageId,
+            failedMessage.location,
+            failedMessage.reply_to?.id,
+          );
+          await storeSentMessage(result.message);
+          setOffline(false);
+          setSyncError(null);
+        } catch (error) {
+          const message = messengerErrorMessage(
+            error,
+            "Не удалось отправить геопозицию",
+          );
+          updatePendingAttachment(clientMessageId, (item) => ({
+            ...item,
+            send_error: message,
+            pending_attachment: item.pending_attachment
+              ? {
+                  ...item.pending_attachment,
+                  stage: "failed",
+                  label: "Геопозиция не отправлена",
+                }
+              : null,
+          }));
+          setOffline(isMessengerConnectionError(error));
+          setSyncError(message);
+        } finally {
+          setSending(false);
+        }
+        return;
+      }
+
+      const sourceItems = pending.items?.length
+        ? pending.items
+        : pending.local_uri && pending.file_name
+          ? [
+              {
+                kind: failedMessage.kind as "image" | "video" | "file",
+                local_uri: pending.local_uri,
+                file_name: pending.file_name,
+                mime_type: fallbackUploadMimeType(
+                  pending.file_name,
+                  failedMessage.kind as "image" | "video" | "file",
+                ),
+                size_bytes: pending.size_bytes,
+                original_size_bytes: pending.size_bytes,
+              },
+            ]
+          : [];
+      const files: MessengerUploadFile[] = sourceItems.map((item) => ({
+        uri: item.local_uri,
+        name: item.file_name,
+        type:
+          item.mime_type || fallbackUploadMimeType(item.file_name, item.kind),
+        kind: item.kind,
+        size_bytes: item.size_bytes,
+        original_size_bytes:
+          item.original_size_bytes ?? item.size_bytes ?? null,
+        width: item.width,
+        height: item.height,
+      }));
+      if (!files.length) {
+        Alert.alert(
+          "Не удалось повторить отправку",
+          "Локальная копия вложения больше недоступна.",
+        );
+        return;
+      }
+      const request: MediaUploadRequest = {
+        source: pending.source,
+        files,
+        clientMessageId,
+        caption: failedMessage.text,
+        replyTarget,
+      };
+      const optimistic = pendingMessengerAttachmentMessage(
+        roomId,
+        clientMessageId,
+        pending.source,
+        failedMessage.text,
+        session.user,
+        replyTarget ?? undefined,
+        files,
+      );
+      optimistic.reply_to = failedMessage.reply_to;
+      optimistic.pending_attachment = optimistic.pending_attachment
+        ? {
+            ...optimistic.pending_attachment,
+            stage: "uploading",
+            label:
+              files.length > 1
+                ? `Отправляем ${files.length} вложений…`
+                : "Отправляем вложение…",
+            progress_percent: null,
+          }
+        : null;
+      setSending(true);
+      setMessages((current) =>
+        mergeMessengerMessages(
+          current.filter(
+            (message) =>
+              message.client_message_id !== failedMessage.client_message_id,
+          ),
+          [optimistic],
+        ),
+      );
+      nearLatest.current = true;
+      scrollToLatest(true);
+      void runManagedMessengerMediaUpload({
+        roomId,
+        clientMessageId,
+        run: (signal) => sendUpload(request, signal),
+      })
+        .then(() => {
+          setOffline(false);
+          setSyncError(null);
+        })
+        .catch((error) => {
+          if (isMessengerUploadCancelledError(error)) return;
+          const message = messengerErrorMessage(
+            error,
+            "Не удалось отправить вложение",
+          );
+          updatePendingAttachment(clientMessageId, (item) => ({
+            ...item,
+            send_error: message,
+            pending_attachment: item.pending_attachment
+              ? {
+                  ...item.pending_attachment,
+                  stage: "failed",
+                  label: "Вложения не отправлены",
+                  progress_percent: null,
+                }
+              : null,
+          }));
+          setOffline(isMessengerConnectionError(error));
+          setSyncError(message);
+        })
+        .finally(() => setSending(false));
+    },
+    [
+      db,
+      flushOutbox,
+      roomId,
+      scrollToLatest,
+      sendUpload,
+      sending,
+      session,
+      storeSentMessage,
+      updatePendingAttachment,
+    ],
+  );
+
+  const requestFailedMessageCancellation = useCallback(
+    (message: MessengerMessage) => {
+      if (!message.pending || !message.send_error) return;
+      setShowAllReactions(false);
+      setActionMessage(null);
+      if (actionDismissTimer.current) clearTimeout(actionDismissTimer.current);
+      actionDismissTimer.current = setTimeout(
+        () =>
+          Alert.alert(
+            "Отменить отправку?",
+            "Сообщение будет удалено только с этого устройства.",
+            [
+              { text: "Назад", style: "cancel" },
+              {
+                text: "Отменить отправку",
+                style: "destructive",
+                onPress: () => {
+                  void removeMessengerOutboxItem(db, message.client_message_id)
+                    .then(() =>
+                      setMessages((current) =>
+                        current.filter(
+                          (item) =>
+                            item.client_message_id !==
+                            message.client_message_id,
+                        ),
+                      ),
+                    )
+                    .catch((error) =>
+                      Alert.alert(
+                        "Не удалось отменить отправку",
+                        messengerErrorMessage(
+                          error,
+                          "Локальная очередь недоступна",
+                        ),
+                      ),
+                    );
+                },
+              },
+            ],
+          ),
+        Platform.OS === "ios" ? 500 : 120,
+      );
+    },
+    [db],
+  );
+
   const send = () => {
+    if (editingMessage) {
+      void submitEdit();
+      return;
+    }
     if (attachmentDraft) {
       sendAttachmentDraft();
       return;
@@ -2665,6 +3089,128 @@ export default function MessengerRoomScreen() {
       requestAnimationFrame(() => inputRef.current?.focus());
     },
     [canWrite, scrollToLatest],
+  );
+
+  const beginEdit = useCallback(
+    (message: MessengerMessage) => {
+      if (
+        !messageMutationAvailable(message, session?.user.id) ||
+        !editableMessengerMessage(message)
+      ) {
+        return;
+      }
+      setEditingMessage(message);
+      setReplyingTo(null);
+      setAttachmentDraft(null);
+      setText(message.text);
+      setShowAllReactions(false);
+      setActionMessage(null);
+      if (actionDismissTimer.current) clearTimeout(actionDismissTimer.current);
+      actionDismissTimer.current = setTimeout(
+        () => inputRef.current?.focus(),
+        Platform.OS === "ios" ? 500 : 120,
+      );
+    },
+    [session?.user.id],
+  );
+
+  const cancelEditing = useCallback(() => {
+    setEditingMessage(null);
+    setText("");
+  }, []);
+
+  const submitEdit = useCallback(async () => {
+    const target = editingMessage;
+    if (!target || messageMutationBusyId) return;
+    const nextText = text.trim();
+    if (target.kind === "text" && !nextText) return;
+    if (nextText === target.text.trim()) {
+      cancelEditing();
+      return;
+    }
+    setMessageMutationBusyId(target.id);
+    try {
+      const result = await updateMessengerMessage(target.id, nextText);
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === result.message.id
+            ? { ...result.message, reactions: message.reactions }
+            : message,
+        ),
+      );
+      await cacheUpdatedMessengerMessage(db, result.message);
+      setEditingMessage(null);
+      setText("");
+      setOffline(false);
+      setSyncError(null);
+    } catch (error) {
+      setOffline(isMessengerConnectionError(error));
+      Alert.alert(
+        "Сообщение не изменено",
+        messengerErrorMessage(error, "Повторите попытку позже"),
+      );
+    } finally {
+      setMessageMutationBusyId(null);
+    }
+  }, [cancelEditing, db, editingMessage, messageMutationBusyId, text]);
+
+  const requestMessageDeletion = useCallback(
+    (message: MessengerMessage) => {
+      if (!messageMutationAvailable(message, session?.user.id)) return;
+      setShowAllReactions(false);
+      setActionMessage(null);
+      if (actionDismissTimer.current) clearTimeout(actionDismissTimer.current);
+      actionDismissTimer.current = setTimeout(
+        () =>
+          Alert.alert(
+            "Удалить сообщение?",
+            "В чате останется отметка «Сообщение удалено». Отменить это действие будет нельзя.",
+            [
+              { text: "Отмена", style: "cancel" },
+              {
+                text: "Удалить",
+                style: "destructive",
+                onPress: () => {
+                  if (messageMutationBusyId) return;
+                  setMessageMutationBusyId(message.id);
+                  void deleteMessengerMessage(message.id)
+                    .then(async (result) => {
+                      setMessages((current) =>
+                        current.map((item) =>
+                          item.id === result.message.id
+                            ? {
+                                ...result.message,
+                                reactions: item.reactions,
+                              }
+                            : item,
+                        ),
+                      );
+                      await cacheUpdatedMessengerMessage(db, result.message);
+                      if (editingMessageRef.current?.id === result.message.id) {
+                        setText("");
+                      }
+                      setEditingMessage((current) =>
+                        current?.id === result.message.id ? null : current,
+                      );
+                      setOffline(false);
+                      setSyncError(null);
+                    })
+                    .catch((error) => {
+                      setOffline(isMessengerConnectionError(error));
+                      Alert.alert(
+                        "Сообщение не удалено",
+                        messengerErrorMessage(error, "Повторите попытку позже"),
+                      );
+                    })
+                    .finally(() => setMessageMutationBusyId(null));
+                },
+              },
+            ],
+          ),
+        Platform.OS === "ios" ? 500 : 120,
+      );
+    },
+    [db, messageMutationBusyId, session?.user.id],
   );
 
   const copyMessageText = useCallback(async (message: MessengerMessage) => {
@@ -2826,6 +3372,32 @@ export default function MessengerRoomScreen() {
               ? "В сети"
               : lastSeenText(peerPresence?.last_seen_at ?? null)
             : participantCountText(roomMemberCount);
+
+  const actionMessageFailed = Boolean(
+    actionMessage?.pending && actionMessage.send_error,
+  );
+  const actionMessageMutable = Boolean(
+    actionMessage && messageMutationAvailable(actionMessage, session?.user.id),
+  );
+  const actionMessageEditable = Boolean(
+    actionMessageMutable &&
+    actionMessage &&
+    editableMessengerMessage(actionMessage),
+  );
+  const editingTextChanged = Boolean(
+    editingMessage && text.trim() !== editingMessage.text.trim(),
+  );
+  const canSubmitEdit = Boolean(
+    editingMessage &&
+    editingTextChanged &&
+    (editingMessage.kind !== "text" || text.trim()),
+  );
+  const canSubmitComposer = editingMessage
+    ? canSubmitEdit
+    : Boolean(text.trim() || attachmentDraft);
+  const composerBusy =
+    sending ||
+    Boolean(editingMessage && messageMutationBusyId === editingMessage.id);
 
   const openGroupSettings = () => {
     if (roomType === "direct") return;
@@ -3005,7 +3577,7 @@ export default function MessengerRoomScreen() {
                     animateEntry={Boolean(item.pending && mine)}
                     onReply={() => beginReply(item)}
                     onLongPress={() => {
-                      if (!item.pending) {
+                      if (!item.pending || item.send_error) {
                         setShowAllReactions(false);
                         setActionMessage(item);
                       }
@@ -3035,13 +3607,17 @@ export default function MessengerRoomScreen() {
                           style={[
                             styles.message,
                             mine ? styles.mine : styles.theirs,
+                            item.deleted_at && styles.deletedMessage,
                             highlightedMessageId === item.id &&
                               styles.highlightedMessage,
                           ]}
                           accessibilityHint="Удерживайте для меню или смахните влево, чтобы ответить"
                         >
-                          <MessageTail mine={mine} />
-                          {item.forwarded_from && (
+                          <MessageTail
+                            mine={mine}
+                            deleted={Boolean(item.deleted_at)}
+                          />
+                          {!item.deleted_at && item.forwarded_from && (
                             <View style={styles.forwardedHeader}>
                               <Icon
                                 name="arrow-redo"
@@ -3069,7 +3645,7 @@ export default function MessengerRoomScreen() {
                               </Text>
                             </View>
                           )}
-                          {item.reply_to && (
+                          {!item.deleted_at && item.reply_to && (
                             <Pressable
                               style={styles.replyQuote}
                               onPress={() =>
@@ -3134,13 +3710,14 @@ export default function MessengerRoomScreen() {
                               style={[
                                 styles.messageText,
                                 emojiOnly && styles.emojiOnlyText,
+                                item.deleted_at && styles.deletedMessageText,
                               ]}
                             >
                               {body}
                             </Text>
                           ) : null}
                           <View style={styles.messageFooter}>
-                            {item.reactions.length > 0 && (
+                            {!item.deleted_at && item.reactions.length > 0 && (
                               <ScrollView
                                 horizontal
                                 nestedScrollEnabled
@@ -3179,11 +3756,18 @@ export default function MessengerRoomScreen() {
                             )}
                             <View style={styles.messageMeta}>
                               <Text style={styles.time}>
-                                {new Date(item.created_at).toLocaleTimeString(
-                                  "ru-RU",
-                                  { hour: "2-digit", minute: "2-digit" },
-                                )}
+                                {new Date(
+                                  item.deleted_at ||
+                                    item.edited_at ||
+                                    item.created_at,
+                                ).toLocaleTimeString("ru-RU", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
                               </Text>
+                              {item.edited_at && !item.deleted_at && (
+                                <Text style={styles.time}>Отредактировано</Text>
+                              )}
                               {mine && <DeliveryChecks message={item} />}
                             </View>
                           </View>
@@ -3265,72 +3849,116 @@ export default function MessengerRoomScreen() {
                     {actionMessage.author.display_name}
                   </Text>
                   <Text style={styles.actionPreviewText} numberOfLines={2}>
-                    {actionMessage.text ||
-                      (actionMessage.kind === "image"
-                        ? "Фото"
-                        : actionMessage.kind === "video"
-                          ? "Видео"
-                          : actionMessage.kind === "file"
-                            ? actionMessage.media?.original_name || "Файл"
-                            : actionMessage.kind === "location"
-                              ? "Геопозиция"
-                              : "Сообщение")}
+                    {actionMessage.deleted_at
+                      ? "Сообщение удалено"
+                      : actionMessage.text ||
+                        (actionMessage.kind === "image"
+                          ? "Фото"
+                          : actionMessage.kind === "video"
+                            ? "Видео"
+                            : actionMessage.kind === "file"
+                              ? actionMessage.media?.original_name || "Файл"
+                              : actionMessage.kind === "location"
+                                ? "Геопозиция"
+                                : "Сообщение")}
                   </Text>
                 </View>
               )}
-              {canReact && actionMessage && (
-                <View>
-                  <View style={styles.reactionPicker}>
-                    {quickReactions.map((reaction) => (
-                      <TouchableOpacity
-                        key={reaction}
-                        style={styles.reactionButton}
-                        onPress={() =>
-                          void toggleReaction(actionMessage, reaction)
-                        }
-                        disabled={reactionBusyIds.has(actionMessage.id)}
-                      >
-                        <Text style={styles.reactionButtonText}>
-                          {reaction}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                    <TouchableOpacity
-                      style={styles.reactionMoreButton}
-                      onPress={() => setShowAllReactions((current) => !current)}
-                      accessibilityLabel="Другие реакции"
-                    >
-                      <Icon
-                        name={showAllReactions ? "chevron-up" : "add"}
-                        size={22}
-                        color={colors.primary}
-                      />
-                    </TouchableOpacity>
-                  </View>
-                  {showAllReactions && (
-                    <View style={styles.reactionPalette}>
-                      {STANDARD_MESSENGER_REACTIONS.map((reaction) => (
+              {canReact &&
+                actionMessage &&
+                !actionMessage.pending &&
+                !actionMessage.deleted_at && (
+                  <View>
+                    <View style={styles.reactionPicker}>
+                      {quickReactions.map((reaction) => (
                         <TouchableOpacity
                           key={reaction}
-                          style={styles.reactionPaletteButton}
+                          style={styles.reactionButton}
                           onPress={() =>
                             void toggleReaction(actionMessage, reaction)
                           }
                           disabled={reactionBusyIds.has(actionMessage.id)}
                         >
-                          <Text style={styles.reactionPaletteText}>
+                          <Text style={styles.reactionButtonText}>
                             {reaction}
                           </Text>
                         </TouchableOpacity>
                       ))}
-                      <Text style={styles.reactionPaletteHint}>
-                        Выбранная реакция попадёт в быстрый набор
-                      </Text>
+                      <TouchableOpacity
+                        style={styles.reactionMoreButton}
+                        onPress={() =>
+                          setShowAllReactions((current) => !current)
+                        }
+                        accessibilityLabel="Другие реакции"
+                      >
+                        <Icon
+                          name={showAllReactions ? "chevron-up" : "add"}
+                          size={22}
+                          color={colors.primary}
+                        />
+                      </TouchableOpacity>
                     </View>
-                  )}
-                </View>
-              )}
-              {canWrite && actionMessage && (
+                    {showAllReactions && (
+                      <View style={styles.reactionPalette}>
+                        {STANDARD_MESSENGER_REACTIONS.map((reaction) => (
+                          <TouchableOpacity
+                            key={reaction}
+                            style={styles.reactionPaletteButton}
+                            onPress={() =>
+                              void toggleReaction(actionMessage, reaction)
+                            }
+                            disabled={reactionBusyIds.has(actionMessage.id)}
+                          >
+                            <Text style={styles.reactionPaletteText}>
+                              {reaction}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                        <Text style={styles.reactionPaletteHint}>
+                          Выбранная реакция попадёт в быстрый набор
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+              {actionMessageFailed && actionMessage ? (
+                <>
+                  <TouchableOpacity
+                    style={styles.messageAction}
+                    onPress={() => void retryFailedMessage(actionMessage)}
+                    disabled={sending}
+                  >
+                    <Icon name="refresh" size={21} color={colors.primary} />
+                    <Text style={styles.messageActionText}>
+                      Отправить заново
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.messageAction, styles.messageActionDanger]}
+                    onPress={() =>
+                      requestFailedMessageCancellation(actionMessage)
+                    }
+                  >
+                    <Icon
+                      name="close-circle-outline"
+                      size={21}
+                      color={colors.error}
+                    />
+                    <Text
+                      style={[
+                        styles.messageActionText,
+                        styles.messageActionTextDanger,
+                      ]}
+                    >
+                      Отменить отправку
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              ) : null}
+              {canWrite &&
+              actionMessage &&
+              !actionMessage.pending &&
+              !actionMessage.deleted_at ? (
                 <TouchableOpacity
                   style={styles.messageAction}
                   onPress={() => beginReply(actionMessage)}
@@ -3338,8 +3966,11 @@ export default function MessengerRoomScreen() {
                   <Icon name="arrow-undo" size={21} color={colors.primary} />
                   <Text style={styles.messageActionText}>Ответить</Text>
                 </TouchableOpacity>
-              )}
-              {actionMessage?.text.trim() ? (
+              ) : null}
+              {actionMessage &&
+              !actionMessage.pending &&
+              !actionMessage.deleted_at &&
+              actionMessage.text.trim() ? (
                 <TouchableOpacity
                   style={styles.messageAction}
                   onPress={() => void copyMessageText(actionMessage)}
@@ -3350,7 +3981,10 @@ export default function MessengerRoomScreen() {
                   </Text>
                 </TouchableOpacity>
               ) : null}
-              {actionMessage?.media &&
+              {actionMessage &&
+              !actionMessage.pending &&
+              !actionMessage.deleted_at &&
+              actionMessage.media &&
               (actionMessage.media_items?.length ?? 1) <= 1 ? (
                 <TouchableOpacity
                   style={styles.messageAction}
@@ -3369,6 +4003,40 @@ export default function MessengerRoomScreen() {
                   <Text style={styles.messageActionText}>Сохранить</Text>
                 </TouchableOpacity>
               ) : null}
+              {actionMessageEditable && actionMessage ? (
+                <TouchableOpacity
+                  style={styles.messageAction}
+                  onPress={() => beginEdit(actionMessage)}
+                >
+                  <Icon
+                    name="create-outline"
+                    size={21}
+                    color={colors.primary}
+                  />
+                  <Text style={styles.messageActionText}>Редактировать</Text>
+                </TouchableOpacity>
+              ) : null}
+              {actionMessageMutable && actionMessage ? (
+                <TouchableOpacity
+                  style={[styles.messageAction, styles.messageActionDanger]}
+                  onPress={() => requestMessageDeletion(actionMessage)}
+                  disabled={messageMutationBusyId === actionMessage.id}
+                >
+                  {messageMutationBusyId === actionMessage.id ? (
+                    <ActivityIndicator color={colors.error} />
+                  ) : (
+                    <Icon name="trash-outline" size={21} color={colors.error} />
+                  )}
+                  <Text
+                    style={[
+                      styles.messageActionText,
+                      styles.messageActionTextDanger,
+                    ]}
+                  >
+                    Удалить
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
               {actionMessage &&
               !actionMessage.pending &&
               actionMessage.author.id === session?.user.id ? (
@@ -3384,7 +4052,9 @@ export default function MessengerRoomScreen() {
                   <Text style={styles.messageActionText}>Статусы</Text>
                 </TouchableOpacity>
               ) : null}
-              {actionMessage && !actionMessage.deleted_at ? (
+              {actionMessage &&
+              !actionMessage.pending &&
+              !actionMessage.deleted_at ? (
                 <TouchableOpacity
                   style={styles.messageAction}
                   onPress={() => queueMessageAction("forward", actionMessage)}
@@ -3691,7 +4361,27 @@ export default function MessengerRoomScreen() {
                 </Text>
               </View>
             )}
-            {replyingTo && (
+            {editingMessage && (
+              <View style={styles.editComposer}>
+                <View style={styles.replyComposerText}>
+                  <Text style={styles.editComposerTitle} numberOfLines={1}>
+                    Редактирование сообщения
+                  </Text>
+                  <Text style={styles.replyText} numberOfLines={1}>
+                    {editingMessage.text || "Подпись к вложению"}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.cancelReply}
+                  onPress={cancelEditing}
+                  disabled={composerBusy}
+                  accessibilityLabel="Отменить редактирование"
+                >
+                  <Icon name="close" size={21} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+            )}
+            {replyingTo && !editingMessage && (
               <View style={styles.replyComposer}>
                 <View style={styles.replyComposerText}>
                   <Text style={styles.replyAuthor} numberOfLines={1}>
@@ -3719,7 +4409,7 @@ export default function MessengerRoomScreen() {
                 </TouchableOpacity>
               </View>
             )}
-            {attachmentDraft && (
+            {attachmentDraft && !editingMessage && (
               <View style={styles.attachmentDraft}>
                 <ScrollView
                   style={styles.attachmentDraftScroll}
@@ -3786,7 +4476,11 @@ export default function MessengerRoomScreen() {
                 <TouchableOpacity
                   style={styles.attachButton}
                   onPress={() => setAttachmentMenuVisible(true)}
-                  disabled={sending || Boolean(attachmentDraft)}
+                  disabled={
+                    composerBusy ||
+                    Boolean(attachmentDraft) ||
+                    Boolean(editingMessage)
+                  }
                   accessibilityLabel="Добавить вложение"
                 >
                   <Icon name="add" size={30} color={colors.primary} />
@@ -3797,9 +4491,23 @@ export default function MessengerRoomScreen() {
                 style={styles.input}
                 value={text}
                 onChangeText={setText}
-                placeholder={attachmentDraft ? "Подпись" : "Сообщение"}
+                placeholder={
+                  editingMessage
+                    ? "Измените сообщение"
+                    : attachmentDraft
+                      ? "Подпись"
+                      : "Сообщение"
+                }
                 multiline
-                maxLength={attachmentDraft ? 1000 : 4000}
+                maxLength={
+                  editingMessage
+                    ? editingMessage.kind === "text"
+                      ? 4000
+                      : 1000
+                    : attachmentDraft
+                      ? 1000
+                      : 4000
+                }
                 onFocus={() => {
                   if (!nearLatest.current) return;
                   keyboardScrollPending.current = true;
@@ -3809,15 +4517,19 @@ export default function MessengerRoomScreen() {
               <TouchableOpacity
                 style={[
                   styles.sendButton,
-                  !text.trim() && !attachmentDraft && styles.sendButtonDisabled,
+                  !canSubmitComposer && styles.sendButtonDisabled,
                 ]}
                 onPress={send}
-                disabled={sending || (!text.trim() && !attachmentDraft)}
+                disabled={composerBusy || !canSubmitComposer}
               >
-                {sending ? (
+                {composerBusy ? (
                   <ActivityIndicator size="small" color={colors.white} />
                 ) : (
-                  <Icon name="send" size={23} color={colors.white} />
+                  <Icon
+                    name={editingMessage ? "checkmark" : "send"}
+                    size={23}
+                    color={colors.white}
+                  />
                 )}
               </TouchableOpacity>
             </View>
@@ -3964,6 +4676,14 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 4,
     borderColor: "#D5E1E9",
     backgroundColor: "#FCFEFF",
+  },
+  deletedMessage: {
+    borderColor: "#D7DEE4",
+    backgroundColor: "#EDF1F4",
+  },
+  deletedMessageText: {
+    color: colors.textSecondary,
+    fontStyle: "italic",
   },
   highlightedMessage: {
     borderWidth: 2,
@@ -4217,6 +4937,24 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: "#EAF3FF",
   },
+  editComposer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 10,
+    marginTop: 8,
+    paddingVertical: 7,
+    paddingLeft: 10,
+    paddingRight: 5,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary,
+    borderRadius: 8,
+    backgroundColor: "#EAF3FF",
+  },
+  editComposerTitle: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "800",
+  },
   replyComposerText: { flex: 1, minWidth: 0 },
   cancelReply: {
     width: 38,
@@ -4295,6 +5033,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#EAF3FF",
   },
   messageActionText: { color: colors.primary, fontSize: 15, fontWeight: "800" },
+  messageActionDanger: { backgroundColor: "#FDEEEE" },
+  messageActionTextDanger: { color: colors.error },
   forwardSheet: {
     maxHeight: "82%",
     padding: 16,

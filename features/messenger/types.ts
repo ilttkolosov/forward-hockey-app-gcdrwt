@@ -187,7 +187,11 @@ export interface MessengerPendingAttachment {
     kind: "image" | "video" | "file";
     local_uri: string;
     file_name: string;
+    mime_type: string;
     size_bytes: number | null;
+    original_size_bytes: number | null;
+    width?: number;
+    height?: number;
   }[];
 }
 
