@@ -144,6 +144,7 @@ export function pendingMessengerAttachmentMessage(
       source,
       stage: "preparing",
       label: pendingAttachmentLabel(source),
+      progress_percent: null,
       local_uri: firstAttachment?.uri ?? null,
       file_name: firstAttachment?.name ?? null,
       size_bytes: firstAttachment?.size_bytes ?? null,

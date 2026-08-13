@@ -389,6 +389,71 @@ function pendingAttachmentSize(sizeBytes: number | null): string | null {
   return `${(sizeBytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
+function PendingUploadProgress({
+  percent,
+}: {
+  percent: number | null | undefined;
+}) {
+  const movement = useRef(new Animated.Value(0)).current;
+  const determinate = typeof percent === "number";
+
+  useEffect(() => {
+    if (determinate) {
+      movement.stopAnimation();
+      movement.setValue(0);
+      return;
+    }
+    movement.setValue(0);
+    const loop = Animated.loop(
+      Animated.timing(movement, {
+        toValue: 1,
+        duration: 1_100,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      movement.setValue(0);
+    };
+  }, [determinate, movement]);
+
+  const clampedPercent = determinate
+    ? Math.max(0, Math.min(100, percent))
+    : null;
+  const translateX = movement.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-64, 260],
+  });
+
+  return (
+    <View
+      style={styles.pendingUploadTrack}
+      accessibilityLabel={
+        clampedPercent === null
+          ? "Загрузка выполняется"
+          : `Загружено ${clampedPercent}%`
+      }
+    >
+      {clampedPercent === null ? (
+        <Animated.View
+          style={[
+            styles.pendingUploadIndeterminate,
+            { transform: [{ translateX }] },
+          ]}
+        />
+      ) : (
+        <View
+          style={[
+            styles.pendingUploadFill,
+            { width: `${clampedPercent}%` },
+          ]}
+        />
+      )}
+    </View>
+  );
+}
+
 function PendingAttachmentView({
   message,
   pending,
@@ -478,6 +543,11 @@ function PendingAttachmentView({
           ) : null}
         </View>
       </View>
+      {!failed &&
+      pending.stage === "uploading" &&
+      pending.source !== "location" ? (
+        <PendingUploadProgress percent={pending.progress_percent} />
+      ) : null}
     </View>
   );
 }
@@ -2139,6 +2209,7 @@ export default function MessengerRoomScreen() {
               ? {
                   ...message.pending_attachment,
                   label: `Загрузка: ${percent}%`,
+                  progress_percent: percent,
                 }
               : null,
           }));
@@ -2432,6 +2503,7 @@ export default function MessengerRoomScreen() {
           ...optimistic.pending_attachment,
           stage: "uploading",
           label: uploadLabel,
+          progress_percent: null,
         }
       : null;
     setText("");
@@ -2463,6 +2535,7 @@ export default function MessengerRoomScreen() {
                   ...pendingMessage.pending_attachment,
                   stage: "failed",
                   label: "Вложения не отправлены",
+                  progress_percent: null,
                 }
               : null,
           }));
@@ -3954,6 +4027,24 @@ const styles = StyleSheet.create({
     marginTop: 2,
     color: colors.textSecondary,
     fontSize: 10,
+  },
+  pendingUploadTrack: {
+    height: 4,
+    marginTop: 7,
+    overflow: "hidden",
+    borderRadius: 2,
+    backgroundColor: "rgba(74, 144, 226, 0.18)",
+  },
+  pendingUploadFill: {
+    height: "100%",
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+  },
+  pendingUploadIndeterminate: {
+    width: 64,
+    height: "100%",
+    borderRadius: 2,
+    backgroundColor: colors.primary,
   },
   messageText: { color: colors.text, fontSize: 15, lineHeight: 20 },
   emojiOnlyText: { fontSize: 38, lineHeight: 46 },

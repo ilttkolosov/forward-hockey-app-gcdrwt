@@ -179,6 +179,7 @@ export interface MessengerPendingAttachment {
   source: MessengerPendingAttachmentSource;
   stage: "preparing" | "uploading" | "failed";
   label: string;
+  progress_percent?: number | null;
   local_uri: string | null;
   file_name: string | null;
   size_bytes: number | null;
