@@ -1,7 +1,13 @@
 import { ResizeMode, Video } from "expo-av";
 import { Image } from "expo-image";
 import * as Sharing from "expo-sharing";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -20,8 +26,10 @@ import {
   cacheMessengerMedia,
   formatMessengerBytes,
 } from "../../services/messengerMediaCache";
+import { tryPreviewMessengerFile } from "../../services/messengerNativeFilePreview";
 import { saveMessengerMediaToDevice } from "../../services/messengerMediaSave";
 import { colors } from "../../styles/commonStyles";
+import { getMessengerFilePresentation } from "./filePresentation";
 import MessengerLocationPreview from "./MessengerLocationPreview";
 import type { MessengerLocation, MessengerMedia } from "./types";
 
@@ -62,6 +70,8 @@ export default function MessengerAttachmentView({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [openingFileId, setOpeningFileId] = useState<string | null>(null);
+  const openingFileRef = useRef<string | null>(null);
 
   useEffect(() => {
     setLocalUris({});
@@ -116,41 +126,6 @@ export default function MessengerAttachmentView({
   if (location) return <MessengerLocationPreview location={location} />;
   if (!items.length) return null;
 
-  const openFile = async (item: MessengerMedia) => {
-    try {
-      const uri = await ensureLocal(item);
-      if (!(await Sharing.isAvailableAsync())) {
-        Alert.alert(
-          "Файл сохранён",
-          "На этом устройстве нет обработчика для открытия файла.",
-        );
-        return;
-      }
-      await Sharing.shareAsync(uri, {
-        dialogTitle: item.original_name,
-        mimeType: item.mime_type,
-      });
-    } catch {
-      // The tile keeps a visible retry state.
-    }
-  };
-
-  const openItem = async (item: MessengerMedia) => {
-    if (item.type === "file") {
-      await openFile(item);
-      return;
-    }
-    try {
-      await ensureLocal(item);
-      const index = viewerItems.findIndex(
-        (candidate) => candidate.id === item.id,
-      );
-      if (index >= 0) setViewerIndex(index);
-    } catch {
-      // The tile keeps a visible retry state.
-    }
-  };
-
   const saveToDevice = async (item: MessengerMedia) => {
     if (savingId) return;
     setSavingId(item.id);
@@ -174,6 +149,64 @@ export default function MessengerAttachmentView({
     }
   };
 
+  const offerFileSave = (item: MessengerMedia) => {
+    Alert.alert(
+      "Просмотр недоступен",
+      "На устройстве нет приложения для просмотра этого файла. Сохранить файл?",
+      [
+        { text: "Отмена", style: "cancel" },
+        {
+          text: "Сохранить",
+          onPress: () => void saveToDevice(item),
+        },
+      ],
+    );
+  };
+
+  const openFile = async (item: MessengerMedia) => {
+    if (openingFileRef.current) return;
+    openingFileRef.current = item.id;
+    setOpeningFileId(item.id);
+    try {
+      const uri = await ensureLocal(item);
+      if (await tryPreviewMessengerFile(uri)) return;
+
+      if (!(await Sharing.isAvailableAsync())) {
+        offerFileSave(item);
+        return;
+      }
+      try {
+        await Sharing.shareAsync(uri, {
+          dialogTitle: item.original_name,
+          mimeType: item.mime_type,
+        });
+      } catch {
+        offerFileSave(item);
+      }
+    } catch {
+      // The tile keeps a visible retry state when the download itself fails.
+    } finally {
+      openingFileRef.current = null;
+      setOpeningFileId(null);
+    }
+  };
+
+  const openItem = async (item: MessengerMedia) => {
+    if (item.type === "file") {
+      await openFile(item);
+      return;
+    }
+    try {
+      await ensureLocal(item);
+      const index = viewerItems.findIndex(
+        (candidate) => candidate.id === item.id,
+      );
+      if (index >= 0) setViewerIndex(index);
+    } catch {
+      // The tile keeps a visible retry state.
+    }
+  };
+
   const renderAlbum = () => {
     const columns = items.length > 4 ? 3 : 2;
     const tileSize = columns === 3 ? 74 : 113;
@@ -181,8 +214,10 @@ export default function MessengerAttachmentView({
       <View style={styles.albumGrid}>
         {items.map((item) => {
           const localUri = localUris[item.id];
-          const loading = loadingIds.has(item.id);
+          const loading = loadingIds.has(item.id) || openingFileId === item.id;
           const failed = Boolean(errors[item.id]);
+          const filePresentation =
+            item.type === "file" ? getMessengerFilePresentation(item) : null;
           return (
             <TouchableOpacity
               key={item.id}
@@ -209,8 +244,9 @@ export default function MessengerAttachmentView({
                           ? "alert-circle-outline"
                           : item.type === "video"
                             ? "play-circle"
-                            : "document-text"
+                            : (filePresentation?.icon ?? "document-text")
                       }
+                      type={item.type === "file" ? "material-community" : "ion"}
                       size={item.type === "video" ? 34 : 29}
                       color={failed ? colors.error : colors.primary}
                     />
@@ -236,8 +272,12 @@ export default function MessengerAttachmentView({
 
   const single = items[0];
   const singleLocalUri = single ? localUris[single.id] : null;
-  const singleLoading = single ? loadingIds.has(single.id) : false;
+  const singleLoading = single
+    ? loadingIds.has(single.id) || openingFileId === single.id
+    : false;
   const singleError = single ? errors[single.id] : null;
+  const singleFilePresentation =
+    single?.type === "file" ? getMessengerFilePresentation(single) : null;
   const viewerMedia =
     viewerIndex === null ? null : (viewerItems[viewerIndex] ?? null);
 
@@ -277,7 +317,12 @@ export default function MessengerAttachmentView({
                 <ActivityIndicator color={colors.white} />
               ) : (
                 <Icon
-                  name={single.type === "video" ? "play" : "document-text"}
+                  name={
+                    single.type === "video"
+                      ? "play"
+                      : (singleFilePresentation?.icon ?? "document-text")
+                  }
+                  type={single.type === "file" ? "material-community" : "ion"}
                   size={23}
                   color={colors.white}
                 />
@@ -289,8 +334,10 @@ export default function MessengerAttachmentView({
                   (single.type === "video" ? "Видео" : "Файл")}
               </Text>
               <Text style={styles.attachmentSubtitle}>
-                {formatMessengerBytes(single.size_bytes)} · Нажмите для
-                просмотра
+                {singleFilePresentation
+                  ? `${singleFilePresentation.label} · `
+                  : ""}
+                {formatMessengerBytes(single.size_bytes)} · Нажмите для открытия
               </Text>
             </View>
           </TouchableOpacity>
