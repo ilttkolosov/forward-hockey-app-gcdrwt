@@ -29,10 +29,17 @@ const PHOTO_JPEG_QUALITY = 0.68;
 // Keep them byte-for-byte as selected; the server validates the real file
 // signature independently of the client-provided MIME type and filename.
 const PHOTO_COMPRESSION_SKIP_BYTES = 500 * 1024;
+const PHOTO_SECOND_PASS_TRIGGER_BYTES = 1024 * 1024;
+const PHOTO_ESTIMATED_BYTES_PER_PIXEL = 0.32;
+const PHOTO_ESTIMATED_OVERHEAD_BYTES = 24 * 1024;
 const SECOND_PASS_EDGE = 1280;
 const SECOND_PASS_QUALITY = 0.58;
 const MAX_VIDEO_EDGE = 720;
 const VIDEO_TARGET_BITRATE = 1_500_000;
+const VIDEO_ESTIMATED_AUDIO_BITRATE = 128_000;
+const VIDEO_COMPRESSION_SKIP_BYTES = 5 * 1024 * 1024;
+const MIN_EXPECTED_COMPRESSION_SAVINGS = 0.2;
+const MIN_ACTUAL_COMPRESSION_SAVINGS = 0.1;
 export const MAX_MESSENGER_MEDIA_SELECTION = 10;
 export const MAX_MESSENGER_UPLOAD_BYTES = 50 * 1024 * 1024;
 
@@ -159,6 +166,35 @@ function resizeToLongestEdge(
   ];
 }
 
+function expectedSavingsRatio(
+  originalBytes: number,
+  expectedBytes: number,
+): number {
+  if (originalBytes <= 0) return 0;
+  return Math.max(0, (originalBytes - expectedBytes) / originalBytes);
+}
+
+function estimatedPhotoOutputBytes(
+  width: number,
+  height: number,
+): number | null {
+  if (width <= 0 || height <= 0) return null;
+  const longestEdge = Math.max(width, height);
+  const scale = Math.min(1, MAX_PHOTO_EDGE / longestEdge);
+  const targetPixels = width * scale * height * scale;
+  return Math.round(
+    targetPixels * PHOTO_ESTIMATED_BYTES_PER_PIXEL +
+      PHOTO_ESTIMATED_OVERHEAD_BYTES,
+  );
+}
+
+async function discardGeneratedMedia(uri: string | null): Promise<void> {
+  if (!uri) return;
+  await FileSystem.deleteAsync(uri, { idempotent: true }).catch(
+    () => undefined,
+  );
+}
+
 function originalPhotoType(
   asset: ImagePicker.ImagePickerAsset,
 ): { mimeType: string; extension: string } | null {
@@ -191,11 +227,74 @@ function originalPhotoType(
     : null;
 }
 
+function originalPhotoFile(
+  asset: ImagePicker.ImagePickerAsset,
+  originalType: NonNullable<ReturnType<typeof originalPhotoType>>,
+  originalSize: number,
+): MessengerUploadFile {
+  return {
+    uri: asset.uri,
+    name: asset.fileName || `photo-${Date.now()}.${originalType.extension}`,
+    type: originalType.mimeType,
+    kind: "image",
+    size_bytes: originalSize,
+    original_size_bytes: originalSize,
+    width: asset.width,
+    height: asset.height,
+  };
+}
+
+function originalVideoType(
+  asset: ImagePicker.ImagePickerAsset,
+): { mimeType: string; extension: string } | null {
+  const mimeType = asset.mimeType?.toLowerCase();
+  const extension = (asset.fileName || asset.uri.split(/[?#]/)[0])
+    .match(/\.([a-z0-9]+)$/i)?.[1]
+    ?.toLowerCase();
+  const byMime: Record<string, string> = {
+    "video/3gpp": "3gp",
+    "video/mp4": "mp4",
+    "video/quicktime": "mov",
+    "video/webm": "webm",
+    "video/x-m4v": "m4v",
+  };
+  if (mimeType && byMime[mimeType]) {
+    return { mimeType, extension: byMime[mimeType] };
+  }
+  const byExtension: Record<string, string> = {
+    "3gp": "video/3gpp",
+    m4v: "video/x-m4v",
+    mov: "video/quicktime",
+    mp4: "video/mp4",
+    webm: "video/webm",
+  };
+  return extension && byExtension[extension]
+    ? { mimeType: byExtension[extension], extension }
+    : null;
+}
+
+function originalVideoFile(
+  asset: ImagePicker.ImagePickerAsset,
+  originalType: NonNullable<ReturnType<typeof originalVideoType>>,
+  originalSize: number,
+): MessengerUploadFile {
+  return {
+    uri: asset.uri,
+    name: asset.fileName || `video-${Date.now()}.${originalType.extension}`,
+    type: originalType.mimeType,
+    kind: "video",
+    size_bytes: originalSize,
+    original_size_bytes: originalSize,
+    width: asset.width,
+    height: asset.height,
+  };
+}
+
 /**
- * Leaves supported originals up to 500 KiB untouched. Larger photos are
- * converted to a reasonably sized JPEG; detailed/noisy results that remain
- * above the threshold receive a stronger second pass so mobile connections
- * are not burdened by camera-sized originals.
+ * Leaves supported originals up to 500 KiB untouched and also skips work when
+ * the selected resolution/size predicts less than 20% savings. A stronger
+ * second pass is reserved for first-pass results above 1 MiB; generated files
+ * that ultimately save less than 10% are discarded in favour of the original.
  */
 async function compressedPhoto(
   asset: ImagePicker.ImagePickerAsset,
@@ -203,29 +302,38 @@ async function compressedPhoto(
   const startedAt = Date.now();
   const originalSize = await localFileSize(asset.uri, asset.fileSize);
   const originalType = originalPhotoType(asset);
+  const expectedOutputSize = estimatedPhotoOutputBytes(
+    asset.width,
+    asset.height,
+  );
+  const expectedSavings =
+    originalSize !== null && expectedOutputSize !== null
+      ? expectedSavingsRatio(originalSize, expectedOutputSize)
+      : null;
   if (
     originalType &&
     originalSize !== null &&
-    originalSize <= PHOTO_COMPRESSION_SKIP_BYTES
+    originalSize <= MAX_MESSENGER_UPLOAD_BYTES &&
+    (originalSize <= PHOTO_COMPRESSION_SKIP_BYTES ||
+      (expectedSavings !== null &&
+        expectedSavings < MIN_EXPECTED_COMPRESSION_SAVINGS))
   ) {
+    const reason =
+      originalSize <= PHOTO_COMPRESSION_SKIP_BYTES
+        ? "small_file"
+        : "limited_expected_savings";
     messengerLog("info", "photo.compression.skipped", {
-      reason: "already_upload_ready",
+      reason,
       duration_ms: Date.now() - startedAt,
       original_size_bytes: originalSize,
       upload_size_bytes: originalSize,
+      expected_output_size_bytes: expectedOutputSize,
+      expected_savings_percent:
+        expectedSavings === null ? null : Math.round(expectedSavings * 100),
       image_width: asset.width,
       image_height: asset.height,
     });
-    return {
-      uri: asset.uri,
-      name: asset.fileName || `photo-${Date.now()}.${originalType.extension}`,
-      type: originalType.mimeType,
-      kind: "image",
-      size_bytes: originalSize,
-      original_size_bytes: originalSize,
-      width: asset.width,
-      height: asset.height,
-    };
+    return originalPhotoFile(asset, originalType, originalSize);
   }
 
   let passCount = 1;
@@ -240,18 +348,50 @@ async function compressedPhoto(
   let compressedSize = await localFileSize(result.uri);
   if (
     compressedSize !== null &&
-    compressedSize > PHOTO_COMPRESSION_SKIP_BYTES
+    compressedSize > PHOTO_SECOND_PASS_TRIGGER_BYTES
   ) {
     passCount = 2;
-    result = await ImageManipulator.manipulateAsync(
-      result.uri,
+    const firstPass = result;
+    const secondPass = await ImageManipulator.manipulateAsync(
+      firstPass.uri,
       resizeToLongestEdge(result.width, result.height, SECOND_PASS_EDGE),
       {
         compress: SECOND_PASS_QUALITY,
         format: ImageManipulator.SaveFormat.JPEG,
       },
     );
-    compressedSize = await localFileSize(result.uri);
+    const secondPassSize = await localFileSize(secondPass.uri);
+    if (
+      secondPassSize !== null &&
+      (compressedSize === null || secondPassSize < compressedSize)
+    ) {
+      result = secondPass;
+      compressedSize = secondPassSize;
+      await discardGeneratedMedia(firstPass.uri);
+    } else {
+      await discardGeneratedMedia(secondPass.uri);
+    }
+  }
+  const actualSavings =
+    originalSize !== null && compressedSize !== null
+      ? expectedSavingsRatio(originalSize, compressedSize)
+      : null;
+  if (
+    originalType &&
+    originalSize !== null &&
+    originalSize <= MAX_MESSENGER_UPLOAD_BYTES &&
+    actualSavings !== null &&
+    actualSavings < MIN_ACTUAL_COMPRESSION_SAVINGS
+  ) {
+    await discardGeneratedMedia(result.uri);
+    messengerLog("info", "photo.compression.discarded", {
+      reason: "limited_actual_savings",
+      duration_ms: Date.now() - startedAt,
+      original_size_bytes: originalSize,
+      compressed_size_bytes: compressedSize,
+      actual_savings_percent: Math.round(actualSavings * 100),
+    });
+    return originalPhotoFile(asset, originalType, originalSize);
   }
   messengerLog("info", "photo.compression.completed", {
     duration_ms: Date.now() - startedAt,
@@ -278,27 +418,84 @@ async function compressedVideo(
   onProgress?: (percent: number) => void,
 ): Promise<MessengerUploadFile> {
   if (Platform.OS === "web") {
-    throw new Error(
-      "Сжатие видео доступно только в мобильном приложении",
-    );
+    throw new Error("Сжатие видео доступно только в мобильном приложении");
   }
 
   const startedAt = Date.now();
   const originalSize = await localFileSize(asset.uri, asset.fileSize);
+  const originalType = originalVideoType(asset);
+  const durationSeconds =
+    typeof asset.duration === "number" && asset.duration > 0
+      ? asset.duration / 1000
+      : null;
+  const averageBitrate =
+    originalSize !== null && durationSeconds !== null
+      ? Math.round((originalSize * 8) / durationSeconds)
+      : null;
+  const expectedOutputBitrate =
+    VIDEO_TARGET_BITRATE + VIDEO_ESTIMATED_AUDIO_BITRATE;
+  const expectedOutputSize =
+    durationSeconds === null
+      ? null
+      : Math.round((durationSeconds * expectedOutputBitrate) / 8);
+  const expectedSavings =
+    originalSize !== null && expectedOutputSize !== null
+      ? expectedSavingsRatio(originalSize, expectedOutputSize)
+      : null;
+
+  if (
+    originalType &&
+    originalSize !== null &&
+    originalSize <= MAX_MESSENGER_UPLOAD_BYTES &&
+    (originalSize <= VIDEO_COMPRESSION_SKIP_BYTES ||
+      (expectedSavings !== null &&
+        expectedSavings < MIN_EXPECTED_COMPRESSION_SAVINGS))
+  ) {
+    const reason =
+      originalSize <= VIDEO_COMPRESSION_SKIP_BYTES
+        ? "small_file"
+        : "already_efficient";
+    onProgress?.(100);
+    messengerLog("info", "video.compression.skipped", {
+      reason,
+      duration_ms: Date.now() - startedAt,
+      original_size_bytes: originalSize,
+      upload_size_bytes: originalSize,
+      video_duration_ms: asset.duration,
+      video_width: asset.width,
+      video_height: asset.height,
+      average_bitrate: averageBitrate,
+      expected_savings_percent:
+        expectedSavings === null ? null : Math.round(expectedSavings * 100),
+    });
+    return originalVideoFile(asset, originalType, originalSize);
+  }
   messengerLog("info", "video.compression.started", {
     original_size_bytes: originalSize,
     video_width: asset.width,
     video_height: asset.height,
-    duration_ms: asset.duration,
+    video_duration_ms: asset.duration,
+    average_bitrate: averageBitrate,
+    expected_output_size_bytes: expectedOutputSize,
+    expected_savings_percent:
+      expectedSavings === null ? null : Math.round(expectedSavings * 100),
   });
 
-  let Video: typeof import("react-native-compressor")["Video"];
+  let Video: (typeof import("react-native-compressor"))["Video"];
   try {
     ({ Video } = await import("react-native-compressor"));
   } catch (error) {
     messengerLog("warn", "video.compressor.unavailable", {
       message: error instanceof Error ? error.message : String(error),
     });
+    if (
+      originalType &&
+      originalSize !== null &&
+      originalSize <= MAX_MESSENGER_UPLOAD_BYTES
+    ) {
+      onProgress?.(100);
+      return originalVideoFile(asset, originalType, originalSize);
+    }
     throw new Error(
       "Модуль сжатия видео недоступен. Установите новую сборку приложения",
     );
@@ -325,6 +522,28 @@ async function compressedVideo(
     },
   );
   const compressedSize = await localFileSize(uri);
+  const actualSavings =
+    originalSize !== null && compressedSize !== null
+      ? expectedSavingsRatio(originalSize, compressedSize)
+      : null;
+  if (
+    originalType &&
+    originalSize !== null &&
+    originalSize <= MAX_MESSENGER_UPLOAD_BYTES &&
+    actualSavings !== null &&
+    actualSavings < MIN_ACTUAL_COMPRESSION_SAVINGS
+  ) {
+    await discardGeneratedMedia(uri);
+    onProgress?.(100);
+    messengerLog("info", "video.compression.discarded", {
+      reason: "limited_actual_savings",
+      duration_ms: Date.now() - startedAt,
+      original_size_bytes: originalSize,
+      compressed_size_bytes: compressedSize,
+      actual_savings_percent: Math.round(actualSavings * 100),
+    });
+    return originalVideoFile(asset, originalType, originalSize);
+  }
   const file: MessengerUploadFile = {
     uri,
     name: `video-${Date.now()}.mp4`,
@@ -334,6 +553,7 @@ async function compressedVideo(
     original_size_bytes: originalSize,
   };
   assertMessengerUploadLimits([file]);
+  onProgress?.(100);
   messengerLog("info", "video.compression.completed", {
     duration_ms: Date.now() - startedAt,
     original_size_bytes: originalSize,
@@ -361,9 +581,7 @@ export async function takeMessengerPhoto(): Promise<MessengerUploadFile | null> 
 }
 
 export async function pickMessengerMedia(
-  onPreparationProgress?: (
-    progress: MessengerMediaPreparationProgress,
-  ) => void,
+  onPreparationProgress?: (progress: MessengerMediaPreparationProgress) => void,
 ): Promise<MessengerUploadFile[]> {
   if (Platform.OS !== "web") await mediaLibraryPermission();
   messengerLog("debug", "attachment.picker.opening", { kind: "library" });

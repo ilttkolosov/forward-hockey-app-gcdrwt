@@ -1,4 +1,3 @@
-import { ResizeMode, Video } from "expo-av";
 import { Image } from "expo-image";
 import * as Sharing from "expo-sharing";
 import React, {
@@ -31,6 +30,7 @@ import { saveMessengerMediaToDevice } from "../../services/messengerMediaSave";
 import { colors } from "../../styles/commonStyles";
 import { getMessengerFilePresentation } from "./filePresentation";
 import MessengerLocationPreview from "./MessengerLocationPreview";
+import MessengerVideoPlayer from "./MessengerVideoPlayer";
 import type { MessengerLocation, MessengerMedia } from "./types";
 
 interface MessengerAttachmentViewProps {
@@ -71,6 +71,7 @@ export default function MessengerAttachmentView({
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [openingFileId, setOpeningFileId] = useState<string | null>(null);
+  const [inlineVideoId, setInlineVideoId] = useState<string | null>(null);
   const openingFileRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -78,6 +79,7 @@ export default function MessengerAttachmentView({
     setLoadingIds(new Set());
     setErrors({});
     setViewerIndex(null);
+    setInlineVideoId(null);
   }, [itemIdentity]);
 
   const ensureLocal = useCallback(
@@ -119,7 +121,9 @@ export default function MessengerAttachmentView({
     if (viewerIndex === null) return;
     [viewerIndex - 1, viewerIndex, viewerIndex + 1].forEach((index) => {
       const item = viewerItems[index];
-      if (item) void ensureLocal(item).catch(() => undefined);
+      if (item && (index === viewerIndex || item.type === "image")) {
+        void ensureLocal(item).catch(() => undefined);
+      }
     });
   }, [ensureLocal, viewerIndex, viewerItems]);
 
@@ -198,6 +202,10 @@ export default function MessengerAttachmentView({
     }
     try {
       await ensureLocal(item);
+      if (item.type === "video" && items.length === 1) {
+        setInlineVideoId(item.id);
+        return;
+      }
       const index = viewerItems.findIndex(
         (candidate) => candidate.id === item.id,
       );
@@ -304,6 +312,44 @@ export default function MessengerAttachmentView({
             </View>
           )}
         </TouchableOpacity>
+      ) : single.type === "video" &&
+        singleLocalUri &&
+        inlineVideoId === single.id ? (
+        <View style={styles.inlineVideoCard}>
+          <MessengerVideoPlayer
+            uri={singleLocalUri}
+            active
+            autoPlay
+            style={styles.inlineVideo}
+            onFallback={() => void openFile(single)}
+          />
+          <View style={styles.inlineVideoFooter}>
+            <View style={styles.inlineVideoText}>
+              <Text style={styles.attachmentTitle} numberOfLines={1}>
+                {single.original_name || "Видео"}
+              </Text>
+              <Text style={styles.attachmentSubtitle}>
+                {formatMessengerBytes(single.size_bytes)}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.inlineVideoSaveButton}
+              onPress={() => void saveToDevice(single)}
+              disabled={Boolean(savingId)}
+              accessibilityLabel="Сохранить видео"
+            >
+              {savingId === single.id ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : (
+                <Icon
+                  name="download-outline"
+                  size={22}
+                  color={colors.primary}
+                />
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
       ) : (
         <View style={styles.fileCard}>
           <TouchableOpacity
@@ -337,7 +383,10 @@ export default function MessengerAttachmentView({
                 {singleFilePresentation
                   ? `${singleFilePresentation.label} · `
                   : ""}
-                {formatMessengerBytes(single.size_bytes)} · Нажмите для открытия
+                {formatMessengerBytes(single.size_bytes)} ·{" "}
+                {single.type === "video"
+                  ? "Нажмите для воспроизведения"
+                  : "Нажмите для открытия"}
               </Text>
             </View>
           </TouchableOpacity>
@@ -462,12 +511,12 @@ export default function MessengerAttachmentView({
                       </ScrollView>
                     )}
                     {localUri && item.type === "video" && (
-                      <Video
-                        source={{ uri: localUri }}
+                      <MessengerVideoPlayer
+                        uri={localUri}
                         style={styles.fullVideo}
-                        useNativeControls
-                        resizeMode={ResizeMode.CONTAIN}
-                        shouldPlay={index === viewerIndex}
+                        active={index === viewerIndex}
+                        autoPlay
+                        onFallback={() => void openFile(item)}
                       />
                     )}
                     {!localUri && (
@@ -574,6 +623,29 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     borderRadius: 13,
     backgroundColor: "rgba(255, 255, 255, 0.54)",
+  },
+  inlineVideoCard: {
+    width: 235,
+    marginHorizontal: -7,
+    marginTop: -3,
+    marginBottom: 5,
+    overflow: "hidden",
+    borderRadius: 13,
+    backgroundColor: "rgba(255, 255, 255, 0.54)",
+  },
+  inlineVideo: { width: "100%", height: 158 },
+  inlineVideoFooter: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: 11,
+  },
+  inlineVideoText: { flex: 1, minWidth: 0 },
+  inlineVideoSaveButton: {
+    width: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
   },
   fileOpenAction: {
     flex: 1,
