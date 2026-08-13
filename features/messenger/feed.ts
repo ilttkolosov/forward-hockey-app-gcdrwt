@@ -1,10 +1,38 @@
 import type {
   MessengerMessage,
+  MessengerMessageDeliveryUpdate,
   MessengerOutboxItem,
   MessengerPendingAttachmentSource,
   MessengerReaction,
   MessengerUser,
 } from "./types";
+
+/** Updates delivery metadata without inserting, removing or reordering feed rows. */
+export function applyMessengerDeliveryUpdates(
+  messages: MessengerMessage[],
+  updates: readonly MessengerMessageDeliveryUpdate[],
+): MessengerMessage[] {
+  if (!updates.length) return messages;
+  const byMessageId = new Map(
+    updates.map((update) => [update.message_id, update.delivery] as const),
+  );
+  let changed = false;
+  const next = messages.map((message) => {
+    const delivery = byMessageId.get(message.id);
+    if (!delivery) return message;
+    if (
+      message.delivery.status === delivery.status &&
+      message.delivery.recipient_count === delivery.recipient_count &&
+      message.delivery.delivered_count === delivery.delivered_count &&
+      message.delivery.read_count === delivery.read_count
+    ) {
+      return message;
+    }
+    changed = true;
+    return { ...message, delivery };
+  });
+  return changed ? next : messages;
+}
 
 function normalizedSequence(value: string): string {
   return value.replace(/^0+/, "") || "0";

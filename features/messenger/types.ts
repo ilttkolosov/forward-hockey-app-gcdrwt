@@ -82,6 +82,7 @@ export interface MessengerRoom {
   peer: null | {
     id: string;
     display_name: string;
+    original_display_name?: string;
     avatar_url: string | null;
     last_seen_at: string | null;
   };
@@ -103,7 +104,12 @@ export interface MessengerRoom {
     media: MessengerMedia | null;
     media_items?: MessengerMedia[];
     location: MessengerLocation | null;
-    author: { id: string; display_name: string; avatar_url: string | null };
+    author: {
+      id: string;
+      display_name: string;
+      original_display_name?: string;
+      avatar_url: string | null;
+    };
   };
 }
 
@@ -111,6 +117,8 @@ export interface MessengerPrivateRoomMember {
   id: string;
   username: string;
   display_name: string;
+  original_display_name?: string;
+  alias?: string | null;
   avatar_url: string | null;
   last_seen_at: string | null;
   is_admin: boolean;
@@ -121,6 +129,7 @@ export interface MessengerRoomMember {
   id: string;
   username: string;
   display_name: string;
+  original_display_name?: string;
   avatar_url: string | null;
   online: boolean;
   last_seen_at: string | null;
@@ -137,6 +146,8 @@ export interface MessengerContact {
   id: string;
   username: string;
   display_name: string;
+  original_display_name?: string;
+  alias?: string | null;
   avatar_url: string | null;
   last_seen_at: string | null;
   team_id: string;
@@ -152,6 +163,18 @@ export interface MessengerReaction {
   reacted_by_me: boolean;
 }
 
+export interface MessengerMessageDelivery {
+  status: "sent" | "delivered" | "read";
+  recipient_count: number;
+  delivered_count: number;
+  read_count: number;
+}
+
+export interface MessengerMessageDeliveryUpdate {
+  message_id: string;
+  delivery: MessengerMessageDelivery;
+}
+
 export interface MessengerReply {
   id: string;
   sequence?: string;
@@ -161,6 +184,7 @@ export interface MessengerReply {
   author: {
     id: string;
     display_name: string;
+    original_display_name?: string;
   };
 }
 
@@ -169,6 +193,7 @@ export interface MessengerForward {
   author: {
     id: string;
     display_name: string;
+    original_display_name?: string;
   };
 }
 
@@ -209,6 +234,7 @@ export interface MessengerMessage {
     id: string;
     username: string;
     display_name: string;
+    original_display_name?: string;
     avatar_url: string | null;
   };
   media: MessengerMedia | null;
@@ -218,12 +244,7 @@ export interface MessengerMessage {
   reply_to: MessengerReply | null;
   forwarded_from: MessengerForward | null;
   reactions: MessengerReaction[];
-  delivery: {
-    status: "sent" | "delivered" | "read";
-    recipient_count: number;
-    delivered_count: number;
-    read_count: number;
-  };
+  delivery: MessengerMessageDelivery;
   pending?: boolean;
   send_error?: string | null;
   /** Local-only preparation state. It is never sent to or cached by the API. */
@@ -243,10 +264,30 @@ export interface MessengerOutboxItem {
 export interface MessengerMessageReceipt {
   user_id: string;
   display_name: string;
+  original_display_name?: string;
   avatar_url: string | null;
   delivered_at: string | null;
   read_at: string | null;
   status: "sent" | "delivered" | "read";
+}
+
+export interface MessengerContactAlias {
+  user_id: string;
+  alias: string;
+  updated_at: string;
+}
+
+export interface MessengerContactProfile {
+  id: string;
+  username: string;
+  display_name: string;
+  original_display_name: string;
+  alias: string | null;
+  avatar_url: string | null;
+  last_seen_at: string | null;
+  team_id: string;
+  team_name: string;
+  roles: string[];
 }
 
 export interface MessengerPushRegistration {

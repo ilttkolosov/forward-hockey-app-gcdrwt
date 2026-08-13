@@ -4,6 +4,8 @@ import * as FileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";
 import type {
   InvitationPreview,
+  MessengerContactAlias,
+  MessengerContactProfile,
   MessengerContact,
   MessengerMessageReceipt,
   MessengerLoginResult,
@@ -16,6 +18,10 @@ import type {
   MessengerSession,
   MessengerUser,
 } from "../features/messenger/types";
+import {
+  applyMessengerAliases,
+  updateMessengerAlias,
+} from "../features/messenger/aliases";
 import {
   clearMessengerPasswordChange,
   clearMessengerSession,
@@ -135,7 +141,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
       payload.error?.details,
     );
   }
-  return payload.data;
+  return applyMessengerAliases(payload.data);
 }
 
 function parseUploadResponse<T>(status: number, body: string): T {
@@ -160,7 +166,7 @@ function parseUploadResponse<T>(status: number, body: string): T {
   if (!payload || !("data" in payload)) {
     throw new Error("Сервер вернул некорректный ответ на загрузку");
   }
-  return payload.data;
+  return applyMessengerAliases(payload.data);
 }
 
 async function refreshMessengerSession(): Promise<MessengerSession> {
@@ -460,6 +466,31 @@ export function leaveMessengerRoom(roomId: string) {
 export function getMessengerContacts(teamId?: string) {
   const query = teamId ? `?team_id=${encodeURIComponent(teamId)}` : "";
   return messengerRequest<MessengerContact[]>(`/chat/contacts${query}`);
+}
+
+export function getMessengerContactAliases() {
+  return messengerRequest<MessengerContactAlias[]>("/chat/contact-aliases");
+}
+
+export function getMessengerDirectPeerProfile(roomId: string) {
+  return messengerRequest<MessengerContactProfile>(
+    `/chat/rooms/${roomId}/peer-profile`,
+  );
+}
+
+export async function setMessengerDirectPeerAlias(
+  roomId: string,
+  targetUserId: string,
+  ownerUserId: string,
+  alias: string,
+) {
+  const profile = await messengerRequest<MessengerContactProfile>(
+    `/chat/rooms/${roomId}/peer-alias`,
+    { method: "PUT", body: JSON.stringify({ alias }) },
+  );
+  const normalizedAlias = alias.trim() || null;
+  await updateMessengerAlias(ownerUserId, targetUserId, normalizedAlias);
+  return applyMessengerAliases({ ...profile, alias: normalizedAlias });
 }
 
 export function createMessengerDirectRoom(teamId: string, userId: string) {

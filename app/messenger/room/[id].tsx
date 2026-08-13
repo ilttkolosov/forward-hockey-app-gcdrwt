@@ -39,6 +39,7 @@ import Icon from "../../../components/Icon";
 import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
 import {
+  applyMessengerDeliveryUpdates,
   applyOptimisticReaction,
   compareMessengerSequence,
   firstUnreadMessengerMessage,
@@ -58,6 +59,7 @@ import {
   STANDARD_MESSENGER_REACTIONS,
 } from "../../../features/messenger/reactions";
 import {
+  cacheMessengerDeliveryUpdates,
   cacheMessengerMessages,
   cacheUpdatedMessengerMessage,
   enqueueMessengerText,
@@ -2129,8 +2131,27 @@ export default function MessengerRoomScreen() {
           event.type === "message.receipt_updated" &&
           event.room_id === roomId
         ) {
-          // Receipt cursors belong to the delivery metadata layer. They must
-          // never trigger a history fetch or replace the visible feed.
+          // The server sends group-safe aggregate snapshots. Replace only the
+          // delivery field so FlatList order, anchors and scroll stay intact.
+          setMessages((current) =>
+            applyMessengerDeliveryUpdates(current, event.updates),
+          );
+          setActionMessage((current) =>
+            current
+              ? applyMessengerDeliveryUpdates([current], event.updates)[0] ||
+                current
+              : current,
+          );
+          void cacheMessengerDeliveryUpdates(db, event.updates).catch(
+            (cacheError) =>
+              messengerLog("warn", "realtime.delivery.cache_failed", {
+                room_id: roomId,
+                message:
+                  cacheError instanceof Error
+                    ? cacheError.message
+                    : String(cacheError),
+              }),
+          );
         } else if (
           event.type === "sync.required" ||
           event.type === "connection.ready"
@@ -3439,6 +3460,15 @@ export default function MessengerRoomScreen() {
     });
   };
 
+  const openDirectContactSettings = () => {
+    const peerId = peerPresence?.id || params.peerId;
+    if (roomType !== "direct" || !peerId) return;
+    router.push({
+      pathname: "/messenger/contact/[id]",
+      params: { id: peerId, roomId },
+    });
+  };
+
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
       <KeyboardAvoidingView
@@ -3479,14 +3509,28 @@ export default function MessengerRoomScreen() {
               </View>
             </TouchableOpacity>
           ) : (
-            <View style={styles.headerText}>
-              <Text style={styles.title} numberOfLines={1}>
-                {roomTitle}
-              </Text>
-              <Text style={styles.subtitle} numberOfLines={1}>
-                {roomSubtitle}
-              </Text>
-            </View>
+            <TouchableOpacity
+              style={styles.groupHeaderTarget}
+              onPress={openDirectContactSettings}
+              disabled={!peerPresence?.id && !params.peerId}
+              accessibilityRole="button"
+              accessibilityLabel="Открыть профиль пользователя"
+            >
+              <AuthenticatedAvatar
+                displayName={roomTitle}
+                avatarUrl={roomAvatarUrl}
+                accessToken={session?.access_token}
+                size={42}
+              />
+              <View style={styles.headerText}>
+                <Text style={styles.title} numberOfLines={1}>
+                  {roomTitle}
+                </Text>
+                <Text style={styles.subtitle} numberOfLines={1}>
+                  {roomSubtitle}
+                </Text>
+              </View>
+            </TouchableOpacity>
           )}
         </View>
 

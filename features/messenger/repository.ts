@@ -1,7 +1,9 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 import { Platform } from "react-native";
+import { applyMessengerAliases } from "./aliases";
 import type {
   MessengerMessage,
+  MessengerMessageDeliveryUpdate,
   MessengerOutboxItem,
   MessengerRoom,
 } from "./types";
@@ -79,7 +81,7 @@ async function withMessengerTransaction(
 
 function parseJson<T>(value: string): T | null {
   try {
-    return JSON.parse(value) as T;
+    return applyMessengerAliases(JSON.parse(value) as T);
   } catch {
     return null;
   }
@@ -772,6 +774,31 @@ export function cacheUpdatedMessengerMessage(
         JSON.stringify(nextRoom),
         message.room_id,
       );
+    }),
+  );
+}
+
+/** Persists receipt aggregates without changing message order or room cards. */
+export function cacheMessengerDeliveryUpdates(
+  db: SQLiteDatabase,
+  updates: readonly MessengerMessageDeliveryUpdate[],
+): Promise<void> {
+  if (!updates.length) return Promise.resolve();
+  return enqueueMessengerWrite(db, () =>
+    withMessengerTransaction(db, async (transaction) => {
+      for (const update of updates) {
+        const row = await transaction.getFirstAsync<MessageRow>(
+          "SELECT raw_json FROM messenger_messages WHERE id = ?",
+          update.message_id,
+        );
+        const message = row ? parseJson<MessengerMessage>(row.raw_json) : null;
+        if (!message) continue;
+        await transaction.runAsync(
+          "UPDATE messenger_messages SET raw_json = ? WHERE id = ?",
+          JSON.stringify({ ...message, delivery: update.delivery }),
+          update.message_id,
+        );
+      }
     }),
   );
 }

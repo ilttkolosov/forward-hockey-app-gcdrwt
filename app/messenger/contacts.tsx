@@ -109,6 +109,8 @@ export default function MessengerContactsScreen() {
           lastReadSequence: result.room.last_read_sequence,
           latestSequence: result.room.last_message?.sequence || "",
           unreadCount: String(result.room.unread_count),
+          peerId: result.room.peer?.id || contact.id,
+          peerLastSeenAt: result.room.peer?.last_seen_at || "",
         },
       });
     } catch (openError) {

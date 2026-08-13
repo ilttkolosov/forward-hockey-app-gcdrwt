@@ -95,7 +95,7 @@ function formatRoomActivityTime(iso: string | undefined): string {
 export default function MessengerRoomsScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
-  const { status, session, isAuthenticated, logout } = useMessengerAuth();
+  const { status, session, isAuthenticated } = useMessengerAuth();
   const [rooms, setRooms] = useState<MessengerRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -342,11 +342,6 @@ export default function MessengerRoomsScreen() {
     });
   };
 
-  const handleLogout = async () => {
-    await logout();
-    router.replace("/messenger/register");
-  };
-
   if (loading || status === "loading") {
     return (
       <SafeAreaView style={styles.loading}>
@@ -391,13 +386,10 @@ export default function MessengerRoomsScreen() {
               displayName={session.user.display_name}
               avatarUrl={session.user.avatar_url}
               accessToken={session.access_token}
-              size={36}
+              size={48}
             />
           </TouchableOpacity>
         )}
-        <TouchableOpacity style={styles.iconButton} onPress={handleLogout}>
-          <Icon name="log-out-outline" size={25} color={colors.textSecondary} />
-        </TouchableOpacity>
       </View>
 
       {error && (
@@ -623,8 +615,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   profileButton: {
-    width: 44,
-    height: 44,
+    width: 56,
+    height: 56,
     alignItems: "center",
     justifyContent: "center",
   },

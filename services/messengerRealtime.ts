@@ -1,6 +1,10 @@
 import { io, type Socket } from "socket.io-client";
 import { AppState, type NativeEventSubscription } from "react-native";
-import type { MessengerMessage } from "../features/messenger/types";
+import type {
+  MessengerMessage,
+  MessengerMessageDeliveryUpdate,
+} from "../features/messenger/types";
+import { applyMessengerAliases } from "../features/messenger/aliases";
 import { MESSENGER_SERVER_ORIGIN } from "./messengerApi";
 
 export type MessengerRealtimeEvent =
@@ -21,6 +25,7 @@ export type MessengerRealtimeEvent =
       recipient_user_id: string;
       last_delivered_sequence: string;
       last_read_sequence: string | null;
+      updates: MessengerMessageDeliveryUpdate[];
     }
   | {
       type: "message.reaction_updated";
@@ -224,14 +229,20 @@ export function connectMessengerRealtime(accessToken: string): void {
     "message.created",
     (payload: { message?: MessengerMessage }) => {
       if (payload.message)
-        publish({ type: "message.created", message: payload.message });
+        publish({
+          type: "message.created",
+          message: applyMessengerAliases(payload.message),
+        });
     },
   );
   nextSocket.on(
     "message.updated",
     (payload: { message?: MessengerMessage }) => {
       if (payload.message)
-        publish({ type: "message.updated", message: payload.message });
+        publish({
+          type: "message.updated",
+          message: applyMessengerAliases(payload.message),
+        });
     },
   );
   nextSocket.on(
@@ -244,9 +255,16 @@ export function connectMessengerRealtime(accessToken: string): void {
     (
       payload: Omit<
         Extract<MessengerRealtimeEvent, { type: "message.receipt_updated" }>,
-        "type"
-      >,
-    ) => publish({ type: "message.receipt_updated", ...payload }),
+        "type" | "updates"
+      > & {
+        updates?: MessengerMessageDeliveryUpdate[];
+      },
+    ) =>
+      publish({
+        type: "message.receipt_updated",
+        ...payload,
+        updates: payload.updates ?? [],
+      }),
   );
   nextSocket.on(
     "message.reaction_updated",

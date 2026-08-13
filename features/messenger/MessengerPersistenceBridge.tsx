@@ -3,8 +3,10 @@ import { useEffect } from "react";
 import { AppState } from "react-native";
 import * as Notifications from "expo-notifications";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
+import { replaceMessengerAliases } from "./aliases";
 import {
   cacheIncomingMessengerMessage,
+  cacheMessengerDeliveryUpdates,
   cacheUpdatedMessengerMessage,
   cacheMessengerRooms,
   loadCachedMessengerRooms,
@@ -13,7 +15,10 @@ import { warmMessengerRoomWindows } from "./cacheWarmup";
 import { flushMessengerReadReceipts } from "../../services/messengerReadSync";
 import { subscribeMessengerRealtime } from "../../services/messengerRealtime";
 import { messengerLog } from "../../services/messengerLogger";
-import { getMessengerRooms } from "../../services/messengerApi";
+import {
+  getMessengerContactAliases,
+  getMessengerRooms,
+} from "../../services/messengerApi";
 import {
   syncMessengerPushRegistration,
   syncMessengerPushTokenRotation,
@@ -39,15 +44,24 @@ export default function MessengerPersistenceBridge() {
     }
     let active = true;
     let roomsSyncRunning = false;
+    const synchronizeAliases = async () => {
+      try {
+        const remoteAliases = await getMessengerContactAliases();
+        if (active) {
+          await replaceMessengerAliases(session.user.id, remoteAliases);
+        }
+      } catch (error) {
+        messengerLog("debug", "aliases.background_sync.deferred", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
     const synchronizeRooms = async (remote: boolean) => {
       if (roomsSyncRunning) return;
       roomsSyncRunning = true;
       try {
         const cached = await loadCachedMessengerRooms(db);
         if (active) await syncMessengerUnreadFromRooms(cached);
-        // Start from the persisted room cards immediately, before the remote
-        // room snapshot returns. This gives never-opened rooms the maximum
-        // possible head start and never blocks app or messenger navigation.
         void warmMessengerRoomWindows(db, cached);
         if (!remote) return;
         const rooms = await getMessengerRooms();
@@ -62,7 +76,7 @@ export default function MessengerPersistenceBridge() {
         roomsSyncRunning = false;
       }
     };
-    void synchronizeRooms(true);
+    void synchronizeAliases().then(() => synchronizeRooms(true));
     if (remotePushNotificationsSupported) {
       void syncMessengerPushRegistration().catch((error) =>
         messengerLog("debug", "push.registration.sync_deferred", {
@@ -96,12 +110,19 @@ export default function MessengerPersistenceBridge() {
               message: error instanceof Error ? error.message : String(error),
             }),
           );
+      } else if (event.type === "message.receipt_updated") {
+        void cacheMessengerDeliveryUpdates(db, event.updates).catch((error) =>
+          messengerLog("warn", "realtime.delivery.cache_failed", {
+            room_id: event.room_id,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
       } else if (
         event.type === "connection.ready" ||
         event.type === "sync.required"
       ) {
         void flushMessengerReadReceipts(db);
-        void synchronizeRooms(true);
+        void synchronizeAliases().then(() => synchronizeRooms(true));
       } else if (event.type === "room.updated") {
         void synchronizeRooms(true);
       }
@@ -111,7 +132,7 @@ export default function MessengerPersistenceBridge() {
       (state) => {
         if (state === "active") {
           void flushMessengerReadReceipts(db);
-          void synchronizeRooms(true);
+          void synchronizeAliases().then(() => synchronizeRooms(true));
           if (remotePushNotificationsSupported) {
             void syncMessengerPushRegistration().catch(() => undefined);
           }

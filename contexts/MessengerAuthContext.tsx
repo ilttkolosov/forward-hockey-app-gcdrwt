@@ -13,6 +13,10 @@ import type {
   MessengerSession,
 } from "../features/messenger/types";
 import {
+  clearMessengerAliases,
+  prepareMessengerAliases,
+} from "../features/messenger/aliases";
+import {
   completeMessengerPasswordChange,
   getMessengerMe,
   loginToMessenger,
@@ -35,10 +39,7 @@ import {
 import { cancelAllManagedMessengerMediaUploads } from "../services/messengerMediaUploadManager";
 
 type MessengerAuthStatus =
-  | "loading"
-  | "authenticated"
-  | "unauthenticated"
-  | "password_change_required";
+  "loading" | "authenticated" | "unauthenticated" | "password_change_required";
 
 interface MessengerAuthContextValue {
   status: MessengerAuthStatus;
@@ -80,11 +81,16 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
     let active = true;
     const unsubscribe = subscribeMessengerSession((nextSession) => {
       if (!active) return;
-      setSession(nextSession);
       if (nextSession) {
-        setPasswordChange(null);
-        setStatus("authenticated");
+        void prepareMessengerAliases(nextSession.user.id).then(() => {
+          if (!active) return;
+          setSession(nextSession);
+          setPasswordChange(null);
+          setStatus("authenticated");
+        });
       } else {
+        clearMessengerAliases();
+        setSession(null);
         setStatus((current) =>
           current === "password_change_required" ? current : "unauthenticated",
         );
@@ -95,8 +101,10 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       loadMessengerPasswordChange(),
     ]).then(async ([stored, pendingPasswordChange]) => {
       if (!active) return;
-      setSession(stored);
       if (stored) {
+        await prepareMessengerAliases(stored.user.id);
+        if (!active) return;
+        setSession(stored);
         setPasswordChange(null);
         setStatus("authenticated");
         if (pendingPasswordChange) await clearMessengerPasswordChange();
@@ -152,9 +160,11 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       // of treating that temporary storage denial as a logout.
       void loadMessengerSession().then((restored) => {
         if (!restored) return;
-        setSession(restored);
-        setPasswordChange(null);
-        setStatus("authenticated");
+        void prepareMessengerAliases(restored.user.id).then(() => {
+          setSession(restored);
+          setPasswordChange(null);
+          setStatus("authenticated");
+        });
       });
       resumeMessengerRealtime();
     });
@@ -168,6 +178,7 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
     ): Promise<"authenticated" | "password_change_required"> => {
       setStatus("loading");
       try {
+        clearMessengerAliases();
         const result = await loginToMessenger(username, password);
         if ("password_change_required" in result) {
           setSession(null);
@@ -175,6 +186,7 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
           setStatus("password_change_required");
           return "password_change_required";
         }
+        await prepareMessengerAliases(result.user.id);
         setSession(result);
         setPasswordChange(null);
         setStatus("authenticated");
@@ -191,7 +203,9 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
     async (payload) => {
       setStatus("loading");
       try {
+        clearMessengerAliases();
         const authenticated = await registerInMessenger(payload);
+        await prepareMessengerAliases(authenticated.user.id);
         setSession(authenticated);
         setPasswordChange(null);
         setStatus("authenticated");
@@ -204,10 +218,14 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
   );
 
   const logout = useCallback(async () => {
-    await logoutFromMessenger();
-    setSession(null);
-    setPasswordChange(null);
-    setStatus("unauthenticated");
+    try {
+      await logoutFromMessenger();
+    } finally {
+      clearMessengerAliases();
+      setSession(null);
+      setPasswordChange(null);
+      setStatus("unauthenticated");
+    }
   }, []);
 
   const completePasswordChange = useCallback(
@@ -215,11 +233,13 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       if (!passwordChange) throw new Error("Сеанс смены пароля не найден");
       setStatus("loading");
       try {
+        clearMessengerAliases();
         const authenticated = await completeMessengerPasswordChange(
           passwordChange.change_token,
           password,
           passwordConfirmation,
         );
+        await prepareMessengerAliases(authenticated.user.id);
         setSession(authenticated);
         setPasswordChange(null);
         setStatus("authenticated");

@@ -56,7 +56,7 @@ export default function MessengerProfileScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
   const params = useLocalSearchParams<{ firstRun?: string }>();
-  const { session, isAuthenticated, refreshUser } = useMessengerAuth();
+  const { session, isAuthenticated, refreshUser, logout } = useMessengerAuth();
   const [displayName, setDisplayName] = useState(
     session?.user.display_name || "",
   );
@@ -76,6 +76,7 @@ export default function MessengerProfileScreen() {
   const [deletionAnswer, setDeletionAnswer] = useState("");
   const [deletionBusy, setDeletionBusy] = useState(false);
   const [deletionError, setDeletionError] = useState<string | null>(null);
+  const [logoutBusy, setLogoutBusy] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) router.replace("/messenger/register");
@@ -110,7 +111,10 @@ export default function MessengerProfileScreen() {
       .catch((loadError) => {
         if (active) {
           setRoomsError(
-            messengerErrorMessage(loadError, "Не удалось загрузить группы и чаты"),
+            messengerErrorMessage(
+              loadError,
+              "Не удалось загрузить группы и чаты",
+            ),
           );
         }
       })
@@ -209,6 +213,27 @@ export default function MessengerProfileScreen() {
     ]);
   };
 
+  const confirmLogout = () => {
+    if (logoutBusy) return;
+    Alert.alert(
+      "Выйти из учётной записи?",
+      "Для продолжения потребуется снова ввести логин и пароль.",
+      [
+        { text: "Отмена", style: "cancel" },
+        {
+          text: "Выйти",
+          style: "destructive",
+          onPress: () => {
+            setLogoutBusy(true);
+            void logout()
+              .then(() => router.replace("/messenger/register"))
+              .finally(() => setLogoutBusy(false));
+          },
+        },
+      ],
+    );
+  };
+
   const confirmClearCache = () => {
     Alert.alert(
       "Очистить кэш медиа?",
@@ -254,7 +279,9 @@ export default function MessengerProfileScreen() {
         latestSequence: room.last_message?.sequence || "",
         unreadCount: String(room.unread_count),
         memberCount:
-          typeof room.member_count === "number" ? String(room.member_count) : "",
+          typeof room.member_count === "number"
+            ? String(room.member_count)
+            : "",
         peerId: room.peer?.id || "",
         peerLastSeenAt: room.peer?.last_seen_at || "",
       },
@@ -269,7 +296,10 @@ export default function MessengerProfileScreen() {
       setRooms((current) => current.filter((item) => item.id !== room.id));
     } catch (leaveError) {
       setRoomsError(
-        messengerErrorMessage(leaveError, "Не удалось выйти из группы или чата"),
+        messengerErrorMessage(
+          leaveError,
+          "Не удалось выйти из группы или чата",
+        ),
       );
     } finally {
       setLeavingRoomId(null);
@@ -461,7 +491,9 @@ export default function MessengerProfileScreen() {
             </View>
             {roomsError && <Text style={styles.roomsError}>{roomsError}</Text>}
             {!roomsLoading && rooms.length === 0 ? (
-              <Text style={styles.emptyRoomsText}>Доступных групп и чатов пока нет.</Text>
+              <Text style={styles.emptyRoomsText}>
+                Доступных групп и чатов пока нет.
+              </Text>
             ) : (
               rooms.map((room, index) => (
                 <View
@@ -536,6 +568,33 @@ export default function MessengerProfileScreen() {
             )}
           </View>
 
+          <TouchableOpacity
+            style={styles.logoutCard}
+            onPress={confirmLogout}
+            disabled={logoutBusy}
+            accessibilityRole="button"
+            accessibilityLabel="Выйти из учётной записи"
+          >
+            <View style={styles.logoutIcon}>
+              {logoutBusy ? (
+                <ActivityIndicator size="small" color={colors.error} />
+              ) : (
+                <Icon name="log-out-outline" size={24} color={colors.error} />
+              )}
+            </View>
+            <View style={styles.logoutText}>
+              <Text style={styles.logoutTitle}>Выйти из учётной записи</Text>
+              <Text style={styles.logoutSubtitle}>
+                Текущий сеанс будет завершён на этом устройстве
+              </Text>
+            </View>
+            <Icon
+              name="chevron-forward"
+              size={20}
+              color={colors.textSecondary}
+            />
+          </TouchableOpacity>
+
           <View style={styles.dangerCard}>
             <View style={styles.dangerIcon}>
               <Icon name="trash-outline" size={24} color={colors.error} />
@@ -552,7 +611,9 @@ export default function MessengerProfileScreen() {
               onPress={openAccountDeletion}
               accessibilityRole="button"
             >
-              <Text style={styles.deleteProfileButtonText}>Удалить профиль</Text>
+              <Text style={styles.deleteProfileButtonText}>
+                Удалить профиль
+              </Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -574,7 +635,9 @@ export default function MessengerProfileScreen() {
             <View style={styles.deletionDialogIcon}>
               <Icon name="warning-outline" size={30} color={colors.error} />
             </View>
-            <Text style={styles.deletionDialogTitle}>Удалить профиль навсегда?</Text>
+            <Text style={styles.deletionDialogTitle}>
+              Удалить профиль навсегда?
+            </Text>
             <Text style={styles.deletionDialogText}>
               Это действие необратимо. Для подтверждения решите пример и введите
               ответ:
@@ -618,7 +681,9 @@ export default function MessengerProfileScreen() {
                 {deletionBusy ? (
                   <ActivityIndicator size="small" color={colors.white} />
                 ) : (
-                  <Text style={styles.confirmDeletionText}>Удалить навсегда</Text>
+                  <Text style={styles.confirmDeletionText}>
+                    Удалить навсегда
+                  </Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -767,6 +832,35 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     backgroundColor: "#FFF8F7",
   },
+  logoutCard: {
+    minHeight: 76,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginHorizontal: 18,
+    marginTop: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 18,
+    backgroundColor: colors.surface,
+  },
+  logoutIcon: {
+    width: 46,
+    height: 46,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 15,
+    backgroundColor: "#FDECEA",
+  },
+  logoutText: { flex: 1, minWidth: 0 },
+  logoutTitle: { color: colors.error, fontSize: 15, fontWeight: "800" },
+  logoutSubtitle: {
+    marginTop: 3,
+    color: colors.textSecondary,
+    fontSize: 11,
+    lineHeight: 16,
+  },
   dangerIcon: {
     width: 46,
     height: 46,
@@ -793,7 +887,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: colors.surface,
   },
-  deleteProfileButtonText: { color: colors.error, fontSize: 14, fontWeight: "800" },
+  deleteProfileButtonText: {
+    color: colors.error,
+    fontSize: 14,
+    fontWeight: "800",
+  },
   modalBackdrop: {
     flex: 1,
     alignItems: "center",
