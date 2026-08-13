@@ -472,20 +472,20 @@ export function getMessengerContactAliases() {
   return messengerRequest<MessengerContactAlias[]>("/chat/contact-aliases");
 }
 
-export function getMessengerDirectPeerProfile(roomId: string) {
+export function getMessengerRoomMemberProfile(roomId: string, userId: string) {
   return messengerRequest<MessengerContactProfile>(
-    `/chat/rooms/${roomId}/peer-profile`,
+    `/chat/rooms/${roomId}/members/${userId}/profile`,
   );
 }
 
-export async function setMessengerDirectPeerAlias(
+export async function setMessengerRoomMemberAlias(
   roomId: string,
   targetUserId: string,
   ownerUserId: string,
   alias: string,
 ) {
   const profile = await messengerRequest<MessengerContactProfile>(
-    `/chat/rooms/${roomId}/peer-alias`,
+    `/chat/rooms/${roomId}/members/${targetUserId}/alias`,
     { method: "PUT", body: JSON.stringify({ alias }) },
   );
   const normalizedAlias = alias.trim() || null;

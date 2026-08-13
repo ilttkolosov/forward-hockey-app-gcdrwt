@@ -133,6 +133,17 @@ export default function MessengerGroupSettingsScreen() {
     [contacts, memberIds, settings?.room.team_id],
   );
 
+  const openParticipantProfile = (member: GroupParticipant) => {
+    if (member.id === session?.user.id) {
+      router.push("/messenger/profile");
+      return;
+    }
+    router.push({
+      pathname: "/messenger/contact/[id]",
+      params: { id: member.id, roomId },
+    });
+  };
+
   const chooseAvatar = async () => {
     if (!settings?.can_manage_profile || saving) return;
     try {
@@ -456,24 +467,36 @@ export default function MessengerGroupSettingsScreen() {
               </View>
               {participants.map((member) => (
                 <View key={member.id} style={styles.memberRow}>
-                  <AuthenticatedAvatar
-                    displayName={member.display_name}
-                    avatarUrl={member.avatar_url}
-                    accessToken={session.access_token}
-                    size={44}
-                  />
-                  <View style={styles.memberText}>
-                    <Text style={styles.memberName} numberOfLines={1}>
-                      {member.display_name}
-                    </Text>
-                    <Text style={styles.memberRole}>
-                      {member.is_admin
-                        ? "Администратор · создатель"
-                        : member.id === session.user.id
-                          ? "Участник · Вы"
-                          : "Участник"}
-                    </Text>
-                  </View>
+                  <TouchableOpacity
+                    style={styles.memberProfileButton}
+                    onPress={() => openParticipantProfile(member)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Открыть профиль ${member.display_name}`}
+                  >
+                    <AuthenticatedAvatar
+                      displayName={member.display_name}
+                      avatarUrl={member.avatar_url}
+                      accessToken={session.access_token}
+                      size={44}
+                    />
+                    <View style={styles.memberText}>
+                      <Text style={styles.memberName} numberOfLines={1}>
+                        {member.display_name}
+                      </Text>
+                      <Text style={styles.memberRole}>
+                        {member.is_admin
+                          ? "Администратор · создатель"
+                          : member.id === session.user.id
+                            ? "Участник · Вы"
+                            : "Участник"}
+                      </Text>
+                    </View>
+                    <Icon
+                      name="chevron-forward"
+                      size={18}
+                      color={colors.textSecondary}
+                    />
+                  </TouchableOpacity>
                   {settings.can_manage_members && !member.is_admin ? (
                     memberBusy === member.id ? (
                       <ActivityIndicator color={colors.primary} />
@@ -704,9 +727,17 @@ const styles = StyleSheet.create({
     minHeight: 64,
     flexDirection: "row",
     alignItems: "center",
-    gap: 11,
+    gap: 4,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
+  },
+  memberProfileButton: {
+    minHeight: 64,
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 11,
   },
   memberText: { flex: 1, minWidth: 0 },
   memberName: { color: colors.text, fontSize: 14, fontWeight: "800" },

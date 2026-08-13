@@ -1,7 +1,16 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,10 +24,10 @@ import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
 import type { MessengerContactProfile } from "../../../features/messenger/types";
 import {
-  getMessengerDirectPeerProfile,
+  getMessengerRoomMemberProfile,
   getMessengerRoomMembers,
   messengerErrorMessage,
-  setMessengerDirectPeerAlias,
+  setMessengerRoomMemberAlias,
 } from "../../../services/messengerApi";
 import { subscribeMessengerRealtime } from "../../../services/messengerRealtime";
 import { colors } from "../../../styles/commonStyles";
@@ -50,6 +59,7 @@ export default function MessengerContactProfileScreen() {
   const params = useLocalSearchParams<{ id: string; roomId?: string }>();
   const { session, isAuthenticated } = useMessengerAuth();
   const roomId = params.roomId || "";
+  const scrollRef = useRef<ScrollView>(null);
   const [profile, setProfile] = useState<MessengerContactProfile | null>(null);
   const [alias, setAlias] = useState("");
   const [online, setOnline] = useState(false);
@@ -64,7 +74,7 @@ export default function MessengerContactProfileScreen() {
     setError(null);
     try {
       const [nextProfile, members] = await Promise.all([
-        getMessengerDirectPeerProfile(roomId),
+        getMessengerRoomMemberProfile(roomId, params.id),
         getMessengerRoomMembers(roomId),
       ]);
       if (nextProfile.id !== params.id) {
@@ -105,6 +115,15 @@ export default function MessengerContactProfileScreen() {
     }, [isAuthenticated, load, params.id, router]),
   );
 
+  useEffect(() => {
+    const subscription = Keyboard.addListener("keyboardDidShow", () => {
+      requestAnimationFrame(() =>
+        scrollRef.current?.scrollToEnd({ animated: true }),
+      );
+    });
+    return () => subscription.remove();
+  }, []);
+
   const normalizedAlias = alias.trim();
   const aliasChanged = normalizedAlias !== (profile?.alias || "");
   const canSave = Boolean(profile && aliasChanged && !saving);
@@ -119,7 +138,7 @@ export default function MessengerContactProfileScreen() {
     setError(null);
     setSaved(false);
     try {
-      const updated = await setMessengerDirectPeerAlias(
+      const updated = await setMessengerRoomMemberAlias(
         roomId,
         profile.id,
         session.user.id,
@@ -153,122 +172,137 @@ export default function MessengerContactProfileScreen() {
         </View>
       </View>
 
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
-      ) : profile && session ? (
-        <ScrollView
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-        >
-          <View style={styles.profileCard}>
-            <AuthenticatedAvatar
-              displayName={profile.display_name}
-              avatarUrl={profile.avatar_url}
-              accessToken={session.access_token}
-              size={132}
-            />
-            <Text style={styles.name}>{profile.display_name}</Text>
-            {profile.alias ? (
-              <Text style={styles.originalName}>
-                Настоящее имя: {profile.original_display_name}
-              </Text>
-            ) : null}
-            <Text style={styles.username}>@{profile.username}</Text>
-            <View style={styles.statusRow}>
-              <View
-                style={[
-                  styles.statusDot,
-                  online ? styles.statusDotOnline : styles.statusDotOffline,
-                ]}
-              />
-              <Text style={styles.statusText}>
-                {online ? "В сети" : lastSeenText(lastSeenAt)}
-              </Text>
-            </View>
-            <Text style={styles.team}>{profile.team_name}</Text>
-            <View style={styles.roles}>
-              {roleLabels.length ? (
-                roleLabels.map((role) => (
-                  <View key={role} style={styles.roleChip}>
-                    <Text style={styles.roleText}>{role}</Text>
-                  </View>
-                ))
-              ) : (
-                <Text style={styles.noRoles}>
-                  Роли в этой команде не назначены
-                </Text>
-              )}
-            </View>
+      <KeyboardAvoidingView
+        style={styles.body}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        {loading ? (
+          <View style={styles.center}>
+            <ActivityIndicator size="large" color={colors.primary} />
           </View>
-
-          <View style={styles.aliasCard}>
-            <Text style={styles.sectionTitle}>Псевдоним</Text>
-            <Text style={styles.helper}>
-              Он виден только вам и заменяет имя этого пользователя во всех
-              чатах, группах и меню.
-            </Text>
-            <TextInput
-              style={styles.input}
-              value={alias}
-              onChangeText={(value) => {
-                setAlias(value);
-                setSaved(false);
-                setError(null);
-              }}
-              maxLength={80}
-              placeholder={profile.original_display_name}
-              autoCapitalize="words"
-              returnKeyType="done"
-              onSubmitEditing={() => void saveAlias()}
-            />
-            <Text style={styles.inputHint}>
-              Оставьте поле пустым, чтобы снова показывать настоящее имя.
-            </Text>
-            {saved ? (
-              <Text style={styles.saved}>Псевдоним сохранён</Text>
-            ) : null}
-            {error ? <Text style={styles.error}>{error}</Text> : null}
-            <TouchableOpacity
-              style={[styles.saveButton, !canSave && styles.disabled]}
-              onPress={() => void saveAlias()}
-              disabled={!canSave}
-            >
-              {saving ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <Text style={styles.saveText}>
-                  {normalizedAlias
-                    ? "Сохранить псевдоним"
-                    : "Удалить псевдоним"}
+        ) : profile && session ? (
+          <ScrollView
+            ref={scrollRef}
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={
+              Platform.OS === "ios" ? "interactive" : "on-drag"
+            }
+          >
+            <View style={styles.profileCard}>
+              <AuthenticatedAvatar
+                displayName={profile.display_name}
+                avatarUrl={profile.avatar_url}
+                accessToken={session.access_token}
+                size={132}
+              />
+              <Text style={styles.name}>{profile.display_name}</Text>
+              {profile.alias ? (
+                <Text style={styles.originalName}>
+                  Настоящее имя: {profile.original_display_name}
                 </Text>
-              )}
+              ) : null}
+              <Text style={styles.username}>@{profile.username}</Text>
+              <View style={styles.statusRow}>
+                <View
+                  style={[
+                    styles.statusDot,
+                    online ? styles.statusDotOnline : styles.statusDotOffline,
+                  ]}
+                />
+                <Text style={styles.statusText}>
+                  {online ? "В сети" : lastSeenText(lastSeenAt)}
+                </Text>
+              </View>
+              <Text style={styles.team}>{profile.team_name}</Text>
+              <View style={styles.roles}>
+                {roleLabels.length ? (
+                  roleLabels.map((role) => (
+                    <View key={role} style={styles.roleChip}>
+                      <Text style={styles.roleText}>{role}</Text>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={styles.noRoles}>
+                    Роли в этой команде не назначены
+                  </Text>
+                )}
+              </View>
+            </View>
+
+            <View style={styles.aliasCard}>
+              <Text style={styles.sectionTitle}>Псевдоним</Text>
+              <Text style={styles.helper}>
+                Он виден только вам и заменяет имя этого пользователя во всех
+                чатах, группах и меню.
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={alias}
+                onChangeText={(value) => {
+                  setAlias(value);
+                  setSaved(false);
+                  setError(null);
+                }}
+                maxLength={80}
+                placeholder={profile.original_display_name}
+                autoCapitalize="words"
+                returnKeyType="done"
+                onFocus={() =>
+                  requestAnimationFrame(() =>
+                    scrollRef.current?.scrollToEnd({ animated: true }),
+                  )
+                }
+                onSubmitEditing={() => void saveAlias()}
+              />
+              <Text style={styles.inputHint}>
+                Оставьте поле пустым, чтобы снова показывать настоящее имя.
+              </Text>
+              {saved ? (
+                <Text style={styles.saved}>Псевдоним сохранён</Text>
+              ) : null}
+              {error ? <Text style={styles.error}>{error}</Text> : null}
+              <TouchableOpacity
+                style={[styles.saveButton, !canSave && styles.disabled]}
+                onPress={() => void saveAlias()}
+                disabled={!canSave}
+              >
+                {saving ? (
+                  <ActivityIndicator color={colors.white} />
+                ) : (
+                  <Text style={styles.saveText}>
+                    {normalizedAlias
+                      ? "Сохранить псевдоним"
+                      : "Удалить псевдоним"}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        ) : (
+          <View style={styles.center}>
+            <Icon
+              name="person-circle-outline"
+              size={64}
+              color={colors.textSecondary}
+            />
+            <Text style={styles.error}>{error || "Профиль не найден"}</Text>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={() => void load()}
+            >
+              <Text style={styles.retryText}>Повторить</Text>
             </TouchableOpacity>
           </View>
-        </ScrollView>
-      ) : (
-        <View style={styles.center}>
-          <Icon
-            name="person-circle-outline"
-            size={64}
-            color={colors.textSecondary}
-          />
-          <Text style={styles.error}>{error || "Профиль не найден"}</Text>
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={() => void load()}
-          >
-            <Text style={styles.retryText}>Повторить</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+        )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.backgroundAlt },
+  body: { flex: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
