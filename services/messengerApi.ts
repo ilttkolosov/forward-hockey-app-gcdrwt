@@ -74,6 +74,10 @@ interface MessengerMessagesResponse {
   };
 }
 
+interface MessengerRoomMessagesSyncResponse extends MessengerMessagesResponse {
+  reconciled_items: MessengerMessage[];
+}
+
 export class MessengerApiError extends Error {
   constructor(
     message: string,
@@ -595,7 +599,7 @@ export function getMessengerMessages(
   } = {},
 ) {
   const query = new URLSearchParams();
-  query.set("limit", String(options.limit ?? 100));
+  query.set("limit", String(options.limit ?? 20));
   if (options.cursor) query.set("cursor", options.cursor);
   if (options.direction) query.set("direction", options.direction);
   const path = `/chat/rooms/${roomId}/messages?${query.toString()}`;
@@ -612,6 +616,56 @@ export function getMessengerMessages(
     () => {
       if (messengerMessageRequests.get(path) === request) {
         messengerMessageRequests.delete(path);
+      }
+    },
+  );
+  return request;
+}
+
+const messengerRoomMessageSyncRequests = new Map<
+  string,
+  Promise<MessengerRoomMessagesSyncResponse>
+>();
+
+/**
+ * Advances one room cursor and refreshes the exact cached messages currently
+ * shown by the client. The server performs both operations after one access
+ * check, which replaces the old concurrent `after` + `latest 100` requests.
+ */
+export function syncMessengerRoomMessages(
+  roomId: string,
+  options: {
+    afterSequence?: string;
+    messageIds?: readonly string[];
+    limit?: number;
+  } = {},
+) {
+  const messageIds = [...new Set(options.messageIds ?? [])]
+    .filter(Boolean)
+    .slice(0, 50)
+    .sort();
+  const payload = {
+    after_sequence: options.afterSequence,
+    message_ids: messageIds,
+    limit: options.limit ?? 20,
+  };
+  const key = `${roomId}:${payload.after_sequence || ""}:${payload.limit}:${messageIds.join(",")}`;
+  const running = messengerRoomMessageSyncRequests.get(key);
+  if (running) return running;
+  const request = messengerRequest<MessengerRoomMessagesSyncResponse>(
+    `/chat/rooms/${roomId}/messages/sync`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+  messengerRoomMessageSyncRequests.set(key, request);
+  void request.then(
+    () => {
+      if (messengerRoomMessageSyncRequests.get(key) === request) {
+        messengerRoomMessageSyncRequests.delete(key);
+      }
+    },
+    () => {
+      if (messengerRoomMessageSyncRequests.get(key) === request) {
+        messengerRoomMessageSyncRequests.delete(key);
       }
     },
   );

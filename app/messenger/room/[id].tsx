@@ -106,6 +106,7 @@ import {
   sendMessengerMedia,
   sendMessengerText,
   setMessengerReaction,
+  syncMessengerRoomMessages,
   updateMessengerMessage,
 } from "../../../services/messengerApi";
 import { queueMessengerReadReceipt } from "../../../services/messengerReadSync";
@@ -745,6 +746,7 @@ export default function MessengerRoomScreen() {
   const listRef = useRef<FlatList<MessengerMessage>>(null);
   const inputRef = useRef<TextInput>(null);
   const messagesRef = useRef<MessengerMessage[]>([]);
+  const viewableServerMessageIds = useRef<string[]>([]);
   const editingMessageRef = useRef<MessengerMessage | null>(null);
   const refreshRunning = useRef(false);
   const flushRunning = useRef(false);
@@ -1207,6 +1209,28 @@ export default function MessengerRoomScreen() {
             reactionMutationIds.current,
           ),
         );
+        void syncMessengerRoomMessages(roomId, {
+          messageIds: cached
+            .filter((message) => !message.pending)
+            .map((message) => message.id),
+        })
+          .then(async (response) => {
+            if (!response.reconciled_items.length) return;
+            setMessages((current) =>
+              reconcileMessengerMessageUpdates(
+                current,
+                response.reconciled_items,
+                reactionMutationIds.current,
+              ),
+            );
+            await cacheMessengerMessages(db, response.reconciled_items);
+          })
+          .catch((error) =>
+            messengerLog("debug", "room.history.reconciliation_deferred", {
+              room_id: roomId,
+              message: messengerErrorMessage(error),
+            }),
+          );
         return;
       }
       if (await isMessengerRoomHistoryComplete(db, roomId)) return;
@@ -1263,17 +1287,33 @@ export default function MessengerRoomScreen() {
           mergeMessengerMessages(current, cached, reactionMutationIds.current),
         );
       }
-      if (cached.length >= 20 || !remoteHasMoreNewerMessages.current) return;
-
+      const cachedMessageIds = cached
+        .filter((message) => !message.pending)
+        .map((message) => message.id);
       const cursor = cached.at(-1)?.sequence ?? latest.sequence;
-      const remote = await getMessengerMessages(roomId, {
-        cursor,
-        direction: "after",
-        limit: 20 - cached.length,
+      const shouldFetchNewer =
+        cached.length < 20 && remoteHasMoreNewerMessages.current;
+      if (!shouldFetchNewer && !cachedMessageIds.length) return;
+      const remote = await syncMessengerRoomMessages(roomId, {
+        afterSequence: shouldFetchNewer ? cursor : undefined,
+        messageIds: cachedMessageIds,
+        limit: Math.max(1, 20 - cached.length),
       });
-      remoteHasMoreNewerMessages.current = remote.page.has_more;
+      if (shouldFetchNewer) {
+        remoteHasMoreNewerMessages.current = remote.page.has_more;
+      }
       if (remote.page.latest_sequence) {
         latestKnownSequence.current = remote.page.latest_sequence;
+      }
+      if (remote.reconciled_items.length) {
+        await cacheMessengerMessages(db, remote.reconciled_items);
+        setMessages((current) =>
+          reconcileMessengerMessageUpdates(
+            current,
+            remote.reconciled_items,
+            reactionMutationIds.current,
+          ),
+        );
       }
       if (remote.items.length) {
         await cacheMessengerMessages(db, remote.items);
@@ -1306,6 +1346,7 @@ export default function MessengerRoomScreen() {
       });
       let localLatestSequence: string | null = null;
       let cachedLatestSequence: string | null = null;
+      let reconciliationMessageIds: string[] = [];
       let localSnapshotReady = false;
       let localReadStateFallback: string | null = null;
       let expectedUnreadCount = Number(params.unreadCount || 0);
@@ -1400,6 +1441,9 @@ export default function MessengerRoomScreen() {
             localSnapshotReady = true;
           }
           const localConfirmed = local.filter((message) => !message.pending);
+          reconciliationMessageIds = localConfirmed.map(
+            (message) => message.id,
+          );
           localLatestSequence = localConfirmed.at(-1)?.sequence ?? null;
           messengerLog("info", "room.cache.first_window_ready", {
             room_id: roomId,
@@ -1505,6 +1549,17 @@ export default function MessengerRoomScreen() {
           ? cachedLatestSequence
           : (await loadCachedMessengerMessageBounds(db, roomId))
               .latest_sequence || latestKnownSequence.current;
+        if (!initial) {
+          const visibleIds = viewableServerMessageIds.current;
+          reconciliationMessageIds = (
+            visibleIds.length
+              ? visibleIds
+              : messagesRef.current
+                  .filter((message) => !message.pending)
+                  .slice(-20)
+                  .map((message) => message.id)
+          ).slice(0, 50);
+        }
         const visibleConfirmedTail = initial
           ? localLatestSequence
           : messagesRef.current.filter((message) => !message.pending).at(-1)
@@ -1523,36 +1578,29 @@ export default function MessengerRoomScreen() {
         let syncDirection: "after" | "latest" = "latest";
 
         if (reconciliationCursor) {
-          // Reconcile strictly after SQLite's newest confirmed sequence. One
-          // small page is enough for this pass; subsequent realtime events or
-          // reconnects continue from the advanced cursor without repainting
-          // old cells.
+          // One request advances the SQLite cursor and refreshes the exact
+          // messages visible on this phone. Edits and tombstones keep their
+          // sequence, so they are selected by id rather than by rereading an
+          // arbitrary 100-message tail.
           syncDirection = "after";
-          const [page, recent] = await Promise.all([
-            getMessengerMessages(roomId, {
-              cursor: reconciliationCursor,
-              direction: "after",
-              limit: 20,
-            }),
-            // Sequence cursors discover newly created messages, but an edit or
-            // deletion keeps its original sequence. Re-read a bounded recent
-            // window so a mutation missed while the socket was disconnected
-            // is still repaired on open/reconnect/poll.
-            getMessengerMessages(roomId, { limit: 100 }),
-          ]);
+          const page = await syncMessengerRoomMessages(roomId, {
+            afterSequence: reconciliationCursor,
+            messageIds: reconciliationMessageIds,
+            limit: 20,
+          });
           receivedMessageCount = page.items.length;
-          reconciledMessageCount = recent.items.length;
+          reconciledMessageCount = page.reconciled_items.length;
           remoteHasMoreNewerMessages.current = page.page.has_more;
           await applyRemoteMessages(page.items, remoteIsContiguousWithFeed);
-          if (recent.items.length) {
+          if (page.reconciled_items.length) {
             setMessages((current) =>
               reconcileMessengerMessageUpdates(
                 current,
-                recent.items,
+                page.reconciled_items,
                 reactionMutationIds.current,
               ),
             );
-            await cacheMessengerMessages(db, recent.items);
+            await cacheMessengerMessages(db, page.reconciled_items);
           }
           if (page.page.latest_sequence) {
             latestSequence = page.page.latest_sequence;
@@ -1757,6 +1805,9 @@ export default function MessengerRoomScreen() {
           .filter((token) => token.isViewable)
           .map((token) => token.item.client_message_id),
       );
+      viewableServerMessageIds.current = viewableItems
+        .filter((token) => token.isViewable && !token.item.pending)
+        .map((token) => token.item.id);
       setViewableMessageIds((current) =>
         equalStringSets(current, nextViewableMessageIds)
           ? current
@@ -1851,7 +1902,8 @@ export default function MessengerRoomScreen() {
       (message, index, candidates): message is MessengerMessage =>
         Boolean(message) &&
         candidates.findIndex(
-          (candidate) => candidate?.client_message_id === message?.client_message_id,
+          (candidate) =>
+            candidate?.client_message_id === message?.client_message_id,
         ) === index,
     );
     prefetchMessengerImages(
@@ -2219,6 +2271,7 @@ export default function MessengerRoomScreen() {
       return () => {
         setRoomScreenActive(false);
         setViewableMessageIds(new Set());
+        viewableServerMessageIds.current = [];
         cancelAnimationFrame(roomDetailsFrame);
         setMessengerActiveRoom(null);
         unsubscribe();

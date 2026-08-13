@@ -4,6 +4,7 @@ import {
   messengerErrorMessage,
 } from "../../services/messengerApi";
 import { messengerLog } from "../../services/messengerLogger";
+import { getMessengerActiveRoomId } from "../../services/messengerRealtime";
 import {
   cacheMessengerMessages,
   loadCachedMessengerMessageBounds,
@@ -11,13 +12,10 @@ import {
 import type { MessengerRoom } from "./types";
 
 const MAX_CATCH_UP_PAGES_PER_PASS = 5;
-const CATCH_UP_PAGE_SIZE = 100;
-const WARMUP_CONCURRENCY = 2;
+const CATCH_UP_PAGE_SIZE = 50;
+const WARMUP_CONCURRENCY = 1;
 
-const activeWarmups = new WeakMap<
-  SQLiteDatabase,
-  Map<string, Promise<void>>
->();
+const activeWarmups = new WeakMap<SQLiteDatabase, Map<string, Promise<void>>>();
 
 function compareSequence(left: string, right: string): number {
   const normalizedLeft = left.replace(/^0+/, "") || "0";
@@ -49,6 +47,7 @@ export function warmMessengerRoomWindow(
 ): Promise<void> {
   const targetSequence = room.last_message?.sequence;
   if (!targetSequence) return Promise.resolve();
+  if (getMessengerActiveRoomId() === room.id) return Promise.resolve();
 
   const warmups = databaseWarmups(db);
   const running = warmups.get(room.id);
@@ -64,6 +63,10 @@ export function warmMessengerRoomWindow(
     ) {
       return;
     }
+    // Foreground room reconciliation has priority over speculative cache
+    // warming. Re-check after SQLite because the user may have opened this
+    // room while the bounds query was queued.
+    if (getMessengerActiveRoomId() === room.id) return;
 
     const source = localLatestSequence ? "catch_up" : "missing_window";
     messengerLog("debug", "room.cache.warm.started", {
@@ -136,7 +139,7 @@ export function warmMessengerRoomWindow(
   return task;
 }
 
-/** Warms rooms sequentially in two lanes to avoid flooding a weak server. */
+/** Warms rooms sequentially in one lane to avoid competing with foreground sync. */
 export async function warmMessengerRoomWindows(
   db: SQLiteDatabase,
   rooms: MessengerRoom[],
@@ -148,6 +151,7 @@ export async function warmMessengerRoomWindows(
       const room = candidates[nextIndex];
       nextIndex += 1;
       if (!room) continue;
+      if (getMessengerActiveRoomId() === room.id) continue;
       try {
         await warmMessengerRoomWindow(db, room);
       } catch {

@@ -13,7 +13,10 @@ import {
 } from "./repository";
 import { warmMessengerRoomWindows } from "./cacheWarmup";
 import { flushMessengerReadReceipts } from "../../services/messengerReadSync";
-import { subscribeMessengerRealtime } from "../../services/messengerRealtime";
+import {
+  getMessengerActiveRoomId,
+  subscribeMessengerRealtime,
+} from "../../services/messengerRealtime";
 import { messengerLog } from "../../services/messengerLogger";
 import { prefetchMessengerImages } from "../../services/messengerMediaCache";
 import {
@@ -26,9 +29,13 @@ import {
 } from "../../services/messengerPush";
 import { remotePushNotificationsSupported } from "../../services/runtimeEnvironment";
 import {
+  refreshMessengerUnreadFromCache,
   setMessengerUnreadCount,
   syncMessengerUnreadFromRooms,
 } from "../../services/messengerUnread";
+
+const BACKGROUND_ROOMS_SYNC_DEBOUNCE_MS = 250;
+const BACKGROUND_ROOMS_SYNC_MIN_INTERVAL_MS = 10_000;
 
 /**
  * Keeps the messenger SQLite cache alive independently from any screen. A
@@ -45,6 +52,9 @@ export default function MessengerPersistenceBridge() {
     }
     let active = true;
     let roomsSyncRunning = false;
+    let roomsSyncQueued = false;
+    let roomsSyncTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastRoomsSyncStartedAt = 0;
     const synchronizeAliases = async () => {
       try {
         const remoteAliases = await getMessengerContactAliases();
@@ -57,14 +67,15 @@ export default function MessengerPersistenceBridge() {
         });
       }
     };
-    const synchronizeRooms = async (remote: boolean) => {
-      if (roomsSyncRunning) return;
+    const synchronizeRooms = async () => {
+      if (roomsSyncRunning) {
+        roomsSyncQueued = true;
+        return;
+      }
       roomsSyncRunning = true;
+      lastRoomsSyncStartedAt = Date.now();
       try {
-        const cached = await loadCachedMessengerRooms(db);
-        if (active) await syncMessengerUnreadFromRooms(cached);
-        void warmMessengerRoomWindows(db, cached);
-        if (!remote) return;
+        await synchronizeAliases();
         const rooms = await getMessengerRooms();
         const reconciled = await cacheMessengerRooms(db, rooms);
         if (active) await syncMessengerUnreadFromRooms(reconciled);
@@ -75,9 +86,54 @@ export default function MessengerPersistenceBridge() {
         });
       } finally {
         roomsSyncRunning = false;
+        if (roomsSyncQueued && active) {
+          roomsSyncQueued = false;
+          scheduleRoomsSynchronization(true);
+        }
       }
     };
-    void synchronizeAliases().then(() => synchronizeRooms(true));
+    const scheduleRoomsSynchronization = (force = false) => {
+      if (!active) return;
+      if (roomsSyncRunning) {
+        // `connection.ready` and `sync.required` are emitted together. A
+        // synchronization already in progress covers both invalidations; only
+        // an actual room mutation must schedule a follow-up pass.
+        if (force) roomsSyncQueued = true;
+        return;
+      }
+      const elapsed = Date.now() - lastRoomsSyncStartedAt;
+      const minimumDelay = force
+        ? 0
+        : Math.max(0, BACKGROUND_ROOMS_SYNC_MIN_INTERVAL_MS - elapsed);
+      const activeRoomDelay =
+        !force && getMessengerActiveRoomId()
+          ? BACKGROUND_ROOMS_SYNC_MIN_INTERVAL_MS
+          : 0;
+      const delay = Math.max(
+        BACKGROUND_ROOMS_SYNC_DEBOUNCE_MS,
+        minimumDelay,
+        activeRoomDelay,
+      );
+      if (roomsSyncTimer) {
+        if (!force) return;
+        clearTimeout(roomsSyncTimer);
+      }
+      roomsSyncTimer = setTimeout(() => {
+        roomsSyncTimer = null;
+        void synchronizeRooms();
+      }, delay);
+    };
+    void loadCachedMessengerRooms(db)
+      .then(async (cached) => {
+        if (active) await syncMessengerUnreadFromRooms(cached);
+        void warmMessengerRoomWindows(db, cached);
+      })
+      .catch((error) =>
+        messengerLog("debug", "rooms.cached_sync.deferred", {
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    scheduleRoomsSynchronization();
     if (remotePushNotificationsSupported) {
       void syncMessengerPushRegistration().catch((error) =>
         messengerLog("debug", "push.registration.sync_deferred", {
@@ -89,7 +145,7 @@ export default function MessengerPersistenceBridge() {
       message: Parameters<typeof cacheIncomingMessengerMessage>[1],
     ) => {
       void cacheIncomingMessengerMessage(db, message, session.user.id)
-        .then(() => synchronizeRooms(false))
+        .then(() => refreshMessengerUnreadFromCache(db))
         .catch((error) =>
           messengerLog("warn", "realtime.message.cache_failed", {
             room_id: message.room_id,
@@ -119,7 +175,7 @@ export default function MessengerPersistenceBridge() {
           session.access_token,
         );
         void cacheUpdatedMessengerMessage(db, event.message)
-          .then(() => synchronizeRooms(false))
+          .then(() => refreshMessengerUnreadFromCache(db))
           .catch((error) =>
             messengerLog("warn", "realtime.message_update.cache_failed", {
               room_id: event.message.room_id,
@@ -139,9 +195,9 @@ export default function MessengerPersistenceBridge() {
         event.type === "sync.required"
       ) {
         void flushMessengerReadReceipts(db);
-        void synchronizeAliases().then(() => synchronizeRooms(true));
+        scheduleRoomsSynchronization();
       } else if (event.type === "room.updated") {
-        void synchronizeRooms(true);
+        scheduleRoomsSynchronization(true);
       }
     });
     const appStateSubscription = AppState.addEventListener(
@@ -149,7 +205,7 @@ export default function MessengerPersistenceBridge() {
       (state) => {
         if (state === "active") {
           void flushMessengerReadReceipts(db);
-          void synchronizeAliases().then(() => synchronizeRooms(true));
+          scheduleRoomsSynchronization();
           if (remotePushNotificationsSupported) {
             void syncMessengerPushRegistration().catch(() => undefined);
           }
@@ -167,6 +223,7 @@ export default function MessengerPersistenceBridge() {
       : null;
     return () => {
       active = false;
+      if (roomsSyncTimer) clearTimeout(roomsSyncTimer);
       unsubscribeRealtime();
       appStateSubscription.remove();
       tokenSubscription?.remove();
