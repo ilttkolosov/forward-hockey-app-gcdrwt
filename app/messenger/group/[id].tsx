@@ -20,6 +20,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../../components/Icon";
 import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
+import MessengerAvatarViewer from "../../../features/messenger/MessengerAvatarViewer";
 import type {
   MessengerContact,
   MessengerRoomMember,
@@ -70,6 +71,7 @@ export default function MessengerGroupSettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [memberBusy, setMemberBusy] = useState<string | null>(null);
   const [addVisible, setAddVisible] = useState(false);
+  const [avatarVisible, setAvatarVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -360,20 +362,37 @@ export default function MessengerGroupSettingsScreen() {
           >
             <View style={styles.card}>
               <View style={styles.avatarWrap}>
-                {selectedAvatar ? (
-                  <Image
-                    source={{ uri: selectedAvatar.uri }}
-                    style={styles.avatarPreview}
-                    contentFit="cover"
-                  />
-                ) : (
-                  <AuthenticatedAvatar
-                    displayName={settings.room.title}
-                    avatarUrl={settings.room.avatar_url}
-                    accessToken={session.access_token}
-                    size={108}
-                  />
-                )}
+                <TouchableOpacity
+                  onPress={() => setAvatarVisible(true)}
+                  disabled={!selectedAvatar && !settings.room.avatar_url}
+                  activeOpacity={0.86}
+                  accessibilityRole={
+                    selectedAvatar || settings.room.avatar_url
+                      ? "button"
+                      : undefined
+                  }
+                  accessibilityLabel={`Фотография группы ${settings.room.title}`}
+                  accessibilityHint={
+                    selectedAvatar || settings.room.avatar_url
+                      ? "Открывает фотографию на весь экран"
+                      : undefined
+                  }
+                >
+                  {selectedAvatar ? (
+                    <Image
+                      source={{ uri: selectedAvatar.uri }}
+                      style={styles.avatarPreview}
+                      contentFit="cover"
+                    />
+                  ) : (
+                    <AuthenticatedAvatar
+                      displayName={settings.room.title}
+                      avatarUrl={settings.room.avatar_url}
+                      accessToken={session.access_token}
+                      size={108}
+                    />
+                  )}
+                </TouchableOpacity>
               </View>
               <TouchableOpacity
                 style={[
@@ -601,6 +620,16 @@ export default function MessengerGroupSettingsScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+      {settings ? (
+        <MessengerAvatarViewer
+          visible={avatarVisible}
+          title={settings.room.title}
+          avatarUrl={settings.room.avatar_url}
+          localUri={selectedAvatar?.uri}
+          accessToken={session.access_token}
+          onClose={() => setAvatarVisible(false)}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }

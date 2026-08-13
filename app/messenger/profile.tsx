@@ -20,6 +20,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
+import MessengerAvatarViewer from "../../features/messenger/MessengerAvatarViewer";
 import { clearMessengerLocalData } from "../../features/messenger/repository";
 import type { MessengerRoom } from "../../features/messenger/types";
 import {
@@ -77,6 +78,7 @@ export default function MessengerProfileScreen() {
   const [deletionBusy, setDeletionBusy] = useState(false);
   const [deletionError, setDeletionError] = useState<string | null>(null);
   const [logoutBusy, setLogoutBusy] = useState(false);
+  const [avatarVisible, setAvatarVisible] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) router.replace("/messenger/register");
@@ -390,20 +392,37 @@ export default function MessengerProfileScreen() {
 
           <View style={styles.card}>
             <View style={styles.avatarWrap}>
-              {selectedAsset ? (
-                <Image
-                  source={selectedAsset.uri}
-                  style={styles.avatarPreview}
-                  contentFit="cover"
-                />
-              ) : (
-                <AuthenticatedAvatar
-                  displayName={session.user.display_name}
-                  avatarUrl={session.user.avatar_url}
-                  accessToken={session.access_token}
-                  size={112}
-                />
-              )}
+              <TouchableOpacity
+                onPress={() => setAvatarVisible(true)}
+                disabled={!selectedAsset && !session.user.avatar_url}
+                activeOpacity={0.86}
+                accessibilityRole={
+                  selectedAsset || session.user.avatar_url
+                    ? "button"
+                    : undefined
+                }
+                accessibilityLabel="Моя фотография профиля"
+                accessibilityHint={
+                  selectedAsset || session.user.avatar_url
+                    ? "Открывает фотографию на весь экран"
+                    : undefined
+                }
+              >
+                {selectedAsset ? (
+                  <Image
+                    source={selectedAsset.uri}
+                    style={styles.avatarPreview}
+                    contentFit="cover"
+                  />
+                ) : (
+                  <AuthenticatedAvatar
+                    displayName={session.user.display_name}
+                    avatarUrl={session.user.avatar_url}
+                    accessToken={session.access_token}
+                    size={112}
+                  />
+                )}
+              </TouchableOpacity>
             </View>
             <TouchableOpacity style={styles.photoButton} onPress={chooseAvatar}>
               <Icon name="camera" size={20} color={colors.primary} />
@@ -690,6 +709,14 @@ export default function MessengerProfileScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+      <MessengerAvatarViewer
+        visible={avatarVisible}
+        title={session.user.display_name}
+        avatarUrl={session.user.avatar_url}
+        localUri={selectedAsset?.uri}
+        accessToken={session.access_token}
+        onClose={() => setAvatarVisible(false)}
+      />
     </SafeAreaView>
   );
 }

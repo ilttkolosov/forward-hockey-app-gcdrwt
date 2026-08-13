@@ -22,6 +22,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../../components/Icon";
 import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
+import MessengerAvatarViewer from "../../../features/messenger/MessengerAvatarViewer";
 import type { MessengerContactProfile } from "../../../features/messenger/types";
 import {
   getMessengerRoomMemberProfile,
@@ -67,6 +68,7 @@ export default function MessengerContactProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [avatarVisible, setAvatarVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -190,12 +192,25 @@ export default function MessengerContactProfileScreen() {
             }
           >
             <View style={styles.profileCard}>
-              <AuthenticatedAvatar
-                displayName={profile.display_name}
-                avatarUrl={profile.avatar_url}
-                accessToken={session.access_token}
-                size={132}
-              />
+              <TouchableOpacity
+                onPress={() => setAvatarVisible(true)}
+                disabled={!profile.avatar_url}
+                activeOpacity={0.86}
+                accessibilityRole={profile.avatar_url ? "button" : undefined}
+                accessibilityLabel={`Фотография ${profile.display_name}`}
+                accessibilityHint={
+                  profile.avatar_url
+                    ? "Открывает фотографию на весь экран"
+                    : undefined
+                }
+              >
+                <AuthenticatedAvatar
+                  displayName={profile.display_name}
+                  avatarUrl={profile.avatar_url}
+                  accessToken={session.access_token}
+                  size={132}
+                />
+              </TouchableOpacity>
               <Text style={styles.name}>{profile.display_name}</Text>
               {profile.alias ? (
                 <Text style={styles.originalName}>
@@ -296,6 +311,15 @@ export default function MessengerContactProfileScreen() {
           </View>
         )}
       </KeyboardAvoidingView>
+      {profile && session ? (
+        <MessengerAvatarViewer
+          visible={avatarVisible}
+          title={profile.display_name}
+          avatarUrl={profile.avatar_url}
+          accessToken={session.access_token}
+          onClose={() => setAvatarVisible(false)}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
