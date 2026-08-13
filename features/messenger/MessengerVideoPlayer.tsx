@@ -46,6 +46,7 @@ export default function MessengerVideoPlayer({
     instance.muted = muted;
     instance.staysActiveInBackground = false;
     instance.keepScreenOnWhilePlaying = !muted;
+    instance.timeUpdateEventInterval = onPositionChange ? 0.5 : 0;
     if (initialPositionSeconds > 0) {
       instance.currentTime = initialPositionSeconds;
     }
@@ -69,20 +70,11 @@ export default function MessengerVideoPlayer({
 
   useEffect(() => {
     if (!active) {
-      onPositionChangeRef.current?.(player.currentTime);
       player.pause();
       return;
     }
     if (autoPlay) player.play();
   }, [active, autoPlay, player]);
-
-  useEffect(
-    () => () => {
-      onPositionChangeRef.current?.(player.currentTime);
-      player.pause();
-    },
-    [player],
-  );
 
   useEventListener(player, "statusChange", ({ status, error }) => {
     if (status === "error") {
@@ -97,6 +89,10 @@ export default function MessengerVideoPlayer({
 
   useEventListener(player, "playToEnd", () => {
     if (!loop) onPositionChangeRef.current?.(0);
+  });
+
+  useEventListener(player, "timeUpdate", ({ currentTime }) => {
+    onPositionChangeRef.current?.(currentTime);
   });
 
   return (
