@@ -1,6 +1,6 @@
 import { useEventListener } from "expo";
 import { VideoView, useVideoPlayer } from "expo-video";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   StyleSheet,
@@ -17,6 +17,11 @@ interface MessengerVideoPlayerProps {
   uri: string;
   active: boolean;
   autoPlay?: boolean;
+  muted?: boolean;
+  loop?: boolean;
+  nativeControls?: boolean;
+  initialPositionSeconds?: number;
+  onPositionChange?: (positionSeconds: number) => void;
   style?: StyleProp<ViewStyle>;
   onFallback: () => void;
 }
@@ -25,16 +30,31 @@ export default function MessengerVideoPlayer({
   uri,
   active,
   autoPlay = false,
+  muted = false,
+  loop = false,
+  nativeControls = true,
+  initialPositionSeconds = 0,
+  onPositionChange,
   style,
   onFallback,
 }: MessengerVideoPlayerProps) {
   const [firstFrameReady, setFirstFrameReady] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const onPositionChangeRef = useRef(onPositionChange);
   const player = useVideoPlayer(uri, (instance) => {
-    instance.loop = false;
+    instance.loop = loop;
+    instance.muted = muted;
     instance.staysActiveInBackground = false;
+    instance.keepScreenOnWhilePlaying = !muted;
+    if (initialPositionSeconds > 0) {
+      instance.currentTime = initialPositionSeconds;
+    }
     if (autoPlay && active) instance.play();
   });
+
+  useEffect(() => {
+    onPositionChangeRef.current = onPositionChange;
+  }, [onPositionChange]);
 
   useEffect(() => {
     setFirstFrameReady(false);
@@ -42,19 +62,41 @@ export default function MessengerVideoPlayer({
   }, [uri]);
 
   useEffect(() => {
+    player.loop = loop;
+    player.muted = muted;
+    player.keepScreenOnWhilePlaying = !muted;
+  }, [loop, muted, player]);
+
+  useEffect(() => {
     if (!active) {
+      onPositionChangeRef.current?.(player.currentTime);
       player.pause();
       return;
     }
-    if (autoPlay && player.status === "readyToPlay") player.play();
+    if (autoPlay) player.play();
   }, [active, autoPlay, player]);
+
+  useEffect(
+    () => () => {
+      onPositionChangeRef.current?.(player.currentTime);
+      player.pause();
+    },
+    [player],
+  );
 
   useEventListener(player, "statusChange", ({ status, error }) => {
     if (status === "error") {
       setPlaybackError(error?.message || "Формат видео не поддерживается");
       return;
     }
-    if (status === "readyToPlay") setPlaybackError(null);
+    if (status === "readyToPlay") {
+      setPlaybackError(null);
+      if (autoPlay && active) player.play();
+    }
+  });
+
+  useEventListener(player, "playToEnd", () => {
+    if (!loop) onPositionChangeRef.current?.(0);
   });
 
   return (
@@ -62,7 +104,7 @@ export default function MessengerVideoPlayer({
       <VideoView
         style={styles.video}
         player={player}
-        nativeControls={!playbackError}
+        nativeControls={nativeControls && !playbackError}
         contentFit="contain"
         fullscreenOptions={{ enable: true, orientation: "default" }}
         allowsPictureInPicture={false}

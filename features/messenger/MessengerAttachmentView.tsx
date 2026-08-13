@@ -43,6 +43,18 @@ interface MessengerAttachmentViewProps {
   playbackEnabled?: boolean;
 }
 
+const MAX_REMEMBERED_VIDEO_POSITIONS = 100;
+const rememberedVideoPositions = new Map<string, number>();
+
+function rememberVideoPosition(mediaId: string, positionSeconds: number): void {
+  if (!Number.isFinite(positionSeconds) || positionSeconds < 0) return;
+  rememberedVideoPositions.delete(mediaId);
+  rememberedVideoPositions.set(mediaId, positionSeconds);
+  if (rememberedVideoPositions.size <= MAX_REMEMBERED_VIDEO_POSITIONS) return;
+  const oldestMediaId = rememberedVideoPositions.keys().next().value;
+  if (oldestMediaId) rememberedVideoPositions.delete(oldestMediaId);
+}
+
 function withoutValue(values: Set<string>, value: string): Set<string> {
   const next = new Set(values);
   next.delete(value);
@@ -327,51 +339,45 @@ export default function MessengerAttachmentView({
             </View>
           )}
         </TouchableOpacity>
-      ) : single.type === "video" && singleLocalUri && playbackEnabled ? (
+      ) : single.type === "video" &&
+        singleLocalUri &&
+        playbackEnabled &&
+        viewerIndex === null ? (
         <View style={styles.inlineVideoCard}>
-          <MessengerVideoPlayer
-            uri={singleLocalUri}
-            active={playbackEnabled}
-            style={styles.inlineVideo}
-            onFallback={() => void openFile(single)}
-          />
-          <View style={styles.inlineVideoFooter}>
+          <View style={styles.inlineVideoStage}>
+            <MessengerVideoPlayer
+              uri={singleLocalUri}
+              active={playbackEnabled}
+              autoPlay
+              muted
+              loop
+              nativeControls={false}
+              initialPositionSeconds={
+                rememberedVideoPositions.get(single.id) || 0
+              }
+              onPositionChange={(positionSeconds) =>
+                rememberVideoPosition(single.id, positionSeconds)
+              }
+              style={styles.inlineVideo}
+              onFallback={() => void openFile(single)}
+            />
             <TouchableOpacity
-              style={styles.inlineVideoText}
-              activeOpacity={0.74}
+              style={styles.inlineVideoTap}
+              activeOpacity={1}
               onPress={() => setViewerIndex(0)}
-              accessibilityLabel="Развернуть видео на весь экран"
-            >
+              accessibilityRole="button"
+              accessibilityLabel="Открыть видео на весь экран"
+            />
+          </View>
+          <View style={styles.inlineVideoFooter}>
+            <View style={styles.inlineVideoText}>
               <Text style={styles.attachmentTitle} numberOfLines={1}>
                 {single.original_name || "Видео"}
               </Text>
               <Text style={styles.attachmentSubtitle}>
                 {formatMessengerBytes(single.size_bytes)}
               </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.inlineVideoSaveButton}
-              onPress={() => setViewerIndex(0)}
-              accessibilityLabel="Развернуть видео на весь экран"
-            >
-              <Icon name="expand-outline" size={21} color={colors.primary} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.inlineVideoSaveButton}
-              onPress={() => void saveToDevice(single)}
-              disabled={Boolean(savingId)}
-              accessibilityLabel="Сохранить видео"
-            >
-              {savingId === single.id ? (
-                <ActivityIndicator color={colors.primary} />
-              ) : (
-                <Icon
-                  name="download-outline"
-                  size={22}
-                  color={colors.primary}
-                />
-              )}
-            </TouchableOpacity>
+            </View>
           </View>
         </View>
       ) : (
@@ -657,20 +663,16 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     backgroundColor: "rgba(255, 255, 255, 0.54)",
   },
+  inlineVideoStage: { width: "100%", height: 158 },
   inlineVideo: { width: "100%", height: 158 },
+  inlineVideoTap: { ...StyleSheet.absoluteFillObject },
   inlineVideoFooter: {
-    minHeight: 48,
+    minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
-    paddingLeft: 11,
+    paddingHorizontal: 11,
   },
   inlineVideoText: { flex: 1, minWidth: 0 },
-  inlineVideoSaveButton: {
-    width: 48,
-    height: 48,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   fileOpenAction: {
     flex: 1,
     minWidth: 0,
