@@ -31,6 +31,7 @@ import {
   saveMessengerSession,
 } from "./messengerSession";
 import { messengerLog, messengerRequestId } from "./messengerLogger";
+import { warmMessengerBufferedUploadFiles } from "./messengerMediaUploadWarmup";
 
 export const MESSENGER_SERVER_ORIGIN = "https://forward.is-gone.com";
 export const MESSENGER_API_BASE_URL = `${MESSENGER_SERVER_ORIGIN}/api/v1`;
@@ -726,6 +727,30 @@ type MessengerMediaUploadFile = {
   size_bytes?: number | null;
 };
 
+class MeasuredExpoUploadFile extends ExpoFile {
+  constructor(
+    uri: string,
+    private readonly reportRead: (
+      durationMs: number,
+      actualSizeBytes: number | null,
+    ) => void,
+  ) {
+    super(uri);
+  }
+
+  override async bytes() {
+    const startedAt = Date.now();
+    try {
+      const result = await super.bytes();
+      this.reportRead(Date.now() - startedAt, result.byteLength);
+      return result;
+    } catch (error) {
+      this.reportRead(Date.now() - startedAt, null);
+      throw error;
+    }
+  }
+}
+
 // Slow mobile uplinks may legitimately need more than ten minutes for the
 // allowed 50 MiB. Cancel only a stalled transfer; continuing byte progress is
 // not an error and must not be cut off by an absolute wall-clock timeout.
@@ -882,6 +907,9 @@ async function sendBufferedMessengerMedia(
 ): Promise<MessengerMediaUploadResult> {
   if (signal?.aborted) throw new MessengerUploadCancelledError();
   const startedAt = Date.now();
+  await warmMessengerBufferedUploadFiles(files);
+  if (signal?.aborted) throw new MessengerUploadCancelledError();
+  const speculativeFileReadDurationMs = Date.now() - startedAt;
   const requestId = messengerRequestId();
   const session = await loadMessengerSession();
   const form = new FormData();
@@ -891,8 +919,24 @@ async function sendBufferedMessengerMedia(
   }
   if (caption?.trim()) form.append("caption", caption.trim());
   if (replyToMessageId) form.append("reply_to_message_id", replyToMessageId);
-  files.forEach((file) => {
-    form.append("files", new ExpoFile(file.uri) as unknown as Blob, file.name);
+  files.forEach((file, index) => {
+    form.append(
+      "files",
+      new MeasuredExpoUploadFile(file.uri, (durationMs, actualSizeBytes) => {
+        messengerLog(
+          durationMs >= 500 ? "info" : "debug",
+          "api.media_buffered_upload.multipart_file_read",
+          {
+            request_id: requestId,
+            file_index: index + 1,
+            expected_size_bytes: file.size_bytes,
+            actual_size_bytes: actualSizeBytes,
+            duration_ms: durationMs,
+          },
+        );
+      }) as unknown as Blob,
+      file.name,
+    );
   });
 
   const headers: Record<string, string> = {
@@ -930,6 +974,7 @@ async function sendBufferedMessengerMedia(
     ),
     upload_timeout_ms: EXPO_FETCH_MEDIA_UPLOAD_TIMEOUT_MS,
     preparation_duration_ms: Date.now() - startedAt,
+    speculative_file_read_duration_ms: speculativeFileReadDurationMs,
   });
 
   try {

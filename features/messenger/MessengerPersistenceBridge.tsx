@@ -23,6 +23,7 @@ import {
   hasLocalMessengerMediaUpload,
   prefetchMessengerImages,
 } from "../../services/messengerMediaCache";
+import { warmMessengerMediaFileReader } from "../../services/messengerMediaUploadWarmup";
 import {
   getMessengerContactAliases,
   getMessengerRooms,
@@ -159,6 +160,7 @@ export default function MessengerPersistenceBridge() {
           message: error instanceof Error ? error.message : String(error),
         }),
       );
+    void warmMessengerMediaFileReader();
     scheduleRoomsSynchronization();
     if (remotePushNotificationsSupported) {
       void syncMessengerPushRegistration().catch((error) =>
@@ -259,6 +261,7 @@ export default function MessengerPersistenceBridge() {
       "change",
       (state) => {
         if (state === "active") {
+          void warmMessengerMediaFileReader();
           void flushMessengerReadReceipts(db);
           scheduleRoomsSynchronization();
           if (remotePushNotificationsSupported) {

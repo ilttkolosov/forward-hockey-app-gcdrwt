@@ -590,6 +590,8 @@ export async function pickMessengerMedia(
     allowsMultipleSelection: true,
     selectionLimit: MAX_MESSENGER_MEDIA_SELECTION,
     orderedSelection: true,
+    preferredAssetRepresentationMode:
+      ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
     quality: 1,
     videoMaxDuration: 180,
   });
