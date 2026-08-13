@@ -1,4 +1,7 @@
-import { applyMessengerDeliveryUpdates } from "../features/messenger/feed";
+import {
+  applyMessengerDeliveryUpdates,
+  reconcileMessengerMessageUpdates,
+} from "../features/messenger/feed";
 import type { MessengerMessage } from "../features/messenger/types";
 
 function message(id: string, sequence: string): MessengerMessage {
@@ -54,6 +57,38 @@ if (after[0]?.delivery.status !== "delivered") {
 }
 if (after[1] !== before[1]) {
   throw new Error("Unrelated message was unnecessarily replaced");
+}
+
+const staleRealtimeUpdate = applyMessengerDeliveryUpdates(after, [
+  {
+    message_id: "one",
+    delivery: {
+      status: "sent",
+      recipient_count: 2,
+      delivered_count: 0,
+      read_count: 0,
+    },
+  },
+]);
+if (staleRealtimeUpdate[0]?.delivery.status !== "delivered") {
+  throw new Error("A stale receipt update regressed the delivery status");
+}
+
+const read = {
+  ...message("one", "1"),
+  delivery: {
+    status: "read" as const,
+    recipient_count: 2,
+    delivered_count: 2,
+    read_count: 2,
+  },
+};
+const staleReconciliation = reconcileMessengerMessageUpdates(
+  [read],
+  [message("one", "1")],
+);
+if (staleReconciliation[0]?.delivery.status !== "read") {
+  throw new Error("A delayed room sync regressed the read status");
 }
 
 console.log("messenger delivery updates: ok");

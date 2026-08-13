@@ -6,6 +6,7 @@ import type {
 } from "../features/messenger/types";
 import { applyMessengerAliases } from "../features/messenger/aliases";
 import { MESSENGER_SERVER_ORIGIN } from "./messengerApi";
+import { messengerLog } from "./messengerLogger";
 
 export type MessengerRealtimeEvent =
   | {
@@ -259,12 +260,20 @@ export function connectMessengerRealtime(accessToken: string): void {
       > & {
         updates?: MessengerMessageDeliveryUpdate[];
       },
-    ) =>
+    ) => {
+      messengerLog("info", "realtime.delivery.received", {
+        room_id: payload.room_id,
+        recipient_user_id: payload.recipient_user_id,
+        update_count: payload.updates?.length ?? 0,
+        last_delivered_sequence: payload.last_delivered_sequence,
+        last_read_sequence: payload.last_read_sequence,
+      });
       publish({
         type: "message.receipt_updated",
         ...payload,
         updates: payload.updates ?? [],
-      }),
+      });
+    },
   );
   nextSocket.on(
     "message.reaction_updated",

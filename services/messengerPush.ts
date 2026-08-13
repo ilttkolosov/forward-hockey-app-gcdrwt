@@ -14,6 +14,7 @@ import {
   getMessengerMessage,
   getMessengerPushRegistration,
   getMessengerRooms,
+  markMessengerDelivered,
   registerMessengerPushToken,
   unregisterMessengerPushToken,
 } from "./messengerApi";
@@ -34,7 +35,8 @@ const MESSENGER_PUSH_ENABLED_PREFIX = "messenger_push_enabled:";
 const MESSENGER_PUSH_PROMPTED_PREFIX = "messenger_push_prompted:";
 const MESSENGER_NATIVE_PUSH_TOKEN_PREFIX = "messenger_native_push_token:";
 const SHARED_EXPO_PUSH_TOKEN_KEY = "expo_push_token";
-let enableMessengerPushInFlight: Promise<MessengerPushRegistration> | null = null;
+let enableMessengerPushInFlight: Promise<MessengerPushRegistration> | null =
+  null;
 let observedNativePushToken: string | null = null;
 
 export interface MessengerPushPayload {
@@ -79,8 +81,7 @@ function nativePushTokenIdentity(
 
 function expoProjectId(): string {
   const extra = Constants.expoConfig?.extra as
-    | { eas?: { projectId?: string } }
-    | undefined;
+    { eas?: { projectId?: string } } | undefined;
   const projectId = extra?.eas?.projectId || Constants.easConfig?.projectId;
   if (!projectId) {
     throw new Error("В конфигурации приложения отсутствует Expo projectId");
@@ -99,8 +100,7 @@ export async function ensureMessengerNotificationChannel(): Promise<void> {
       sound: "default",
       enableVibrate: true,
       showBadge: true,
-      lockscreenVisibility:
-        Notifications.AndroidNotificationVisibility.PRIVATE,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
     },
   );
 }
@@ -111,7 +111,9 @@ export async function getProjectExpoPushToken(): Promise<string> {
     throw new Error("PUSH-уведомления доступны только на мобильном устройстве");
   }
   if (!Device.isDevice) {
-    throw new Error("PUSH-уведомления необходимо проверять на физическом устройстве");
+    throw new Error(
+      "PUSH-уведомления необходимо проверять на физическом устройстве",
+    );
   }
   await ensureMessengerNotificationChannel();
   const token = await Notifications.getExpoPushTokenAsync({
@@ -121,7 +123,9 @@ export async function getProjectExpoPushToken(): Promise<string> {
   return token.data;
 }
 
-async function ensureNotificationPermission(request: boolean): Promise<boolean> {
+async function ensureNotificationPermission(
+  request: boolean,
+): Promise<boolean> {
   if (!remotePushNotificationsSupported) return false;
   let permission = await Notifications.getPermissionsAsync();
   if (permission.status !== "granted" && request) {
@@ -136,7 +140,9 @@ async function ensureNotificationPermission(request: boolean): Promise<boolean> 
   return permission.status === "granted";
 }
 
-export async function loadMessengerPushPreference(userId: string): Promise<boolean> {
+export async function loadMessengerPushPreference(
+  userId: string,
+): Promise<boolean> {
   return (await AsyncStorage.getItem(enabledKey(userId))) === "true";
 }
 
@@ -260,7 +266,9 @@ export async function syncMessengerPushTokenRotation(
   await syncMessengerPushRegistration();
 }
 
-export async function shouldOfferMessengerPush(userId: string): Promise<boolean> {
+export async function shouldOfferMessengerPush(
+  userId: string,
+): Promise<boolean> {
   if (!remotePushNotificationsSupported) return false;
   return (await AsyncStorage.getItem(promptedKey(userId))) !== "true";
 }
@@ -296,16 +304,21 @@ export function normalizeMessengerPushPayload(
       candidate = parsed;
       continue;
     }
-    if (record.type === "messenger.message" || record.type === "messenger.badge") {
+    if (
+      record.type === "messenger.message" ||
+      record.type === "messenger.badge"
+    ) {
       const unread = Number(record.unread_count);
       return {
         type: record.type,
-        room_id: typeof record.room_id === "string" ? record.room_id : undefined,
+        room_id:
+          typeof record.room_id === "string" ? record.room_id : undefined,
         room_title:
           typeof record.room_title === "string" ? record.room_title : undefined,
         message_id:
           typeof record.message_id === "string" ? record.message_id : undefined,
-        sequence: typeof record.sequence === "string" ? record.sequence : undefined,
+        sequence:
+          typeof record.sequence === "string" ? record.sequence : undefined,
         unread_count: Number.isFinite(unread) ? unread : undefined,
       };
     }
@@ -349,6 +362,20 @@ export async function processMessengerPushPayload(
       await syncMessengerUnreadFromRooms(reconciled);
     }
     await cacheIncomingMessengerMessage(db, message, session.user.id);
+    if (message.author.id !== session.user.id) {
+      try {
+        await markMessengerDelivered(message.room_id, message.sequence);
+      } catch (error) {
+        // The message itself is already cached. A later room-list sync will
+        // retry only the missing delivery cursor without losing the push.
+        messengerLog("debug", "push.delivery_ack.deferred", {
+          room_id: message.room_id,
+          message_id: message.id,
+          sequence: message.sequence,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     if (payload.unread_count === undefined) {
       await refreshMessengerUnreadFromCache(db);
     } else {

@@ -1,11 +1,87 @@
 import type {
   MessengerMessage,
+  MessengerMessageDelivery,
   MessengerMessageDeliveryUpdate,
   MessengerOutboxItem,
   MessengerPendingAttachmentSource,
   MessengerReaction,
   MessengerUser,
 } from "./types";
+
+const DELIVERY_STATUS_RANK: Record<MessengerMessageDelivery["status"], number> =
+  {
+    sent: 0,
+    delivered: 1,
+    read: 2,
+  };
+
+function deliveryStatusForCounts(
+  recipientCount: number,
+  deliveredCount: number,
+  readCount: number,
+): MessengerMessageDelivery["status"] {
+  if (recipientCount > 0 && readCount >= recipientCount) return "read";
+  if (recipientCount > 0 && deliveredCount >= recipientCount) {
+    return "delivered";
+  }
+  return "sent";
+}
+
+/**
+ * Delivery receipts are append-only on the server. A delayed REST response
+ * must therefore never undo a newer realtime update on the phone.
+ */
+export function mergeMessengerDelivery(
+  existing: MessengerMessageDelivery,
+  incoming: MessengerMessageDelivery,
+): MessengerMessageDelivery {
+  const readCount = Math.max(existing.read_count, incoming.read_count);
+  const deliveredCount = Math.max(
+    existing.delivered_count,
+    incoming.delivered_count,
+    readCount,
+  );
+  const recipientCount = Math.max(
+    existing.recipient_count,
+    incoming.recipient_count,
+    deliveredCount,
+  );
+  const countedStatus = deliveryStatusForCounts(
+    recipientCount,
+    deliveredCount,
+    readCount,
+  );
+  const status = [existing.status, incoming.status, countedStatus].reduce(
+    (latest, candidate) =>
+      DELIVERY_STATUS_RANK[candidate] > DELIVERY_STATUS_RANK[latest]
+        ? candidate
+        : latest,
+    "sent" as MessengerMessageDelivery["status"],
+  );
+  const merged: MessengerMessageDelivery = {
+    status,
+    recipient_count: recipientCount,
+    delivered_count: deliveredCount,
+    read_count: readCount,
+  };
+  if (
+    existing.status === merged.status &&
+    existing.recipient_count === merged.recipient_count &&
+    existing.delivered_count === merged.delivered_count &&
+    existing.read_count === merged.read_count
+  ) {
+    return existing;
+  }
+  if (
+    incoming.status === merged.status &&
+    incoming.recipient_count === merged.recipient_count &&
+    incoming.delivered_count === merged.delivered_count &&
+    incoming.read_count === merged.read_count
+  ) {
+    return incoming;
+  }
+  return merged;
+}
 
 /** Updates delivery metadata without inserting, removing or reordering feed rows. */
 export function applyMessengerDeliveryUpdates(
@@ -18,16 +94,10 @@ export function applyMessengerDeliveryUpdates(
   );
   let changed = false;
   const next = messages.map((message) => {
-    const delivery = byMessageId.get(message.id);
-    if (!delivery) return message;
-    if (
-      message.delivery.status === delivery.status &&
-      message.delivery.recipient_count === delivery.recipient_count &&
-      message.delivery.delivered_count === delivery.delivered_count &&
-      message.delivery.read_count === delivery.read_count
-    ) {
-      return message;
-    }
+    const incoming = byMessageId.get(message.id);
+    if (!incoming) return message;
+    const delivery = mergeMessengerDelivery(message.delivery, incoming);
+    if (delivery === message.delivery) return message;
     changed = true;
     return { ...message, delivery };
   });
@@ -238,6 +308,7 @@ function mergeMessengerMessage(
   return {
     ...existing,
     ...incoming,
+    delivery: mergeMessengerDelivery(existing.delivery, incoming.delivery),
     media: incoming.media ?? mediaItems[0] ?? null,
     media_items: mediaItems,
     reactions: protectedReactionIds.has(incoming.id)

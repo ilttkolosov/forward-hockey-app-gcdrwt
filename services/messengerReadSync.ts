@@ -16,7 +16,9 @@ interface ReadSyncQueue {
 // Scrolling can advance the local cursor many times per second. Keep every
 // advance immediate in SQLite, but wait for a short idle window before sending
 // only the newest room cursor to the server.
-const READ_RECEIPT_DEBOUNCE_MS = 5_000;
+// Keep rapid scroll updates coalesced, but do not leave the sender waiting
+// several seconds for the blue read state after the recipient stops scrolling.
+const READ_RECEIPT_DEBOUNCE_MS = 750;
 const READ_RECEIPT_RETRY_MS = 15_000;
 const queues = new WeakMap<SQLiteDatabase, ReadSyncQueue>();
 

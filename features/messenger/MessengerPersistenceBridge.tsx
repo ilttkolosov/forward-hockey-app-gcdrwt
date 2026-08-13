@@ -4,6 +4,7 @@ import { AppState } from "react-native";
 import * as Notifications from "expo-notifications";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import { replaceMessengerAliases } from "./aliases";
+import { compareMessengerSequence } from "./feed";
 import {
   cacheIncomingMessengerMessage,
   cacheMessengerDeliveryUpdates,
@@ -22,6 +23,7 @@ import { prefetchMessengerImages } from "../../services/messengerMediaCache";
 import {
   getMessengerContactAliases,
   getMessengerRooms,
+  markMessengerDelivered,
 } from "../../services/messengerApi";
 import {
   syncMessengerPushRegistration,
@@ -77,6 +79,27 @@ export default function MessengerPersistenceBridge() {
       try {
         await synchronizeAliases();
         const rooms = await getMessengerRooms();
+        for (const room of rooms) {
+          const latest = room.last_message;
+          if (
+            latest &&
+            latest.author.id !== session.user.id &&
+            compareMessengerSequence(
+              latest.sequence,
+              room.last_delivered_sequence,
+            ) > 0
+          ) {
+            void markMessengerDelivered(room.id, latest.sequence).catch(
+              (error) =>
+                messengerLog("debug", "delivery.background_sync.deferred", {
+                  room_id: room.id,
+                  sequence: latest.sequence,
+                  message:
+                    error instanceof Error ? error.message : String(error),
+                }),
+            );
+          }
+        }
         const reconciled = await cacheMessengerRooms(db, rooms);
         if (active) await syncMessengerUnreadFromRooms(reconciled);
         void warmMessengerRoomWindows(db, reconciled);
@@ -145,7 +168,28 @@ export default function MessengerPersistenceBridge() {
       message: Parameters<typeof cacheIncomingMessengerMessage>[1],
     ) => {
       void cacheIncomingMessengerMessage(db, message, session.user.id)
-        .then(() => refreshMessengerUnreadFromCache(db))
+        .then(() => {
+          void refreshMessengerUnreadFromCache(db);
+          if (message.author.id !== session.user.id) {
+            void markMessengerDelivered(message.room_id, message.sequence)
+              .then(() =>
+                messengerLog("info", "delivery.acknowledged", {
+                  room_id: message.room_id,
+                  message_id: message.id,
+                  sequence: message.sequence,
+                }),
+              )
+              .catch((error) =>
+                messengerLog("debug", "delivery.ack_deferred", {
+                  room_id: message.room_id,
+                  message_id: message.id,
+                  sequence: message.sequence,
+                  message:
+                    error instanceof Error ? error.message : String(error),
+                }),
+              );
+          }
+        })
         .catch((error) =>
           messengerLog("warn", "realtime.message.cache_failed", {
             room_id: message.room_id,

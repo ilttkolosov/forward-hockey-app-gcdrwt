@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 import { Platform } from "react-native";
 import { applyMessengerAliases } from "./aliases";
+import { mergeMessengerDelivery } from "./feed";
 import type {
   MessengerMessage,
   MessengerMessageDeliveryUpdate,
@@ -15,6 +16,10 @@ interface RoomRow {
 
 interface MessageRow {
   raw_json: string;
+}
+
+interface IdentifiedMessageRow extends MessageRow {
+  id: string;
 }
 
 interface MessageBoundsRow {
@@ -603,7 +608,33 @@ export async function cacheMessengerMessages(
 ): Promise<void> {
   await enqueueMessengerWrite(db, () =>
     withMessengerTransaction(db, async (transaction) => {
+      const messageIds = [...new Set(messages.map((message) => message.id))];
+      const existingById = new Map<string, MessengerMessage>();
+      if (messageIds.length) {
+        const placeholders = messageIds.map(() => "?").join(", ");
+        const existingRows =
+          await transaction.getAllAsync<IdentifiedMessageRow>(
+            `SELECT id, raw_json
+             FROM messenger_messages
+            WHERE id IN (${placeholders})`,
+            ...messageIds,
+          );
+        for (const row of existingRows) {
+          const existing = parseJson<MessengerMessage>(row.raw_json);
+          if (existing) existingById.set(row.id, existing);
+        }
+      }
       for (const message of messages) {
+        const existing = existingById.get(message.id);
+        const cachedMessage = existing
+          ? {
+              ...message,
+              delivery: mergeMessengerDelivery(
+                existing.delivery,
+                message.delivery,
+              ),
+            }
+          : message;
         await transaction.runAsync(
           `INSERT INTO messenger_messages
           (id, room_id, sequence, client_message_id, created_at, raw_json)
@@ -613,12 +644,12 @@ export async function cacheMessengerMessages(
            client_message_id = excluded.client_message_id,
            created_at = excluded.created_at,
            raw_json = excluded.raw_json`,
-          message.id,
-          message.room_id,
-          message.sequence,
-          message.client_message_id,
-          message.created_at,
-          JSON.stringify(message),
+          cachedMessage.id,
+          cachedMessage.room_id,
+          cachedMessage.sequence,
+          cachedMessage.client_message_id,
+          cachedMessage.created_at,
+          JSON.stringify(cachedMessage),
         );
       }
     }),
@@ -633,10 +664,22 @@ export function cacheIncomingMessengerMessage(
 ): Promise<void> {
   return enqueueMessengerWrite(db, () =>
     withMessengerTransaction(db, async (transaction) => {
-      const existingMessage = await transaction.getFirstAsync<{ id: string }>(
-        "SELECT id FROM messenger_messages WHERE id = ?",
+      const existingRow = await transaction.getFirstAsync<IdentifiedMessageRow>(
+        "SELECT id, raw_json FROM messenger_messages WHERE id = ?",
         message.id,
       );
+      const existingMessage = existingRow
+        ? parseJson<MessengerMessage>(existingRow.raw_json)
+        : null;
+      const cachedMessage = existingMessage
+        ? {
+            ...message,
+            delivery: mergeMessengerDelivery(
+              existingMessage.delivery,
+              message.delivery,
+            ),
+          }
+        : message;
       await transaction.runAsync(
         `INSERT INTO messenger_messages
           (id, room_id, sequence, client_message_id, created_at, raw_json)
@@ -646,17 +689,17 @@ export function cacheIncomingMessengerMessage(
            client_message_id = excluded.client_message_id,
            created_at = excluded.created_at,
            raw_json = excluded.raw_json`,
-        message.id,
-        message.room_id,
-        message.sequence,
-        message.client_message_id,
-        message.created_at,
-        JSON.stringify(message),
+        cachedMessage.id,
+        cachedMessage.room_id,
+        cachedMessage.sequence,
+        cachedMessage.client_message_id,
+        cachedMessage.created_at,
+        JSON.stringify(cachedMessage),
       );
 
       const roomRow = await transaction.getFirstAsync<RoomRow>(
         "SELECT raw_json FROM messenger_rooms WHERE id = ?",
-        message.room_id,
+        cachedMessage.room_id,
       );
       const room = roomRow ? parseJson<MessengerRoom>(roomRow.raw_json) : null;
       if (!room) return;
@@ -675,7 +718,7 @@ export function cacheIncomingMessengerMessage(
         room.last_message?.sequence || "0",
       );
       const shouldIncrementUnread =
-        !existingMessage &&
+        !existingRow &&
         isNewer &&
         message.author.id !== currentUserId &&
         sequenceIsNewer(message.sequence, localReadSequence);
@@ -731,6 +774,9 @@ export function cacheUpdatedMessengerMessage(
       const message: MessengerMessage = {
         ...incoming,
         reactions: existing?.reactions ?? incoming.reactions,
+        delivery: existing
+          ? mergeMessengerDelivery(existing.delivery, incoming.delivery)
+          : incoming.delivery,
       };
       await transaction.runAsync(
         `INSERT INTO messenger_messages
@@ -793,9 +839,14 @@ export function cacheMessengerDeliveryUpdates(
         );
         const message = row ? parseJson<MessengerMessage>(row.raw_json) : null;
         if (!message) continue;
+        const delivery = mergeMessengerDelivery(
+          message.delivery,
+          update.delivery,
+        );
+        if (delivery === message.delivery) continue;
         await transaction.runAsync(
           "UPDATE messenger_messages SET raw_json = ? WHERE id = ?",
-          JSON.stringify({ ...message, delivery: update.delivery }),
+          JSON.stringify({ ...message, delivery }),
           update.message_id,
         );
       }
