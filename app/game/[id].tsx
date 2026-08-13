@@ -33,16 +33,37 @@ const isYouTubeUrl = (url: string): boolean => {
   return /(?:youtube\.com\/watch\?v=|youtu\.be\/)/.test(url.trim());
 };
 
-const isVKUrl = (url: string): boolean => {
-  return /vk\.com\/video/.test(url.trim());
+// === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
+const VK_EMBED_URL = 'https://vkvideo.ru/video_ext.php';
+const VK_VIDEO_ID_PATTERN = /(?:video|live)(-?\d+)_(\d+)/i;
+
+const isVKVideoHost = (hostname: string): boolean => {
+  const normalizedHostname = hostname.toLowerCase();
+  return ['vk.com', 'vk.ru', 'vkvideo.ru'].some(
+    (domain) => normalizedHostname === domain || normalizedHostname.endsWith(`.${domain}`)
+  );
 };
 
-
-// === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 const parseVKVideoUrl = (url: string): { ownerId: string; videoId: string } | null => {
   try {
-    if (url.includes('video_ext.php')) return null;
-    const videoMatch = url.match(/video(-?\d+)_(\d+)/);
+    const parsedUrl = new URL(url.trim().replace(/&amp;/g, '&'));
+    if (!isVKVideoHost(parsedUrl.hostname)) return null;
+
+    if (parsedUrl.pathname.endsWith('/video_ext.php')) {
+      const ownerId = parsedUrl.searchParams.get('oid');
+      const videoId = parsedUrl.searchParams.get('id');
+      if (ownerId && videoId && /^-?\d+$/.test(ownerId) && /^\d+$/.test(videoId)) {
+        return { ownerId, videoId };
+      }
+      return null;
+    }
+
+    // VK currently uses both /video-OWNER_ID_VIDEO_ID and
+    // /live-OWNER_ID_VIDEO_ID. The identifier may also be nested in a
+    // query/hash of a share URL, so inspect the complete path suffix.
+    const videoMatch = `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`.match(
+      VK_VIDEO_ID_PATTERN
+    );
     if (videoMatch) {
       return { ownerId: videoMatch[1], videoId: videoMatch[2] };
     }
@@ -53,27 +74,62 @@ const parseVKVideoUrl = (url: string): { ownerId: string; videoId: string } | nu
   }
 };
 
-const constructVKEmbedUrl = (ownerId: string, videoId: string, autoplay: boolean = true): string => {
-  return `https://vk.com/video_ext.php?oid=${ownerId}&id=${videoId}&hd=4&autoplay=${autoplay ? '1' : '0'}&muted=0&js_api=1`;
+const constructVKEmbedUrl = (
+  ownerId: string,
+  videoId: string,
+  autoplay: boolean = true,
+  sourceUrl?: URL
+): string => {
+  const embedUrl = new URL(VK_EMBED_URL);
+
+  // Preserve parameters which VK may add to shared/private videos and clips.
+  ['hash', 'list', 't'].forEach((parameter) => {
+    const value = sourceUrl?.searchParams.get(parameter);
+    if (value) embedUrl.searchParams.set(parameter, value);
+  });
+
+  embedUrl.searchParams.set('oid', ownerId);
+  embedUrl.searchParams.set('id', videoId);
+  embedUrl.searchParams.set('hd', sourceUrl?.searchParams.get('hd') || '4');
+  embedUrl.searchParams.set('autoplay', autoplay ? '1' : '0');
+  embedUrl.searchParams.set('muted', '0');
+  embedUrl.searchParams.set('js_api', '1');
+  return embedUrl.toString();
 };
 
 const getVKEmbedUrl = (videoUrl: string, autoplay: boolean = true): string => {
   try {
-    if (videoUrl.includes('video_ext.php')) {
-      const url = new URL(videoUrl);
-      if (!url.searchParams.has('hd')) url.searchParams.set('hd', '4');
-      url.searchParams.set('autoplay', autoplay ? '1' : '0');
-      url.searchParams.set('muted', '0');
-      if (!url.searchParams.has('js_api')) url.searchParams.set('js_api', '1');
-      return url.toString();
+    const normalizedUrl = videoUrl.trim().replace(/&amp;/g, '&');
+    const parsed = parseVKVideoUrl(normalizedUrl);
+    if (parsed) {
+      return constructVKEmbedUrl(
+        parsed.ownerId,
+        parsed.videoId,
+        autoplay,
+        new URL(normalizedUrl)
+      );
     }
-    const parsed = parseVKVideoUrl(videoUrl);
-    if (parsed) return constructVKEmbedUrl(parsed.ownerId, parsed.videoId, autoplay);
     return videoUrl;
   } catch (error) {
     console.error('Error processing VK video URL:', error);
     return videoUrl;
   }
+};
+
+const isAllowedVKEmbedNavigation = (requestUrl: string): boolean => {
+  if (requestUrl === 'about:blank') return true;
+  try {
+    const parsedUrl = new URL(requestUrl);
+    return isVKVideoHost(parsedUrl.hostname) && parsedUrl.pathname.endsWith('/video_ext.php');
+  } catch {
+    return false;
+  }
+};
+
+const shouldAllowVideoNavigation = (sourceUrl: string, requestUrl: string): boolean => {
+  // Keep the existing behavior for non-VK sources (for example YouTube).
+  // VK embeds stay inside the player instead of navigating to the full VK UI.
+  return parseVKVideoUrl(sourceUrl) === null || isAllowedVKEmbedNavigation(requestUrl);
 };
 
 
@@ -1046,7 +1102,9 @@ export default function GameDetailsScreen() {
                 scrollEnabled={false}
                 showsHorizontalScrollIndicator={false}
                 showsVerticalScrollIndicator={false}
-                userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"
+                onShouldStartLoadWithRequest={(request) =>
+                  shouldAllowVideoNavigation(sp_video, request.url)
+                }
               />
             </View>
           </View>
@@ -1188,8 +1246,9 @@ export default function GameDetailsScreen() {
               bounces={false}
               showsHorizontalScrollIndicator={false}
               showsVerticalScrollIndicator={false}
-              userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"
-              onShouldStartLoadWithRequest={(request) => request.url.startsWith('https://vk.com/video_ext.php')}
+              onShouldStartLoadWithRequest={(request) =>
+                shouldAllowVideoNavigation(videoModalUrl, request.url)
+              }
               onFullscreenVideoWillDismiss={() => setVideoModalUrl(null)}
             />
           </View>
