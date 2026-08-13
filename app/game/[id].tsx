@@ -1,6 +1,7 @@
 // app/game/[id].tsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   ScrollView,
@@ -127,6 +128,9 @@ const isAllowedVKEmbedNavigation = (requestUrl: string): boolean => {
 };
 
 const BLOCKED_VIDEO_NAVIGATION_TYPES = new Set(['click', 'formsubmit', 'formresubmit']);
+const MAX_VIDEO_BOOTSTRAP_RETRIES = 2;
+
+type VideoGenerationStatus = 'ready' | 'retrying' | 'failed';
 
 const shouldAllowVideoNavigation = (
   sourceUrl: string,
@@ -627,7 +631,55 @@ export default function GameDetailsScreen() {
 
   const f2fLoadedRef = useRef(false);
   const [videoModalUrl, setVideoModalUrl] = useState<string | null>(null);
-  const videoLoadStartedAtRef = useRef<number | null>(null);
+  const [videoWebViewGeneration, setVideoWebViewGeneration] = useState(0);
+  const [videoPlayerState, setVideoPlayerState] = useState<'loading' | 'ready' | 'error'>(
+    'loading'
+  );
+  const videoBootstrapRetryRef = useRef(0);
+  const videoLoadStartedAtRef = useRef(new Map<number, number>());
+  const videoGenerationStatusRef = useRef(new Map<number, VideoGenerationStatus>());
+
+  const requestVideoReload = useCallback(
+    (generation: number, reason: string, context: Record<string, unknown> = {}) => {
+      const generationStatus = videoGenerationStatusRef.current.get(generation);
+      if (generationStatus === 'retrying' || generationStatus === 'failed') return;
+
+      if (videoBootstrapRetryRef.current >= MAX_VIDEO_BOOTSTRAP_RETRIES) {
+        videoGenerationStatusRef.current.set(generation, 'failed');
+        setVideoPlayerState('error');
+        console.warn('[GameVideo][player.failed]', {
+          game_id: id,
+          reason,
+          attempts: videoBootstrapRetryRef.current,
+          ...context,
+        });
+        return;
+      }
+
+      videoGenerationStatusRef.current.set(generation, 'retrying');
+      videoBootstrapRetryRef.current += 1;
+      setVideoPlayerState('loading');
+      console.log('[GameVideo][bootstrap.retry]', {
+        game_id: id,
+        reason,
+        attempt: videoBootstrapRetryRef.current,
+        ...context,
+      });
+      setVideoWebViewGeneration((currentGeneration) =>
+        currentGeneration === generation ? currentGeneration + 1 : currentGeneration
+      );
+    },
+    [id]
+  );
+
+  const retryVideoManually = useCallback(() => {
+    videoBootstrapRetryRef.current = 0;
+    setVideoPlayerState('loading');
+    setVideoWebViewGeneration((currentGeneration) => {
+      videoGenerationStatusRef.current.set(currentGeneration, 'retrying');
+      return currentGeneration + 1;
+    });
+  }, []);
 
   // === АНИМАЦИЯ ПРОКРУТКИ ===
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -1119,16 +1171,21 @@ export default function GameDetailsScreen() {
           <View style={styles.videoContainer}>
             <View style={styles.videoFrame}>
               <WebView
+                key={`game-video-${id}-${videoWebViewGeneration}`}
                 source={{ uri: getVKEmbedUrl(sp_video, !isGameFinished(gameDetails)) }}
-                style={styles.webview}
+                style={[
+                  styles.webview,
+                  videoPlayerState !== 'ready' && styles.webviewHidden,
+                ]}
                 javaScriptEnabled={true}
                 domStorageEnabled={true}
-                startInLoadingState={true}
                 scalesPageToFit={false}
                 allowsInlineMediaPlayback={true}
                 mediaPlaybackRequiresUserAction={false}
                 mixedContentMode="compatibility"
                 allowsFullscreenVideo={true}
+                sharedCookiesEnabled={true}
+                thirdPartyCookiesEnabled={true}
                 bounces={false}
                 scrollEnabled={false}
                 showsHorizontalScrollIndicator={false}
@@ -1150,41 +1207,101 @@ export default function GameDetailsScreen() {
                   return allowed;
                 }}
                 onLoadStart={({ nativeEvent }) => {
-                  videoLoadStartedAtRef.current = Date.now();
+                  videoLoadStartedAtRef.current.set(videoWebViewGeneration, Date.now());
+                  if (
+                    parseVKVideoUrl(sp_video) !== null &&
+                    !isAllowedVKEmbedNavigation(nativeEvent.url)
+                  ) {
+                    setVideoPlayerState('loading');
+                  }
                   console.log('[GameVideo][load.started]', {
                     game_id: id,
+                    generation: videoWebViewGeneration,
                     ...getVideoLogContext(nativeEvent.url),
                   });
                 }}
                 onLoadEnd={({ nativeEvent }) => {
-                  const startedAt = videoLoadStartedAtRef.current;
-                  videoLoadStartedAtRef.current = null;
+                  const startedAt = videoLoadStartedAtRef.current.get(videoWebViewGeneration);
+                  videoLoadStartedAtRef.current.delete(videoWebViewGeneration);
                   console.log('[GameVideo][load.completed]', {
                     game_id: id,
+                    generation: videoWebViewGeneration,
                     duration_ms: startedAt ? Date.now() - startedAt : null,
                     ...getVideoLogContext(nativeEvent.url),
                   });
+
+                  const isVKSource = parseVKVideoUrl(sp_video) !== null;
+                  if (!isVKSource || isAllowedVKEmbedNavigation(nativeEvent.url)) {
+                    if (
+                      videoGenerationStatusRef.current.get(videoWebViewGeneration) !==
+                      'retrying'
+                    ) {
+                      videoGenerationStatusRef.current.set(videoWebViewGeneration, 'ready');
+                      videoBootstrapRetryRef.current = 0;
+                      setVideoPlayerState('ready');
+                      console.log('[GameVideo][player.ready]', {
+                        game_id: id,
+                        generation: videoWebViewGeneration,
+                        ...getVideoLogContext(nativeEvent.url),
+                      });
+                    }
+                    return;
+                  }
+
+                  requestVideoReload(
+                    videoWebViewGeneration,
+                    'redirected_outside_embed',
+                    getVideoLogContext(nativeEvent.url)
+                  );
                 }}
                 onError={({ nativeEvent }) => {
-                  const startedAt = videoLoadStartedAtRef.current;
-                  videoLoadStartedAtRef.current = null;
+                  const startedAt = videoLoadStartedAtRef.current.get(videoWebViewGeneration);
+                  videoLoadStartedAtRef.current.delete(videoWebViewGeneration);
                   console.warn('[GameVideo][load.error]', {
                     game_id: id,
+                    generation: videoWebViewGeneration,
                     duration_ms: startedAt ? Date.now() - startedAt : null,
                     code: nativeEvent.code,
                     description: nativeEvent.description,
+                    ...getVideoLogContext(nativeEvent.url),
+                  });
+                  requestVideoReload(videoWebViewGeneration, 'load_error', {
+                    code: nativeEvent.code,
                     ...getVideoLogContext(nativeEvent.url),
                   });
                 }}
                 onHttpError={({ nativeEvent }) => {
                   console.warn('[GameVideo][http_error]', {
                     game_id: id,
+                    generation: videoWebViewGeneration,
                     status: nativeEvent.statusCode,
                     description: nativeEvent.description,
                     ...getVideoLogContext(nativeEvent.url),
                   });
                 }}
               />
+              {videoPlayerState !== 'ready' && (
+                <View style={styles.videoPlayerOverlay}>
+                  {videoPlayerState === 'error' ? (
+                    <>
+                      <Text style={styles.videoPlayerErrorText}>
+                        Не удалось загрузить трансляцию
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.videoPlayerRetryButton}
+                        onPress={retryVideoManually}
+                      >
+                        <Text style={styles.videoPlayerRetryText}>Повторить</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <>
+                      <ActivityIndicator size="large" color="#FFFFFF" />
+                      <Text style={styles.videoPlayerLoadingText}>Загрузка трансляции…</Text>
+                    </>
+                  )}
+                </View>
+              )}
             </View>
           </View>
         )}
@@ -1374,6 +1491,32 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   webview: { flex: 1, backgroundColor: '#000', borderRadius: 12 },
+  webviewHidden: { opacity: 0 },
+  videoPlayerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#000',
+  },
+  videoPlayerLoadingText: { color: '#FFFFFF', fontSize: 14, fontWeight: '500' },
+  videoPlayerErrorText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  videoPlayerRetryButton: {
+    minHeight: 42,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+  },
+  videoPlayerRetryText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   gameInfo: {
     padding: 10,
     backgroundColor: colors.background,
