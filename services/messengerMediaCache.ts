@@ -1,10 +1,25 @@
 import * as FileSystem from "expo-file-system/legacy";
 import type { MessengerMedia } from "../features/messenger/types";
 import { messengerMediaUrl } from "./messengerApi";
-import { messengerLog } from "./messengerLogger";
+import { messengerLog, messengerRequestId } from "./messengerLogger";
 
 const CACHE_ROOT = `${FileSystem.cacheDirectory || ""}forward-messenger-media/`;
 const downloads = new Map<string, Promise<string>>();
+
+function responseHeader(
+  headers: Record<string, string>,
+  name: string,
+): string | undefined {
+  const expected = name.toLowerCase();
+  const entry = Object.entries(headers).find(
+    ([headerName]) => headerName.toLowerCase() === expected,
+  );
+  return entry?.[1];
+}
+
+function elapsedSince(startedAt: number): number {
+  return Math.max(0, Date.now() - startedAt);
+}
 
 function extensionFor(media: MessengerMedia): string {
   const byMime: Record<string, string> = {
@@ -67,29 +82,106 @@ export async function cacheMessengerMedia(
     if (!source) throw new Error("У вложения отсутствует адрес");
     const temporary = `${destination}.download`;
     await FileSystem.deleteAsync(temporary, { idempotent: true });
+    const clientRequestId = messengerRequestId();
+    const downloadStartedAt = Date.now();
+    let firstProgressAt: number | null = null;
+    let lastWrittenBytes = 0;
+    let expectedBytes = media.size_bytes;
     messengerLog("debug", "media.cache.download.started", {
       asset_id: media.id,
       media_type: media.type,
       size_bytes: media.size_bytes,
+      client_request_id: clientRequestId,
+      session_type: "foreground",
     });
-    const result = await FileSystem.downloadAsync(source, temporary, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    const resumable = FileSystem.createDownloadResumable(
+      source,
+      temporary,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "X-Request-ID": clientRequestId,
+        },
+        // iOS defaults legacy downloads to a background URLSession. That is
+        // appropriate for large offline transfers, but the OS may defer a
+        // 100-200 KB image for several seconds. Visible chat media is
+        // latency-sensitive and must use the foreground URLSession instead.
+        sessionType: FileSystem.FileSystemSessionType.FOREGROUND,
+      },
+      (progress) => {
+        lastWrittenBytes = progress.totalBytesWritten;
+        if (progress.totalBytesExpectedToWrite > 0) {
+          expectedBytes = progress.totalBytesExpectedToWrite;
+        }
+        if (firstProgressAt !== null || progress.totalBytesWritten <= 0) return;
+        firstProgressAt = Date.now();
+        messengerLog("debug", "media.cache.download.first_progress", {
+          asset_id: media.id,
+          client_request_id: clientRequestId,
+          first_progress_ms: elapsedSince(downloadStartedAt),
+          written_bytes: progress.totalBytesWritten,
+          expected_bytes: expectedBytes,
+        });
+      },
+    );
+    const result = await resumable.downloadAsync();
+    if (!result) throw new Error("Загрузка вложения была отменена");
+    const networkCompletedAt = Date.now();
     if (result.status < 200 || result.status >= 300) {
       await FileSystem.deleteAsync(temporary, { idempotent: true });
       throw new Error(`Сервер вернул HTTP ${result.status}`);
     }
+    const temporaryInfo = await FileSystem.getInfoAsync(temporary);
+    const downloadedBytes =
+      temporaryInfo.exists && !temporaryInfo.isDirectory
+        ? temporaryInfo.size
+        : lastWrittenBytes;
     await FileSystem.moveAsync({ from: temporary, to: destination });
+    const completedAt = Date.now();
+    const durationMs = completedAt - downloadStartedAt;
+    const requestId = responseHeader(result.headers, "x-request-id");
     messengerLog("info", "media.cache.download.completed", {
       asset_id: media.id,
       media_type: media.type,
-      local_uri: destination,
+      client_request_id: clientRequestId,
+      request_id: requestId,
+      status: result.status,
+      duration_ms: durationMs,
+      first_progress_ms:
+        firstProgressAt === null ? null : firstProgressAt - downloadStartedAt,
+      network_duration_ms: networkCompletedAt - downloadStartedAt,
+      finalize_duration_ms: completedAt - networkCompletedAt,
+      downloaded_bytes: downloadedBytes,
+      expected_bytes: expectedBytes,
+      throughput_kbps:
+        durationMs > 0
+          ? Math.round((downloadedBytes * 8) / durationMs)
+          : null,
+      server_timing: responseHeader(result.headers, "server-timing"),
+      delivery: responseHeader(result.headers, "x-media-delivery"),
     });
     return destination;
   })().finally(() => downloads.delete(media.id));
 
   downloads.set(media.id, task);
   return task;
+}
+
+/** Starts caching incoming/visible images without blocking message rendering. */
+export function prefetchMessengerImages(
+  mediaItems: readonly MessengerMedia[],
+  accessToken: string,
+): void {
+  mediaItems
+    .filter((item) => item.type === "image")
+    .forEach((item) => {
+      void cacheMessengerMedia(item, accessToken).catch((error) =>
+        messengerLog("debug", "media.cache.prefetch.deferred", {
+          asset_id: item.id,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    });
 }
 
 /** Seeds the protected cache from the file that has just been uploaded. */

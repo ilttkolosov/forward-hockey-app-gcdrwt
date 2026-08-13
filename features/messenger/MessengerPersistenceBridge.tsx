@@ -15,6 +15,7 @@ import { warmMessengerRoomWindows } from "./cacheWarmup";
 import { flushMessengerReadReceipts } from "../../services/messengerReadSync";
 import { subscribeMessengerRealtime } from "../../services/messengerRealtime";
 import { messengerLog } from "../../services/messengerLogger";
+import { prefetchMessengerImages } from "../../services/messengerMediaCache";
 import {
   getMessengerContactAliases,
   getMessengerRooms,
@@ -99,8 +100,24 @@ export default function MessengerPersistenceBridge() {
     };
     const unsubscribeRealtime = subscribeMessengerRealtime((event) => {
       if (event.type === "message.created") {
+        prefetchMessengerImages(
+          event.message.media_items?.length
+            ? event.message.media_items
+            : event.message.media
+              ? [event.message.media]
+              : [],
+          session.access_token,
+        );
         persistRealtimeMessage(event.message);
       } else if (event.type === "message.updated") {
+        prefetchMessengerImages(
+          event.message.media_items?.length
+            ? event.message.media_items
+            : event.message.media
+              ? [event.message.media]
+              : [],
+          session.access_token,
+        );
         void cacheUpdatedMessengerMessage(db, event.message)
           .then(() => synchronizeRooms(false))
           .catch((error) =>

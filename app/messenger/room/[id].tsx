@@ -124,7 +124,10 @@ import {
   takeMessengerPhoto,
   type MessengerUploadFile,
 } from "../../../services/messengerAttachmentPicker";
-import { seedMessengerMediaCache } from "../../../services/messengerMediaCache";
+import {
+  prefetchMessengerImages,
+  seedMessengerMediaCache,
+} from "../../../services/messengerMediaCache";
 import { runManagedMessengerMediaUpload } from "../../../services/messengerMediaUploadManager";
 import { saveMessengerMediaToDevice } from "../../../services/messengerMediaSave";
 import { colors } from "../../../styles/commonStyles";
@@ -1840,6 +1843,27 @@ export default function MessengerRoomScreen() {
     const anchor = shouldAnchorUnreadBoundary
       ? readAnchor || firstUnread || current.at(-1) || null
       : current.at(-1) || null;
+    // Start protected image transfer while the list is positioning. The
+    // attachment cell will join the same deduplicated promise once visible.
+    // This removes the previous 300-600 ms wait for `listReady` from the
+    // latency path without downloading every off-screen image in the window.
+    const priorityMessages = [firstUnread, anchor, current.at(-1)].filter(
+      (message, index, candidates): message is MessengerMessage =>
+        Boolean(message) &&
+        candidates.findIndex(
+          (candidate) => candidate?.client_message_id === message?.client_message_id,
+        ) === index,
+    );
+    prefetchMessengerImages(
+      priorityMessages.flatMap((message) =>
+        message.media_items?.length
+          ? message.media_items
+          : message.media
+            ? [message.media]
+            : [],
+      ),
+      session.access_token,
+    );
     setUnreadMarkerClientId(firstUnread?.client_message_id ?? null);
     initialAnchorClientId.current = anchor?.client_message_id ?? null;
     initialAnchorMode.current = shouldAnchorUnreadBoundary
@@ -3762,7 +3786,12 @@ export default function MessengerRoomScreen() {
                                 mediaItems={mediaItems}
                                 location={location}
                                 accessToken={session.access_token}
-                                deferAutomaticCache={!listReady}
+                                deferAutomaticCache={
+                                  !roomScreenActive ||
+                                  !viewableMessageIds.has(
+                                    item.client_message_id,
+                                  )
+                                }
                                 playbackEnabled={
                                   roomScreenActive &&
                                   viewableMessageIds.has(item.client_message_id)

@@ -1,4 +1,4 @@
-import { Image } from "expo-image";
+import { Image, type ImageLoadEventData } from "expo-image";
 import * as Sharing from "expo-sharing";
 import React, {
   useCallback,
@@ -26,6 +26,7 @@ import {
   formatMessengerBytes,
   getCachedMessengerMediaUri,
 } from "../../services/messengerMediaCache";
+import { messengerLog } from "../../services/messengerLogger";
 import { tryPreviewMessengerFile } from "../../services/messengerNativeFilePreview";
 import { saveMessengerMediaToDevice } from "../../services/messengerMediaSave";
 import { colors } from "../../styles/commonStyles";
@@ -44,7 +45,9 @@ interface MessengerAttachmentViewProps {
 }
 
 const MAX_REMEMBERED_VIDEO_POSITIONS = 100;
+const MAX_MEASURED_IMAGE_RENDERS = 500;
 const rememberedVideoPositions = new Map<string, number>();
+const measuredImageRenders = new Set<string>();
 
 function rememberVideoPosition(mediaId: string, positionSeconds: number): void {
   if (!Number.isFinite(positionSeconds) || positionSeconds < 0) return;
@@ -59,6 +62,14 @@ function withoutValue(values: Set<string>, value: string): Set<string> {
   const next = new Set(values);
   next.delete(value);
   return next;
+}
+
+function rememberMeasuredImageRender(mediaId: string): void {
+  measuredImageRenders.delete(mediaId);
+  measuredImageRenders.add(mediaId);
+  if (measuredImageRenders.size <= MAX_MEASURED_IMAGE_RENDERS) return;
+  const oldestMediaId = measuredImageRenders.values().next().value;
+  if (oldestMediaId) measuredImageRenders.delete(oldestMediaId);
 }
 
 export default function MessengerAttachmentView({
@@ -87,8 +98,11 @@ export default function MessengerAttachmentView({
   const [savingId, setSavingId] = useState<string | null>(null);
   const [openingFileId, setOpeningFileId] = useState<string | null>(null);
   const openingFileRef = useRef<string | null>(null);
+  const localUrisRef = useRef<Record<string, string>>({});
+  const imageRenderStartedAt = useRef(new Map<string, number>());
 
   useEffect(() => {
+    localUrisRef.current = {};
     setLocalUris({});
     setLoadingIds(new Set());
     setErrors({});
@@ -106,7 +120,11 @@ export default function MessengerAttachmentView({
     let active = true;
     void getCachedMessengerMediaUri(video).then((uri) => {
       if (!active || !uri) return;
-      setLocalUris((current) => ({ ...current, [video.id]: uri }));
+      setLocalUris((current) => {
+        const next = { ...current, [video.id]: uri };
+        localUrisRef.current = next;
+        return next;
+      });
     });
     return () => {
       active = false;
@@ -115,7 +133,7 @@ export default function MessengerAttachmentView({
 
   const ensureLocal = useCallback(
     async (item: MessengerMedia): Promise<string> => {
-      const known = localUris[item.id];
+      const known = localUrisRef.current[item.id];
       if (known) return known;
       setLoadingIds((current) => new Set(current).add(item.id));
       setErrors((current) => {
@@ -125,7 +143,11 @@ export default function MessengerAttachmentView({
       });
       try {
         const uri = await cacheMessengerMedia(item, accessToken);
-        setLocalUris((current) => ({ ...current, [item.id]: uri }));
+        setLocalUris((current) => {
+          const next = { ...current, [item.id]: uri };
+          localUrisRef.current = next;
+          return next;
+        });
         return uri;
       } catch (cacheError) {
         const message =
@@ -138,7 +160,28 @@ export default function MessengerAttachmentView({
         setLoadingIds((current) => withoutValue(current, item.id));
       }
     },
-    [accessToken, localUris],
+    [accessToken],
+  );
+
+  const handleImageLoadStart = useCallback((mediaId: string) => {
+    imageRenderStartedAt.current.set(mediaId, Date.now());
+  }, []);
+
+  const handleImageLoad = useCallback(
+    (item: MessengerMedia, event: ImageLoadEventData) => {
+      if (measuredImageRenders.has(item.id)) return;
+      rememberMeasuredImageRender(item.id);
+      const startedAt = imageRenderStartedAt.current.get(item.id);
+      messengerLog("info", "media.image.rendered", {
+        asset_id: item.id,
+        render_duration_ms: startedAt ? Date.now() - startedAt : null,
+        cache_type: event.cacheType,
+        width: event.source.width,
+        height: event.source.height,
+        size_bytes: item.size_bytes,
+      });
+    },
+    [],
   );
 
   useEffect(() => {
@@ -267,6 +310,8 @@ export default function MessengerAttachmentView({
                   style={styles.albumImage}
                   contentFit="cover"
                   transition={120}
+                  onLoadStart={() => handleImageLoadStart(item.id)}
+                  onLoad={(event) => handleImageLoad(item, event)}
                 />
               ) : (
                 <View style={styles.albumPlaceholder}>
@@ -332,6 +377,8 @@ export default function MessengerAttachmentView({
               style={styles.previewImage}
               contentFit="cover"
               transition={140}
+              onLoadStart={() => handleImageLoadStart(single.id)}
+              onLoad={(event) => handleImageLoad(single, event)}
             />
           ) : (
             <View style={styles.previewPlaceholder}>
@@ -537,6 +584,8 @@ export default function MessengerAttachmentView({
                           source={localUri}
                           style={styles.fullImage}
                           contentFit="contain"
+                          onLoadStart={() => handleImageLoadStart(item.id)}
+                          onLoad={(event) => handleImageLoad(item, event)}
                         />
                       </ScrollView>
                     )}
