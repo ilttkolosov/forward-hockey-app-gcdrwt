@@ -628,13 +628,12 @@ type MessengerMediaUploadFile = {
 // not an error and must not be cut off by an absolute wall-clock timeout.
 const MEDIA_UPLOAD_STALL_TIMEOUT_MS = 3 * 60 * 1000;
 
-// The legacy FileSystem multipart implementation copies the complete source
-// into a second temporary multipart file and uses an iOS URLSession upload
-// task. Production timing showed that path delivering only about 2.2 Mbit/s
-// while nginx and local storage were idle. Expo SDK 54 recommends File +
-// expo/fetch for uploads; use it for every allowed single file on iOS. The
-// server's 50 MiB limit bounds the in-memory multipart body. Android retains
-// native byte progress for large files and uses expo/fetch for small payloads.
+// Expo's File + fetch path avoids the legacy multipart copy for small
+// payloads. Large files use the native foreground upload task so the UI gets
+// real byte progress and the three-minute no-progress watchdog stays useful.
+// Production A/B testing isolated the former large-upload slowdown to nginx
+// HTTP/2 request flow control; the server now accepts these uploads over
+// HTTP/1.1, so the progress-capable transport no longer inherits that bottleneck.
 const BUFFERED_MEDIA_UPLOAD_MAX_BYTES = 1024 * 1024;
 const EXPO_FETCH_MEDIA_UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -976,8 +975,7 @@ export async function sendMessengerMedia(
   signal?: AbortSignal,
 ) {
   if (Platform.OS !== "web" && files.length === 1 && files[0]) {
-    const useExpoFetch =
-      Platform.OS === "ios" || shouldUseBufferedMediaUpload(files[0]);
+    const useExpoFetch = shouldUseBufferedMediaUpload(files[0]);
     const transport = useExpoFetch
       ? "expo_fetch_buffered"
       : "legacy_native_progress";
