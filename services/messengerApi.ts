@@ -636,6 +636,8 @@ const MEDIA_UPLOAD_STALL_TIMEOUT_MS = 3 * 60 * 1000;
 // keeps native progress for large files and uses expo/fetch for small ones.
 const BUFFERED_MEDIA_UPLOAD_MAX_BYTES = 1024 * 1024;
 const EXPO_FETCH_MEDIA_UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
+const MEDIA_UPLOAD_PROGRESS_POLL_INTERVAL_MS = 1_250;
+const MEDIA_UPLOAD_PROGRESS_STEP_PERCENT = 20;
 
 function shouldUseBufferedMediaUpload(file: MessengerMediaUploadFile) {
   return (
@@ -643,6 +645,109 @@ function shouldUseBufferedMediaUpload(file: MessengerMediaUploadFile) {
     file.size_bytes >= 0 &&
     file.size_bytes <= BUFFERED_MEDIA_UPLOAD_MAX_BYTES
   );
+}
+
+function startServerUploadProgressPolling(
+  uploadId: string,
+  totalBytes: number,
+  accessToken: string | undefined,
+  onProgress: ((progress: MessengerUploadProgress) => void) | undefined,
+): () => void {
+  if (
+    !onProgress ||
+    !accessToken ||
+    !Number.isFinite(totalBytes) ||
+    totalBytes <= 0
+  ) {
+    return () => undefined;
+  }
+
+  let active = true;
+  let inFlight = false;
+  let lastReportedPercent = 0;
+  let currentController: AbortController | null = null;
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const stop = () => {
+    active = false;
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+    currentController?.abort();
+    currentController = null;
+  };
+
+  const poll = async () => {
+    if (!active || inFlight) return;
+    inFlight = true;
+    const controller = new AbortController();
+    currentController = controller;
+    try {
+      const response = await fetch(
+        `${MESSENGER_API_BASE_URL}/media-uploads/${encodeURIComponent(uploadId)}/progress`,
+        {
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          signal: controller.signal,
+        },
+      );
+      if (!active) return;
+      if (!response.ok) {
+        messengerLog("debug", "api.media_upload.progress_unavailable", {
+          upload_id: uploadId,
+          status: response.status,
+        });
+        stop();
+        return;
+      }
+      const payload = (await response.json()) as ApiEnvelope<{
+        received_bytes?: number;
+      }>;
+      if (!active) return;
+      const receivedBytes = Number(payload.data?.received_bytes ?? 0);
+      if (!Number.isFinite(receivedBytes) || receivedBytes <= 0) return;
+      const measuredPercent = Math.max(
+        0,
+        Math.min(100, Math.floor((receivedBytes / totalBytes) * 100)),
+      );
+      const coarsePercent = Math.min(
+        100,
+        Math.floor(measuredPercent / MEDIA_UPLOAD_PROGRESS_STEP_PERCENT) *
+          MEDIA_UPLOAD_PROGRESS_STEP_PERCENT,
+      );
+      if (coarsePercent <= lastReportedPercent) return;
+      lastReportedPercent = coarsePercent;
+      onProgress({
+        sent_bytes: Math.min(receivedBytes, totalBytes),
+        total_bytes: totalBytes,
+        percent: coarsePercent,
+      });
+      messengerLog("debug", "api.media_upload.server_progress", {
+        upload_id: uploadId,
+        received_bytes: receivedBytes,
+        total_bytes: totalBytes,
+        percent: coarsePercent,
+      });
+    } catch (error) {
+      if (!active) return;
+      messengerLog("debug", "api.media_upload.progress_unavailable", {
+        upload_id: uploadId,
+        message: messengerErrorMessage(error),
+      });
+      stop();
+    } finally {
+      if (currentController === controller) currentController = null;
+      inFlight = false;
+    }
+  };
+
+  timer = setInterval(() => {
+    void poll();
+  }, MEDIA_UPLOAD_PROGRESS_POLL_INTERVAL_MS);
+  return stop;
 }
 
 async function sendBufferedSingleMessengerMedia(
@@ -669,6 +774,7 @@ async function sendBufferedSingleMessengerMedia(
   const headers: Record<string, string> = {
     Accept: "application/json",
     "x-request-id": requestId,
+    "x-upload-id": requestId,
   };
   if (session?.access_token) {
     headers.Authorization = `Bearer ${session.access_token}`;
@@ -682,6 +788,12 @@ async function sendBufferedSingleMessengerMedia(
     timedOut = true;
     controller.abort();
   }, EXPO_FETCH_MEDIA_UPLOAD_TIMEOUT_MS);
+  const stopProgressPolling = startServerUploadProgressPolling(
+    requestId,
+    file.size_bytes ?? 0,
+    session?.access_token,
+    onProgress,
+  );
 
   messengerLog("info", "api.media_buffered_upload.started", {
     request_id: requestId,
@@ -726,6 +838,7 @@ async function sendBufferedSingleMessengerMedia(
       !noRefresh &&
       Boolean(session?.refresh_token)
     ) {
+      stopProgressPolling();
       await refreshMessengerSession();
       return sendBufferedSingleMessengerMedia(
         roomId,
@@ -743,6 +856,7 @@ async function sendBufferedSingleMessengerMedia(
       body,
     );
     const totalBytes = file.size_bytes ?? 0;
+    stopProgressPolling();
     onProgress?.({
       sent_bytes: totalBytes,
       total_bytes: totalBytes,
@@ -772,6 +886,7 @@ async function sendBufferedSingleMessengerMedia(
     );
     throw normalized;
   } finally {
+    stopProgressPolling();
     clearTimeout(timeoutTimer);
     signal?.removeEventListener("abort", handleAbort);
   }
@@ -1013,14 +1128,52 @@ export async function sendMessengerMedia(
   if (caption?.trim()) form.append("caption", caption.trim());
   if (replyToMessageId) form.append("reply_to_message_id", replyToMessageId);
   files.forEach((file) => form.append("files", file as unknown as Blob));
+  if (Platform.OS === "web") {
+    try {
+      return await messengerRequest<MessengerMediaUploadResult>(
+        `/chat/rooms/${roomId}/media`,
+        { method: "POST", body: form, signal },
+      );
+    } catch (error) {
+      if (signal?.aborted) throw new MessengerUploadCancelledError();
+      throw error;
+    }
+  }
+
+  const uploadId = messengerRequestId();
+  const session = await loadMessengerSession();
+  const totalBytes = files.reduce(
+    (sum, file) => sum + Math.max(0, file.size_bytes ?? 0),
+    0,
+  );
+  const stopProgressPolling = startServerUploadProgressPolling(
+    uploadId,
+    totalBytes,
+    session?.access_token,
+    onProgress,
+  );
   try {
-    return await messengerRequest<MessengerMediaUploadResult>(
+    const result = await messengerRequest<MessengerMediaUploadResult>(
       `/chat/rooms/${roomId}/media`,
-      { method: "POST", body: form, signal },
+      {
+        method: "POST",
+        body: form,
+        signal,
+        headers: { "x-upload-id": uploadId },
+      },
     );
+    stopProgressPolling();
+    onProgress?.({
+      sent_bytes: totalBytes,
+      total_bytes: totalBytes,
+      percent: 100,
+    });
+    return result;
   } catch (error) {
     if (signal?.aborted) throw new MessengerUploadCancelledError();
     throw error;
+  } finally {
+    stopProgressPolling();
   }
 }
 
