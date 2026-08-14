@@ -182,25 +182,25 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
     editor.resignFirstResponder()
   }
 
-  func textViewDidBeginEditing(_ textView: UITextView) {
+  public func textViewDidBeginEditing(_ textView: UITextView) {
     installLegacyMenuItemsIfNeeded()
     onFocus([:])
   }
 
-  func textViewDidEndEditing(_ textView: UITextView) {
+  public func textViewDidEndEditing(_ textView: UITextView) {
     if #unavailable(iOS 16.0) {
       UIMenuController.shared.menuItems = nil
     }
     onBlur([:])
   }
 
-  func textViewDidChange(_ textView: UITextView) {
+  public func textViewDidChange(_ textView: UITextView) {
     updatePlaceholder()
     emitValueChange()
     emitContentHeight()
   }
 
-  func textView(
+  public func textView(
     _ textView: UITextView,
     shouldChangeTextIn range: NSRange,
     replacementText text: String
@@ -364,7 +364,7 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
     if #available(iOS 16.0, *) { return }
     UIMenuController.shared.menuItems = [
       UIMenuItem(title: "Жирный", action: #selector(ForwardAttributedTextView.formatBold(_:))),
-      UIMenuItem(title: "Курсив", action: #selector(ForwardAttributedTextView.formatItalic(_:))),
+      UIMenuItem(title: "Курсив", action: #selector(FormatItalic(_:)),
       UIMenuItem(title: "Подчёркнутый", action: #selector(ForwardAttributedTextView.formatUnderline(_:))),
       UIMenuItem(title: "Зачёркнутый", action: #selector(ForwardAttributedTextView.formatStrikethrough(_:)))
     ]
@@ -459,7 +459,7 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
     to value: NSMutableAttributedString,
     range: NSRange
   ) {
-    value.enumerateAttribute(.font, in: range) { current, subrange, _ in
+    value.enumerateAttribute(.font, in range) { current, subrange, _ in
       let currentFont = current as? UIFont ?? UIFont.systemFont(ofSize: fontSize)
       let traits = currentFont.fontDescriptor.symbolicTraits.union(trait)
       let descriptor = currentFont.fontDescriptor.withSymbolicTraits(traits) ?? currentFont.fontDescriptor
