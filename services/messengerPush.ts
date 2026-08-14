@@ -44,11 +44,13 @@ let observedNativePushToken: string | null = null;
 type NotificationPermissionRequest = "never" | "explicit" | "restore";
 
 export interface MessengerPushPayload {
-  type: "messenger.message" | "messenger.badge";
+  type: "messenger.message" | "messenger.reaction" | "messenger.badge";
   room_id?: string;
   room_title?: string;
   message_id?: string;
   sequence?: string;
+  reacting_user_id?: string;
+  reaction?: string;
   unread_count?: number;
 }
 
@@ -318,6 +320,7 @@ export function normalizeMessengerPushPayload(
     }
     if (
       record.type === "messenger.message" ||
+      record.type === "messenger.reaction" ||
       record.type === "messenger.badge"
     ) {
       const unread = Number(record.unread_count);
@@ -331,6 +334,12 @@ export function normalizeMessengerPushPayload(
           typeof record.message_id === "string" ? record.message_id : undefined,
         sequence:
           typeof record.sequence === "string" ? record.sequence : undefined,
+        reacting_user_id:
+          typeof record.reacting_user_id === "string"
+            ? record.reacting_user_id
+            : undefined,
+        reaction:
+          typeof record.reaction === "string" ? record.reaction : undefined,
         unread_count: Number.isFinite(unread) ? unread : undefined,
       };
     }
@@ -358,7 +367,11 @@ export async function processMessengerPushPayload(
   if (payload.unread_count !== undefined) {
     await setMessengerUnreadCount(payload.unread_count);
   }
-  if (payload.type !== "messenger.message" || !payload.message_id) {
+  if (
+    (payload.type !== "messenger.message" &&
+      payload.type !== "messenger.reaction") ||
+    !payload.message_id
+  ) {
     return payload;
   }
   const session = await loadMessengerSession();
@@ -374,7 +387,10 @@ export async function processMessengerPushPayload(
       await syncMessengerUnreadFromRooms(reconciled);
     }
     await cacheIncomingMessengerMessage(db, message, session.user.id);
-    if (message.author.id !== session.user.id) {
+    if (
+      payload.type === "messenger.message" &&
+      message.author.id !== session.user.id
+    ) {
       try {
         await markMessengerDelivered(message.room_id, message.sequence);
       } catch (error) {
@@ -401,7 +417,8 @@ export async function processMessengerPushPayload(
     } else {
       await setMessengerUnreadCount(payload.unread_count);
     }
-    messengerLog("info", "push.message.cached", {
+    messengerLog("info", "push.event.cached", {
+      push_type: payload.type,
       room_id: message.room_id,
       message_id: message.id,
       sequence: message.sequence,
@@ -409,7 +426,8 @@ export async function processMessengerPushPayload(
   } catch (error) {
     // The notification remains useful while offline; normal room sync will
     // fetch the message when connectivity returns.
-    messengerLog("warn", "push.message.cache_deferred", {
+    messengerLog("warn", "push.event.cache_deferred", {
+      push_type: payload.type,
       room_id: payload.room_id,
       message_id: payload.message_id,
       message: error instanceof Error ? error.message : String(error),

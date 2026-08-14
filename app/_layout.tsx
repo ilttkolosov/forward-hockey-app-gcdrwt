@@ -62,13 +62,16 @@ Notifications.setNotificationHandler({
       notification.request.content.data,
     );
     const messengerBadgeUpdate = messengerPush?.type === 'messenger.badge';
-    const messengerDeliveredToVisibleRoom =
+    const messengerRoomEvent =
+      messengerPush?.type === 'messenger.message'
+      || messengerPush?.type === 'messenger.reaction';
+    const messengerEventForVisibleRoom =
       AppState.currentState === 'active'
-      && messengerPush?.type === 'messenger.message'
+      && messengerRoomEvent
       && Boolean(messengerPush.room_id)
       && messengerPush.room_id === getMessengerActiveRoomId();
     const suppressVisualNotification =
-      messengerBadgeUpdate || messengerDeliveredToVisibleRoom;
+      messengerBadgeUpdate || messengerEventForVisibleRoom;
 
     return {
       shouldShowBanner: !suppressVisualNotification,
@@ -313,9 +316,16 @@ function RootLayoutContent() {
     }
     const data = response.notification.request.content.data;
     const messengerPush = normalizeMessengerPushPayload(data);
-    if (messengerPush?.type === 'messenger.message' && messengerPush.room_id) {
+    const opensMessengerRoom =
+      messengerPush?.type === 'messenger.message'
+      || messengerPush?.type === 'messenger.reaction';
+    if (opensMessengerRoom && messengerPush.room_id) {
       void processMessengerPushPayload(data);
-      initializationLog('Открытие комнаты по нажатию на уведомление мессенджера');
+      initializationLog(
+        messengerPush.type === 'messenger.reaction'
+          ? 'Открытие реакции по нажатию на уведомление мессенджера'
+          : 'Открытие комнаты по нажатию на уведомление мессенджера'
+      );
       // A PUSH can be opened while another room is already on screen. Replace
       // that route so consecutive notifications never build a room-by-room
       // back stack.
@@ -326,6 +336,11 @@ function RootLayoutContent() {
           title: messengerPush.room_title || 'Чат',
           pushMessageId: messengerPush.message_id || '',
           pushSequence: messengerPush.sequence || '',
+          pushEventId: identifier,
+          pushReaction:
+            messengerPush.type === 'messenger.reaction'
+              ? messengerPush.reaction || ''
+              : '',
         },
       });
     }

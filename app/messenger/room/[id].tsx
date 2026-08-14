@@ -643,6 +643,71 @@ function UnreadDivider() {
   );
 }
 
+function MessengerReactionChip({
+  reaction,
+  count,
+  selected,
+  disabled,
+  animationKey,
+  onPress,
+}: {
+  reaction: string;
+  count: number;
+  selected: boolean;
+  disabled: boolean;
+  animationKey: string | null;
+  onPress: () => void;
+}) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!animationKey) return;
+    scale.setValue(0.72);
+    translateY.setValue(10);
+    const animation = Animated.parallel([
+      Animated.sequence([
+        Animated.spring(scale, {
+          toValue: 1.36,
+          speed: 24,
+          bounciness: 12,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scale, {
+          toValue: 1,
+          speed: 20,
+          bounciness: 8,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.spring(translateY, {
+        toValue: 0,
+        speed: 18,
+        bounciness: 14,
+        useNativeDriver: true,
+      }),
+    ]);
+    animation.start();
+    return () => animation.stop();
+  }, [animationKey, scale, translateY]);
+
+  return (
+    <Animated.View style={{ transform: [{ translateY }, { scale }] }}>
+      <TouchableOpacity
+        style={[styles.reactionChip, selected && styles.reactionChipSelected]}
+        onPress={onPress}
+        disabled={disabled}
+        accessibilityLabel={`${reaction}, реакций: ${count}`}
+      >
+        <Text style={styles.reactionText}>
+          {reaction}
+          {count >= 2 ? ` ${count}` : ""}
+        </Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
 function messageReplyPreview(reply: MessengerReply): string {
   if (reply.deleted_at) return "Сообщение удалено";
   if (reply.text) return reply.text;
@@ -665,6 +730,8 @@ interface MessengerMessageListItemProps {
   roomScreenActive: boolean;
   viewable: boolean;
   reactionBusy: boolean;
+  animatedReaction: string | null;
+  reactionAnimationKey: string | null;
   onReply: (message: MessengerMessage) => void;
   onOpenActions: (message: MessengerMessage) => void;
   onNavigateToReply: (
@@ -691,6 +758,8 @@ const MessengerMessageListItem = React.memo(
     roomScreenActive,
     viewable,
     reactionBusy,
+    animatedReaction,
+    reactionAnimationKey,
     onReply,
     onOpenActions,
     onNavigateToReply,
@@ -883,24 +952,21 @@ const MessengerMessageListItem = React.memo(
                       contentContainerStyle={styles.reactionSummary}
                     >
                       {item.reactions.map((reaction) => (
-                        <TouchableOpacity
+                        <MessengerReactionChip
                           key={reaction.reaction}
-                          style={[
-                            styles.reactionChip,
-                            reaction.reacted_by_me &&
-                              styles.reactionChipSelected,
-                          ]}
+                          reaction={reaction.reaction}
+                          count={reaction.count}
+                          selected={reaction.reacted_by_me}
                           onPress={() =>
                             onToggleReaction(item, reaction.reaction)
                           }
                           disabled={!canReact || reactionBusy}
-                          accessibilityLabel={`${reaction.reaction}, реакций: ${reaction.count}`}
-                        >
-                          <Text style={styles.reactionText}>
-                            {reaction.reaction}
-                            {reaction.count >= 2 ? ` ${reaction.count}` : ""}
-                          </Text>
-                        </TouchableOpacity>
+                          animationKey={
+                            animatedReaction === reaction.reaction
+                              ? reactionAnimationKey
+                              : null
+                          }
+                        />
                       ))}
                     </ScrollView>
                   )}
@@ -954,6 +1020,8 @@ export default function MessengerRoomScreen() {
     unreadCount?: string;
     pushMessageId?: string;
     pushSequence?: string;
+    pushEventId?: string;
+    pushReaction?: string;
     memberCount?: string;
     peerId?: string;
     peerLastSeenAt?: string;
@@ -1048,6 +1116,11 @@ export default function MessengerRoomScreen() {
   const [highlightedMessageId, setHighlightedMessageId] = useState<
     string | null
   >(null);
+  const [pushReactionAnimation, setPushReactionAnimation] = useState<{
+    messageId: string;
+    reaction: string;
+    key: string;
+  } | null>(null);
   const [feedHeight, setFeedHeight] = useState(0);
   const listRef = useRef<FlatList<MessengerMessage>>(null);
   const inputRef = useRef<TextInput>(null);
@@ -1123,6 +1196,9 @@ export default function MessengerRoomScreen() {
   const messageNavigationTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const pushReactionAnimationTimer = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const openedAt = useRef(
     (() => {
       const value = Number(params.openedAt);
@@ -1262,23 +1338,66 @@ export default function MessengerRoomScreen() {
   );
 
   useEffect(() => {
-    if (
-      !listReady ||
-      pushMessageNavigationHandled.current === params.pushMessageId ||
-      !params.pushMessageId
-    ) {
-      return;
-    }
-    pushMessageNavigationHandled.current = params.pushMessageId;
-    void navigateToRepliedMessage({
-      id: params.pushMessageId,
-      sequence: params.pushSequence || undefined,
-    });
+    if (!listReady || !params.pushMessageId) return;
+    const navigationKey =
+      params.pushEventId ||
+      `${params.pushMessageId}:${params.pushReaction || "message"}`;
+    if (pushMessageNavigationHandled.current === navigationKey) return;
+    pushMessageNavigationHandled.current = navigationKey;
+    let cancelled = false;
+    void (async () => {
+      await navigateToRepliedMessage({
+        id: params.pushMessageId!,
+        sequence: params.pushSequence || undefined,
+      });
+      if (!params.pushReaction || cancelled) return;
+      try {
+        const freshMessage = await getMessengerMessage(params.pushMessageId!);
+        await cacheMessengerMessages(db, [freshMessage]);
+        if (cancelled) return;
+        setMessages((current) => {
+          const next = reconcileMessengerMessageUpdates(
+            current,
+            [freshMessage],
+            reactionMutationIds.current,
+          );
+          messagesRef.current = next;
+          return next;
+        });
+      } catch (error) {
+        messengerLog("warn", "push.reaction.refresh_failed", {
+          room_id: roomId,
+          message_id: params.pushMessageId,
+          reaction: params.pushReaction,
+          message: messengerErrorMessage(error),
+        });
+      }
+      if (cancelled) return;
+      if (pushReactionAnimationTimer.current) {
+        clearTimeout(pushReactionAnimationTimer.current);
+      }
+      setPushReactionAnimation({
+        messageId: params.pushMessageId!,
+        reaction: params.pushReaction,
+        key: navigationKey,
+      });
+      pushReactionAnimationTimer.current = setTimeout(() => {
+        setPushReactionAnimation(null);
+        pushReactionAnimationTimer.current = null;
+      }, 2_200);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [
+    db,
     listReady,
     navigateToRepliedMessage,
+    params.pushEventId,
     params.pushMessageId,
+    params.pushReaction,
     params.pushSequence,
+    roomId,
   ]);
 
   useEffect(() => {
@@ -2655,6 +2774,11 @@ export default function MessengerRoomScreen() {
           clearTimeout(messageNavigationTimer.current);
           messageNavigationTimer.current = null;
         }
+        if (pushReactionAnimationTimer.current) {
+          clearTimeout(pushReactionAnimationTimer.current);
+          pushReactionAnimationTimer.current = null;
+        }
+        setPushReactionAnimation(null);
         messageNavigationTarget.current = null;
         clearInitialPositionTimers();
         pendingInitialPosition.current = false;
@@ -3953,6 +4077,16 @@ export default function MessengerRoomScreen() {
         roomScreenActive={roomScreenActive}
         viewable={viewableMessageIds.has(item.client_message_id)}
         reactionBusy={reactionBusyIds.has(item.id)}
+        animatedReaction={
+          pushReactionAnimation?.messageId === item.id
+            ? pushReactionAnimation.reaction
+            : null
+        }
+        reactionAnimationKey={
+          pushReactionAnimation?.messageId === item.id
+            ? pushReactionAnimation.key
+            : null
+        }
         onReply={beginReply}
         onOpenActions={openMessageActions}
         onNavigateToReply={navigateToRepliedMessage}
@@ -3966,6 +4100,7 @@ export default function MessengerRoomScreen() {
       highlightedMessageId,
       navigateToRepliedMessage,
       openMessageActions,
+      pushReactionAnimation,
       reactionBusyIds,
       roomScreenActive,
       roomType,
