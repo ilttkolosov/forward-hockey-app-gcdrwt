@@ -30,6 +30,7 @@ import {
   messengerErrorMessage,
   setMessengerRoomMemberAlias,
 } from "../../../services/messengerApi";
+import { messengerLog } from "../../../services/messengerLogger";
 import { subscribeMessengerRealtime } from "../../../services/messengerRealtime";
 import { colors } from "../../../styles/commonStyles";
 
@@ -57,14 +58,22 @@ function lastSeenText(value: string | null): string {
 
 export default function MessengerContactProfileScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ id: string; roomId?: string }>();
+  const params = useLocalSearchParams<{
+    id: string;
+    roomId?: string;
+    online?: string;
+    lastSeenAt?: string;
+    openedAt?: string;
+  }>();
   const { session, isAuthenticated } = useMessengerAuth();
   const roomId = params.roomId || "";
   const scrollRef = useRef<ScrollView>(null);
   const [profile, setProfile] = useState<MessengerContactProfile | null>(null);
   const [alias, setAlias] = useState("");
-  const [online, setOnline] = useState(false);
-  const [lastSeenAt, setLastSeenAt] = useState<string | null>(null);
+  const [online, setOnline] = useState(params.online === "true");
+  const [lastSeenAt, setLastSeenAt] = useState<string | null>(
+    params.lastSeenAt || null,
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -73,23 +82,65 @@ export default function MessengerContactProfileScreen() {
 
   const load = useCallback(async () => {
     if (!isAuthenticated || !roomId) return;
+    const startedAt = Date.now();
     setError(null);
     try {
-      const [nextProfile, members] = await Promise.all([
-        getMessengerRoomMemberProfile(roomId, params.id),
-        getMessengerRoomMembers(roomId),
-      ]);
+      const nextProfile = await getMessengerRoomMemberProfile(
+        roomId,
+        params.id,
+      );
       if (nextProfile.id !== params.id) {
         throw new Error(
           "Пользователь не является участником этого личного чата",
         );
       }
-      const presence = members.find((member) => member.id === nextProfile.id);
       setProfile(nextProfile);
       setAlias(nextProfile.alias || "");
-      setOnline(presence?.online ?? false);
-      setLastSeenAt(presence?.last_seen_at ?? nextProfile.last_seen_at);
+      const presenceWasPassed =
+        params.online === "true" || params.online === "false";
+      if (presenceWasPassed) {
+        setOnline(params.online === "true");
+        setLastSeenAt(params.lastSeenAt || nextProfile.last_seen_at);
+      } else {
+        setLastSeenAt(nextProfile.last_seen_at);
+      }
       setSaved(false);
+      setLoading(false);
+      const openedAt = Number(params.openedAt);
+      messengerLog("info", "contact_profile.ready", {
+        room_id: roomId,
+        user_id: nextProfile.id,
+        profile_duration_ms: Date.now() - startedAt,
+        elapsed_since_tap_ms: Number.isFinite(openedAt)
+          ? Math.max(0, Date.now() - openedAt)
+          : null,
+        presence_source: presenceWasPassed ? "navigation" : "deferred",
+      });
+
+      // The profile response contains every field required to render the
+      // card. Presence is secondary and must never hold the entire screen
+      // behind a request for all room members.
+      if (!presenceWasPassed) {
+        void getMessengerRoomMembers(roomId, { priority: "background" })
+          .then((members) => {
+            const presence = members.find(
+              (member) => member.id === nextProfile.id,
+            );
+            if (!presence) return;
+            setOnline(presence.online);
+            setLastSeenAt(presence.last_seen_at ?? nextProfile.last_seen_at);
+          })
+          .catch((presenceError) =>
+            messengerLog("debug", "contact_profile.presence_deferred", {
+              room_id: roomId,
+              user_id: nextProfile.id,
+              message:
+                presenceError instanceof Error
+                  ? presenceError.message
+                  : String(presenceError),
+            }),
+          );
+      }
     } catch (loadError) {
       setError(
         messengerErrorMessage(loadError, "Не удалось загрузить профиль"),
@@ -97,7 +148,14 @@ export default function MessengerContactProfileScreen() {
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated, params.id, roomId]);
+  }, [
+    isAuthenticated,
+    params.id,
+    params.lastSeenAt,
+    params.online,
+    params.openedAt,
+    roomId,
+  ]);
 
   useFocusEffect(
     useCallback(() => {

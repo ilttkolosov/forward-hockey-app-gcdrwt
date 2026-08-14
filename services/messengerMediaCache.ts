@@ -1,4 +1,5 @@
 import * as FileSystem from "expo-file-system/legacy";
+import { AppState } from "react-native";
 import type { MessengerMedia } from "../features/messenger/types";
 import { messengerMediaUrl } from "./messengerApi";
 import { messengerLog, messengerRequestId } from "./messengerLogger";
@@ -6,6 +7,17 @@ import { messengerLog, messengerRequestId } from "./messengerLogger";
 const CACHE_ROOT = `${FileSystem.cacheDirectory || ""}forward-messenger-media/`;
 const downloads = new Map<string, Promise<string>>();
 const localMediaUploads = new Set<string>();
+const queuedVideoPrefetches = new Set<string>();
+const videoPrefetchQueue: {
+  media: MessengerMedia;
+  accessToken: string;
+  sessionType: "foreground" | "background";
+}[] = [];
+let videoPrefetchRunning = false;
+
+interface MessengerMediaCacheOptions {
+  sessionType?: "foreground" | "background";
+}
 
 /**
  * Marks a media message whose source files exist on this exact device. The
@@ -86,6 +98,7 @@ export async function getCachedMessengerMediaUri(
 export async function cacheMessengerMedia(
   media: MessengerMedia,
   accessToken: string,
+  options: MessengerMediaCacheOptions = {},
 ): Promise<string> {
   const existing = downloads.get(media.id);
   if (existing) return existing;
@@ -105,12 +118,13 @@ export async function cacheMessengerMedia(
     let firstProgressAt: number | null = null;
     let lastWrittenBytes = 0;
     let expectedBytes = media.size_bytes;
+    const sessionType = options.sessionType ?? "foreground";
     messengerLog("debug", "media.cache.download.started", {
       asset_id: media.id,
       media_type: media.type,
       size_bytes: media.size_bytes,
       client_request_id: clientRequestId,
-      session_type: "foreground",
+      session_type: sessionType,
     });
     const resumable = FileSystem.createDownloadResumable(
       source,
@@ -124,7 +138,10 @@ export async function cacheMessengerMedia(
         // appropriate for large offline transfers, but the OS may defer a
         // 100-200 KB image for several seconds. Visible chat media is
         // latency-sensitive and must use the foreground URLSession instead.
-        sessionType: FileSystem.FileSystemSessionType.FOREGROUND,
+        sessionType:
+          sessionType === "background"
+            ? FileSystem.FileSystemSessionType.BACKGROUND
+            : FileSystem.FileSystemSessionType.FOREGROUND,
       },
       (progress) => {
         lastWrittenBytes = progress.totalBytesWritten;
@@ -183,21 +200,83 @@ export async function cacheMessengerMedia(
   return task;
 }
 
-/** Starts caching incoming/visible images without blocking message rendering. */
+async function drainVideoPrefetchQueue(): Promise<void> {
+  if (videoPrefetchRunning) return;
+  videoPrefetchRunning = true;
+  try {
+    while (videoPrefetchQueue.length > 0) {
+      const entry = videoPrefetchQueue.shift();
+      if (!entry) continue;
+      try {
+        await cacheMessengerMedia(entry.media, entry.accessToken, {
+          sessionType: entry.sessionType,
+        });
+      } catch (error) {
+        messengerLog("debug", "media.cache.prefetch.deferred", {
+          asset_id: entry.media.id,
+          media_type: entry.media.type,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        queuedVideoPrefetches.delete(entry.media.id);
+      }
+    }
+  } finally {
+    videoPrefetchRunning = false;
+    if (videoPrefetchQueue.length > 0) void drainVideoPrefetchQueue();
+  }
+}
+
+/**
+ * Starts caching incoming/visible media without blocking message persistence.
+ * Images keep their low-latency path, while videos use a single-file queue so
+ * several incoming clips cannot saturate the transport at the same time.
+ */
+export function prefetchMessengerMedia(
+  mediaItems: readonly MessengerMedia[],
+  accessToken: string,
+): void {
+  if (!accessToken) return;
+  const sessionType =
+    AppState.currentState === "active" ? "foreground" : "background";
+  mediaItems
+    .filter((item) => item.type === "image")
+    .forEach((item) => {
+      void cacheMessengerMedia(item, accessToken, { sessionType }).catch(
+        (error) =>
+          messengerLog("debug", "media.cache.prefetch.deferred", {
+            asset_id: item.id,
+            media_type: item.type,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+      );
+    });
+
+  mediaItems
+    .filter((item) => item.type === "video")
+    .forEach((item) => {
+      if (queuedVideoPrefetches.has(item.id) || downloads.has(item.id)) return;
+      queuedVideoPrefetches.add(item.id);
+      videoPrefetchQueue.push({ media: item, accessToken, sessionType });
+      messengerLog("debug", "media.cache.video_prefetch.queued", {
+        asset_id: item.id,
+        size_bytes: item.size_bytes,
+        queue_position: videoPrefetchQueue.length,
+        session_type: sessionType,
+      });
+    });
+  if (videoPrefetchQueue.length > 0) void drainVideoPrefetchQueue();
+}
+
+/** Compatibility wrapper for callers outside the current messenger bundle. */
 export function prefetchMessengerImages(
   mediaItems: readonly MessengerMedia[],
   accessToken: string,
 ): void {
-  mediaItems
-    .filter((item) => item.type === "image")
-    .forEach((item) => {
-      void cacheMessengerMedia(item, accessToken).catch((error) =>
-        messengerLog("debug", "media.cache.prefetch.deferred", {
-          asset_id: item.id,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    });
+  prefetchMessengerMedia(
+    mediaItems.filter((item) => item.type === "image"),
+    accessToken,
+  );
 }
 
 /** Seeds the protected cache from the file that has just been uploaded. */
@@ -241,6 +320,8 @@ export async function clearMessengerMediaCache(): Promise<number> {
   if (!FileSystem.cacheDirectory) return 0;
   const bytes = await messengerMediaCacheSize();
   downloads.clear();
+  videoPrefetchQueue.splice(0, videoPrefetchQueue.length);
+  queuedVideoPrefetches.clear();
   await FileSystem.deleteAsync(CACHE_ROOT, { idempotent: true });
   messengerLog("info", "media.cache.cleared", { removed_bytes: bytes });
   return bytes;

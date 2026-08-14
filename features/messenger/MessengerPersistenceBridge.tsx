@@ -21,7 +21,7 @@ import {
 import { messengerLog } from "../../services/messengerLogger";
 import {
   hasLocalMessengerMediaUpload,
-  prefetchMessengerImages,
+  prefetchMessengerMedia,
 } from "../../services/messengerMediaCache";
 import { warmMessengerMediaFileReader } from "../../services/messengerMediaUploadWarmup";
 import {
@@ -109,6 +109,18 @@ export default function MessengerPersistenceBridge() {
             );
           }
         }
+        prefetchMessengerMedia(
+          rooms.flatMap((room) => {
+            const latest = room.last_message;
+            if (!latest || latest.author.id === userId) return [];
+            return latest.media_items?.length
+              ? latest.media_items
+              : latest.media
+                ? [latest.media]
+                : [];
+          }),
+          sessionRef.current?.access_token ?? "",
+        );
         const reconciled = await cacheMessengerRooms(db, rooms);
         if (active) await syncMessengerUnreadFromRooms(reconciled);
         void warmMessengerRoomWindows(db, reconciled);
@@ -177,6 +189,9 @@ export default function MessengerPersistenceBridge() {
     const persistRealtimeMessage = (
       message: Parameters<typeof cacheIncomingMessengerMessage>[1],
     ) => {
+      const preserveLocalMedia = hasLocalMessengerMediaUpload(
+        message.client_message_id,
+      );
       void cacheIncomingMessengerMessage(db, message, userId)
         .then(() => {
           void refreshMessengerUnreadFromCache(db);
@@ -199,6 +214,22 @@ export default function MessengerPersistenceBridge() {
                 }),
               );
           }
+          if (!preserveLocalMedia) {
+            prefetchMessengerMedia(
+              message.media_items?.length
+                ? message.media_items
+                : message.media
+                  ? [message.media]
+                  : [],
+              sessionRef.current?.access_token ?? "",
+            );
+          } else {
+            messengerLog("debug", "media.cache.local_upload_preserved", {
+              room_id: message.room_id,
+              message_id: message.id,
+              client_message_id: message.client_message_id,
+            });
+          }
         })
         .catch((error) =>
           messengerLog("warn", "realtime.message.cache_failed", {
@@ -210,34 +241,22 @@ export default function MessengerPersistenceBridge() {
     };
     const unsubscribeRealtime = subscribeMessengerRealtime((event) => {
       if (event.type === "message.created") {
-        if (!hasLocalMessengerMediaUpload(event.message.client_message_id)) {
-          prefetchMessengerImages(
-            event.message.media_items?.length
-              ? event.message.media_items
-              : event.message.media
-                ? [event.message.media]
-                : [],
-            sessionRef.current?.access_token ?? "",
-          );
-        } else {
-          messengerLog("debug", "media.cache.local_upload_preserved", {
-            room_id: event.message.room_id,
-            message_id: event.message.id,
-            client_message_id: event.message.client_message_id,
-          });
-        }
         persistRealtimeMessage(event.message);
       } else if (event.type === "message.updated") {
-        prefetchMessengerImages(
-          event.message.media_items?.length
-            ? event.message.media_items
-            : event.message.media
-              ? [event.message.media]
-              : [],
-          sessionRef.current?.access_token ?? "",
-        );
         void cacheUpdatedMessengerMessage(db, event.message)
-          .then(() => refreshMessengerUnreadFromCache(db))
+          .then(() => {
+            void refreshMessengerUnreadFromCache(db);
+            if (event.message.author.id !== userId) {
+              prefetchMessengerMedia(
+                event.message.media_items?.length
+                  ? event.message.media_items
+                  : event.message.media
+                    ? [event.message.media]
+                    : [],
+                sessionRef.current?.access_token ?? "",
+              );
+            }
+          })
           .catch((error) =>
             messengerLog("warn", "realtime.message_update.cache_failed", {
               room_id: event.message.room_id,

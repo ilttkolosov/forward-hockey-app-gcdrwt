@@ -142,7 +142,13 @@ export default function MessengerGroupSettingsScreen() {
     }
     router.push({
       pathname: "/messenger/contact/[id]",
-      params: { id: member.id, roomId },
+      params: {
+        id: member.id,
+        roomId,
+        openedAt: String(Date.now()),
+        online: String(member.online),
+        lastSeenAt: member.last_seen_at || "",
+      },
     });
   };
 

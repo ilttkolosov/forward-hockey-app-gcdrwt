@@ -21,6 +21,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
+import { messengerMediaUrl } from "../../services/messengerApi";
 import {
   cacheMessengerMedia,
   formatMessengerBytes,
@@ -187,7 +188,7 @@ export default function MessengerAttachmentView({
   useEffect(() => {
     if (deferAutomaticCache) return;
     items
-      .filter((item) => item.type === "image")
+      .filter((item) => item.type === "image" || item.type === "video")
       .forEach((item) => void ensureLocal(item).catch(() => undefined));
   }, [deferAutomaticCache, ensureLocal, itemIdentity, items]);
 
@@ -358,6 +359,8 @@ export default function MessengerAttachmentView({
   const singleError = single ? errors[single.id] : null;
   const singleFilePresentation =
     single?.type === "file" ? getMessengerFilePresentation(single) : null;
+  const singleVideoRemoteUri =
+    single?.type === "video" ? messengerMediaUrl(single.url) : null;
   const viewerMedia =
     viewerIndex === null ? null : (viewerItems[viewerIndex] ?? null);
 
@@ -387,34 +390,66 @@ export default function MessengerAttachmentView({
           )}
         </TouchableOpacity>
       ) : single.type === "video" &&
-        singleLocalUri &&
         playbackEnabled &&
         viewerIndex === null ? (
         <View style={styles.inlineVideoCard}>
           <View style={styles.inlineVideoStage}>
-            <MessengerVideoPlayer
-              uri={singleLocalUri}
-              active={playbackEnabled}
-              autoPlay
-              muted
-              loop
-              nativeControls={false}
-              initialPositionSeconds={
-                rememberedVideoPositions.get(single.id) || 0
-              }
-              onPositionChange={(positionSeconds) =>
-                rememberVideoPosition(single.id, positionSeconds)
-              }
-              style={styles.inlineVideo}
-              onFallback={() => void openFile(single)}
-            />
-            <TouchableOpacity
-              style={styles.inlineVideoTap}
-              activeOpacity={1}
-              onPress={() => setViewerIndex(0)}
-              accessibilityRole="button"
-              accessibilityLabel="Открыть видео на весь экран"
-            />
+            {singleLocalUri ? (
+              <>
+                <MessengerVideoPlayer
+                  uri={singleLocalUri}
+                  active={playbackEnabled}
+                  autoPlay
+                  muted
+                  loop
+                  nativeControls={false}
+                  initialPositionSeconds={
+                    rememberedVideoPositions.get(single.id) || 0
+                  }
+                  onPositionChange={(positionSeconds) =>
+                    rememberVideoPosition(single.id, positionSeconds)
+                  }
+                  style={styles.inlineVideo}
+                  onFallback={() => void openFile(single)}
+                />
+                <TouchableOpacity
+                  style={styles.inlineVideoTap}
+                  activeOpacity={1}
+                  onPress={() => setViewerIndex(0)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Открыть видео на весь экран"
+                />
+              </>
+            ) : singleVideoRemoteUri ? (
+              <MessengerVideoPlayer
+                uri={singleVideoRemoteUri}
+                requestHeaders={{ Authorization: `Bearer ${accessToken}` }}
+                active={playbackEnabled}
+                muted
+                nativeControls={false}
+                previewOnly
+                style={styles.inlineVideo}
+                onFallback={() => void ensureLocal(single)}
+              />
+            ) : (
+              <View style={styles.inlineVideoFallback} />
+            )}
+            {!singleLocalUri && (
+              <View style={styles.inlineVideoDownload} pointerEvents="none">
+                {singleError ? (
+                  <Icon
+                    name="alert-circle-outline"
+                    size={24}
+                    color={colors.white}
+                  />
+                ) : (
+                  <ActivityIndicator color={colors.white} />
+                )}
+                <Text style={styles.inlineVideoDownloadText}>
+                  {singleError ? "Ошибка загрузки" : "Загрузка видео…"}
+                </Text>
+              </View>
+            )}
           </View>
           <View style={styles.inlineVideoFooter}>
             <View style={styles.inlineVideoText}>
@@ -422,6 +457,11 @@ export default function MessengerAttachmentView({
                 {single.original_name || "Видео"}
               </Text>
               <Text style={styles.attachmentSubtitle}>
+                {singleError
+                  ? "Повторите загрузку"
+                  : singleLocalUri
+                    ? "Готово"
+                    : "Загружается"} ·{" "}
                 {formatMessengerBytes(single.size_bytes)}
               </Text>
             </View>
@@ -714,6 +754,23 @@ const styles = StyleSheet.create({
   },
   inlineVideoStage: { width: "100%", height: 158 },
   inlineVideo: { width: "100%", height: 158 },
+  inlineVideoFallback: {
+    width: "100%",
+    height: 158,
+    backgroundColor: "#08121E",
+  },
+  inlineVideoDownload: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    backgroundColor: "rgba(8, 18, 30, 0.3)",
+  },
+  inlineVideoDownloadText: {
+    color: colors.white,
+    fontSize: 11,
+    fontWeight: "700",
+  },
   inlineVideoTap: { ...StyleSheet.absoluteFillObject },
   inlineVideoFooter: {
     minHeight: 44,

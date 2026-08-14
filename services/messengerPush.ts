@@ -20,6 +20,7 @@ import {
   unregisterMessengerPushToken,
 } from "./messengerApi";
 import { messengerLog } from "./messengerLogger";
+import { prefetchMessengerMedia } from "./messengerMediaCache";
 import { loadMessengerSession } from "./messengerSession";
 import {
   refreshMessengerUnreadFromCache,
@@ -386,6 +387,14 @@ export async function processMessengerPushPayload(
           message: error instanceof Error ? error.message : String(error),
         });
       }
+      prefetchMessengerMedia(
+        message.media_items?.length
+          ? message.media_items
+          : message.media
+            ? [message.media]
+            : [],
+        session.access_token,
+      );
     }
     if (payload.unread_count === undefined) {
       await refreshMessengerUnreadFromCache(db);

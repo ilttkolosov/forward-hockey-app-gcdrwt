@@ -15,12 +15,14 @@ import { colors } from "../../styles/commonStyles";
 
 interface MessengerVideoPlayerProps {
   uri: string;
+  requestHeaders?: Record<string, string>;
   active: boolean;
   autoPlay?: boolean;
   muted?: boolean;
   loop?: boolean;
   nativeControls?: boolean;
   initialPositionSeconds?: number;
+  previewOnly?: boolean;
   onPositionChange?: (positionSeconds: number) => void;
   style?: StyleProp<ViewStyle>;
   onFallback: () => void;
@@ -28,12 +30,14 @@ interface MessengerVideoPlayerProps {
 
 export default function MessengerVideoPlayer({
   uri,
+  requestHeaders,
   active,
   autoPlay = false,
   muted = false,
   loop = false,
   nativeControls = true,
   initialPositionSeconds = 0,
+  previewOnly = false,
   onPositionChange,
   style,
   onFallback,
@@ -41,17 +45,20 @@ export default function MessengerVideoPlayer({
   const [firstFrameReady, setFirstFrameReady] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const onPositionChangeRef = useRef(onPositionChange);
-  const player = useVideoPlayer(uri, (instance) => {
-    instance.loop = loop;
-    instance.muted = muted;
-    instance.staysActiveInBackground = false;
-    instance.keepScreenOnWhilePlaying = !muted;
-    instance.timeUpdateEventInterval = onPositionChange ? 0.5 : 0;
-    if (initialPositionSeconds > 0) {
-      instance.currentTime = initialPositionSeconds;
-    }
-    if (autoPlay && active) instance.play();
-  });
+  const player = useVideoPlayer(
+    requestHeaders ? { uri, headers: requestHeaders } : uri,
+    (instance) => {
+      instance.loop = loop;
+      instance.muted = muted;
+      instance.staysActiveInBackground = false;
+      instance.keepScreenOnWhilePlaying = !muted;
+      instance.timeUpdateEventInterval = onPositionChange ? 0.5 : 0;
+      if (initialPositionSeconds > 0) {
+        instance.currentTime = initialPositionSeconds;
+      }
+      if ((autoPlay || previewOnly) && active) instance.play();
+    },
+  );
 
   useEffect(() => {
     onPositionChangeRef.current = onPositionChange;
@@ -73,8 +80,8 @@ export default function MessengerVideoPlayer({
       player.pause();
       return;
     }
-    if (autoPlay) player.play();
-  }, [active, autoPlay, player]);
+    if (autoPlay || (previewOnly && !firstFrameReady)) player.play();
+  }, [active, autoPlay, firstFrameReady, player, previewOnly]);
 
   useEventListener(player, "statusChange", ({ status, error }) => {
     if (status === "error") {
@@ -83,7 +90,7 @@ export default function MessengerVideoPlayer({
     }
     if (status === "readyToPlay") {
       setPlaybackError(null);
-      if (autoPlay && active) player.play();
+      if ((autoPlay || previewOnly) && active) player.play();
     }
   });
 
@@ -106,14 +113,17 @@ export default function MessengerVideoPlayer({
         allowsPictureInPicture={false}
         allowsVideoFrameAnalysis={false}
         surfaceType="surfaceView"
-        onFirstFrameRender={() => setFirstFrameReady(true)}
+        onFirstFrameRender={() => {
+          setFirstFrameReady(true);
+          if (previewOnly) player.pause();
+        }}
       />
       {!firstFrameReady && !playbackError && (
         <View style={styles.loading} pointerEvents="none">
           <ActivityIndicator color={colors.white} />
         </View>
       )}
-      {playbackError && (
+      {playbackError && !previewOnly && (
         <TouchableOpacity
           style={styles.error}
           activeOpacity={0.84}

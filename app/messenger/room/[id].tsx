@@ -129,7 +129,7 @@ import {
 import {
   beginLocalMessengerMediaUpload,
   endLocalMessengerMediaUpload,
-  prefetchMessengerImages,
+  prefetchMessengerMedia,
   seedMessengerMediaCache,
 } from "../../../services/messengerMediaCache";
 import { runManagedMessengerMediaUpload } from "../../../services/messengerMediaUploadManager";
@@ -1903,10 +1903,10 @@ export default function MessengerRoomScreen() {
     const anchor = shouldAnchorUnreadBoundary
       ? readAnchor || firstUnread || current.at(-1) || null
       : current.at(-1) || null;
-    // Start protected image transfer while the list is positioning. The
+    // Start protected media transfer while the list is positioning. The
     // attachment cell will join the same deduplicated promise once visible.
     // This removes the previous 300-600 ms wait for `listReady` from the
-    // latency path without downloading every off-screen image in the window.
+    // latency path without downloading every off-screen item in the window.
     const priorityMessages = [firstUnread, anchor, current.at(-1)].filter(
       (message, index, candidates): message is MessengerMessage =>
         Boolean(message) &&
@@ -1915,7 +1915,7 @@ export default function MessengerRoomScreen() {
             candidate?.client_message_id === message?.client_message_id,
         ) === index,
     );
-    prefetchMessengerImages(
+    prefetchMessengerMedia(
       priorityMessages.flatMap((message) =>
         message.media_items?.length
           ? message.media_items
@@ -3574,7 +3574,17 @@ export default function MessengerRoomScreen() {
     if (roomType !== "direct" || !peerId) return;
     router.push({
       pathname: "/messenger/contact/[id]",
-      params: { id: peerId, roomId },
+      params: {
+        id: peerId,
+        roomId,
+        openedAt: String(Date.now()),
+        ...(peerPresence
+          ? {
+              online: String(peerPresence.online),
+              lastSeenAt: peerPresence.last_seen_at || "",
+            }
+          : {}),
+      },
     });
   };
 

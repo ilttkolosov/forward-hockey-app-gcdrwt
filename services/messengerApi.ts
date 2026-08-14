@@ -698,9 +698,13 @@ export function getMessengerRoomSettings(roomId: string) {
   );
 }
 
-export function getMessengerRoomMembers(roomId: string) {
+export function getMessengerRoomMembers(
+  roomId: string,
+  options: { priority?: MessengerTransportPriority } = {},
+) {
   return messengerRequest<MessengerRoomMember[]>(
     `/chat/rooms/${roomId}/members`,
+    { transportPriority: options.priority ?? "foreground" },
   );
 }
 
