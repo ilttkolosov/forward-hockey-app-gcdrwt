@@ -27,7 +27,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
   type ViewToken,
@@ -55,6 +54,10 @@ import MessengerAttachmentView from "../../../features/messenger/MessengerAttach
 import MessengerLinkPreview, {
   MessengerLinkifiedText,
 } from "../../../features/messenger/MessengerLinkPreview";
+import {
+  ForwardRichTextInput,
+  type ForwardRichTextInputHandle,
+} from "../../../modules/forward-rich-text-input";
 import {
   DEFAULT_QUICK_REACTIONS,
   loadQuickMessengerReactions,
@@ -1073,6 +1076,7 @@ export default function MessengerRoomScreen() {
   );
   const [messages, setMessages] = useState<MessengerMessage[]>([]);
   const [text, setText] = useState("");
+  const [composerInputHeight, setComposerInputHeight] = useState(46);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [offline, setOffline] = useState(false);
@@ -1140,7 +1144,7 @@ export default function MessengerRoomScreen() {
   } | null>(null);
   const [feedHeight, setFeedHeight] = useState(0);
   const listRef = useRef<FlatList<MessengerMessage>>(null);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<ForwardRichTextInputHandle>(null);
   const messagesRef = useRef<MessengerMessage[]>([]);
   const viewableServerMessageIds = useRef<string[]>([]);
   const editingMessageRef = useRef<MessengerMessage | null>(null);
@@ -3972,6 +3976,12 @@ export default function MessengerRoomScreen() {
   const composerBusy =
     sending ||
     Boolean(editingMessage && messageMutationBusyId === editingMessage.id);
+  const handleComposerContentSizeChange = useCallback((height: number) => {
+    const nextHeight = Math.max(46, Math.min(120, Math.ceil(height)));
+    setComposerInputHeight((current) =>
+      current === nextHeight ? current : nextHeight,
+    );
+  }, []);
 
   const openGroupSettings = () => {
     if (!roomType || roomType === "direct") return;
@@ -4876,9 +4886,9 @@ export default function MessengerRoomScreen() {
                   <Icon name="add" size={30} color={colors.primary} />
                 </TouchableOpacity>
               )}
-              <TextInput
+              <ForwardRichTextInput
                 ref={inputRef}
-                style={styles.input}
+                style={[styles.input, { height: composerInputHeight }]}
                 value={text}
                 onChangeText={setText}
                 placeholder={
@@ -4888,7 +4898,6 @@ export default function MessengerRoomScreen() {
                       ? "Подпись"
                       : "Сообщение"
                 }
-                multiline
                 maxLength={
                   editingMessage
                     ? editingMessage.kind === "text"
@@ -4898,6 +4907,10 @@ export default function MessengerRoomScreen() {
                       ? 1000
                       : 4000
                 }
+                textColor={colors.text}
+                placeholderTextColor={colors.textSecondary}
+                selectionColor={colors.accent}
+                onContentSizeChange={handleComposerContentSizeChange}
                 onFocus={() => {
                   if (!nearLatest.current) return;
                   keyboardScrollPending.current = true;
@@ -5356,12 +5369,9 @@ const styles = StyleSheet.create({
     flex: 1,
     maxHeight: 120,
     minHeight: 46,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 18,
-    color: colors.text,
     backgroundColor: colors.backgroundAlt,
   },
   attachButton: {
