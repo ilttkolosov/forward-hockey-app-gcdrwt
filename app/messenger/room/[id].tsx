@@ -660,7 +660,7 @@ interface MessengerMessageListItemProps {
   unreadMarker: boolean;
   canWrite: boolean;
   canReact: boolean;
-  roomType: string;
+  roomType: MessengerRoom["room_type"] | null;
   highlighted: boolean;
   roomScreenActive: boolean;
   viewable: boolean;
@@ -788,13 +788,13 @@ const MessengerMessageListItem = React.memo(
                       Переслано от{" "}
                       <Text
                         style={
-                          roomType === "direct"
-                            ? undefined
-                            : {
+                          roomType && roomType !== "direct"
+                            ? {
                                 color: messengerAuthorColor(
                                   item.forwarded_from.author.id,
                                 ),
                               }
+                            : undefined
                         }
                       >
                         {item.forwarded_from.author.display_name}
@@ -812,9 +812,13 @@ const MessengerMessageListItem = React.memo(
                     <Text
                       style={[
                         styles.replyAuthor,
-                        roomType !== "direct" && {
-                          color: messengerAuthorColor(item.reply_to.author.id),
-                        },
+                        roomType && roomType !== "direct"
+                          ? {
+                              color: messengerAuthorColor(
+                                item.reply_to.author.id,
+                              ),
+                            }
+                          : undefined,
                       ]}
                       numberOfLines={1}
                     >
@@ -829,9 +833,11 @@ const MessengerMessageListItem = React.memo(
                   <Text
                     style={[
                       styles.author,
-                      roomType !== "direct" && {
-                        color: messengerAuthorColor(item.author.id),
-                      },
+                      roomType && roomType !== "direct"
+                        ? {
+                            color: messengerAuthorColor(item.author.id),
+                          }
+                        : undefined,
                     ]}
                     numberOfLines={1}
                   >
@@ -922,6 +928,14 @@ const MessengerMessageListItem = React.memo(
   },
 );
 
+function routeRoomType(
+  value: string | undefined,
+): MessengerRoom["room_type"] | null {
+  return value === "group" || value === "direct" || value === "private_group"
+    ? value
+    : null;
+}
+
 export default function MessengerRoomScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
@@ -952,7 +966,11 @@ export default function MessengerRoomScreen() {
   const canReact = params.canReact !== "false";
   const [roomTitle, setRoomTitle] = useState(params.title || "Чат");
   const [roomAvatarUrl, setRoomAvatarUrl] = useState(params.avatarUrl || null);
-  const [roomType, setRoomType] = useState(params.roomType || "group");
+  // PUSH navigation intentionally carries only a stable room/message ID. An
+  // absent room type therefore means "not hydrated yet", not "group".
+  const [roomType, setRoomType] = useState<
+    MessengerRoom["room_type"] | null
+  >(() => routeRoomType(params.roomType));
   const [roomTeamId, setRoomTeamId] = useState(params.teamId || "");
   const [roomMemberCount, setRoomMemberCount] = useState<number | null>(() => {
     const initial = Number(params.memberCount);
@@ -2327,33 +2345,72 @@ export default function MessengerRoomScreen() {
     connectionSyncTimer.current = setTimeout(run, 250);
   }, [flushOutbox, loadMessages]);
 
-  const refreshRoomMembers = useCallback(async () => {
-    if (!roomId || !session) return;
-    try {
-      const members = await getMessengerRoomMembers(roomId);
-      if (roomType === "direct") {
-        const peer = members.find((member) => member.id !== session.user.id);
-        if (peer) {
-          setPeerPresence({
-            id: peer.id,
-            online: peer.online,
-            last_seen_at: peer.last_seen_at,
-          });
-        }
-      } else {
-        setRoomMemberCount(members.length);
-      }
-      setOffline(false);
-    } catch (membersError) {
-      if (isMessengerConnectionError(membersError)) setOffline(true);
-      messengerLog("warn", "room.members.sync_failed", {
-        room_id: roomId,
-        message: messengerErrorMessage(membersError),
-      });
-    } finally {
-      setRoomDetailsReady(true);
+  const applyRoomIdentity = useCallback((room: MessengerRoom) => {
+    setRoomTitle(room.title);
+    setRoomAvatarUrl(room.avatar_url);
+    setRoomType(room.room_type);
+    setRoomTeamId(room.team_id);
+    if (typeof room.member_count === "number") {
+      setRoomMemberCount(room.member_count);
     }
-  }, [roomId, roomType, session]);
+    if (room.peer) {
+      setPeerPresence((current) => ({
+        id: room.peer!.id,
+        online: current?.id === room.peer!.id ? current.online : false,
+        last_seen_at:
+          current?.id === room.peer!.id
+            ? current.last_seen_at
+            : room.peer!.last_seen_at,
+      }));
+    } else if (room.room_type !== "direct") {
+      setPeerPresence(null);
+    }
+  }, []);
+
+  const loadCachedRoomIdentity = useCallback(async () => {
+    try {
+      const room = await loadCachedMessengerRoom(db, roomId);
+      if (room) applyRoomIdentity(room);
+      return room;
+    } catch (identityError) {
+      messengerLog("warn", "room.identity.cache_failed", {
+        room_id: roomId,
+        message: messengerErrorMessage(identityError),
+      });
+      return null;
+    }
+  }, [applyRoomIdentity, db, roomId]);
+
+  const refreshRoomMembers = useCallback(
+    async (resolvedRoomType: MessengerRoom["room_type"] | null) => {
+      if (!roomId || !session) return;
+      try {
+        const members = await getMessengerRoomMembers(roomId);
+        if (resolvedRoomType === "direct") {
+          const peer = members.find((member) => member.id !== session.user.id);
+          if (peer) {
+            setPeerPresence({
+              id: peer.id,
+              online: peer.online,
+              last_seen_at: peer.last_seen_at,
+            });
+          }
+        } else if (resolvedRoomType) {
+          setRoomMemberCount(members.length);
+        }
+        setOffline(false);
+      } catch (membersError) {
+        if (isMessengerConnectionError(membersError)) setOffline(true);
+        messengerLog("warn", "room.members.sync_failed", {
+          room_id: roomId,
+          message: messengerErrorMessage(membersError),
+        });
+      } finally {
+        setRoomDetailsReady(true);
+      }
+    },
+    [roomId, session],
+  );
 
   const refreshRoomIdentity = useCallback(async () => {
     try {
@@ -2362,32 +2419,52 @@ export default function MessengerRoomScreen() {
       );
       if (!room) {
         router.replace("/messenger/rooms");
-        return;
+        return null;
       }
-      setRoomTitle(room.title);
-      setRoomAvatarUrl(room.avatar_url);
-      setRoomType(room.room_type);
-      setRoomTeamId(room.team_id);
-      if (typeof room.member_count === "number") {
-        setRoomMemberCount(room.member_count);
-      }
-      if (room.peer) {
-        setPeerPresence((current) => ({
-          id: room.peer!.id,
-          online: current?.id === room.peer!.id ? current.online : false,
-          last_seen_at:
-            current?.id === room.peer!.id
-              ? current.last_seen_at
-              : room.peer!.last_seen_at,
-        }));
-      }
+      applyRoomIdentity(room);
+      return room;
     } catch (identityError) {
       messengerLog("warn", "room.identity.sync_failed", {
         room_id: roomId,
         message: messengerErrorMessage(identityError),
       });
+      return null;
     }
-  }, [roomId, router]);
+  }, [applyRoomIdentity, roomId, router]);
+
+  const refreshRoomDetails = useCallback(
+    async (refreshIdentity: boolean) => {
+      const navigationRoomType = routeRoomType(params.roomType);
+      let resolvedRoomType = navigationRoomType;
+
+      // PUSH navigation has no presentation metadata. SQLite normally already
+      // contains the room card, so hydrate it before waiting for the network.
+      if (!resolvedRoomType) {
+        const cachedRoom = await loadCachedRoomIdentity();
+        resolvedRoomType = cachedRoom?.room_type ?? null;
+      }
+
+      const membersPromise = resolvedRoomType
+        ? refreshRoomMembers(resolvedRoomType)
+        : null;
+      const freshRoom = refreshIdentity ? await refreshRoomIdentity() : null;
+
+      if (membersPromise) await membersPromise;
+      if (freshRoom && freshRoom.room_type !== resolvedRoomType) {
+        await refreshRoomMembers(freshRoom.room_type);
+      } else if (!membersPromise && freshRoom) {
+        await refreshRoomMembers(freshRoom.room_type);
+      } else if (!membersPromise) {
+        setRoomDetailsReady(true);
+      }
+    },
+    [
+      loadCachedRoomIdentity,
+      params.roomType,
+      refreshRoomIdentity,
+      refreshRoomMembers,
+    ],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -2405,8 +2482,9 @@ export default function MessengerRoomScreen() {
       roomFocusCount.current += 1;
       void loadMessages(true);
       const roomDetailsFrame = requestAnimationFrame(() => {
-        if (returningToRoom) void refreshRoomIdentity();
-        void refreshRoomMembers();
+        void refreshRoomDetails(
+          returningToRoom || !routeRoomType(params.roomType),
+        );
       });
       const unsubscribe = subscribeMessengerRealtime((event) => {
         if (event.type === "connection.state") {
@@ -2528,10 +2606,7 @@ export default function MessengerRoomScreen() {
           scheduleConnectionSync();
         } else if (event.type === "room.updated" && event.room_id === roomId) {
           if (event.deleted) router.replace("/messenger/rooms");
-          else {
-            void refreshRoomIdentity();
-            void refreshRoomMembers();
-          }
+          else void refreshRoomDetails(true);
         } else if (
           event.type === "message.reaction_updated" &&
           event.room_id === roomId &&
@@ -2594,9 +2669,9 @@ export default function MessengerRoomScreen() {
       isAuthenticated,
       loadMessages,
       openedAt,
+      params.roomType,
       roomId,
-      refreshRoomIdentity,
-      refreshRoomMembers,
+      refreshRoomDetails,
       router,
       scheduleConnectionSync,
       scrollToLatest,
@@ -3788,7 +3863,7 @@ export default function MessengerRoomScreen() {
   }, [forwardContacts, forwardRooms]);
 
   const roomSubtitle =
-    !initialDataReady || !roomDetailsReady
+    !initialDataReady || !roomDetailsReady || !roomType
       ? "Обновление"
       : offline || !realtimeConnected
         ? "Нет соединения с сервером"
@@ -3827,7 +3902,7 @@ export default function MessengerRoomScreen() {
     Boolean(editingMessage && messageMutationBusyId === editingMessage.id);
 
   const openGroupSettings = () => {
-    if (roomType === "direct") return;
+    if (!roomType || roomType === "direct") return;
     router.push({
       pathname: "/messenger/group/[id]",
       params: {
@@ -3919,52 +3994,43 @@ export default function MessengerRoomScreen() {
           >
             <Icon name="chevron-back" size={28} color={colors.primary} />
           </TouchableOpacity>
-          {roomType !== "direct" ? (
-            <TouchableOpacity
-              style={styles.groupHeaderTarget}
-              onPress={openGroupSettings}
-              accessibilityRole="button"
-              accessibilityLabel="Открыть информацию и настройки группы"
-            >
-              <AuthenticatedAvatar
-                displayName={roomTitle}
-                avatarUrl={roomAvatarUrl}
-                accessToken={session?.access_token}
-                size={42}
-              />
-              <View style={styles.headerText}>
-                <Text style={styles.title} numberOfLines={1}>
-                  {roomTitle}
-                </Text>
-                <Text style={styles.subtitle} numberOfLines={1}>
-                  {roomSubtitle}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={styles.groupHeaderTarget}
-              onPress={openDirectContactSettings}
-              disabled={!peerPresence?.id && !params.peerId}
-              accessibilityRole="button"
-              accessibilityLabel="Открыть профиль пользователя"
-            >
-              <AuthenticatedAvatar
-                displayName={roomTitle}
-                avatarUrl={roomAvatarUrl}
-                accessToken={session?.access_token}
-                size={42}
-              />
-              <View style={styles.headerText}>
-                <Text style={styles.title} numberOfLines={1}>
-                  {roomTitle}
-                </Text>
-                <Text style={styles.subtitle} numberOfLines={1}>
-                  {roomSubtitle}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={styles.groupHeaderTarget}
+            onPress={
+              roomType === "direct"
+                ? openDirectContactSettings
+                : openGroupSettings
+            }
+            disabled={
+              !roomType ||
+              (roomType === "direct" &&
+                !peerPresence?.id &&
+                !params.peerId)
+            }
+            accessibilityRole="button"
+            accessibilityLabel={
+              roomType === "direct"
+                ? "Открыть профиль пользователя"
+                : roomType
+                  ? "Открыть информацию и настройки группы"
+                  : "Информация о чате обновляется"
+            }
+          >
+            <AuthenticatedAvatar
+              displayName={roomTitle}
+              avatarUrl={roomAvatarUrl}
+              accessToken={session?.access_token}
+              size={42}
+            />
+            <View style={styles.headerText}>
+              <Text style={styles.title} numberOfLines={1}>
+                {roomTitle}
+              </Text>
+              <Text style={styles.subtitle} numberOfLines={1}>
+                {roomSubtitle}
+              </Text>
+            </View>
+          </TouchableOpacity>
         </View>
 
         <ImageBackground
