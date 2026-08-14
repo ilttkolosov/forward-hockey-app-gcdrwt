@@ -79,7 +79,10 @@ export function warmMessengerRoomWindow(
     let cachedCount = 0;
     let pageCount = 0;
     if (!localLatestSequence) {
-      const latest = await getMessengerMessages(room.id, { limit: 20 });
+      const latest = await getMessengerMessages(room.id, {
+        limit: 20,
+        priority: "background",
+      });
       pageCount = 1;
       if (latest.items.length) {
         await cacheMessengerMessages(db, latest.items);
@@ -95,6 +98,7 @@ export function warmMessengerRoomWindow(
           cursor: localLatestSequence,
           direction: "after",
           limit: CATCH_UP_PAGE_SIZE,
+          priority: "background",
         });
         pageCount += 1;
         if (!page.items.length) break;

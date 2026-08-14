@@ -7,6 +7,7 @@ import type {
 import { applyMessengerAliases } from "../features/messenger/aliases";
 import { MESSENGER_SERVER_ORIGIN } from "./messengerApi";
 import { messengerLog } from "./messengerLogger";
+import { prioritizeMessengerForegroundTransport } from "./messengerTransport";
 
 export type MessengerRealtimeEvent =
   | {
@@ -53,6 +54,8 @@ let presenceRequested = false;
 let activeRoomRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let presenceRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let appStateSubscription: NativeEventSubscription | null = null;
+let socketReady = false;
+let connectionRejected = false;
 
 function activeRoomIdForServer(): string | null {
   return AppState.currentState === "active" ? visibleRoomId : null;
@@ -133,6 +136,8 @@ function closeSocket(reason: string): void {
   socket.io.removeAllListeners();
   socket.disconnect();
   socket = null;
+  socketReady = false;
+  connectionRejected = false;
   publish({ type: "connection.state", connected: false, reason });
 }
 
@@ -168,26 +173,47 @@ export function connectMessengerRealtime(accessToken: string): void {
     forceNew: true,
     reconnection: true,
     reconnectionAttempts: Infinity,
-    reconnectionDelay: 750,
-    reconnectionDelayMax: 10_000,
-    randomizationFactor: 0.4,
-    timeout: 10_000,
+    reconnectionDelay: 250,
+    reconnectionDelayMax: 3_000,
+    randomizationFactor: 0.2,
+    timeout: 6_000,
   });
   socket = nextSocket;
 
   nextSocket.on("connect", () => {
-    console.log("[Messenger realtime] Соединение установлено");
+    socketReady = false;
+    connectionRejected = false;
+    console.log(
+      "[Messenger realtime] Транспорт подключён, ожидается авторизация",
+    );
     announceActiveRoom();
     synchronizeActiveRoomRefresh();
     announcePresenceActivity();
     synchronizePresenceRefresh();
-    publish({ type: "connection.state", connected: true });
+    publish({
+      type: "connection.state",
+      connected: false,
+      reason: "authenticating",
+    });
   });
   nextSocket.on("disconnect", (reason) => {
+    socketReady = false;
     stopActiveRoomRefresh();
     stopPresenceRefresh();
     console.log(`[Messenger realtime] Соединение закрыто: ${reason}`);
     publish({ type: "connection.state", connected: false, reason });
+    if (
+      reason === "io server disconnect" &&
+      !connectionRejected &&
+      activeAccessToken &&
+      AppState.currentState === "active"
+    ) {
+      setTimeout(() => {
+        if (socket === nextSocket && !nextSocket.connected) {
+          nextSocket.connect();
+        }
+      }, 500);
+    }
   });
   nextSocket.on("connect_error", (error) => {
     // Never log the handshake or access token.
@@ -210,6 +236,8 @@ export function connectMessengerRealtime(accessToken: string): void {
   nextSocket.on(
     "connection.ready",
     (payload: { user_id: string; session_id: string; room_ids: string[] }) => {
+      socketReady = true;
+      connectionRejected = false;
       // The server authenticates inside its connection handler. Re-announce
       // scoped state here so an event emitted immediately on the transport's
       // `connect` callback cannot arrive before authentication is ready.
@@ -218,14 +246,39 @@ export function connectMessengerRealtime(accessToken: string): void {
       synchronizeActiveRoomRefresh();
       synchronizePresenceRefresh();
       publish({ type: "connection.ready", ...payload });
+      publish({ type: "connection.state", connected: true });
       publish({ type: "sync.required" });
     },
   );
-  nextSocket.on("connection.rejected", (payload: { code?: string }) => {
-    const reason = payload.code || "connection_rejected";
-    console.warn(`[Messenger realtime] Сервер отклонил соединение: ${reason}`);
-    publish({ type: "connection.state", connected: false, reason });
-  });
+  nextSocket.on(
+    "connection.rejected",
+    (payload: { code?: string; retry_after_ms?: number }) => {
+      const reason = payload.code || "connection_rejected";
+      socketReady = false;
+      connectionRejected = true;
+      console.warn(
+        `[Messenger realtime] Сервер отклонил соединение: ${reason}`,
+      );
+      publish({ type: "connection.state", connected: false, reason });
+      if (reason === "temporary_unavailable") {
+        const retryAfterMs = Math.min(
+          5_000,
+          Math.max(250, payload.retry_after_ms ?? 1_000),
+        );
+        setTimeout(() => {
+          if (
+            socket === nextSocket &&
+            !nextSocket.connected &&
+            activeAccessToken &&
+            AppState.currentState === "active"
+          ) {
+            connectionRejected = false;
+            nextSocket.connect();
+          }
+        }, retryAfterMs);
+      }
+    },
+  );
   nextSocket.on(
     "message.created",
     (payload: { message?: MessengerMessage }) => {
@@ -308,8 +361,12 @@ export function disconnectMessengerRealtime(): void {
 /** Called when React Native returns from the background. */
 export function resumeMessengerRealtime(): void {
   if (!socket || !activeAccessToken) return;
-  if (!socket.connected) socket.connect();
-  else {
+  if (!socket.connected) {
+    // A network transition must not inherit an old exponential-backoff wait.
+    // `open()` asks the Manager to start a transport attempt immediately.
+    socket.io.open();
+    socket.connect();
+  } else {
     announceActiveRoom();
     synchronizeActiveRoomRefresh();
     announcePresenceActivity();
@@ -324,7 +381,7 @@ export function getMessengerActiveRoomId(): string | null {
 }
 
 export function getMessengerRealtimeConnectionState(): boolean {
-  return socket?.connected === true;
+  return socket?.connected === true && socketReady;
 }
 
 /** Presence is true only while an authenticated user is inside «Общение». */
@@ -341,6 +398,10 @@ export function setMessengerPresenceActive(active: boolean): void {
  */
 export function setMessengerActiveRoom(roomId: string | null): void {
   visibleRoomId = roomId || null;
+  if (visibleRoomId) {
+    prioritizeMessengerForegroundTransport();
+    resumeMessengerRealtime();
+  }
   ensureAppStateSubscription();
   announceActiveRoom();
   synchronizeActiveRoomRefresh();

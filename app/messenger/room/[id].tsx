@@ -116,6 +116,7 @@ import {
   subscribeMessengerRealtime,
 } from "../../../services/messengerRealtime";
 import { messengerLog } from "../../../services/messengerLogger";
+import { prioritizeMessengerForegroundTransport } from "../../../services/messengerTransport";
 import {
   assertMessengerUploadLimits,
   currentMessengerLocation,
@@ -2326,6 +2327,8 @@ export default function MessengerRoomScreen() {
   const sendText = () => {
     const body = text.trim();
     if (!body || !roomId || !session) return;
+    const tappedAt = Date.now();
+    prioritizeMessengerForegroundTransport();
     const clientMessageId = Crypto.randomUUID();
     const createdAt = new Date().toISOString();
     const replyTarget = replyingTo;
@@ -2343,6 +2346,11 @@ export default function MessengerRoomScreen() {
       session.user,
       replyTarget ?? undefined,
     );
+    messengerLog("info", "message.send.requested", {
+      room_id: roomId,
+      client_message_id: clientMessageId,
+      has_reply: Boolean(replyTarget?.id),
+    });
     setText("");
     setReplyingTo(null);
     setMessages((current) => mergeMessengerMessages(current, [optimistic]));
@@ -2358,6 +2366,7 @@ export default function MessengerRoomScreen() {
             room_id: roomId,
             client_message_id: clientMessageId,
             has_reply: Boolean(replyTarget?.id),
+            elapsed_since_tap_ms: Date.now() - tappedAt,
           });
           void flushOutbox().catch((error) => {
             setOffline(isMessengerConnectionError(error));

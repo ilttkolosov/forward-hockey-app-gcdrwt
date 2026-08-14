@@ -1,5 +1,5 @@
 import { useSQLiteContext } from "expo-sqlite";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
 import * as Notifications from "expo-notifications";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
@@ -50,9 +50,12 @@ const BACKGROUND_ROOMS_SYNC_MIN_INTERVAL_MS = 10_000;
 export default function MessengerPersistenceBridge() {
   const db = useSQLiteContext();
   const { session, isAuthenticated } = useMessengerAuth();
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const userId = session?.user.id ?? null;
 
   useEffect(() => {
-    if (!isAuthenticated || !session) {
+    if (!isAuthenticated || !userId) {
       void setMessengerUnreadCount(0);
       return;
     }
@@ -63,9 +66,11 @@ export default function MessengerPersistenceBridge() {
     let lastRoomsSyncStartedAt = 0;
     const synchronizeAliases = async () => {
       try {
-        const remoteAliases = await getMessengerContactAliases();
+        const remoteAliases = await getMessengerContactAliases({
+          priority: "background",
+        });
         if (active) {
-          await replaceMessengerAliases(session.user.id, remoteAliases);
+          await replaceMessengerAliases(userId, remoteAliases);
         }
       } catch (error) {
         messengerLog("debug", "aliases.background_sync.deferred", {
@@ -81,13 +86,13 @@ export default function MessengerPersistenceBridge() {
       roomsSyncRunning = true;
       lastRoomsSyncStartedAt = Date.now();
       try {
-        await synchronizeAliases();
-        const rooms = await getMessengerRooms();
+        void synchronizeAliases();
+        const rooms = await getMessengerRooms({ priority: "background" });
         for (const room of rooms) {
           const latest = room.last_message;
           if (
             latest &&
-            latest.author.id !== session.user.id &&
+            latest.author.id !== userId &&
             compareMessengerSequence(
               latest.sequence,
               room.last_delivered_sequence,
@@ -172,10 +177,10 @@ export default function MessengerPersistenceBridge() {
     const persistRealtimeMessage = (
       message: Parameters<typeof cacheIncomingMessengerMessage>[1],
     ) => {
-      void cacheIncomingMessengerMessage(db, message, session.user.id)
+      void cacheIncomingMessengerMessage(db, message, userId)
         .then(() => {
           void refreshMessengerUnreadFromCache(db);
-          if (message.author.id !== session.user.id) {
+          if (message.author.id !== userId) {
             void markMessengerDelivered(message.room_id, message.sequence)
               .then(() =>
                 messengerLog("info", "delivery.acknowledged", {
@@ -212,7 +217,7 @@ export default function MessengerPersistenceBridge() {
               : event.message.media
                 ? [event.message.media]
                 : [],
-            session.access_token,
+            sessionRef.current?.access_token ?? "",
           );
         } else {
           messengerLog("debug", "media.cache.local_upload_preserved", {
@@ -229,7 +234,7 @@ export default function MessengerPersistenceBridge() {
             : event.message.media
               ? [event.message.media]
               : [],
-          session.access_token,
+          sessionRef.current?.access_token ?? "",
         );
         void cacheUpdatedMessengerMessage(db, event.message)
           .then(() => refreshMessengerUnreadFromCache(db))
@@ -286,7 +291,7 @@ export default function MessengerPersistenceBridge() {
       appStateSubscription.remove();
       tokenSubscription?.remove();
     };
-  }, [db, isAuthenticated, session]);
+  }, [db, isAuthenticated, userId]);
 
   return null;
 }

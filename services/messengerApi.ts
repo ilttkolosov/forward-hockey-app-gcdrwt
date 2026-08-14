@@ -1,6 +1,7 @@
 import { fetch as expoFetch } from "expo/fetch";
 import { File as ExpoFile } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
+import { Buffer } from "buffer";
 import { Platform } from "react-native";
 import type {
   InvitationPreview,
@@ -33,6 +34,12 @@ import {
 } from "./messengerSession";
 import { messengerLog, messengerRequestId } from "./messengerLogger";
 import { warmMessengerBufferedUploadFiles } from "./messengerMediaUploadWarmup";
+import {
+  MessengerBackgroundRequestCancelledError,
+  type MessengerTransportPriority,
+  prioritizeMessengerForegroundTransport,
+  runMessengerTransportTask,
+} from "./messengerTransport";
 
 export const MESSENGER_SERVER_ORIGIN = "https://forward.is-gone.com";
 export const MESSENGER_API_BASE_URL = `${MESSENGER_SERVER_ORIGIN}/api/v1`;
@@ -58,6 +65,8 @@ interface ApiEnvelope<T> {
 interface RequestOptions extends RequestInit {
   public?: boolean;
   noRefresh?: boolean;
+  transportPriority?: MessengerTransportPriority;
+  timeoutMs?: number;
 }
 
 export interface MessengerUploadProgress {
@@ -134,7 +143,34 @@ function messengerErrorDetails(error: unknown): string | undefined {
 }
 
 let refreshPromise: Promise<MessengerSession> | null = null;
-const REFRESH_RETRY_DELAYS_MS = [0, 400, 1_200] as const;
+const REFRESH_RETRY_DELAYS_MS = [0, 300] as const;
+const ACCESS_TOKEN_MIN_VALIDITY_MS = 45_000;
+const REFRESH_REQUEST_TIMEOUT_MS = 6_000;
+
+function accessTokenExpiryMs(accessToken: string): number | null {
+  try {
+    const payload = accessToken.split(".")[1];
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const claims = JSON.parse(
+      Buffer.from(padded, "base64").toString("utf8"),
+    ) as { exp?: unknown };
+    return typeof claims.exp === "number" && Number.isFinite(claims.exp)
+      ? claims.exp * 1000
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isMessengerAccessTokenUsable(
+  accessToken: string,
+  minimumValidityMs = 0,
+): boolean {
+  const expiresAt = accessTokenExpiryMs(accessToken);
+  return expiresAt !== null && expiresAt - Date.now() > minimumValidityMs;
+}
 
 async function parseResponse<T>(response: Response): Promise<T> {
   const payload = (await response.json().catch(() => ({}))) as ApiEnvelope<T> &
@@ -196,14 +232,22 @@ async function refreshMessengerSession(): Promise<MessengerSession> {
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
       try {
-        const response = await fetch(`${MESSENGER_API_BASE_URL}/auth/refresh`, {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
+        const response = await runMessengerTransportTask(
+          {
+            priority: "foreground",
+            timeoutMs: REFRESH_REQUEST_TIMEOUT_MS,
           },
-          body: JSON.stringify({ refresh_token: session.refresh_token }),
-        });
+          (signal) =>
+            fetch(`${MESSENGER_API_BASE_URL}/auth/refresh`, {
+              method: "POST",
+              headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ refresh_token: session.refresh_token }),
+              signal,
+            }),
+        );
         const refreshed = await parseResponse<MessengerSession>(response);
         await saveMessengerSession(refreshed);
         return refreshed;
@@ -226,6 +270,29 @@ async function refreshMessengerSession(): Promise<MessengerSession> {
   return refreshPromise;
 }
 
+/** Refreshes before the first REST/WebSocket use instead of first failing 401. */
+export async function ensureFreshMessengerSession(
+  options: { force?: boolean; minimumValidityMs?: number } = {},
+): Promise<MessengerSession> {
+  const session = await loadMessengerSession();
+  if (!session?.refresh_token) {
+    throw new MessengerApiError(
+      "Необходим вход",
+      401,
+      "authentication_required",
+    );
+  }
+  const minimumValidityMs =
+    options.minimumValidityMs ?? ACCESS_TOKEN_MIN_VALIDITY_MS;
+  if (
+    !options.force &&
+    isMessengerAccessTokenUsable(session.access_token, minimumValidityMs)
+  ) {
+    return session;
+  }
+  return refreshMessengerSession();
+}
+
 export async function messengerRequest<T>(
   path: string,
   options: RequestOptions = {},
@@ -233,7 +300,19 @@ export async function messengerRequest<T>(
   const startedAt = Date.now();
   const requestId = messengerRequestId();
   const method = options.method || "GET";
-  const session = await loadMessengerSession();
+  const priority = options.transportPriority ?? "foreground";
+  let session = await loadMessengerSession();
+  if (
+    !options.public &&
+    !options.noRefresh &&
+    session?.refresh_token &&
+    !isMessengerAccessTokenUsable(
+      session.access_token,
+      ACCESS_TOKEN_MIN_VALIDITY_MS,
+    )
+  ) {
+    session = await ensureFreshMessengerSession();
+  }
   const headers = new Headers(options.headers);
   headers.set("Accept", "application/json");
   headers.set("x-request-id", requestId);
@@ -255,12 +334,31 @@ export async function messengerRequest<T>(
         : options.body
           ? "json"
           : "none",
+    priority,
   });
   try {
-    const response = await fetch(`${MESSENGER_API_BASE_URL}${path}`, {
-      ...options,
-      headers,
-    });
+    const {
+      public: _public,
+      noRefresh: _noRefresh,
+      transportPriority: _transportPriority,
+      timeoutMs,
+      signal: externalSignal,
+      ...requestInit
+    } = options;
+    const response = await runMessengerTransportTask(
+      {
+        priority,
+        timeoutMs:
+          timeoutMs ?? (options.body instanceof FormData ? 120_000 : undefined),
+        signal: externalSignal,
+      },
+      (signal) =>
+        fetch(`${MESSENGER_API_BASE_URL}${path}`, {
+          ...requestInit,
+          headers,
+          signal,
+        }),
+    );
     const serverRequestId = response.headers.get("x-request-id") || requestId;
     messengerLog(response.ok ? "info" : "warn", "api.response", {
       request_id: serverRequestId,
@@ -279,7 +377,13 @@ export async function messengerRequest<T>(
         request_id: serverRequestId,
         reason: "http_401",
       });
-      await refreshMessengerSession();
+      const latestSession = await loadMessengerSession();
+      if (
+        !latestSession?.access_token ||
+        latestSession.access_token === session?.access_token
+      ) {
+        await refreshMessengerSession();
+      }
       return messengerRequest<T>(path, { ...options, noRefresh: true });
     }
     return await parseResponse<T>(response);
@@ -290,17 +394,24 @@ export async function messengerRequest<T>(
     // and the local SQLite cache remains usable. Keep the diagnostic record,
     // but log it as a warning so a temporary network loss does not look like an
     // application crash.
-    messengerLog("warn", "api.failure", {
-      request_id: requestId,
-      method,
-      path,
-      duration_ms: Date.now() - startedAt,
-      category: error instanceof MessengerApiError ? "http" : "connection",
-      status: error instanceof MessengerApiError ? error.status : undefined,
-      code: error instanceof MessengerApiError ? error.code : undefined,
-      message: messengerErrorMessage(error),
-      details: messengerErrorDetails(error),
-    });
+    messengerLog(
+      error instanceof MessengerBackgroundRequestCancelledError
+        ? "debug"
+        : "warn",
+      "api.failure",
+      {
+        request_id: requestId,
+        method,
+        path,
+        duration_ms: Date.now() - startedAt,
+        category: error instanceof MessengerApiError ? "http" : "connection",
+        status: error instanceof MessengerApiError ? error.status : undefined,
+        code: error instanceof MessengerApiError ? error.code : undefined,
+        message: messengerErrorMessage(error),
+        details: messengerErrorDetails(error),
+        priority,
+      },
+    );
     throw error;
   }
 }
@@ -439,23 +550,43 @@ export async function logoutFromMessenger(): Promise<void> {
   }
 }
 
-let messengerRoomsRequest: Promise<MessengerRoom[]> | null = null;
+let messengerRoomsRequest: {
+  priority: MessengerTransportPriority;
+  promise: Promise<MessengerRoom[]>;
+} | null = null;
 
 /**
  * The persistence bridge, rooms screen and realtime recovery can all request
  * the same snapshot during one foreground transition. Share that request so a
  * navigation never competes with two or three identical HTTP/TLS exchanges.
  */
-export function getMessengerRooms() {
-  if (messengerRoomsRequest) return messengerRoomsRequest;
-  const request = messengerRequest<MessengerRoom[]>("/chat/rooms");
-  messengerRoomsRequest = request;
+export function getMessengerRooms(
+  options: { priority?: MessengerTransportPriority } = {},
+) {
+  const priority = options.priority ?? "foreground";
+  if (
+    messengerRoomsRequest &&
+    !(
+      priority === "foreground" &&
+      messengerRoomsRequest.priority === "background"
+    )
+  ) {
+    return messengerRoomsRequest.promise;
+  }
+  if (messengerRoomsRequest?.priority === "background") {
+    prioritizeMessengerForegroundTransport();
+  }
+  const request = messengerRequest<MessengerRoom[]>("/chat/rooms", {
+    transportPriority: priority,
+  });
+  const tracked = { priority, promise: request };
+  messengerRoomsRequest = tracked;
   void request.then(
     () => {
-      if (messengerRoomsRequest === request) messengerRoomsRequest = null;
+      if (messengerRoomsRequest === tracked) messengerRoomsRequest = null;
     },
     () => {
-      if (messengerRoomsRequest === request) messengerRoomsRequest = null;
+      if (messengerRoomsRequest === tracked) messengerRoomsRequest = null;
     },
   );
   return request;
@@ -474,8 +605,42 @@ export function getMessengerContacts(teamId?: string) {
   return messengerRequest<MessengerContact[]>(`/chat/contacts${query}`);
 }
 
-export function getMessengerContactAliases() {
-  return messengerRequest<MessengerContactAlias[]>("/chat/contact-aliases");
+let messengerAliasesRequest: {
+  priority: MessengerTransportPriority;
+  promise: Promise<MessengerContactAlias[]>;
+} | null = null;
+
+export function getMessengerContactAliases(
+  options: { priority?: MessengerTransportPriority } = {},
+) {
+  const priority = options.priority ?? "foreground";
+  if (
+    messengerAliasesRequest &&
+    !(
+      priority === "foreground" &&
+      messengerAliasesRequest.priority === "background"
+    )
+  ) {
+    return messengerAliasesRequest.promise;
+  }
+  if (messengerAliasesRequest?.priority === "background") {
+    prioritizeMessengerForegroundTransport();
+  }
+  const request = messengerRequest<MessengerContactAlias[]>(
+    "/chat/contact-aliases",
+    { transportPriority: priority },
+  );
+  const tracked = { priority, promise: request };
+  messengerAliasesRequest = tracked;
+  void request.then(
+    () => {
+      if (messengerAliasesRequest === tracked) messengerAliasesRequest = null;
+    },
+    () => {
+      if (messengerAliasesRequest === tracked) messengerAliasesRequest = null;
+    },
+  );
+  return request;
 }
 
 export function getMessengerRoomMemberProfile(roomId: string, userId: string) {
@@ -598,6 +763,7 @@ export function getMessengerMessages(
     cursor?: string;
     direction?: "before" | "after";
     limit?: number;
+    priority?: MessengerTransportPriority;
   } = {},
 ) {
   const query = new URLSearchParams();
@@ -605,19 +771,23 @@ export function getMessengerMessages(
   if (options.cursor) query.set("cursor", options.cursor);
   if (options.direction) query.set("direction", options.direction);
   const path = `/chat/rooms/${roomId}/messages?${query.toString()}`;
-  const running = messengerMessageRequests.get(path);
+  const priority = options.priority ?? "foreground";
+  const requestKey = `${priority}:${path}`;
+  const running = messengerMessageRequests.get(requestKey);
   if (running) return running;
-  const request = messengerRequest<MessengerMessagesResponse>(path);
-  messengerMessageRequests.set(path, request);
+  const request = messengerRequest<MessengerMessagesResponse>(path, {
+    transportPriority: priority,
+  });
+  messengerMessageRequests.set(requestKey, request);
   void request.then(
     () => {
-      if (messengerMessageRequests.get(path) === request) {
-        messengerMessageRequests.delete(path);
+      if (messengerMessageRequests.get(requestKey) === request) {
+        messengerMessageRequests.delete(requestKey);
       }
     },
     () => {
-      if (messengerMessageRequests.get(path) === request) {
-        messengerMessageRequests.delete(path);
+      if (messengerMessageRequests.get(requestKey) === request) {
+        messengerMessageRequests.delete(requestKey);
       }
     },
   );
@@ -656,7 +826,11 @@ export function syncMessengerRoomMessages(
   if (running) return running;
   const request = messengerRequest<MessengerRoomMessagesSyncResponse>(
     `/chat/rooms/${roomId}/messages/sync`,
-    { method: "POST", body: JSON.stringify(payload) },
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+      transportPriority: "foreground",
+    },
   );
   messengerRoomMessageSyncRequests.set(key, request);
   void request.then(
@@ -686,6 +860,7 @@ export function updateMessengerMessage(messageId: string, text: string) {
     {
       method: "PATCH",
       body: JSON.stringify({ text }),
+      transportPriority: "foreground",
     },
   );
 }
@@ -693,7 +868,7 @@ export function updateMessengerMessage(messageId: string, text: string) {
 export function deleteMessengerMessage(messageId: string) {
   return messengerRequest<{ message: MessengerMessage }>(
     `/chat/messages/${encodeURIComponent(messageId)}`,
-    { method: "DELETE" },
+    { method: "DELETE", transportPriority: "foreground" },
   );
 }
 
@@ -707,6 +882,8 @@ export function sendMessengerText(
     `/chat/rooms/${roomId}/messages`,
     {
       method: "POST",
+      transportPriority: "foreground",
+      timeoutMs: 8_000,
       body: JSON.stringify({
         client_message_id: clientMessageId,
         text,
@@ -1455,6 +1632,7 @@ export function markMessengerDelivered(roomId: string, sequence: string) {
   return messengerRequest(`/chat/rooms/${roomId}/delivered`, {
     method: "POST",
     body: JSON.stringify({ last_delivered_sequence: sequence }),
+    transportPriority: "background",
   });
 }
 
@@ -1462,6 +1640,7 @@ export function markMessengerRead(roomId: string, sequence: string) {
   return messengerRequest(`/chat/rooms/${roomId}/read`, {
     method: "POST",
     body: JSON.stringify({ last_read_sequence: sequence }),
+    transportPriority: "background",
   });
 }
 
@@ -1495,8 +1674,7 @@ export function unregisterMessengerPushToken() {
 }
 
 export function unregisterMessengerPushDevice() {
-  return messengerRequest<{ unregistered: true }>(
-    "/push/registration/device",
-    { method: "DELETE" },
-  );
+  return messengerRequest<{ unregistered: true }>("/push/registration/device", {
+    method: "DELETE",
+  });
 }

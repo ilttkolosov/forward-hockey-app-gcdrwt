@@ -7,6 +7,7 @@ import React, {
   useState,
 } from "react";
 import { usePathname } from "expo-router";
+import NetInfo from "@react-native-community/netinfo";
 import { AppState } from "react-native";
 import type {
   MessengerPasswordChangeRequired,
@@ -18,7 +19,9 @@ import {
 } from "../features/messenger/aliases";
 import {
   completeMessengerPasswordChange,
+  ensureFreshMessengerSession,
   getMessengerMe,
+  isMessengerAccessTokenUsable,
   loginToMessenger,
   logoutFromMessenger,
   registerInMessenger,
@@ -35,6 +38,7 @@ import {
   disconnectMessengerRealtime,
   resumeMessengerRealtime,
   setMessengerPresenceActive,
+  subscribeMessengerRealtime,
 } from "../services/messengerRealtime";
 import { cancelAllManagedMessengerMediaUploads } from "../services/messengerMediaUploadManager";
 
@@ -69,6 +73,12 @@ interface MessengerAuthContextValue {
 const MessengerAuthContext = createContext<MessengerAuthContextValue | null>(
   null,
 );
+
+async function recoverMessengerTransport(force = false): Promise<void> {
+  const fresh = await ensureFreshMessengerSession({ force });
+  connectMessengerRealtime(fresh.access_token);
+  resumeMessengerRealtime();
+}
 
 export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
   const pathname = usePathname();
@@ -130,12 +140,61 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
 
   useEffect(() => {
     const accessToken = session?.access_token;
-    if (accessToken) connectMessengerRealtime(accessToken);
-    else {
+    let active = true;
+    if (accessToken) {
+      void ensureFreshMessengerSession()
+        .then((fresh) => {
+          if (active) connectMessengerRealtime(fresh.access_token);
+        })
+        .catch((error) => {
+          // A still-valid token may be used during a temporary refresh outage.
+          // Never open a socket with an already expired token: the server must
+          // not force-disconnect it before recovery can rotate the session.
+          if (active && isMessengerAccessTokenUsable(accessToken)) {
+            connectMessengerRealtime(accessToken);
+          } else {
+            console.warn(
+              "[Messenger] Подключение отложено до обновления сессии:",
+              error,
+            );
+          }
+        });
+    } else {
       cancelAllManagedMessengerMediaUploads();
       disconnectMessengerRealtime();
     }
+    return () => {
+      active = false;
+    };
   }, [session?.access_token]);
+
+  useEffect(() => {
+    let recovery: Promise<void> | null = null;
+    return subscribeMessengerRealtime((event) => {
+      if (
+        event.type !== "connection.state" ||
+        event.connected ||
+        ![
+          "authentication_required",
+          "authentication_failed",
+          "invalid_access_token",
+        ].includes(event.reason ?? "")
+      ) {
+        return;
+      }
+      if (recovery) return;
+      recovery = recoverMessengerTransport(true)
+        .catch((error) =>
+          console.warn(
+            "[Messenger] Повторная авторизация realtime отложена:",
+            error,
+          ),
+        )
+        .finally(() => {
+          recovery = null;
+        });
+    });
+  }, []);
 
   useEffect(() => {
     const insideCommunication =
@@ -166,9 +225,38 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
           setStatus("authenticated");
         });
       });
-      resumeMessengerRealtime();
+      void recoverMessengerTransport().catch((error) =>
+        console.warn(
+          "[Messenger] Восстановление соединения после фона отложено:",
+          error,
+        ),
+      );
     });
     return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    let initialized = false;
+    let unavailable = false;
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      const available =
+        state.isConnected === true && state.isInternetReachable !== false;
+      if (!initialized) {
+        initialized = true;
+        unavailable = !available;
+        return;
+      }
+      const recovered = available && unavailable;
+      unavailable = !available;
+      if (!recovered) return;
+      void recoverMessengerTransport().catch((error) =>
+        console.warn(
+          "[Messenger] Восстановление соединения после возврата сети отложено:",
+          error,
+        ),
+      );
+    });
+    return unsubscribe;
   }, []);
 
   const login = useCallback(
