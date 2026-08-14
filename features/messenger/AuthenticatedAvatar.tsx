@@ -22,7 +22,7 @@ function initials(displayName: string): string {
   );
 }
 
-export default function AuthenticatedAvatar({
+function AuthenticatedAvatar({
   displayName,
   avatarUrl,
   accessToken,
@@ -59,6 +59,11 @@ export default function AuthenticatedAvatar({
     </View>
   );
 }
+
+// Message bubbles update frequently (delivery marks, composer state and
+// viewability). Reusing an unchanged avatar prevents expo-image from being
+// reconciled again whenever another message is appended to the feed.
+export default React.memo(AuthenticatedAvatar);
 
 const styles = StyleSheet.create({
   avatar: {

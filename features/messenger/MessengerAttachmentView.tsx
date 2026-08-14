@@ -73,7 +73,7 @@ function rememberMeasuredImageRender(mediaId: string): void {
   if (oldestMediaId) measuredImageRenders.delete(oldestMediaId);
 }
 
-export default function MessengerAttachmentView({
+function MessengerAttachmentView({
   media,
   mediaItems,
   location,
@@ -675,6 +675,12 @@ export default function MessengerAttachmentView({
     </>
   );
 }
+
+// Media previews are the heaviest part of a chat row. Message objects that
+// were already in the feed keep stable media references, so shallow memoizing
+// here lets an optimistic append render only the new bubble instead of
+// rebuilding every visible image/video subtree.
+export default React.memo(MessengerAttachmentView);
 
 const styles = StyleSheet.create({
   imageFrame: {

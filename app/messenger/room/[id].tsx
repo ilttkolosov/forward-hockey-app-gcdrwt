@@ -643,6 +643,285 @@ function UnreadDivider() {
   );
 }
 
+function messageReplyPreview(reply: MessengerReply): string {
+  if (reply.deleted_at) return "Сообщение удалено";
+  if (reply.text) return reply.text;
+  if (reply.kind === "image") return "Фото";
+  if (reply.kind === "video") return "Видео";
+  if (reply.kind === "file") return "Файл";
+  if (reply.kind === "location") return "Геопозиция";
+  return "Сообщение";
+}
+
+interface MessengerMessageListItemProps {
+  item: MessengerMessage;
+  currentUserId: string | null;
+  accessToken: string | null;
+  unreadMarker: boolean;
+  canWrite: boolean;
+  canReact: boolean;
+  roomType: string;
+  highlighted: boolean;
+  roomScreenActive: boolean;
+  viewable: boolean;
+  reactionBusy: boolean;
+  onReply: (message: MessengerMessage) => void;
+  onOpenActions: (message: MessengerMessage) => void;
+  onNavigateToReply: (
+    reply: Pick<MessengerReply, "id" | "sequence">,
+  ) => void;
+  onToggleReaction: (message: MessengerMessage, reaction: string) => void;
+}
+
+/**
+ * One isolated feed row. Existing message objects retain their identity when
+ * a new optimistic message is appended, so React.memo can keep every old
+ * image/video bubble untouched while the new row is painted and sent.
+ */
+const MessengerMessageListItem = React.memo(
+  function MessengerMessageListItem({
+    item,
+    currentUserId,
+    accessToken,
+    unreadMarker,
+    canWrite,
+    canReact,
+    roomType,
+    highlighted,
+    roomScreenActive,
+    viewable,
+    reactionBusy,
+    onReply,
+    onOpenActions,
+    onNavigateToReply,
+    onToggleReaction,
+  }: MessengerMessageListItemProps) {
+    const mine = item.author.id === currentUserId;
+    const media = item.deleted_at ? null : (item.media ?? null);
+    const mediaItems = item.deleted_at
+      ? []
+      : item.media_items?.length
+        ? item.media_items
+        : media
+          ? [media]
+          : [];
+    const location = item.deleted_at ? null : (item.location ?? null);
+    const pendingAttachment = item.deleted_at
+      ? null
+      : (item.pending_attachment ?? null);
+    const body = item.deleted_at
+      ? "Сообщение удалено"
+      : item.text ||
+        (!mediaItems.length && !location && !pendingAttachment
+          ? item.kind === "image"
+            ? "Фото"
+            : item.kind === "video"
+              ? "Видео"
+              : item.kind === "file"
+                ? "Файл"
+                : item.kind === "location"
+                  ? "Геопозиция"
+                  : ""
+          : "");
+    const emojiOnly =
+      !item.deleted_at && item.kind === "text" && isEmojiOnly(body);
+
+    if (item.kind === "system") {
+      return (
+        <View collapsable={false}>
+          {unreadMarker && <UnreadDivider />}
+          <View style={styles.systemMessageRow}>
+            <View style={styles.systemMessage}>
+              <Text style={styles.systemMessageText}>{body}</Text>
+              <Text style={styles.systemMessageTime}>
+                {new Date(item.created_at).toLocaleTimeString("ru-RU", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </Text>
+            </View>
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View collapsable={false}>
+        {unreadMarker && <UnreadDivider />}
+        <SwipeableMessage
+          enabled={canWrite && !item.pending && !item.deleted_at}
+          animateEntry={Boolean(item.pending && mine)}
+          onReply={() => onReply(item)}
+          onLongPress={() => {
+            if (!item.pending || item.send_error) onOpenActions(item);
+          }}
+        >
+          <View
+            style={[
+              styles.messageRow,
+              mine ? styles.messageRowMine : styles.messageRowTheirs,
+            ]}
+          >
+            {!mine && (
+              <AuthenticatedAvatar
+                displayName={item.author.display_name}
+                avatarUrl={item.author.avatar_url}
+                accessToken={accessToken}
+                size={40}
+              />
+            )}
+            <View style={[styles.messageColumn, mine && styles.messageColumnMine]}>
+              <View
+                style={[
+                  styles.message,
+                  mine ? styles.mine : styles.theirs,
+                  item.deleted_at && styles.deletedMessage,
+                  highlighted && styles.highlightedMessage,
+                ]}
+                accessibilityHint="Удерживайте для меню или смахните влево, чтобы ответить"
+              >
+                <MessageTail mine={mine} deleted={Boolean(item.deleted_at)} />
+                {!item.deleted_at && item.forwarded_from && (
+                  <View style={styles.forwardedHeader}>
+                    <Icon name="arrow-redo" size={14} color={colors.accent} />
+                    <Text style={styles.forwardedText} numberOfLines={1}>
+                      Переслано от{" "}
+                      <Text
+                        style={
+                          roomType === "direct"
+                            ? undefined
+                            : {
+                                color: messengerAuthorColor(
+                                  item.forwarded_from.author.id,
+                                ),
+                              }
+                        }
+                      >
+                        {item.forwarded_from.author.display_name}
+                      </Text>
+                    </Text>
+                  </View>
+                )}
+                {!item.deleted_at && item.reply_to && (
+                  <Pressable
+                    style={styles.replyQuote}
+                    onPress={() => onNavigateToReply(item.reply_to!)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Перейти к исходному сообщению"
+                  >
+                    <Text
+                      style={[
+                        styles.replyAuthor,
+                        roomType !== "direct" && {
+                          color: messengerAuthorColor(item.reply_to.author.id),
+                        },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.reply_to.author.display_name}
+                    </Text>
+                    <Text style={styles.replyText} numberOfLines={1}>
+                      {messageReplyPreview(item.reply_to)}
+                    </Text>
+                  </Pressable>
+                )}
+                {!mine && (
+                  <Text
+                    style={[
+                      styles.author,
+                      roomType !== "direct" && {
+                        color: messengerAuthorColor(item.author.id),
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {item.author.display_name}
+                  </Text>
+                )}
+                {!pendingAttachment &&
+                  (mediaItems.length > 0 || location) &&
+                  accessToken && (
+                    <MessengerAttachmentView
+                      media={media}
+                      mediaItems={mediaItems}
+                      location={location}
+                      accessToken={accessToken}
+                      deferAutomaticCache={!roomScreenActive || !viewable}
+                      playbackEnabled={roomScreenActive && viewable}
+                    />
+                  )}
+                {pendingAttachment ? (
+                  <PendingAttachmentView
+                    message={item}
+                    pending={pendingAttachment}
+                  />
+                ) : null}
+                {body ? (
+                  <Text
+                    style={[
+                      styles.messageText,
+                      emojiOnly && styles.emojiOnlyText,
+                      item.deleted_at && styles.deletedMessageText,
+                    ]}
+                  >
+                    {body}
+                  </Text>
+                ) : null}
+                <View style={styles.messageFooter}>
+                  {!item.deleted_at && item.reactions.length > 0 && (
+                    <ScrollView
+                      horizontal
+                      nestedScrollEnabled
+                      showsHorizontalScrollIndicator={false}
+                      style={styles.reactionScroller}
+                      contentContainerStyle={styles.reactionSummary}
+                    >
+                      {item.reactions.map((reaction) => (
+                        <TouchableOpacity
+                          key={reaction.reaction}
+                          style={[
+                            styles.reactionChip,
+                            reaction.reacted_by_me &&
+                              styles.reactionChipSelected,
+                          ]}
+                          onPress={() =>
+                            onToggleReaction(item, reaction.reaction)
+                          }
+                          disabled={!canReact || reactionBusy}
+                          accessibilityLabel={`${reaction.reaction}, реакций: ${reaction.count}`}
+                        >
+                          <Text style={styles.reactionText}>
+                            {reaction.reaction}
+                            {reaction.count >= 2 ? ` ${reaction.count}` : ""}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  )}
+                  <View style={styles.messageMeta}>
+                    <Text style={styles.time}>
+                      {new Date(
+                        item.deleted_at || item.edited_at || item.created_at,
+                      ).toLocaleTimeString("ru-RU", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </Text>
+                    {item.edited_at && !item.deleted_at && (
+                      <Text style={styles.time}>Отредактировано</Text>
+                    )}
+                    {mine && <DeliveryChecks message={item} />}
+                  </View>
+                </View>
+              </View>
+            </View>
+          </View>
+        </SwipeableMessage>
+      </View>
+    );
+  },
+);
+
 export default function MessengerRoomScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
@@ -3153,83 +3432,85 @@ export default function MessengerRoomScreen() {
     sendText();
   };
 
-  const toggleReaction = async (
-    message: MessengerMessage,
-    reaction: string,
-  ) => {
-    if (
-      !canReact ||
-      message.pending ||
-      reactionMutationIds.current.has(message.id)
-    ) {
-      return;
-    }
-    const currentMessage =
-      messagesRef.current.find((item) => item.id === message.id) ?? message;
-    const previousReactions = currentMessage.reactions;
-    const selected = previousReactions.some(
-      (item) => item.reaction === reaction && item.reacted_by_me,
-    );
-    const nextReaction = selected ? null : reaction;
-    const optimisticReactions = applyOptimisticReaction(
-      previousReactions,
-      nextReaction,
-    );
-    reactionMutationIds.current.add(message.id);
-    setReactionBusyIds((current) => new Set(current).add(message.id));
-    const optimisticMessage = {
-      ...currentMessage,
-      reactions: optimisticReactions,
-    };
-    setMessages((current) =>
-      current.map((item) =>
-        item.id === message.id ? optimisticMessage : item,
-      ),
-    );
-    setActionMessage(null);
-    setShowAllReactions(false);
-    void cacheMessengerMessages(db, [optimisticMessage]).catch(() => undefined);
-    if (nextReaction) {
-      void rememberQuickMessengerReaction(nextReaction, quickReactions).then(
-        setQuickReactions,
+  const toggleReaction = useCallback(
+    async (message: MessengerMessage, reaction: string) => {
+      if (
+        !canReact ||
+        message.pending ||
+        reactionMutationIds.current.has(message.id)
+      ) {
+        return;
+      }
+      const currentMessage =
+        messagesRef.current.find((item) => item.id === message.id) ?? message;
+      const previousReactions = currentMessage.reactions;
+      const selected = previousReactions.some(
+        (item) => item.reaction === reaction && item.reacted_by_me,
       );
-    }
-    try {
-      const result = selected
-        ? await removeMessengerReaction(message.id)
-        : await setMessengerReaction(message.id, reaction);
-      const confirmedMessage = {
-        ...optimisticMessage,
-        reactions: result.reactions,
+      const nextReaction = selected ? null : reaction;
+      const optimisticReactions = applyOptimisticReaction(
+        previousReactions,
+        nextReaction,
+      );
+      reactionMutationIds.current.add(message.id);
+      setReactionBusyIds((current) => new Set(current).add(message.id));
+      const optimisticMessage = {
+        ...currentMessage,
+        reactions: optimisticReactions,
       };
       setMessages((current) =>
         current.map((item) =>
-          item.id === message.id ? confirmedMessage : item,
+          item.id === message.id ? optimisticMessage : item,
         ),
       );
-      void cacheMessengerMessages(db, [confirmedMessage]).catch(
+      setActionMessage(null);
+      setShowAllReactions(false);
+      void cacheMessengerMessages(db, [optimisticMessage]).catch(
         () => undefined,
       );
-    } catch (error) {
-      const rolledBack = { ...currentMessage, reactions: previousReactions };
-      setMessages((current) =>
-        current.map((item) => (item.id === message.id ? rolledBack : item)),
-      );
-      void cacheMessengerMessages(db, [rolledBack]).catch(() => undefined);
-      console.warn("[Messenger] Не удалось изменить реакцию:", error);
-      Alert.alert(
-        "Реакция не изменена",
-        messengerErrorMessage(error, "Повторите попытку позже"),
-      );
-    } finally {
-      reactionMutationIds.current.delete(message.id);
-      setReactionBusyIds((current) => {
-        const next = new Set(current);
-        next.delete(message.id);
-        return next;
-      });
-    }
-  };
+      if (nextReaction) {
+        void rememberQuickMessengerReaction(nextReaction, quickReactions).then(
+          setQuickReactions,
+        );
+      }
+      try {
+        const result = selected
+          ? await removeMessengerReaction(message.id)
+          : await setMessengerReaction(message.id, reaction);
+        const confirmedMessage = {
+          ...optimisticMessage,
+          reactions: result.reactions,
+        };
+        setMessages((current) =>
+          current.map((item) =>
+            item.id === message.id ? confirmedMessage : item,
+          ),
+        );
+        void cacheMessengerMessages(db, [confirmedMessage]).catch(
+          () => undefined,
+        );
+      } catch (error) {
+        const rolledBack = { ...currentMessage, reactions: previousReactions };
+        setMessages((current) =>
+          current.map((item) => (item.id === message.id ? rolledBack : item)),
+        );
+        void cacheMessengerMessages(db, [rolledBack]).catch(() => undefined);
+        console.warn("[Messenger] Не удалось изменить реакцию:", error);
+        Alert.alert(
+          "Реакция не изменена",
+          messengerErrorMessage(error, "Повторите попытку позже"),
+        );
+      } finally {
+        reactionMutationIds.current.delete(message.id);
+        setReactionBusyIds((current) => {
+          const next = new Set(current);
+          next.delete(message.id);
+          return next;
+        });
+      }
+    },
+    [canReact, db, quickReactions],
+  );
 
   const beginReply = useCallback(
     (message: MessengerMessage) => {
@@ -3506,16 +3787,6 @@ export default function MessengerRoomScreen() {
     );
   }, [forwardContacts, forwardRooms]);
 
-  const replyPreview = (reply: MessengerReply): string => {
-    if (reply.deleted_at) return "Сообщение удалено";
-    if (reply.text) return reply.text;
-    if (reply.kind === "image") return "Фото";
-    if (reply.kind === "video") return "Видео";
-    if (reply.kind === "file") return "Файл";
-    if (reply.kind === "location") return "Геопозиция";
-    return "Сообщение";
-  };
-
   const roomSubtitle =
     !initialDataReady || !roomDetailsReady
       ? "Обновление"
@@ -3587,6 +3858,49 @@ export default function MessengerRoomScreen() {
       },
     });
   };
+
+  const openMessageActions = useCallback((message: MessengerMessage) => {
+    setShowAllReactions(false);
+    setActionMessage(message);
+  }, []);
+
+  const renderMessageItem = useCallback(
+    ({ item }: { item: MessengerMessage }) => (
+      <MessengerMessageListItem
+        item={item}
+        currentUserId={session?.user.id ?? null}
+        accessToken={session?.access_token ?? null}
+        unreadMarker={item.client_message_id === unreadMarkerClientId}
+        canWrite={canWrite}
+        canReact={canReact}
+        roomType={roomType}
+        highlighted={highlightedMessageId === item.id}
+        roomScreenActive={roomScreenActive}
+        viewable={viewableMessageIds.has(item.client_message_id)}
+        reactionBusy={reactionBusyIds.has(item.id)}
+        onReply={beginReply}
+        onOpenActions={openMessageActions}
+        onNavigateToReply={navigateToRepliedMessage}
+        onToggleReaction={toggleReaction}
+      />
+    ),
+    [
+      beginReply,
+      canReact,
+      canWrite,
+      highlightedMessageId,
+      navigateToRepliedMessage,
+      openMessageActions,
+      reactionBusyIds,
+      roomScreenActive,
+      roomType,
+      session?.access_token,
+      session?.user.id,
+      toggleReaction,
+      unreadMarkerClientId,
+      viewableMessageIds,
+    ],
+  );
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
@@ -3703,276 +4017,7 @@ export default function MessengerRoomScreen() {
               if (!nearLatest.current) return;
               listRef.current?.scrollToEnd({ animated });
             }}
-            renderItem={({ item }) => {
-              const mine = item.author.id === session?.user.id;
-              const media = item.deleted_at ? null : (item.media ?? null);
-              const mediaItems = item.deleted_at
-                ? []
-                : item.media_items?.length
-                  ? item.media_items
-                  : media
-                    ? [media]
-                    : [];
-              const location = item.deleted_at ? null : (item.location ?? null);
-              const pendingAttachment = item.deleted_at
-                ? null
-                : (item.pending_attachment ?? null);
-              const body = item.deleted_at
-                ? "Сообщение удалено"
-                : item.text ||
-                  (!mediaItems.length && !location && !pendingAttachment
-                    ? item.kind === "image"
-                      ? "Фото"
-                      : item.kind === "video"
-                        ? "Видео"
-                        : item.kind === "file"
-                          ? "Файл"
-                          : item.kind === "location"
-                            ? "Геопозиция"
-                            : ""
-                    : "");
-              const emojiOnly =
-                !item.deleted_at && item.kind === "text" && isEmojiOnly(body);
-              if (item.kind === "system") {
-                return (
-                  <View collapsable={false}>
-                    {item.client_message_id === unreadMarkerClientId && (
-                      <UnreadDivider />
-                    )}
-                    <View style={styles.systemMessageRow}>
-                      <View style={styles.systemMessage}>
-                        <Text style={styles.systemMessageText}>{body}</Text>
-                        <Text style={styles.systemMessageTime}>
-                          {new Date(item.created_at).toLocaleTimeString(
-                            "ru-RU",
-                            {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            },
-                          )}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                );
-              }
-              return (
-                <View collapsable={false}>
-                  {item.client_message_id === unreadMarkerClientId && (
-                    <UnreadDivider />
-                  )}
-                  <SwipeableMessage
-                    enabled={canWrite && !item.pending && !item.deleted_at}
-                    animateEntry={Boolean(item.pending && mine)}
-                    onReply={() => beginReply(item)}
-                    onLongPress={() => {
-                      if (!item.pending || item.send_error) {
-                        setShowAllReactions(false);
-                        setActionMessage(item);
-                      }
-                    }}
-                  >
-                    <View
-                      style={[
-                        styles.messageRow,
-                        mine ? styles.messageRowMine : styles.messageRowTheirs,
-                      ]}
-                    >
-                      {!mine && (
-                        <AuthenticatedAvatar
-                          displayName={item.author.display_name}
-                          avatarUrl={item.author.avatar_url}
-                          accessToken={session?.access_token}
-                          size={40}
-                        />
-                      )}
-                      <View
-                        style={[
-                          styles.messageColumn,
-                          mine && styles.messageColumnMine,
-                        ]}
-                      >
-                        <View
-                          style={[
-                            styles.message,
-                            mine ? styles.mine : styles.theirs,
-                            item.deleted_at && styles.deletedMessage,
-                            highlightedMessageId === item.id &&
-                              styles.highlightedMessage,
-                          ]}
-                          accessibilityHint="Удерживайте для меню или смахните влево, чтобы ответить"
-                        >
-                          <MessageTail
-                            mine={mine}
-                            deleted={Boolean(item.deleted_at)}
-                          />
-                          {!item.deleted_at && item.forwarded_from && (
-                            <View style={styles.forwardedHeader}>
-                              <Icon
-                                name="arrow-redo"
-                                size={14}
-                                color={colors.accent}
-                              />
-                              <Text
-                                style={styles.forwardedText}
-                                numberOfLines={1}
-                              >
-                                Переслано от{" "}
-                                <Text
-                                  style={
-                                    roomType === "direct"
-                                      ? undefined
-                                      : {
-                                          color: messengerAuthorColor(
-                                            item.forwarded_from.author.id,
-                                          ),
-                                        }
-                                  }
-                                >
-                                  {item.forwarded_from.author.display_name}
-                                </Text>
-                              </Text>
-                            </View>
-                          )}
-                          {!item.deleted_at && item.reply_to && (
-                            <Pressable
-                              style={styles.replyQuote}
-                              onPress={() =>
-                                void navigateToRepliedMessage(item.reply_to!)
-                              }
-                              accessibilityRole="button"
-                              accessibilityLabel="Перейти к исходному сообщению"
-                            >
-                              <Text
-                                style={[
-                                  styles.replyAuthor,
-                                  roomType !== "direct" && {
-                                    color: messengerAuthorColor(
-                                      item.reply_to.author.id,
-                                    ),
-                                  },
-                                ]}
-                                numberOfLines={1}
-                              >
-                                {item.reply_to.author.display_name}
-                              </Text>
-                              <Text style={styles.replyText} numberOfLines={1}>
-                                {replyPreview(item.reply_to)}
-                              </Text>
-                            </Pressable>
-                          )}
-                          {!mine && (
-                            <Text
-                              style={[
-                                styles.author,
-                                roomType !== "direct" && {
-                                  color: messengerAuthorColor(item.author.id),
-                                },
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {item.author.display_name}
-                            </Text>
-                          )}
-                          {!pendingAttachment &&
-                            (mediaItems.length > 0 || location) &&
-                            session?.access_token && (
-                              <MessengerAttachmentView
-                                media={media}
-                                mediaItems={mediaItems}
-                                location={location}
-                                accessToken={session.access_token}
-                                deferAutomaticCache={
-                                  !roomScreenActive ||
-                                  !viewableMessageIds.has(
-                                    item.client_message_id,
-                                  )
-                                }
-                                playbackEnabled={
-                                  roomScreenActive &&
-                                  viewableMessageIds.has(item.client_message_id)
-                                }
-                              />
-                            )}
-                          {pendingAttachment ? (
-                            <PendingAttachmentView
-                              message={item}
-                              pending={pendingAttachment}
-                            />
-                          ) : null}
-                          {body ? (
-                            <Text
-                              style={[
-                                styles.messageText,
-                                emojiOnly && styles.emojiOnlyText,
-                                item.deleted_at && styles.deletedMessageText,
-                              ]}
-                            >
-                              {body}
-                            </Text>
-                          ) : null}
-                          <View style={styles.messageFooter}>
-                            {!item.deleted_at && item.reactions.length > 0 && (
-                              <ScrollView
-                                horizontal
-                                nestedScrollEnabled
-                                showsHorizontalScrollIndicator={false}
-                                style={styles.reactionScroller}
-                                contentContainerStyle={styles.reactionSummary}
-                              >
-                                {item.reactions.map((reaction) => (
-                                  <TouchableOpacity
-                                    key={reaction.reaction}
-                                    style={[
-                                      styles.reactionChip,
-                                      reaction.reacted_by_me &&
-                                        styles.reactionChipSelected,
-                                    ]}
-                                    onPress={() =>
-                                      void toggleReaction(
-                                        item,
-                                        reaction.reaction,
-                                      )
-                                    }
-                                    disabled={
-                                      !canReact || reactionBusyIds.has(item.id)
-                                    }
-                                    accessibilityLabel={`${reaction.reaction}, реакций: ${reaction.count}`}
-                                  >
-                                    <Text style={styles.reactionText}>
-                                      {reaction.reaction}
-                                      {reaction.count >= 2
-                                        ? ` ${reaction.count}`
-                                        : ""}
-                                    </Text>
-                                  </TouchableOpacity>
-                                ))}
-                              </ScrollView>
-                            )}
-                            <View style={styles.messageMeta}>
-                              <Text style={styles.time}>
-                                {new Date(
-                                  item.deleted_at ||
-                                    item.edited_at ||
-                                    item.created_at,
-                                ).toLocaleTimeString("ru-RU", {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </Text>
-                              {item.edited_at && !item.deleted_at && (
-                                <Text style={styles.time}>Отредактировано</Text>
-                              )}
-                              {mine && <DeliveryChecks message={item} />}
-                            </View>
-                          </View>
-                        </View>
-                      </View>
-                    </View>
-                  </SwipeableMessage>
-                </View>
-              );
-            }}
+            renderItem={renderMessageItem}
             ListEmptyComponent={
               loading ? (
                 <View style={styles.empty}>
@@ -4583,7 +4628,7 @@ export default function MessengerRoomScreen() {
                     {replyingTo.author.display_name}
                   </Text>
                   <Text style={styles.replyText} numberOfLines={1}>
-                    {replyPreview({
+                    {messageReplyPreview({
                       id: replyingTo.id,
                       kind: replyingTo.kind,
                       text: replyingTo.text,
