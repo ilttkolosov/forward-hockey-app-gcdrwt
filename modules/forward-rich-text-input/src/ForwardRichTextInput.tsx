@@ -12,8 +12,8 @@ import {
   TextInput,
   type NativeSyntheticEvent,
   type StyleProp,
+  type TextStyle,
   type TextInputProps,
-  type ViewStyle,
 } from "react-native";
 
 interface NativeValueChangeEvent {
@@ -25,7 +25,7 @@ interface NativeContentSizeChangeEvent {
 }
 
 interface NativeForwardRichTextInputProps {
-  style?: StyleProp<ViewStyle>;
+  style?: StyleProp<TextStyle>;
   value: string;
   placeholder?: string;
   maxLength?: number;
@@ -55,7 +55,7 @@ export interface ForwardRichTextInputHandle {
 }
 
 export interface ForwardRichTextInputProps {
-  style?: StyleProp<ViewStyle>;
+  style?: StyleProp<TextStyle>;
   value: string;
   onChangeText: (value: string) => void;
   placeholder?: string;
