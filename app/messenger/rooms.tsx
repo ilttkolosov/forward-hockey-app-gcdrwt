@@ -29,6 +29,7 @@ import {
 } from "../../services/messengerApi";
 import { subscribeMessengerRealtime } from "../../services/messengerRealtime";
 import { messengerLog } from "../../services/messengerLogger";
+import { stripMessengerTextFormatting } from "../../services/messengerTextFormatting";
 import { syncMessengerUnreadFromRooms } from "../../services/messengerUnread";
 import { colors } from "../../styles/commonStyles";
 
@@ -39,7 +40,7 @@ function lastMessageText(room: MessengerRoom): string {
   if (room.last_message.kind === "file")
     return room.last_message.media?.original_name || "Файл";
   if (room.last_message.kind === "location") return "Геопозиция";
-  return room.last_message.text;
+  return stripMessengerTextFormatting(room.last_message.text);
 }
 
 function sequenceIsNewer(candidate: string, current: string): boolean {

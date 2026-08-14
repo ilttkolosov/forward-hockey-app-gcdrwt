@@ -122,6 +122,7 @@ import {
   assertMessengerUploadLimits,
   currentMessengerLocation,
   MAX_MESSENGER_MEDIA_SELECTION,
+  pasteMessengerClipboardImage,
   pickMessengerFile,
   pickMessengerMedia,
   takeMessengerPhoto,
@@ -143,6 +144,12 @@ import {
   subscribeMessengerOutbox,
 } from "../../../services/messengerOutbox";
 import { firstMessengerMessageUrl } from "../../../services/messengerLinkPreview";
+import {
+  applyMessengerTextFormat,
+  stripMessengerTextFormatting,
+  type MessengerTextFormat,
+  type MessengerTextSelection,
+} from "../../../services/messengerTextFormatting";
 
 type MessengerAttachmentKind = "camera" | "library" | "file" | "location";
 type InitialAnchorMode = "read_anchor" | "unread_fallback" | "latest";
@@ -167,6 +174,21 @@ interface MediaUploadRequest extends AttachmentDraft {
   caption: string;
   replyTarget: MessengerMessage | null;
 }
+
+const MESSAGE_FORMAT_ACTIONS: readonly {
+  format: MessengerTextFormat;
+  label: string;
+  accessibilityLabel: string;
+}[] = [
+  { format: "bold", label: "Ж", accessibilityLabel: "Полужирный" },
+  { format: "italic", label: "К", accessibilityLabel: "Курсив" },
+  { format: "underline", label: "Ч", accessibilityLabel: "Подчёркнутый" },
+  {
+    format: "strikethrough",
+    label: "З",
+    accessibilityLabel: "Зачёркнутый",
+  },
+];
 
 const MESSAGE_MUTATION_WINDOW_MS = 3 * 60 * 1000;
 
@@ -716,7 +738,7 @@ function MessengerReactionChip({
 
 function messageReplyPreview(reply: MessengerReply): string {
   if (reply.deleted_at) return "Сообщение удалено";
-  if (reply.text) return reply.text;
+  if (reply.text) return stripMessengerTextFormatting(reply.text);
   if (reply.kind === "image") return "Фото";
   if (reply.kind === "video") return "Видео";
   if (reply.kind === "file") return "Файл";
@@ -798,11 +820,12 @@ const MessengerMessageListItem = React.memo(
                   ? "Геопозиция"
                   : ""
           : "");
+    const plainBody = stripMessengerTextFormatting(body);
     const emojiOnly =
-      !item.deleted_at && item.kind === "text" && isEmojiOnly(body);
+      !item.deleted_at && item.kind === "text" && isEmojiOnly(plainBody);
     const linkPreviewUrl = item.deleted_at
       ? null
-      : firstMessengerMessageUrl(body);
+      : firstMessengerMessageUrl(plainBody);
 
     if (item.kind === "system") {
       return (
@@ -1071,6 +1094,11 @@ export default function MessengerRoomScreen() {
   );
   const [messages, setMessages] = useState<MessengerMessage[]>([]);
   const [text, setText] = useState("");
+  const [inputSelection, setInputSelection] =
+    useState<MessengerTextSelection>({ start: 0, end: 0 });
+  const [clipboardImageAvailable, setClipboardImageAvailable] =
+    useState(false);
+  const [clipboardImageBusy, setClipboardImageBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [offline, setOffline] = useState(false);
@@ -1228,6 +1256,29 @@ export default function MessengerRoomScreen() {
 
   useEffect(() => {
     void loadQuickMessengerReactions().then(setQuickReactions);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const refreshAvailability = () => {
+      void Clipboard.hasImageAsync()
+        .then((available) => {
+          if (active) setClipboardImageAvailable(available);
+        })
+        .catch(() => {
+          if (active) setClipboardImageAvailable(false);
+        });
+    };
+    refreshAvailability();
+    const subscription = Clipboard.addClipboardListener(({ contentTypes }) => {
+      setClipboardImageAvailable(
+        contentTypes.includes(Clipboard.ContentType.IMAGE),
+      );
+    });
+    return () => {
+      active = false;
+      Clipboard.removeClipboardListener(subscription);
+    };
   }, []);
 
   const clearPendingLatestScroll = useCallback(() => {
@@ -3160,6 +3211,61 @@ export default function MessengerRoomScreen() {
     ],
   );
 
+  const formatSelectedText = useCallback(
+    (format: MessengerTextFormat) => {
+      const next = applyMessengerTextFormat(text, inputSelection, format);
+      if (next.text === text) return;
+      setText(next.text);
+      setInputSelection(next.selection);
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.setNativeProps({ selection: next.selection });
+      });
+    },
+    [inputSelection, text],
+  );
+
+  const pasteClipboardImage = useCallback(async () => {
+    if (
+      clipboardImageBusy ||
+      attachmentDraft ||
+      editingMessage ||
+      !canMedia
+    ) {
+      return;
+    }
+    setClipboardImageBusy(true);
+    setAttachmentPreparationLabel("Вставляем изображение…");
+    try {
+      const file = await pasteMessengerClipboardImage();
+      if (!file) {
+        setClipboardImageAvailable(false);
+        Alert.alert(
+          "Изображение не найдено",
+          "В буфере обмена больше нет изображения.",
+        );
+        return;
+      }
+      setAttachmentDraft({ source: "library", files: [file] });
+      void warmMessengerBufferedUploadFiles([file]);
+      setOffline(false);
+      setSyncError(null);
+    } catch (error) {
+      Alert.alert(
+        "Не удалось вставить изображение",
+        messengerErrorMessage(error, "Повторите попытку"),
+      );
+    } finally {
+      setAttachmentPreparationLabel(null);
+      setClipboardImageBusy(false);
+    }
+  }, [
+    attachmentDraft,
+    canMedia,
+    clipboardImageBusy,
+    editingMessage,
+  ]);
+
   const sendAttachmentDraft = useCallback(() => {
     if (!attachmentDraft || !roomId || !session || sending) return;
     const clientMessageId = Crypto.randomUUID();
@@ -3797,7 +3903,7 @@ export default function MessengerRoomScreen() {
 
   const copyMessageText = useCallback(async (message: MessengerMessage) => {
     if (!message.text.trim()) return;
-    await Clipboard.setStringAsync(message.text);
+    await Clipboard.setStringAsync(stripMessengerTextFormatting(message.text));
     setActionMessage(null);
     setShowAllReactions(false);
   }, []);
@@ -3969,7 +4075,12 @@ export default function MessengerRoomScreen() {
     : Boolean(text.trim() || attachmentDraft);
   const composerBusy =
     sending ||
+    clipboardImageBusy ||
     Boolean(editingMessage && messageMutationBusyId === editingMessage.id);
+  const hasSelectedComposerText =
+    inputSelection.end > inputSelection.start &&
+    inputSelection.start >= 0 &&
+    inputSelection.end <= text.length;
 
   const openGroupSettings = () => {
     if (!roomType || roomType === "direct") return;
@@ -4238,7 +4349,7 @@ export default function MessengerRoomScreen() {
                   <Text style={styles.actionPreviewText} numberOfLines={2}>
                     {actionMessage.deleted_at
                       ? "Сообщение удалено"
-                      : actionMessage.text ||
+                      : stripMessengerTextFormatting(actionMessage.text) ||
                         (actionMessage.kind === "image"
                           ? "Фото"
                           : actionMessage.kind === "video"
@@ -4755,7 +4866,8 @@ export default function MessengerRoomScreen() {
                     Редактирование сообщения
                   </Text>
                   <Text style={styles.replyText} numberOfLines={1}>
-                    {editingMessage.text || "Подпись к вложению"}
+                    {stripMessengerTextFormatting(editingMessage.text) ||
+                      "Подпись к вложению"}
                   </Text>
                 </View>
                 <TouchableOpacity
@@ -4858,6 +4970,64 @@ export default function MessengerRoomScreen() {
                 </TouchableOpacity>
               </View>
             )}
+            {(hasSelectedComposerText ||
+              (clipboardImageAvailable &&
+                canMedia &&
+                !attachmentDraft &&
+                !editingMessage)) && (
+              <View style={styles.composerTools}>
+                {hasSelectedComposerText &&
+                  MESSAGE_FORMAT_ACTIONS.map((action) => (
+                    <TouchableOpacity
+                      key={action.format}
+                      style={styles.formatButton}
+                      onPress={() => formatSelectedText(action.format)}
+                      disabled={composerBusy}
+                      accessibilityRole="button"
+                      accessibilityLabel={action.accessibilityLabel}
+                    >
+                      <Text
+                        style={[
+                          styles.formatButtonText,
+                          action.format === "bold" && styles.formatBold,
+                          action.format === "italic" && styles.formatItalic,
+                          action.format === "underline" &&
+                            styles.formatUnderline,
+                          action.format === "strikethrough" &&
+                            styles.formatStrikethrough,
+                        ]}
+                      >
+                        {action.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                {clipboardImageAvailable &&
+                  canMedia &&
+                  !attachmentDraft &&
+                  !editingMessage && (
+                    <TouchableOpacity
+                      style={styles.clipboardImageButton}
+                      onPress={() => void pasteClipboardImage()}
+                      disabled={composerBusy}
+                      accessibilityRole="button"
+                      accessibilityLabel="Вставить изображение из буфера обмена"
+                    >
+                      {clipboardImageBusy ? (
+                        <ActivityIndicator size="small" color={colors.primary} />
+                      ) : (
+                        <Icon
+                          name="clipboard-outline"
+                          size={18}
+                          color={colors.primary}
+                        />
+                      )}
+                      <Text style={styles.clipboardImageText}>
+                        Вставить изображение
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+              </View>
+            )}
             <View style={styles.composer}>
               {canMedia && (
                 <TouchableOpacity
@@ -4878,6 +5048,9 @@ export default function MessengerRoomScreen() {
                 style={styles.input}
                 value={text}
                 onChangeText={setText}
+                onSelectionChange={(event) =>
+                  setInputSelection(event.nativeEvent.selection)
+                }
                 placeholder={
                   editingMessage
                     ? "Измените сообщение"
@@ -4896,6 +5069,9 @@ export default function MessengerRoomScreen() {
                       : 4000
                 }
                 onFocus={() => {
+                  void Clipboard.hasImageAsync()
+                    .then(setClipboardImageAvailable)
+                    .catch(() => setClipboardImageAvailable(false));
                   if (!nearLatest.current) return;
                   keyboardScrollPending.current = true;
                   scrollToLatest(true);
@@ -5304,6 +5480,54 @@ const styles = StyleSheet.create({
     height: 38,
     alignItems: "center",
     justifyContent: "center",
+  },
+  composerTools: {
+    minHeight: 39,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginHorizontal: 10,
+    marginTop: 7,
+    paddingHorizontal: 5,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: "#D5E1EC",
+    borderRadius: 12,
+    backgroundColor: "#F2F7FC",
+  },
+  formatButton: {
+    width: 32,
+    height: 30,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    backgroundColor: colors.white,
+  },
+  formatButtonText: {
+    color: colors.text,
+    fontSize: 15,
+  },
+  formatBold: { fontWeight: "900" },
+  formatItalic: { fontStyle: "italic", fontWeight: "700" },
+  formatUnderline: { fontWeight: "700", textDecorationLine: "underline" },
+  formatStrikethrough: {
+    fontWeight: "700",
+    textDecorationLine: "line-through",
+  },
+  clipboardImageButton: {
+    minHeight: 30,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginLeft: "auto",
+    paddingHorizontal: 9,
+    borderRadius: 8,
+    backgroundColor: "#E4EFFC",
+  },
+  clipboardImageText: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "800",
   },
   composer: {
     flexDirection: "row",

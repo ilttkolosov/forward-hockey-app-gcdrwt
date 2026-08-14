@@ -1,3 +1,4 @@
+import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -658,6 +659,53 @@ export async function pickMessengerFile(): Promise<MessengerUploadFile | null> {
     original_size_bytes: size,
   };
   assertMessengerUploadLimits([file]);
+  return file;
+}
+
+export async function pasteMessengerClipboardImage(): Promise<MessengerUploadFile | null> {
+  const image = await Clipboard.getImageAsync({
+    format: "jpeg",
+    jpegQuality: 0.82,
+  });
+  if (!image) return null;
+  if (!FileSystem.cacheDirectory) {
+    throw new Error("Локальное хранилище для вставки изображения недоступно");
+  }
+
+  const base64 = image.data.replace(/^data:image\/[a-z0-9.+-]+;base64,/i, "");
+  if (!base64 || base64 === image.data) {
+    throw new Error("Не удалось прочитать изображение из буфера обмена");
+  }
+
+  const directory = `${FileSystem.cacheDirectory}forward-messenger-clipboard/`;
+  const timestamp = Date.now();
+  const uri = `${directory}clipboard-${timestamp}.jpg`;
+  await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
+  await FileSystem.writeAsStringAsync(uri, base64, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  const size = await localFileSize(uri);
+  const file: MessengerUploadFile = {
+    uri,
+    name: `clipboard-${timestamp}.jpg`,
+    type: "image/jpeg",
+    kind: "image",
+    size_bytes: size,
+    original_size_bytes: size,
+    width: image.size.width,
+    height: image.size.height,
+  };
+  try {
+    assertMessengerUploadLimits([file]);
+  } catch (error) {
+    await discardGeneratedMedia(uri);
+    throw error;
+  }
+  messengerLog("info", "attachment.clipboard_image.prepared", {
+    size_bytes: size,
+    width: image.size.width,
+    height: image.size.height,
+  });
   return file;
 }
 

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Linking,
+  Platform,
   StyleProp,
   StyleSheet,
   Text,
@@ -18,6 +19,10 @@ import {
   type MessengerLinkPreview as MessengerLinkPreviewData,
 } from "../../services/messengerLinkPreview";
 import { messengerLog } from "../../services/messengerLogger";
+import {
+  parseMessengerFormattedText,
+  type MessengerTextFormat,
+} from "../../services/messengerTextFormatting";
 
 async function openExternalUrl(url: string): Promise<void> {
   try {
@@ -37,27 +42,63 @@ export function MessengerLinkifiedText({
   text: string;
   style?: StyleProp<TextStyle>;
 }) {
-  const segments = useMemo(() => splitMessengerTextLinks(text), [text]);
+  const segments = useMemo(
+    () =>
+      parseMessengerFormattedText(text).flatMap((formatted) =>
+        splitMessengerTextLinks(formatted.text).map((segment) => ({
+          ...segment,
+          formats: formatted.formats,
+        })),
+      ),
+    [text],
+  );
   return (
     <Text style={style}>
-      {segments.map((segment, index) =>
-        segment.url ? (
-          <Text
-            key={`${index}:${segment.text}`}
-            style={styles.linkText}
-            onPress={() => void openExternalUrl(segment.url!)}
-            accessibilityRole="link"
-            accessibilityLabel={`Открыть ссылку ${segment.text}`}
-            suppressHighlighting={false}
-          >
-            {segment.text}
-          </Text>
-        ) : (
-          segment.text
-        ),
-      )}
+      {segments.map((segment, index) => (
+        <Text
+          key={`${index}:${segment.text}`}
+          style={formattedSegmentStyle(segment.formats, Boolean(segment.url))}
+          onPress={
+            segment.url ? () => void openExternalUrl(segment.url!) : undefined
+          }
+          accessibilityRole={segment.url ? "link" : undefined}
+          accessibilityLabel={
+            segment.url ? `Открыть ссылку ${segment.text}` : undefined
+          }
+          suppressHighlighting={false}
+        >
+          {segment.text}
+        </Text>
+      ))}
     </Text>
   );
+}
+
+function formattedSegmentStyle(
+  formats: readonly MessengerTextFormat[],
+  link: boolean,
+): TextStyle {
+  const decorations: string[] = [];
+  if (link || formats.includes("underline")) decorations.push("underline");
+  if (formats.includes("strikethrough")) decorations.push("line-through");
+  return {
+    ...(link ? { color: "#075FA8" } : null),
+    ...(formats.includes("bold") ? { fontWeight: "800" as const } : null),
+    ...(formats.includes("italic") ? { fontStyle: "italic" as const } : null),
+    ...(decorations.length
+      ? {
+          textDecorationLine: decorations.join(" ") as TextStyle["textDecorationLine"],
+        }
+      : null),
+    ...(formats.includes("strikethrough")
+      ? {
+          textDecorationColor: "#617386",
+        }
+      : null),
+    ...(formats.includes("bold") && Platform.OS === "android"
+      ? { includeFontPadding: false }
+      : null),
+  };
 }
 
 export default function MessengerLinkPreview({
@@ -131,13 +172,13 @@ export default function MessengerLinkPreview({
 }
 
 const styles = StyleSheet.create({
-  linkText: {
-    color: "#1267B1",
-    textDecorationLine: "underline",
-  },
   card: {
     width: 236,
-    minHeight: 76,
+    maxWidth: "100%",
+    height: 78,
+    maxHeight: 78,
+    alignSelf: "flex-start",
+    flexShrink: 1,
     marginTop: 7,
     flexDirection: "row",
     overflow: "hidden",
@@ -154,18 +195,21 @@ const styles = StyleSheet.create({
   },
   imageShell: {
     width: 76,
-    minHeight: 74,
+    height: 76,
+    flexShrink: 0,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255, 255, 255, 0.68)",
   },
   image: {
-    width: "100%",
-    height: "100%",
+    width: 76,
+    height: 76,
   },
   textColumn: {
     flex: 1,
+    height: 76,
     minWidth: 0,
+    overflow: "hidden",
     justifyContent: "center",
     paddingHorizontal: 10,
     paddingVertical: 8,
