@@ -364,7 +364,7 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
     if #available(iOS 16.0, *) { return }
     UIMenuController.shared.menuItems = [
       UIMenuItem(title: "Жирный", action: #selector(ForwardAttributedTextView.formatBold(_:))),
-      UIMenuItem(title: "Курсив", action: #selector(FormatItalic(_:)),
+      UIMenuItem(title: "Курсив", action: #selector(ForwardAttributedTextView.formatItalic(_:))),
       UIMenuItem(title: "Подчёркнутый", action: #selector(ForwardAttributedTextView.formatUnderline(_:))),
       UIMenuItem(title: "Зачёркнутый", action: #selector(ForwardAttributedTextView.formatStrikethrough(_:)))
     ]
@@ -459,7 +459,7 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
     to value: NSMutableAttributedString,
     range: NSRange
   ) {
-    value.enumerateAttribute(.font, in range) { current, subrange, _ in
+    value.enumerateAttribute(.font, in: range) { current, subrange, _ in
       let currentFont = current as? UIFont ?? UIFont.systemFont(ofSize: fontSize)
       let traits = currentFont.fontDescriptor.symbolicTraits.union(trait)
       let descriptor = currentFont.fontDescriptor.withSymbolicTraits(traits) ?? currentFont.fontDescriptor
