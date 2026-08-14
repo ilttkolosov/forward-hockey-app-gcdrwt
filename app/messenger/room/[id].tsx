@@ -122,7 +122,6 @@ import {
   assertMessengerUploadLimits,
   currentMessengerLocation,
   MAX_MESSENGER_MEDIA_SELECTION,
-  pasteMessengerClipboardImage,
   pickMessengerFile,
   pickMessengerMedia,
   takeMessengerPhoto,
@@ -144,12 +143,7 @@ import {
   subscribeMessengerOutbox,
 } from "../../../services/messengerOutbox";
 import { firstMessengerMessageUrl } from "../../../services/messengerLinkPreview";
-import {
-  applyMessengerTextFormat,
-  stripMessengerTextFormatting,
-  type MessengerTextFormat,
-  type MessengerTextSelection,
-} from "../../../services/messengerTextFormatting";
+import { stripMessengerTextFormatting } from "../../../services/messengerTextFormatting";
 
 type MessengerAttachmentKind = "camera" | "library" | "file" | "location";
 type InitialAnchorMode = "read_anchor" | "unread_fallback" | "latest";
@@ -174,16 +168,6 @@ interface MediaUploadRequest extends AttachmentDraft {
   caption: string;
   replyTarget: MessengerMessage | null;
 }
-
-const MESSAGE_FORMAT_ACTIONS: readonly {
-  format: MessengerTextFormat;
-  title: string;
-}[] = [
-  { format: "bold", title: "Жирный" },
-  { format: "italic", title: "Курсив" },
-  { format: "underline", title: "Подчёркнутый" },
-  { format: "strikethrough", title: "Зачёркнутый" },
-];
 
 const MESSAGE_MUTATION_WINDOW_MS = 3 * 60 * 1000;
 
@@ -1089,14 +1073,6 @@ export default function MessengerRoomScreen() {
   );
   const [messages, setMessages] = useState<MessengerMessage[]>([]);
   const [text, setText] = useState("");
-  const [formatMenuVisible, setFormatMenuVisible] = useState(false);
-  const [formatMenuPreview, setFormatMenuPreview] = useState("");
-  const [formattingFeedback, setFormattingFeedback] = useState<string | null>(
-    null,
-  );
-  const [clipboardImageAvailable, setClipboardImageAvailable] =
-    useState(false);
-  const [clipboardImageBusy, setClipboardImageBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [offline, setOffline] = useState(false);
@@ -1165,21 +1141,6 @@ export default function MessengerRoomScreen() {
   const [feedHeight, setFeedHeight] = useState(0);
   const listRef = useRef<FlatList<MessengerMessage>>(null);
   const inputRef = useRef<TextInput>(null);
-  const lastNonEmptyInputSelection = useRef<MessengerTextSelection | null>(
-    null,
-  );
-  const formattingTargetSelection = useRef<MessengerTextSelection | null>(
-    null,
-  );
-  const formatMenuOpenTimer = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const formatSelectionRestoreTimer = useRef<ReturnType<
-    typeof setTimeout
-  > | null>(null);
-  const formattingFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
   const messagesRef = useRef<MessengerMessage[]>([]);
   const viewableServerMessageIds = useRef<string[]>([]);
   const editingMessageRef = useRef<MessengerMessage | null>(null);
@@ -1269,44 +1230,6 @@ export default function MessengerRoomScreen() {
 
   useEffect(() => {
     void loadQuickMessengerReactions().then(setQuickReactions);
-  }, []);
-
-  useEffect(
-    () => () => {
-      if (formatMenuOpenTimer.current) {
-        clearTimeout(formatMenuOpenTimer.current);
-      }
-      if (formatSelectionRestoreTimer.current) {
-        clearTimeout(formatSelectionRestoreTimer.current);
-      }
-      if (formattingFeedbackTimer.current) {
-        clearTimeout(formattingFeedbackTimer.current);
-      }
-    },
-    [],
-  );
-
-  useEffect(() => {
-    let active = true;
-    const refreshAvailability = () => {
-      void Clipboard.hasImageAsync()
-        .then((available) => {
-          if (active) setClipboardImageAvailable(available);
-        })
-        .catch(() => {
-          if (active) setClipboardImageAvailable(false);
-        });
-    };
-    refreshAvailability();
-    const subscription = Clipboard.addClipboardListener(({ contentTypes }) => {
-      setClipboardImageAvailable(
-        contentTypes.includes(Clipboard.ContentType.IMAGE),
-      );
-    });
-    return () => {
-      active = false;
-      Clipboard.removeClipboardListener(subscription);
-    };
   }, []);
 
   const clearPendingLatestScroll = useCallback(() => {
@@ -2854,8 +2777,6 @@ export default function MessengerRoomScreen() {
       client_message_id: clientMessageId,
       has_reply: Boolean(replyTarget?.id),
     });
-    lastNonEmptyInputSelection.current = null;
-    formattingTargetSelection.current = null;
     setText("");
     setReplyingTo(null);
     setMessages((current) => mergeMessengerMessages(current, [optimistic]));
@@ -3241,170 +3162,6 @@ export default function MessengerRoomScreen() {
     ],
   );
 
-  const handleComposerTextChange = useCallback((nextText: string) => {
-    lastNonEmptyInputSelection.current = null;
-    formattingTargetSelection.current = null;
-    setText(nextText);
-  }, []);
-
-  const handleComposerSelectionChange = useCallback(
-    (selection: MessengerTextSelection) => {
-      if (selection.end > selection.start) {
-        lastNonEmptyInputSelection.current = { ...selection };
-      }
-    },
-    [],
-  );
-
-  const captureFormattingSelection = useCallback(() => {
-    formattingTargetSelection.current = lastNonEmptyInputSelection.current
-      ? { ...lastNonEmptyInputSelection.current }
-      : null;
-  }, []);
-
-  const restoreComposerCursor = useCallback((position: number) => {
-    if (formatSelectionRestoreTimer.current) {
-      clearTimeout(formatSelectionRestoreTimer.current);
-    }
-    formatSelectionRestoreTimer.current = setTimeout(
-      () => {
-        inputRef.current?.focus();
-        requestAnimationFrame(() =>
-          inputRef.current?.setNativeProps({
-            selection: { start: position, end: position },
-          }),
-        );
-        formatSelectionRestoreTimer.current = null;
-      },
-      Platform.OS === "ios" ? 220 : 80,
-    );
-  }, []);
-
-  const closeFormattingMenu = useCallback(() => {
-    const target = formattingTargetSelection.current;
-    setFormatMenuVisible(false);
-    setFormatMenuPreview("");
-    formattingTargetSelection.current = null;
-    lastNonEmptyInputSelection.current = null;
-    if (target) restoreComposerCursor(target.end);
-  }, [restoreComposerCursor]);
-
-  const openFormattingMenu = useCallback(() => {
-    const target = formattingTargetSelection.current;
-    if (
-      !target ||
-      target.end <= target.start ||
-      target.start < 0 ||
-      target.end > text.length
-    ) {
-      formattingTargetSelection.current = null;
-      Alert.alert(
-        "Форматирование",
-        "Сначала выделите фрагмент текста, затем нажмите Aa.",
-      );
-      return;
-    }
-    setFormatMenuPreview(
-      stripMessengerTextFormatting(text.slice(target.start, target.end)),
-    );
-    inputRef.current?.blur();
-    Keyboard.dismiss();
-    if (formatMenuOpenTimer.current) {
-      clearTimeout(formatMenuOpenTimer.current);
-    }
-    formatMenuOpenTimer.current = setTimeout(
-      () => {
-        setFormatMenuVisible(true);
-        formatMenuOpenTimer.current = null;
-      },
-      Platform.OS === "ios" ? 100 : 0,
-    );
-  }, [text]);
-
-  const formatSelectedText = useCallback(
-    (format: MessengerTextFormat) => {
-      const target = formattingTargetSelection.current;
-      if (!target) {
-        closeFormattingMenu();
-        return;
-      }
-      const next = applyMessengerTextFormat(text, target, format);
-      if (next.text === text) {
-        closeFormattingMenu();
-        return;
-      }
-      const lengthDelta = next.text.length - text.length;
-      const cursorPosition =
-        next.selection.end + (lengthDelta > 0 ? lengthDelta / 2 : 0);
-      const action = MESSAGE_FORMAT_ACTIONS.find(
-        (candidate) => candidate.format === format,
-      );
-      setText(next.text);
-      setFormatMenuVisible(false);
-      setFormatMenuPreview("");
-      formattingTargetSelection.current = null;
-      lastNonEmptyInputSelection.current = null;
-      setFormattingFeedback(
-        `${action?.title || "Форматирование"}: ${lengthDelta > 0 ? "применено" : "снято"}`,
-      );
-      if (formattingFeedbackTimer.current) {
-        clearTimeout(formattingFeedbackTimer.current);
-      }
-      formattingFeedbackTimer.current = setTimeout(() => {
-        setFormattingFeedback(null);
-        formattingFeedbackTimer.current = null;
-      }, 1_500);
-      messengerLog("debug", "message.formatting.applied", {
-        format,
-        selection_length: target.end - target.start,
-        removed: lengthDelta < 0,
-      });
-      restoreComposerCursor(cursorPosition);
-    },
-    [closeFormattingMenu, restoreComposerCursor, text],
-  );
-
-  const pasteClipboardImage = useCallback(async () => {
-    if (
-      clipboardImageBusy ||
-      attachmentDraft ||
-      editingMessage ||
-      !canMedia
-    ) {
-      return;
-    }
-    setClipboardImageBusy(true);
-    setAttachmentPreparationLabel("Вставляем изображение…");
-    try {
-      const file = await pasteMessengerClipboardImage();
-      if (!file) {
-        setClipboardImageAvailable(false);
-        Alert.alert(
-          "Изображение не найдено",
-          "В буфере обмена больше нет изображения.",
-        );
-        return;
-      }
-      setAttachmentDraft({ source: "library", files: [file] });
-      void warmMessengerBufferedUploadFiles([file]);
-      setOffline(false);
-      setSyncError(null);
-    } catch (error) {
-      Alert.alert(
-        "Не удалось вставить изображение",
-        messengerErrorMessage(error, "Повторите попытку"),
-      );
-    } finally {
-      setAttachmentPreparationLabel(null);
-      setClipboardImageBusy(false);
-    }
-  }, [
-    attachmentDraft,
-    canMedia,
-    clipboardImageBusy,
-    editingMessage,
-  ]);
-
   const sendAttachmentDraft = useCallback(() => {
     if (!attachmentDraft || !roomId || !session || sending) return;
     const clientMessageId = Crypto.randomUUID();
@@ -3441,8 +3198,6 @@ export default function MessengerRoomScreen() {
           progress_percent: null,
         }
       : null;
-    lastNonEmptyInputSelection.current = null;
-    formattingTargetSelection.current = null;
     setText("");
     setReplyingTo(null);
     setAttachmentDraft(null);
@@ -3931,8 +3686,6 @@ export default function MessengerRoomScreen() {
       setEditingMessage(message);
       setReplyingTo(null);
       setAttachmentDraft(null);
-      lastNonEmptyInputSelection.current = null;
-      formattingTargetSelection.current = null;
       setText(message.text);
       setShowAllReactions(false);
       setActionMessage(null);
@@ -3946,8 +3699,6 @@ export default function MessengerRoomScreen() {
   );
 
   const cancelEditing = useCallback(() => {
-    lastNonEmptyInputSelection.current = null;
-    formattingTargetSelection.current = null;
     setEditingMessage(null);
     setText("");
   }, []);
@@ -4220,7 +3971,6 @@ export default function MessengerRoomScreen() {
     : Boolean(text.trim() || attachmentDraft);
   const composerBusy =
     sending ||
-    clipboardImageBusy ||
     Boolean(editingMessage && messageMutationBusyId === editingMessage.id);
 
   const openGroupSettings = () => {
@@ -4916,81 +4666,6 @@ export default function MessengerRoomScreen() {
         />
 
         <Modal
-          visible={formatMenuVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={closeFormattingMenu}
-        >
-          <Pressable style={styles.modalBackdrop} onPress={closeFormattingMenu}>
-            <Pressable
-              style={styles.formattingSheet}
-              onPress={(event) => event.stopPropagation()}
-            >
-              <View style={styles.formattingSheetHeader}>
-                <View style={styles.formattingSheetHeading}>
-                  <Text style={styles.formattingSheetTitle}>
-                    Форматирование
-                  </Text>
-                  <Text style={styles.formattingSheetHint}>
-                    Выберите оформление выделенного текста
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.attachmentClose}
-                  onPress={closeFormattingMenu}
-                  accessibilityLabel="Закрыть меню форматирования"
-                >
-                  <Icon name="close" size={23} color={colors.textSecondary} />
-                </TouchableOpacity>
-              </View>
-              <View style={styles.formattingSelectionPreview}>
-                <Text
-                  style={styles.formattingSelectionPreviewText}
-                  numberOfLines={3}
-                >
-                  {formatMenuPreview}
-                </Text>
-              </View>
-              <View style={styles.formattingActions}>
-                {MESSAGE_FORMAT_ACTIONS.map((action) => (
-                  <TouchableOpacity
-                    key={action.format}
-                    style={styles.formattingAction}
-                    onPress={() => formatSelectedText(action.format)}
-                    accessibilityRole="button"
-                    accessibilityLabel={action.title}
-                  >
-                    <View style={styles.formattingActionSample}>
-                      <Text
-                        style={[
-                          styles.formattingActionSampleText,
-                          action.format === "bold" && styles.formatBold,
-                          action.format === "italic" && styles.formatItalic,
-                          action.format === "underline" &&
-                            styles.formatUnderline,
-                          action.format === "strikethrough" &&
-                            styles.formatStrikethrough,
-                        ]}
-                      >
-                        Aa
-                      </Text>
-                    </View>
-                    <Text style={styles.formattingActionTitle}>
-                      {action.title}
-                    </Text>
-                    <Icon
-                      name="chevron-forward"
-                      size={19}
-                      color={colors.textSecondary}
-                    />
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </Pressable>
-          </Pressable>
-        </Modal>
-
-        <Modal
           visible={attachmentMenuVisible}
           transparent
           animationType="slide"
@@ -5067,14 +4742,6 @@ export default function MessengerRoomScreen() {
 
         {canWrite ? (
           <View style={styles.composerShell}>
-            {formattingFeedback && (
-              <View style={styles.formattingFeedback} pointerEvents="none">
-                <Icon name="checkmark-circle" size={17} color={colors.primary} />
-                <Text style={styles.formattingFeedbackText}>
-                  {formattingFeedback}
-                </Text>
-              </View>
-            )}
             {attachmentPreparationLabel && (
               <View style={styles.attachmentPreparation}>
                 <ActivityIndicator size="small" color={colors.primary} />
@@ -5194,33 +4861,6 @@ export default function MessengerRoomScreen() {
                 </TouchableOpacity>
               </View>
             )}
-            {clipboardImageAvailable &&
-              canMedia &&
-              !attachmentDraft &&
-              !editingMessage && (
-              <View style={styles.composerTools}>
-                <TouchableOpacity
-                  style={styles.clipboardImageButton}
-                  onPress={() => void pasteClipboardImage()}
-                  disabled={composerBusy}
-                  accessibilityRole="button"
-                  accessibilityLabel="Вставить изображение из буфера обмена"
-                >
-                  {clipboardImageBusy ? (
-                    <ActivityIndicator size="small" color={colors.primary} />
-                  ) : (
-                    <Icon
-                      name="clipboard-outline"
-                      size={18}
-                      color={colors.primary}
-                    />
-                  )}
-                  <Text style={styles.clipboardImageText}>
-                    Вставить изображение
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            )}
             <View style={styles.composer}>
               {canMedia && (
                 <TouchableOpacity
@@ -5236,29 +4876,11 @@ export default function MessengerRoomScreen() {
                   <Icon name="add" size={30} color={colors.primary} />
                 </TouchableOpacity>
               )}
-              <TouchableOpacity
-                style={[
-                  styles.formattingTrigger,
-                  (!text.trim() || composerBusy) &&
-                    styles.formattingTriggerDisabled,
-                ]}
-                onPressIn={captureFormattingSelection}
-                onPress={openFormattingMenu}
-                disabled={!text.trim() || composerBusy}
-                accessibilityRole="button"
-                accessibilityLabel="Форматировать текст"
-                accessibilityHint="Сначала выделите фрагмент сообщения"
-              >
-                <Text style={styles.formattingTriggerText}>Aa</Text>
-              </TouchableOpacity>
               <TextInput
                 ref={inputRef}
                 style={styles.input}
                 value={text}
-                onChangeText={handleComposerTextChange}
-                onSelectionChange={(event) =>
-                  handleComposerSelectionChange(event.nativeEvent.selection)
-                }
+                onChangeText={setText}
                 placeholder={
                   editingMessage
                     ? "Измените сообщение"
@@ -5277,9 +4899,6 @@ export default function MessengerRoomScreen() {
                       : 4000
                 }
                 onFocus={() => {
-                  void Clipboard.hasImageAsync()
-                    .then(setClipboardImageAvailable)
-                    .catch(() => setClipboardImageAvailable(false));
                   if (!nearLatest.current) return;
                   keyboardScrollPending.current = true;
                   scrollToLatest(true);
@@ -5689,56 +5308,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  formattingFeedback: {
-    minHeight: 32,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingTop: 6,
-  },
-  formattingFeedbackText: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  composerTools: {
-    minHeight: 39,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginHorizontal: 10,
-    marginTop: 7,
-    paddingHorizontal: 5,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: "#D5E1EC",
-    borderRadius: 12,
-    backgroundColor: "#F2F7FC",
-  },
-  formatBold: { fontWeight: "900" },
-  formatItalic: { fontStyle: "italic", fontWeight: "700" },
-  formatUnderline: { fontWeight: "700", textDecorationLine: "underline" },
-  formatStrikethrough: {
-    fontWeight: "700",
-    textDecorationLine: "line-through",
-  },
-  clipboardImageButton: {
-    minHeight: 30,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginLeft: "auto",
-    paddingHorizontal: 9,
-    borderRadius: 8,
-    backgroundColor: "#E4EFFC",
-  },
-  clipboardImageText: {
-    color: colors.primary,
-    fontSize: 11,
-    fontWeight: "800",
-  },
   composer: {
     flexDirection: "row",
     alignItems: "flex-end",
@@ -5803,23 +5372,6 @@ const styles = StyleSheet.create({
     borderRadius: 23,
     backgroundColor: "#EAF3FF",
   },
-  formattingTrigger: {
-    width: 40,
-    height: 46,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#BFD5EC",
-    borderRadius: 17,
-    backgroundColor: "#EAF3FF",
-  },
-  formattingTriggerDisabled: { opacity: 0.42 },
-  formattingTriggerText: {
-    color: colors.primary,
-    fontSize: 15,
-    fontWeight: "900",
-    letterSpacing: -0.4,
-  },
   sendButton: {
     width: 48,
     height: 48,
@@ -5840,70 +5392,6 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 20,
     backgroundColor: colors.surface,
-  },
-  formattingSheet: {
-    padding: 16,
-    paddingBottom: 14,
-    borderRadius: 22,
-    backgroundColor: colors.surface,
-  },
-  formattingSheetHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  formattingSheetHeading: { flex: 1, minWidth: 0 },
-  formattingSheetTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "900",
-  },
-  formattingSheetHint: {
-    marginTop: 3,
-    color: colors.textSecondary,
-    fontSize: 12,
-  },
-  formattingSelectionPreview: {
-    marginTop: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.accent,
-    borderRadius: 10,
-    backgroundColor: colors.backgroundAlt,
-  },
-  formattingSelectionPreviewText: {
-    color: colors.text,
-    fontSize: 14,
-    lineHeight: 19,
-  },
-  formattingActions: { marginTop: 8 },
-  formattingAction: {
-    minHeight: 54,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 11,
-    paddingHorizontal: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  formattingActionSample: {
-    width: 42,
-    height: 38,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 11,
-    backgroundColor: "#EAF3FF",
-  },
-  formattingActionSampleText: {
-    color: colors.primary,
-    fontSize: 15,
-  },
-  formattingActionTitle: {
-    flex: 1,
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: "800",
   },
   actionMessagePreview: {
     marginBottom: 12,
