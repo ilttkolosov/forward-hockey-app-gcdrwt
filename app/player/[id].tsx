@@ -11,6 +11,7 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
 import { formatPlayerBirthDate, getHandednessText, getCaptainBadgeText } from '../../utils/playerUtils';
 import { Image } from 'expo-image';
+import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
 
 const styles = StyleSheet.create({
   container: {
@@ -134,12 +135,14 @@ const styles = StyleSheet.create({
 export default function PlayerDetailsScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const playersRevision = useReferenceDataRevision('players');
   const [player, setPlayer] = useState<Player | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadPlayerData = useCallback(async () => {
+      void playersRevision;
       if (!id) return;
       // Уберите проверку isLoading — она не нужна, если вызов идёт только из useEffect
       try {
@@ -153,7 +156,7 @@ export default function PlayerDetailsScreen() {
         setIsLoading(false);
         setRefreshing(false);
       }
-    }, [id]); // ← только id
+    }, [id, playersRevision]);
 
   useEffect(() => {
     if (id) {

@@ -1096,6 +1096,39 @@ export const getGameDetailsCacheKeys = (): string[] => {
   return Object.keys(gameDetailsCache);
 };
 
+/**
+ * Rebuilds every in-memory projection that embeds team, league, season or
+ * venue fields. It is called only after the corresponding SQLite tables were
+ * atomically replaced in the background.
+ */
+export async function refreshGameReferenceCaches(): Promise<void> {
+  // Requests can be added while an earlier request is settling. Recheck
+  // until the old generation is fully drained; once the loop sees an empty
+  // set, the synchronous reset below runs before another JS task can start.
+  while (ongoingRequests.size > 0 || masterDataLoadPromise) {
+    const pendingRequests = [...ongoingRequests.values()];
+    if (masterDataLoadPromise) pendingRequests.push(masterDataLoadPromise);
+    await Promise.allSettled(pendingRequests);
+  }
+
+  leaguesLoaded = false;
+  seasonsLoaded = false;
+  venuesLoaded = false;
+  teamsLoaded = false;
+  cachedLeagues = {};
+  cachedSeasons = {};
+  cachedVenues = {};
+  cachedTeams = {};
+  gamesCache = {};
+  gameDetailsCache = {};
+  pastGamesForTeam74Cache = null;
+
+  await Promise.all([loadLeagues(), loadSeasons(), loadVenues(), loadTeams()]);
+  // Rebuild the visible master snapshot with the new reference records. The
+  // existing snapshot remains usable until this background request completes.
+  await getUpcomingGamesMasterData(true);
+}
+
 // Экспортируем функцию для получения арены по ID из кэша
 export const getVenueById = (id: string): ApiVenue | null => {
   return cachedVenues[id] || null;

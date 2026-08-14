@@ -28,6 +28,7 @@ import { useTrackScreenView } from '../hooks/useTrackScreenView';
 import { useNetworkStatus } from '../contexts/NetworkStatusContext';
 import { useMessengerAuth } from '../contexts/MessengerAuthContext';
 import { useMessengerUnreadCount } from '../services/messengerUnread';
+import { useReferenceDataRevision } from '../services/referenceDataUpdates';
 
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 
@@ -159,6 +160,13 @@ export default function HomeScreen() {
   const { isOffline } = useNetworkStatus();
   const { isAuthenticated: isMessengerAuthenticated } = useMessengerAuth();
   const messengerUnreadCount = useMessengerUnreadCount();
+  const referenceRevision = useReferenceDataRevision([
+    'teams',
+    'venues',
+    'leagues',
+    'seasons',
+    'players',
+  ]);
   const [currentGames, setCurrentGames] = useState<Game[]>([]);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
   const [upcomingCount, setUpcomingCount] = useState<number>(0);
@@ -180,6 +188,7 @@ export default function HomeScreen() {
   }, []);
 
   const loadData = useCallback(async (force = false, showLoading = true) => {
+    void referenceRevision;
     try {
       setError(null);
       if (!force && showLoading) setLoading(true);
@@ -217,7 +226,7 @@ export default function HomeScreen() {
       if (!force) setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [referenceRevision]);
 
   useEffect(() => {
     loadData();
@@ -287,20 +296,9 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Quick Navigation — НОВЫЙ ПОРЯДОК */}
+        {/* Quick Navigation */}
         <View style={quickNavStyles.container}>
-          {/* Турниры */}
-          <Link href="/tournaments" asChild>
-            <TouchableOpacity style={quickNavStyles.item}>
-              <Icon name="trophy" size={24} color={colors.primary} style={quickNavStyles.icon} />
-              <Text style={quickNavStyles.title}>Турниры</Text>
-              <Text style={quickNavStyles.subtitle}>
-                {getDeclension(tournamentsCount, ['текущий', 'текущих', 'текущих'])}
-              </Text>
-            </TouchableOpacity>
-          </Link>
-
-          {/* Расписание тренировок */}
+          {/* Тренировки */}
           <Link href="/trainings" asChild>
             <TouchableOpacity style={quickNavStyles.item}>
               <Icon name="calendar" size={24} color={colors.primary} style={quickNavStyles.icon} />
@@ -309,35 +307,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </Link>
 
-          {/* Мобильные игры */}
-          <Link href="/mobilegames" asChild>
-            <TouchableOpacity style={quickNavStyles.item}>
-              <Icon name="game-controller" size={24} color={colors.primary} style={quickNavStyles.icon} />
-              <Text style={quickNavStyles.title}>Мобильные игры</Text>
-            </TouchableOpacity>
-          </Link>
-
-          {/* Архив матчей */}
-          <Link href="/season" asChild>
-            <TouchableOpacity style={quickNavStyles.item}>
-              <Icon name="archive" size={24} color={colors.primary} style={quickNavStyles.icon} />
-              <Text style={quickNavStyles.title}>Архив матчей</Text>
-              <Text style={quickNavStyles.subtitle}>История матчей</Text>
-            </TouchableOpacity>
-          </Link>
-
-          {/* Игроки */}
-          <Link href="/players" asChild>
-            <TouchableOpacity style={quickNavStyles.item}>
-              <Icon name="people" size={24} color={colors.primary} style={quickNavStyles.icon} />
-              <Text style={quickNavStyles.title}>Игроки</Text>
-              <Text style={quickNavStyles.subtitle}>
-                {playersCount > 0 ? `${playersCount} игроков` : 'Состав команды'}
-              </Text>
-            </TouchableOpacity>
-          </Link>
-
-          {/* Командный мессенджер */}
+          {/* Общение */}
           <Link
             href={isMessengerAuthenticated ? "/messenger/rooms" : "/messenger/register"}
             asChild
@@ -354,6 +324,45 @@ export default function HomeScreen() {
               <Text style={quickNavStyles.title}>Общение</Text>
               <Text style={quickNavStyles.subtitle}>
                 {isMessengerAuthenticated ? 'Чаты команды' : 'Вход по приглашению'}
+              </Text>
+            </TouchableOpacity>
+          </Link>
+
+          {/* Турниры */}
+          <Link href="/tournaments" asChild>
+            <TouchableOpacity style={quickNavStyles.item}>
+              <Icon name="trophy" size={24} color={colors.primary} style={quickNavStyles.icon} />
+              <Text style={quickNavStyles.title}>Турниры</Text>
+              <Text style={quickNavStyles.subtitle}>
+                {getDeclension(tournamentsCount, ['текущий', 'текущих', 'текущих'])}
+              </Text>
+            </TouchableOpacity>
+          </Link>
+
+          {/* Архив матчей */}
+          <Link href="/season" asChild>
+            <TouchableOpacity style={quickNavStyles.item}>
+              <Icon name="archive" size={24} color={colors.primary} style={quickNavStyles.icon} />
+              <Text style={quickNavStyles.title}>Архив матчей</Text>
+              <Text style={quickNavStyles.subtitle}>История матчей</Text>
+            </TouchableOpacity>
+          </Link>
+
+          {/* Мобильные игры */}
+          <Link href="/mobilegames" asChild>
+            <TouchableOpacity style={quickNavStyles.item}>
+              <Icon name="game-controller" size={24} color={colors.primary} style={quickNavStyles.icon} />
+              <Text style={quickNavStyles.title}>Мобильные игры</Text>
+            </TouchableOpacity>
+          </Link>
+
+          {/* Игроки */}
+          <Link href="/players" asChild>
+            <TouchableOpacity style={quickNavStyles.item}>
+              <Icon name="people" size={24} color={colors.primary} style={quickNavStyles.icon} />
+              <Text style={quickNavStyles.title}>Игроки</Text>
+              <Text style={quickNavStyles.subtitle}>
+                {playersCount > 0 ? `${playersCount} игроков` : 'Состав команды'}
               </Text>
             </TouchableOpacity>
           </Link>

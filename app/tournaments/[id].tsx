@@ -21,6 +21,7 @@ import SegmentedControl from '@react-native-segmented-control/segmented-control'
 import GameCardCompact from '../../components/GameCardCompact';
 import { getGames, gameDetailsCache } from '../../data/gameData';
 import type { Game } from '../../types';
+import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
 import {
   fetchTournamentConfig,
   getCachedTournamentConfig,
@@ -171,6 +172,12 @@ const styles = StyleSheet.create({
 export default function TournamentDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const referenceRevision = useReferenceDataRevision([
+    'teams',
+    'venues',
+    'leagues',
+    'seasons',
+  ]);
 
   // Состояния
   const [tournamentInfo, setTournamentInfo] = useState<any | null>(null);
@@ -244,6 +251,7 @@ export default function TournamentDetailScreen() {
   }, [id]);
 
   const loadTournamentGames = useCallback(async (force = false) => {
+    void referenceRevision;
     if (!tournamentConfig?.league_id || !tournamentConfig?.season_id) {
       setTournamentGames([]);
       calculateFilterCounts([]);
@@ -271,7 +279,7 @@ export default function TournamentDetailScreen() {
     } finally {
       setGamesLoading(false);
     }
-  }, [tournamentConfig, calculateFilterCounts]);
+  }, [tournamentConfig, calculateFilterCounts, referenceRevision]);
 
   const loadTournamentTable = useCallback(async (force = false) => {
     if (!id) return;
@@ -340,6 +348,12 @@ export default function TournamentDetailScreen() {
       loadTournamentTable();
     }
   }, [activeTab, tournamentTable, tableLoading, loadTournamentTable]);
+
+  useEffect(() => {
+    if (referenceRevision === 0 || !tournamentConfig) return;
+    void loadTournamentGames(true);
+    setTournamentTable(null);
+  }, [loadTournamentGames, referenceRevision, tournamentConfig]);
 
   useEffect(() => {
     if (id) {

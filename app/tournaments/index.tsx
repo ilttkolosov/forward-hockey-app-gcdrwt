@@ -21,6 +21,7 @@ import { getGames } from '../../data/gameData';
 // Импортируем функции для загрузки конфигурации турнира
 import { fetchTournamentConfig, getCachedTournamentConfig } from '../../services/tournamentsApi';
 import { useTrackScreenView } from '../../hooks/useTrackScreenView';
+import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
 
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 const TOURNAMENTS_PAST_KEY = 'tournaments_past';
@@ -78,6 +79,7 @@ const addLogosToTable = async (table: TournamentTable[]): Promise<TournamentTabl
 };
 
 export default function TournamentsScreen() {
+  const teamsRevision = useReferenceDataRevision('teams');
   const [activeTab, setActiveTab] = useState<number>(0);
   const [tables, setTables] = useState<{
     current: { name: string; id: string; data: TournamentTableWithLogos }[];
@@ -110,6 +112,7 @@ export default function TournamentsScreen() {
   }, []);
 
   const loadTournamentsFromCache = useCallback(async () => {
+    void teamsRevision;
     try {
       const cachedTournamentsNow = await AsyncStorage.getItem(TOURNAMENTS_NOW_KEY);
       const cachedTournamentsPast = await AsyncStorage.getItem(TOURNAMENTS_PAST_KEY);
@@ -179,7 +182,7 @@ export default function TournamentsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [preloadCurrentTournamentGames]);
+  }, [preloadCurrentTournamentGames, teamsRevision]);
 
   useEffect(() => {
     loadTournamentsFromCache();

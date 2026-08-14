@@ -396,8 +396,8 @@ async fetchEvents(params: {
 
   // --- СТАРЫЕ МЕТОДЫ для команд (оставлены для получения логотипов/названий) ---
 
-  async fetchTeamList(): Promise<ApiTeam[]> {
-    if (this.teamListCache) {
+  async fetchTeamList(forceRefresh = false): Promise<ApiTeam[]> {
+    if (this.teamListCache && !forceRefresh) {
       console.log('API Service: Returning cached team list');
       return this.teamListCache;
     }

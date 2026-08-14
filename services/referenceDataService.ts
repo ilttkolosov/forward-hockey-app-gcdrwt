@@ -15,6 +15,8 @@ import type { StartupConfig } from './startupApi';
 import { apiService } from './apiService';
 import { saveTeamList, verifyAndRestoreTeamLogos } from './teamStorage';
 import { dataAvailability } from './dataAvailability';
+import { refreshGameReferenceCaches } from '../data/gameData';
+import { publishReferenceDataUpdate } from './referenceDataUpdates';
 
 const versionFor = (config: StartupConfig, entity: ReferenceEntity): number => {
   const nestedVersion = config.data_versions?.[entity];
@@ -40,11 +42,21 @@ export interface ReferenceDataLocalState {
   canStartUpcomingImmediately: boolean;
 }
 
+export interface ReferenceDataRefreshResult {
+  updatedEntities: StartupReferenceEntity[];
+  failedEntities: StartupReferenceEntity[];
+}
+
+export interface ReferenceDataInitializationResult {
+  teamsCount: number;
+  backgroundRefresh: () => Promise<ReferenceDataRefreshResult>;
+}
+
 export const initializeReferenceData = async (
   config: StartupConfig,
   canUseNetwork: boolean,
   onLocalStateReady?: (state: ReferenceDataLocalState) => void
-): Promise<{ teamsCount: number }> => {
+): Promise<ReferenceDataInitializationResult> => {
   let [teams, venues, leagues, seasons] = await Promise.all([
     loadTeamsFromDatabase(),
     loadVenuesFromDatabase(),
@@ -72,60 +84,118 @@ export const initializeReferenceData = async (
     entity => localVersions[entity] !== targetVersions[entity]
   );
   const missingEntities = REFERENCE_ENTITIES.filter(entity => itemCounts[entity] === 0);
-  const requiresNetworkRefresh = canUseNetwork
-    && (changedEntities.length > 0 || missingEntities.length > 0);
-
   onLocalStateReady?.({
     localVersions,
     targetVersions,
     itemCounts,
     changedEntities,
     missingEntities,
-    canStartUpcomingImmediately: missingEntities.length === 0 && !requiresNetworkRefresh,
+    // An older complete snapshot is enough to render the application. A
+    // version mismatch schedules a background replacement and never keeps the
+    // splash screen mounted.
+    canStartUpcomingImmediately: missingEntities.length === 0,
   });
 
-  const update = async <T>(
-    entity: StartupReferenceEntity,
-    current: T[],
-    fetcher: () => Promise<T[]>,
-    replace: (items: T[], version: number) => Promise<void>
-  ): Promise<T[]> => {
+  const refreshEntity = async (entity: StartupReferenceEntity): Promise<void> => {
     const targetVersion = versionFor(config, entity);
-    const shouldUpdate = canUseNetwork && targetVersion !== localVersions[entity];
-    if (!shouldUpdate && current.length > 0) {
-      console.log(`[Database] ${entity}: версия ${localVersions[entity]}, используется SQLite`);
-      return current;
+    if (entity === 'teams') {
+      const fresh = await apiService.fetchTeamList(true);
+      await replaceTeams(fresh, targetVersion);
+      teams = fresh;
+    } else if (entity === 'venues') {
+      const fresh = (await apiService.fetchVenues()).data;
+      await replaceVenues(fresh, targetVersion);
+      venues = fresh;
+    } else if (entity === 'leagues') {
+      const fresh = (await apiService.fetchLeagues()).data;
+      await replaceLeagues(fresh, targetVersion);
+      leagues = fresh;
+    } else {
+      const fresh = (await apiService.fetchSeasons()).data;
+      await replaceSeasons(fresh, targetVersion);
+      seasons = fresh;
     }
-    if (!canUseNetwork) {
-      if (current.length > 0) return current;
-      throw new Error(`В локальной базе отсутствует справочник ${entity}`);
-    }
-    try {
-      const fresh = await fetcher();
-      await replace(fresh, targetVersion);
-      console.log(`[Database] ${entity}: обновлено до версии ${targetVersion}`);
-      return fresh;
-    } catch (error) {
-      if (current.length === 0) throw error;
-      dataAvailability.markCachedDataUsed(`Не удалось обновить справочник ${entity}`);
-      console.warn(`[Database] ${entity}: используется локальная версия после ошибки`, error);
-      return current;
+    localVersions[entity] = targetVersion;
+    console.log(`[Database] ${entity}: обновлено до версии ${targetVersion}`);
+  };
+
+  const persistSnapshots = async (): Promise<void> => {
+    apiService.hydrateReferenceCaches({ teams, venues, leagues, seasons });
+    const writes = await Promise.allSettled([
+      saveTeamList(teams),
+      AsyncStorage.setItem('teams_version', String(localVersions.teams)),
+      AsyncStorage.setItem('api_venues_cache', JSON.stringify(venues)),
+      AsyncStorage.setItem('api_leagues_cache', JSON.stringify(leagues)),
+      AsyncStorage.setItem('api_seasons_cache', JSON.stringify(seasons)),
+    ]);
+    const failedWrites = writes.filter((result) => result.status === 'rejected');
+    if (failedWrites.length > 0) {
+      console.warn(
+        `[Справочники] ${failedWrites.length} вспомогательных снимков AsyncStorage не сохранено; SQLite остаётся основным источником`,
+      );
     }
   };
 
-  teams = await update('teams', teams, () => apiService.fetchTeamList(), replaceTeams);
-  venues = await update('venues', venues, async () => (await apiService.fetchVenues()).data, replaceVenues);
-  leagues = await update('leagues', leagues, async () => (await apiService.fetchLeagues()).data, replaceLeagues);
-  seasons = await update('seasons', seasons, async () => (await apiService.fetchSeasons()).data, replaceSeasons);
+  // A missing table is the only case that must be completed before rendering;
+  // otherwise the affected screens have no valid fallback at all.
+  for (const entity of missingEntities) {
+    if (!canUseNetwork) {
+      throw new Error(`В локальной базе отсутствует справочник ${entity}`);
+    }
+    await refreshEntity(entity);
+  }
 
-  apiService.hydrateReferenceCaches({ teams, venues, leagues, seasons });
-  await Promise.all([
-    saveTeamList(teams),
-    AsyncStorage.setItem('teams_version', String(versionFor(config, 'teams'))),
-    AsyncStorage.setItem('api_venues_cache', JSON.stringify(venues)),
-    AsyncStorage.setItem('api_leagues_cache', JSON.stringify(leagues)),
-    AsyncStorage.setItem('api_seasons_cache', JSON.stringify(seasons)),
-  ]);
-  await verifyAndRestoreTeamLogos(teams);
-  return { teamsCount: teams.length };
+  await persistSnapshots();
+  REFERENCE_ENTITIES.forEach((entity) => {
+    if (!changedEntities.includes(entity)) {
+      console.log(`[Database] ${entity}: версия ${localVersions[entity]}, используется SQLite`);
+    }
+  });
+
+  const backgroundRefresh = async (): Promise<ReferenceDataRefreshResult> => {
+    const updatedEntities: StartupReferenceEntity[] = [];
+    const failedEntities: StartupReferenceEntity[] = [];
+    const refreshCandidates = canUseNetwork
+      ? changedEntities.filter((entity) => !missingEntities.includes(entity))
+      : [];
+
+    for (const entity of refreshCandidates) {
+      try {
+        await refreshEntity(entity);
+        updatedEntities.push(entity);
+      } catch (error) {
+        failedEntities.push(entity);
+        dataAvailability.markCachedDataUsed(`Не удалось обновить справочник ${entity}`);
+        console.warn(`[Database] ${entity}: фоновое обновление отложено`, error);
+      }
+    }
+
+    if (updatedEntities.length) {
+      await persistSnapshots();
+    }
+    // Logo discovery and downloads are deliberately detached from startup.
+    // A failed optional logo must not suppress the revision event for the
+    // reference rows that were already committed successfully.
+    try {
+      await verifyAndRestoreTeamLogos(teams);
+    } catch (error) {
+      console.warn('[Справочники] Проверка логотипов отложена:', error);
+    }
+    if (updatedEntities.length) {
+      try {
+        await refreshGameReferenceCaches();
+      } catch (error) {
+        console.warn('[Справочники] Не удалось сразу перестроить кэш матчей:', error);
+      }
+      publishReferenceDataUpdate(
+        updatedEntities,
+        Object.fromEntries(
+          updatedEntities.map((entity) => [entity, localVersions[entity]]),
+        ),
+      );
+    }
+    return { updatedEntities, failedEntities };
+  };
+
+  return { teamsCount: teams.length, backgroundRefresh };
 };

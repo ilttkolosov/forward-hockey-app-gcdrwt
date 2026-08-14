@@ -52,6 +52,9 @@ import {
 } from "../../../features/messenger/feed";
 import MessageReceiptsModal from "../../../features/messenger/MessageReceiptsModal";
 import MessengerAttachmentView from "../../../features/messenger/MessengerAttachmentView";
+import MessengerLinkPreview, {
+  MessengerLinkifiedText,
+} from "../../../features/messenger/MessengerLinkPreview";
 import {
   DEFAULT_QUICK_REACTIONS,
   loadQuickMessengerReactions,
@@ -72,7 +75,6 @@ import {
   loadCachedMessengerRoom,
   loadMessengerLocalReadState,
   loadMessengerOutbox,
-  markMessengerOutboxFailure,
   markMessengerRoomHistoryComplete,
   removeMessengerOutboxItem,
   removeMessengerOutboxItems,
@@ -104,7 +106,6 @@ import {
   removeMessengerReaction,
   sendMessengerLocation,
   sendMessengerMedia,
-  sendMessengerText,
   setMessengerReaction,
   syncMessengerRoomMessages,
   updateMessengerMessage,
@@ -137,6 +138,11 @@ import { warmMessengerBufferedUploadFiles } from "../../../services/messengerMed
 import { saveMessengerMediaToDevice } from "../../../services/messengerMediaSave";
 import { colors } from "../../../styles/commonStyles";
 import { refreshMessengerUnreadFromCache } from "../../../services/messengerUnread";
+import {
+  flushMessengerOutbox,
+  subscribeMessengerOutbox,
+} from "../../../services/messengerOutbox";
+import { firstMessengerMessageUrl } from "../../../services/messengerLinkPreview";
 
 type MessengerAttachmentKind = "camera" | "library" | "file" | "location";
 type InitialAnchorMode = "read_anchor" | "unread_fallback" | "latest";
@@ -794,6 +800,9 @@ const MessengerMessageListItem = React.memo(
           : "");
     const emojiOnly =
       !item.deleted_at && item.kind === "text" && isEmojiOnly(body);
+    const linkPreviewUrl = item.deleted_at
+      ? null
+      : firstMessengerMessageUrl(body);
 
     if (item.kind === "system") {
       return (
@@ -932,15 +941,21 @@ const MessengerMessageListItem = React.memo(
                   />
                 ) : null}
                 {body ? (
-                  <Text
+                  <MessengerLinkifiedText
+                    text={body}
                     style={[
                       styles.messageText,
                       emojiOnly && styles.emojiOnlyText,
                       item.deleted_at && styles.deletedMessageText,
                     ]}
-                  >
-                    {body}
-                  </Text>
+                  />
+                ) : null}
+                {linkPreviewUrl ? (
+                  <MessengerLinkPreview
+                    url={linkPreviewUrl}
+                    enabled={roomScreenActive && viewable}
+                    mine={mine}
+                  />
                 ) : null}
                 <View style={styles.messageFooter}>
                   {!item.deleted_at && item.reactions.length > 0 && (
@@ -1128,9 +1143,6 @@ export default function MessengerRoomScreen() {
   const viewableServerMessageIds = useRef<string[]>([]);
   const editingMessageRef = useRef<MessengerMessage | null>(null);
   const refreshRunning = useRef(false);
-  const flushRunning = useRef(false);
-  const flushRequested = useRef(false);
-  const flushOutboxRef = useRef<() => Promise<void>>(async () => undefined);
   const olderMessagesLoading = useRef(false);
   const newerCachedMessagesLoading = useRef(false);
   const remoteHasMoreNewerMessages = useRef(true);
@@ -1450,113 +1462,47 @@ export default function MessengerRoomScreen() {
 
   const flushOutbox = useCallback(async () => {
     if (!isAuthenticated) return;
-    if (flushRunning.current) {
-      flushRequested.current = true;
-      return;
-    }
-    flushRunning.current = true;
-    let firstError: unknown = null;
-    try {
-      const attempted = new Set<string>();
-      let stopForConnection = false;
-      while (!stopForConnection) {
-        const pending = (await loadMessengerOutbox(db, roomId)).filter(
-          (item) => !attempted.has(item.client_message_id),
-        );
-        if (!pending.length) break;
-        messengerLog("debug", "outbox.flush.started", {
-          room_id: roomId,
-          pending_count: pending.length,
-        });
-        for (const item of pending) {
-          attempted.add(item.client_message_id);
-          try {
-            messengerLog("debug", "outbox.item.sending", {
-              room_id: item.room_id,
-              client_message_id: item.client_message_id,
-              attempts: item.attempts,
-              has_reply: Boolean(item.reply_to_message_id),
-            });
-            setMessages((current) =>
-              current.map((message) =>
-                message.client_message_id === item.client_message_id
-                  ? { ...message, send_error: null }
-                  : message,
-              ),
-            );
-            const result = await sendMessengerText(
-              item.room_id,
-              item.client_message_id,
-              item.text,
-              item.reply_to_message_id,
-            );
-            setMessages((current) =>
-              mergeMessengerMessages(
-                current,
-                [result.message],
-                reactionMutationIds.current,
-              ),
-            );
-            try {
-              await cacheMessengerMessages(db, [result.message]);
-            } catch (cacheError) {
-              logMessageCacheFailure(result.message, cacheError);
-            }
-            await removeMessengerOutboxItem(db, item.client_message_id);
-            messengerLog("info", "outbox.item.sent", {
-              room_id: item.room_id,
-              client_message_id: item.client_message_id,
-              message_id: result.message.id,
-              sequence: result.message.sequence,
-              created_at: result.message.created_at,
-              created: result.created,
-            });
-          } catch (error) {
-            await markMessengerOutboxFailure(db, item.client_message_id, error);
-            firstError ??= error;
-            const message = messengerErrorMessage(
-              error,
-              "Не удалось отправить сообщение",
-            );
-            setMessages((current) =>
-              current.map((currentMessage) =>
-                currentMessage.client_message_id === item.client_message_id
-                  ? { ...currentMessage, pending: true, send_error: message }
-                  : currentMessage,
-              ),
-            );
-            messengerLog("warn", "outbox.item.failed", {
-              room_id: item.room_id,
-              client_message_id: item.client_message_id,
-              category: isMessengerConnectionError(error)
-                ? "connection"
-                : "server",
-              message,
-            });
-            if (isMessengerConnectionError(error)) {
-              stopForConnection = true;
-              break;
-            }
-          }
-        }
-      }
-      messengerLog(firstError ? "warn" : "debug", "outbox.flush.finished", {
-        room_id: roomId,
-        failed: Boolean(firstError),
-      });
-      if (firstError) throw firstError;
-    } finally {
-      flushRunning.current = false;
-      if (flushRequested.current && !firstError) {
-        flushRequested.current = false;
-        setTimeout(() => void flushOutboxRef.current(), 0);
-      }
-    }
-  }, [db, isAuthenticated, roomId]);
+    await flushMessengerOutbox(db);
+  }, [db, isAuthenticated]);
 
-  useEffect(() => {
-    flushOutboxRef.current = flushOutbox;
-  }, [flushOutbox]);
+  useEffect(
+    () =>
+      subscribeMessengerOutbox((event) => {
+        if (event.item.room_id !== roomId) return;
+        if (event.type === "sending") {
+          setMessages((current) =>
+            current.map((message) =>
+              message.client_message_id === event.item.client_message_id
+                ? { ...message, send_error: null }
+                : message,
+            ),
+          );
+          return;
+        }
+        if (event.type === "sent") {
+          setMessages((current) =>
+            mergeMessengerMessages(
+              current,
+              [event.message],
+              reactionMutationIds.current,
+            ),
+          );
+          setOffline(false);
+          setSyncError(null);
+          return;
+        }
+        setMessages((current) =>
+          current.map((message) =>
+            message.client_message_id === event.item.client_message_id
+              ? { ...message, pending: true, send_error: event.message }
+              : message,
+          ),
+        );
+        setOffline(isMessengerConnectionError(event.error));
+        setSyncError(event.message);
+      }),
+    [roomId],
+  );
 
   const clearInitialUnreadIfCovered = useCallback(
     (sequence: string) => {
@@ -2834,40 +2780,39 @@ export default function MessengerRoomScreen() {
     setMessages((current) => mergeMessengerMessages(current, [optimistic]));
     nearLatest.current = true;
     scrollToLatest(true);
-    // Let React commit and paint the new bubble before touching SQLite or the
-    // network. Delivery metadata then changes independently on the same item.
-    requestAnimationFrame(() => {
-      void (async () => {
-        try {
-          await enqueueMessengerText(db, outboxItem);
-          messengerLog("info", "message.queued", {
-            room_id: roomId,
-            client_message_id: clientMessageId,
-            has_reply: Boolean(replyTarget?.id),
-            elapsed_since_tap_ms: Date.now() - tappedAt,
-          });
-          void flushOutbox().catch((error) => {
-            setOffline(isMessengerConnectionError(error));
-            setSyncError(
-              messengerErrorMessage(error, "Не удалось отправить сообщение"),
-            );
-          });
-        } catch (error) {
-          const message = messengerErrorMessage(
-            error,
-            "Не удалось сохранить сообщение локально",
+    // Persist immediately on tap. The process is owned by the application
+    // bridge, so leaving this room cannot cancel either the queue write or the
+    // following request.
+    void (async () => {
+      try {
+        await enqueueMessengerText(db, outboxItem);
+        messengerLog("info", "message.queued", {
+          room_id: roomId,
+          client_message_id: clientMessageId,
+          has_reply: Boolean(replyTarget?.id),
+          elapsed_since_tap_ms: Date.now() - tappedAt,
+        });
+        void flushOutbox().catch((error) => {
+          setOffline(isMessengerConnectionError(error));
+          setSyncError(
+            messengerErrorMessage(error, "Не удалось отправить сообщение"),
           );
-          setMessages((current) =>
-            current.map((item) =>
-              item.client_message_id === clientMessageId
-                ? { ...item, send_error: message }
-                : item,
-            ),
-          );
-          setSyncError(message);
-        }
-      })();
-    });
+        });
+      } catch (error) {
+        const message = messengerErrorMessage(
+          error,
+          "Не удалось сохранить сообщение локально",
+        );
+        setMessages((current) =>
+          current.map((item) =>
+            item.client_message_id === clientMessageId
+              ? { ...item, send_error: message }
+              : item,
+          ),
+        );
+        setSyncError(message);
+      }
+    })();
   };
 
   const storeSentMessage = useCallback(
@@ -3258,48 +3203,49 @@ export default function MessengerRoomScreen() {
     setMessages((current) => mergeMessengerMessages(current, [optimistic]));
     nearLatest.current = true;
     scrollToLatest(true);
-    requestAnimationFrame(() => {
-      void runManagedMessengerMediaUpload({
-        roomId,
-        clientMessageId,
-        run: (signal) => sendUpload(request, signal),
+    // Start the globally owned upload in the same turn as the send tap. It
+    // must not depend on another animation frame that may never run after an
+    // immediate navigation, app switch or screen lock.
+    void runManagedMessengerMediaUpload({
+      roomId,
+      clientMessageId,
+      run: (signal) => sendUpload(request, signal),
+    })
+      .then(() => {
+        setOffline(false);
+        setSyncError(null);
       })
-        .then(() => {
-          setOffline(false);
-          setSyncError(null);
-        })
-        .catch((error) => {
-          if (isMessengerUploadCancelledError(error)) return;
-          const message = messengerErrorMessage(
-            error,
-            "Не удалось отправить вложение",
-          );
-          setOffline(isMessengerConnectionError(error));
-          setSyncError(message);
-          updatePendingAttachment(clientMessageId, (pendingMessage) => ({
-            ...pendingMessage,
-            send_error: message,
-            pending_attachment: pendingMessage.pending_attachment
-              ? {
-                  ...pendingMessage.pending_attachment,
-                  stage: "failed",
-                  label: "Вложения не отправлены",
-                  progress_percent: null,
-                }
-              : null,
-          }));
-          messengerLog("warn", "media.upload.failed", {
-            room_id: roomId,
-            client_message_id: clientMessageId,
-            media_count: request.files.length,
-            message,
-          });
-          Alert.alert("Ошибка вложения", message);
-        })
-        .finally(() => {
-          setSending(false);
+      .catch((error) => {
+        if (isMessengerUploadCancelledError(error)) return;
+        const message = messengerErrorMessage(
+          error,
+          "Не удалось отправить вложение",
+        );
+        setOffline(isMessengerConnectionError(error));
+        setSyncError(message);
+        updatePendingAttachment(clientMessageId, (pendingMessage) => ({
+          ...pendingMessage,
+          send_error: message,
+          pending_attachment: pendingMessage.pending_attachment
+            ? {
+                ...pendingMessage.pending_attachment,
+                stage: "failed",
+                label: "Вложения не отправлены",
+                progress_percent: null,
+              }
+            : null,
+        }));
+        messengerLog("warn", "media.upload.failed", {
+          room_id: roomId,
+          client_message_id: clientMessageId,
+          media_count: request.files.length,
+          message,
         });
-    });
+        Alert.alert("Ошибка вложения", message);
+      })
+      .finally(() => {
+        setSending(false);
+      });
   }, [
     attachmentDraft,
     replyingTo,

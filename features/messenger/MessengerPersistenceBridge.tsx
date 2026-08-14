@@ -2,6 +2,7 @@ import { useSQLiteContext } from "expo-sqlite";
 import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
 import * as Notifications from "expo-notifications";
+import NetInfo from "@react-native-community/netinfo";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import { replaceMessengerAliases } from "./aliases";
 import { compareMessengerSequence } from "./feed";
@@ -11,6 +12,7 @@ import {
   cacheUpdatedMessengerMessage,
   cacheMessengerRooms,
   loadCachedMessengerRooms,
+  removeMessengerOutboxItem,
 } from "./repository";
 import { warmMessengerRoomWindows } from "./cacheWarmup";
 import { flushMessengerReadReceipts } from "../../services/messengerReadSync";
@@ -39,6 +41,7 @@ import {
   setMessengerUnreadCount,
   syncMessengerUnreadFromRooms,
 } from "../../services/messengerUnread";
+import { requestMessengerOutboxFlush } from "../../services/messengerOutbox";
 
 const BACKGROUND_ROOMS_SYNC_DEBOUNCE_MS = 250;
 const BACKGROUND_ROOMS_SYNC_MIN_INTERVAL_MS = 10_000;
@@ -178,6 +181,7 @@ export default function MessengerPersistenceBridge() {
         }),
       );
     void warmMessengerMediaFileReader();
+    requestMessengerOutboxFlush(db);
     scheduleRoomsSynchronization();
     if (remotePushNotificationsSupported) {
       void syncMessengerPushRegistration().catch((error) =>
@@ -194,6 +198,12 @@ export default function MessengerPersistenceBridge() {
       );
       void cacheIncomingMessengerMessage(db, message, userId)
         .then(() => {
+          if (message.author.id === userId) {
+            void removeMessengerOutboxItem(
+              db,
+              message.client_message_id,
+            ).catch(() => undefined);
+          }
           void refreshMessengerUnreadFromCache(db);
           if (message.author.id !== userId) {
             void markMessengerDelivered(message.room_id, message.sequence)
@@ -276,6 +286,7 @@ export default function MessengerPersistenceBridge() {
         event.type === "sync.required"
       ) {
         void flushMessengerReadReceipts(db);
+        requestMessengerOutboxFlush(db);
         scheduleRoomsSynchronization();
       } else if (event.type === "room.updated") {
         scheduleRoomsSynchronization(true);
@@ -284,6 +295,10 @@ export default function MessengerPersistenceBridge() {
     const appStateSubscription = AppState.addEventListener(
       "change",
       (state) => {
+        // Start or keep the durable send pipeline alive before the OS gets a
+        // chance to suspend JavaScript. A native request already in flight is
+        // not tied to the room component.
+        requestMessengerOutboxFlush(db);
         if (state === "active") {
           void warmMessengerMediaFileReader();
           void flushMessengerReadReceipts(db);
@@ -294,6 +309,14 @@ export default function MessengerPersistenceBridge() {
         }
       },
     );
+    const networkSubscription = NetInfo.addEventListener((network) => {
+      if (
+        network.isConnected !== false &&
+        network.isInternetReachable !== false
+      ) {
+        requestMessengerOutboxFlush(db);
+      }
+    });
     const tokenSubscription = remotePushNotificationsSupported
       ? Notifications.addPushTokenListener((token) => {
           void syncMessengerPushTokenRotation(token).catch((error) =>
@@ -308,6 +331,7 @@ export default function MessengerPersistenceBridge() {
       if (roomsSyncTimer) clearTimeout(roomsSyncTimer);
       unsubscribeRealtime();
       appStateSubscription.remove();
+      networkSubscription();
       tokenSubscription?.remove();
     };
   }, [db, isAuthenticated, userId]);

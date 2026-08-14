@@ -22,6 +22,7 @@ import { getPositionTabName, getHandednessText } from '../utils/playerUtils';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { playerDownloadService } from '../services/playerDataService'; // ← добавили
+import { useReferenceDataRevision } from '../services/referenceDataUpdates';
 
 const styles = StyleSheet.create({
   container: {
@@ -236,6 +237,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onPress }) => {
 
 export default function PlayersScreen() {
   const router = useRouter();
+  const playersRevision = useReferenceDataRevision('players');
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -289,7 +291,7 @@ export default function PlayersScreen() {
       isActive = false;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [retryKey]);
+  }, [playersRevision, retryKey]);
 
   const handlePlayerPress = (player: Player) => {
     if (showSearchModal) {

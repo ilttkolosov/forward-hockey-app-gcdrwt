@@ -28,6 +28,7 @@ import ProtocolEventCard from '../../components/ProtocolEventCard';
 import { getPlayerById } from '../../data/playerData';
 import { trackScreenView } from '../../services/analyticsService';
 import { useTrackScreenView } from '../../hooks/useTrackScreenView';
+import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
 
 // Определение типа видео
 const isYouTubeUrl = (url: string): boolean => {
@@ -591,6 +592,13 @@ const renderPlayerStatsTable = (
 export default function GameDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const referenceRevision = useReferenceDataRevision([
+    'teams',
+    'venues',
+    'leagues',
+    'seasons',
+    'players',
+  ]);
   const [gameDetails, setGameDetails] = useState<Game | null>(null);
   const [protocolPlayers, setProtocolPlayers] = useState<Record<string, any>>({});
   const [statsPlayers, setStatsPlayers] = useState<Record<string, any>>({});
@@ -693,6 +701,7 @@ export default function GameDetailsScreen() {
 
   // === ЗАГРУЗКА ДАННЫХ ИГРЫ ===
   const loadGameData = useCallback(async (forceRefresh = false) => {
+    void referenceRevision;
     try {
       console.log('Loading game data for ID:', id, { forceRefresh });
       setLoading(true);
@@ -756,10 +765,11 @@ export default function GameDetailsScreen() {
       setLoading(false);
       if (forceRefresh) setRefreshing(false);
     }
-  }, [id]);
+  }, [id, referenceRevision]);
 
   // === ЗАГРУЗКА F2F ===
   const loadF2fGames = useCallback(async (currentGame: Game) => {
+    void referenceRevision;
     if (f2fLoadedRef.current) return;
     f2fLoadedRef.current = true;
     const homeTeamId = currentGame.homeTeamId;
@@ -800,7 +810,12 @@ export default function GameDetailsScreen() {
     } finally {
       setF2fLoading(false);
     }
-  }, [id]);
+  }, [id, referenceRevision]);
+
+  useEffect(() => {
+    f2fLoadedRef.current = false;
+    setF2fGames([]);
+  }, [referenceRevision]);
 
   useEffect(() => {
     if (id) {

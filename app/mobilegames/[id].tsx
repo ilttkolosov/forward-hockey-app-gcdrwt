@@ -21,6 +21,7 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
 import { useTrackScreenView } from '../../hooks/useTrackScreenView';
+import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
 
 const { width } = Dimensions.get('window');
 
@@ -40,6 +41,7 @@ export default function MemoryGameScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const playersRevision = useReferenceDataRevision('players');
 
   const [players, setPlayers] = useState<Player[]>([]);
   const [cards, setCards] = useState<{
@@ -308,6 +310,15 @@ export default function MemoryGameScreen() {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [id, initLevel, loadRecords, router]);
+
+  useEffect(() => {
+    if (playersRevision === 0) return;
+    void getPlayers()
+      .then(setPlayers)
+      .catch((error) =>
+        console.warn('Не удалось обновить игроков в активной игре:', error),
+      );
+  }, [playersRevision]);
 
   // Расчёт размера карточки
   const calculateCardSize = () => {

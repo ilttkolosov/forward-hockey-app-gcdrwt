@@ -19,6 +19,7 @@ import ErrorMessage from '../../components/ErrorMessage';
 import Icon from '../../components/Icon';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import GameCard from '../../components/GameCard'; // ← ЕДИНЫЙ КОМПОНЕНТ
+import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
 
 // Русские месяцы для поиска
 const RUSSIAN_MONTHS = [
@@ -28,6 +29,12 @@ const RUSSIAN_MONTHS = [
 
 export default function SeasonGamesScreen() {
   const router = useRouter();
+  const referenceRevision = useReferenceDataRevision([
+    'teams',
+    'venues',
+    'leagues',
+    'seasons',
+  ]);
   const { id, date_from, date_to, seasonName } = useLocalSearchParams<{
     id: string;
     date_from: string;
@@ -44,6 +51,7 @@ export default function SeasonGamesScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const loadData = useCallback(async (bypassCache = false) => {
+    void referenceRevision;
     if (!date_from || !date_to) {
       setError('Не указан диапазон дат');
       setLoading(false);
@@ -119,7 +127,7 @@ export default function SeasonGamesScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [date_from, date_to, id]);
+  }, [date_from, date_to, id, referenceRevision]);
 
   useEffect(() => {
     loadData();

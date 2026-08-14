@@ -39,6 +39,7 @@ import { MessengerAuthProvider } from '../contexts/MessengerAuthContext';
 import MessengerPersistenceBridge from '../features/messenger/MessengerPersistenceBridge';
 import { SQLiteProvider } from 'expo-sqlite';
 import { DATABASE_ASSET_SOURCE, DATABASE_NAME, migrateDatabase } from '../database';
+import { getReferenceVersion } from '../database/repository';
 import {
   getConfiguredReferenceVersion,
   initializeReferenceData,
@@ -54,6 +55,7 @@ import {
 } from '../services/messengerPush';
 import { remotePushNotificationsSupported } from '../services/runtimeEnvironment';
 import { getMessengerActiveRoomId } from '../services/messengerRealtime';
+import { publishReferenceDataUpdate } from '../services/referenceDataUpdates';
 global.Buffer = Buffer;
 
 Notifications.setNotificationHandler({
@@ -362,6 +364,7 @@ function RootLayoutContent() {
     setInitializationMessage('Запуск приложения...');
     setDynamicStatus('Подготовка данных...');
     setProgress(0);
+    const afterStartupTasks: (() => void)[] = [];
 
     // === Отслеживаем загрузку предстоящих игр ===
     let upcomingGamesPromise: Promise<void> | null = null;
@@ -483,7 +486,7 @@ function RootLayoutContent() {
       setInitializationMessage('Подготовка локальных справочников...');
       setProgress(15);
       const referencesStartedAt = Date.now();
-      const { teamsCount } = await initializeReferenceData(
+      const { teamsCount, backgroundRefresh: referenceRefresh } = await initializeReferenceData(
         config,
         canUseNetwork,
         state => {
@@ -499,7 +502,7 @@ function RootLayoutContent() {
             );
           }
           if (state.canStartUpcomingImmediately) {
-            startUpcomingGames('локальные справочники полны и их версии актуальны');
+            startUpcomingGames('полный локальный снимок доступен');
           } else {
             initializationLog('Предстоящие игры: запуск отложен до подготовки справочников');
           }
@@ -508,10 +511,34 @@ function RootLayoutContent() {
       initializationLog(
         `Справочники готовы за ${elapsedMilliseconds(referencesStartedAt)} мс; команд=${teamsCount}`
       );
+      afterStartupTasks.push(() => {
+        void referenceRefresh()
+          .then(result => {
+            if (result.updatedEntities.length > 0) {
+              initializationLog(
+                `Фоновое обновление справочников завершено: ${result.updatedEntities
+                  .map(entity => REFERENCE_LABELS[entity])
+                  .join(', ')}`
+              );
+            }
+            if (result.failedEntities.length > 0) {
+              console.warn(
+                `[Инициализация] Фоновое обновление отложено: ${result.failedEntities
+                  .map(entity => REFERENCE_LABELS[entity])
+                  .join(', ')}`
+              );
+            }
+          })
+          .catch(error => {
+            console.warn('[Инициализация] Фоновая подготовка справочников не завершена:', error);
+          });
+      });
       setDynamicStatus(`Загружено команд ${teamsCount}`);
       setProgress(30);
 
-      // Если справочники обновлялись, запрос запускается только теперь, с актуальными данными.
+      // На первой установке запрос ждёт обязательного локального наполнения.
+      // При наличии старого полного снимка он уже запущен параллельно, а
+      // новые версии справочников будут применены после открытия приложения.
       if (!upcomingGamesPromise) {
         startUpcomingGames('справочники подготовлены');
       } else {
@@ -525,22 +552,56 @@ function RootLayoutContent() {
       const playersVersion = getConfiguredReferenceVersion(config, 'players');
       initializationLog(`Игроки: подготовка версии ${playersVersion}`);
       let playersList: Player[] = [];
+      let localPlayersVersion = await getReferenceVersion('players');
       try {
         playersList = await playerDownloadService.initializeFromDatabase(
           playersVersion,
-          canUseNetwork,
+          false,
           (stage, message) => setDynamicStatus(message || stage)
         );
-        await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(playersVersion));
       } catch (error) {
-        playersList = await playerDownloadService.getPlayersFromStorage();
-        if (playersList.length === 0) throw error;
-        dataAvailability.markCachedDataUsed('Не удалось обновить данные игроков');
-        console.warn('[Инициализация] Игроки: использован предыдущий локальный набор:', error);
+        if (canUseNetwork) {
+          // A first installation with no local roster has no usable fallback,
+          // so this one exceptional case is prepared before rendering.
+          playersList = await playerDownloadService.initializeFromDatabase(
+            playersVersion,
+            true,
+            (stage, message) => setDynamicStatus(message || stage)
+          );
+          localPlayersVersion = playersVersion;
+        } else {
+          playersList = await playerDownloadService.getPlayersFromStorage();
+          if (playersList.length === 0) throw error;
+          dataAvailability.markCachedDataUsed('Не удалось обновить данные игроков');
+          console.warn('[Инициализация] Игроки: использован предыдущий локальный набор:', error);
+        }
       }
+      localPlayersVersion = await getReferenceVersion('players') || localPlayersVersion;
+      await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(localPlayersVersion));
       initializationLog(
         `Игроки: подготовлено ${playersList.length} записей за ${elapsedMilliseconds(playersStartedAt)} мс`
       );
+      if (canUseNetwork && localPlayersVersion !== playersVersion) {
+        const playerRefreshStartedAt = Date.now();
+        initializationLog(
+          `Игроки: версия ${localPlayersVersion}/${playersVersion}, обновление запущено в фоне`
+        );
+        afterStartupTasks.push(() => {
+          void playerDownloadService.refreshPlayersData(playersVersion)
+            .then(async freshPlayers => {
+              await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(playersVersion));
+              publishReferenceDataUpdate(['players'], { players: playersVersion });
+              initializationLog(
+                `Игроки: фоновое обновление завершено; записей=${freshPlayers.length}, `
+                + `${elapsedMilliseconds(playerRefreshStartedAt)} мс`
+              );
+            })
+            .catch(error => {
+              dataAvailability.markCachedDataUsed('Не удалось обновить данные игроков');
+              console.warn('[Инициализация] Игроки: фоновое обновление отложено:', error);
+            });
+        });
+      }
       setDynamicStatus(`Загружено игроков ${playersList.length}`);
       setProgress(70);
 
@@ -615,7 +676,10 @@ function RootLayoutContent() {
       setInitializationMessage('Готово!');
       setProgress(100);
       initializationLog(`Приложение готово за ${elapsedMilliseconds(initializationStartedAt)} мс`);
-      setTimeout(() => setIsInitializing(false), 200);
+      setTimeout(() => {
+        setIsInitializing(false);
+        afterStartupTasks.forEach(task => task());
+      }, 200);
 
     } catch (error) {
       console.error(

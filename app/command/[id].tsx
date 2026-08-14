@@ -30,6 +30,7 @@ import Icon from '../../components/Icon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { trackScreenView } from '../../services/analyticsService';
 import { useTrackScreenView } from '../../hooks/useTrackScreenView';
+import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
 
 const styles = StyleSheet.create({
   container: {
@@ -218,6 +219,12 @@ scrollView: {
 export default function TeamDetailScreen() {
   const router = useRouter();
   const { id: teamId, tournamentId } = useLocalSearchParams<{ id: string; tournamentId: string }>();
+  const referenceRevision = useReferenceDataRevision([
+    'teams',
+    'venues',
+    'leagues',
+    'seasons',
+  ]);
   const [teamName, setTeamName] = useState<string>('');
   const [teamLogoUri, setTeamLogoUri] = useState<string | null>(null);
   const [tournamentName, setTournamentName] = useState<string>('');
@@ -229,6 +236,7 @@ export default function TeamDetailScreen() {
   const [activeTab, setActiveTab] = useState(0); // 0 = past, 1 = upcoming
 
   const loadTeamData = useCallback(async () => {
+    void referenceRevision;
     if (!teamId || !tournamentId) {
       setError('Недостаточно параметров: teamId или tournamentId');
       setLoading(false);
@@ -290,7 +298,7 @@ export default function TeamDetailScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [teamId, tournamentId]);
+  }, [referenceRevision, teamId, tournamentId]);
 
   useEffect(() => {
     loadTeamData();
