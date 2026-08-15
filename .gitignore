@@ -29,8 +29,8 @@ yarn-error.*
 
 .natively/
 
-android/
-ios/
+/android/
+/ios/
 
 netlify.toml
 .netlify/

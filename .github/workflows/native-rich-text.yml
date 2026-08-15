@@ -13,6 +13,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Verify EAS archive includes native module sources
+        run: |
+          if git check-ignore --no-index -q modules/forward-rich-text-input/android/build.gradle; then
+            echo "Android module sources are excluded by ignore rules"
+            exit 1
+          fi
+          if git check-ignore --no-index -q modules/forward-rich-text-input/ios/ForwardRichTextInputView.swift; then
+            echo "iOS module sources are excluded by ignore rules"
+            exit 1
+          fi
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:

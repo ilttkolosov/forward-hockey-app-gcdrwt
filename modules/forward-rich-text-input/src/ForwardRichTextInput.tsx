@@ -1,5 +1,8 @@
 import Constants, { ExecutionEnvironment } from "expo-constants";
-import { requireNativeViewManager } from "expo-modules-core";
+import {
+  requireNativeViewManager,
+  requireOptionalNativeModule,
+} from "expo-modules-core";
 import React, {
   forwardRef,
   useCallback,
@@ -87,6 +90,16 @@ function getNativeComponent(): NativeComponent | null {
     cachedNativeComponent = null;
     return cachedNativeComponent;
   }
+
+  // requireNativeViewManager can still create a Fabric component placeholder
+  // when the JS bundle is newer than the installed native binary. Rendering
+  // that placeholder produces a visible "Unimplemented component" error, so
+  // verify that the native module exists before requiring its view manager.
+  if (!requireOptionalNativeModule("ForwardRichTextInput")) {
+    cachedNativeComponent = null;
+    return cachedNativeComponent;
+  }
+
   try {
     cachedNativeComponent = requireNativeViewManager<NativeForwardRichTextInputProps>(
       "ForwardRichTextInput",
