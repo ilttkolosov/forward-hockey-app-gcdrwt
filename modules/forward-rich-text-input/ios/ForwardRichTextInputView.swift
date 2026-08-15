@@ -200,6 +200,11 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
     emitContentHeight()
   }
 
+  public func textViewDidChangeSelection(_ textView: UITextView) {
+    guard !suppressEvents, textView.selectedRange.length == 0 else { return }
+    updateTypingAttributes()
+  }
+
   public func textView(
     _ textView: UITextView,
     shouldChangeTextIn range: NSRange,
@@ -207,7 +212,11 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
   ) -> Bool {
     if textView.markedTextRange != nil { return true }
     let nextLength = (textView.text as NSString).length - range.length + (text as NSString).length
-    return nextLength <= maxLength
+    guard nextLength <= maxLength else { return false }
+    if !text.isEmpty {
+      updateTypingAttributes()
+    }
+    return true
   }
 
   @available(iOS 16.0, *)
@@ -216,6 +225,26 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
     editMenuForTextIn range: NSRange,
     suggestedActions: [UIMenuElement]
   ) -> UIMenu? {
+    makeEditMenu(for: range, suggestedActions: suggestedActions)
+  }
+
+  @available(iOS 26.0, *)
+  public func textView(
+    _ textView: UITextView,
+    editMenuForTextInRanges ranges: [NSValue],
+    suggestedActions: [UIMenuElement]
+  ) -> UIMenu? {
+    let selectedRange = ranges
+      .map(\.rangeValue)
+      .first(where: { $0.length > 0 }) ?? textView.selectedRange
+    return makeEditMenu(for: selectedRange, suggestedActions: suggestedActions)
+  }
+
+  @available(iOS 16.0, *)
+  private func makeEditMenu(
+    for range: NSRange,
+    suggestedActions: [UIMenuElement]
+  ) -> UIMenu {
     guard range.length > 0 else { return UIMenu(children: suggestedActions) }
 
     let formatActions = ForwardTextFormat.allCases.map { format in
@@ -229,11 +258,12 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
       return action
     }
     let formatMenu = UIMenu(
-      title: "Форматирование",
+      title: "Формат",
       image: UIImage(systemName: "textformat"),
       children: formatActions
     )
-    return UIMenu(children: suggestedActions + [formatMenu])
+    // Keep the formatting submenu on the first page of the compact edit menu.
+    return UIMenu(children: [formatMenu] + suggestedActions)
   }
 
   fileprivate func toggleFormat(_ format: ForwardTextFormat) {
@@ -269,6 +299,7 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
     }
 
     editor.selectedRange = range
+    updateTypingAttributes()
     editor.becomeFirstResponder()
     emitValueChange()
     emitContentHeight()
@@ -301,9 +332,15 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
   }
 
   private func updateTypingAttributes() {
-    var attributes = editor.typingAttributes
-    attributes[.font] = UIFont.systemFont(ofSize: fontSize)
-    attributes[.foregroundColor] = editorTextColor
+    var attributes: [NSAttributedString.Key: Any] = [
+      .font: UIFont.systemFont(ofSize: fontSize),
+      .foregroundColor: editorTextColor,
+      .underlineStyle: 0,
+      .strikethroughStyle: 0
+    ]
+    if let paragraphStyle = editor.typingAttributes[.paragraphStyle] {
+      attributes[.paragraphStyle] = paragraphStyle
+    }
     editor.typingAttributes = attributes
   }
 
