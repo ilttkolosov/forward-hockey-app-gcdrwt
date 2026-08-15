@@ -59,9 +59,14 @@ function extractInviteToken(value: string): string | null {
 
 export default function MessengerRegistrationScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ token?: string }>();
+  const params = useLocalSearchParams<{
+    token?: string;
+    sharePending?: string;
+  }>();
   const { isAuthenticated, passwordChange, login, register } =
     useMessengerAuth();
+  const authenticatedDestination =
+    params.sharePending === "1" ? "/messenger/share" : "/messenger/rooms";
   const [mode, setMode] = useState<ScreenMode>("invite");
   const [inviteValue, setInviteValue] = useState(params.token || "");
   const [inviteToken, setInviteToken] = useState<string | null>(null);
@@ -79,12 +84,23 @@ export default function MessengerRegistrationScreen() {
 
   useEffect(() => {
     if (isAuthenticated && !registeringNewAccount)
-      router.replace("/messenger/rooms");
-  }, [isAuthenticated, registeringNewAccount, router]);
+      router.replace(authenticatedDestination);
+  }, [
+    authenticatedDestination,
+    isAuthenticated,
+    registeringNewAccount,
+    router,
+  ]);
 
   useEffect(() => {
-    if (passwordChange) router.replace("/messenger/change-password");
-  }, [passwordChange, router]);
+    if (passwordChange) {
+      router.replace({
+        pathname: "/messenger/change-password",
+        params:
+          params.sharePending === "1" ? { sharePending: "1" } : undefined,
+      });
+    }
+  }, [params.sharePending, passwordChange, router]);
 
   const checkInvitation = useCallback(async (value: string) => {
     const token = extractInviteToken(value);
@@ -173,10 +189,12 @@ export default function MessengerRegistrationScreen() {
         email: email.trim() || undefined,
       });
       const finish = () =>
-        router.replace({
-          pathname: "/messenger/profile",
-          params: { firstRun: "1" },
-        });
+        params.sharePending === "1"
+          ? router.replace("/messenger/share")
+          : router.replace({
+              pathname: "/messenger/profile",
+              params: { firstRun: "1" },
+            });
       const activatedSession = await loadMessengerSession();
       if (
         activatedSession &&
@@ -227,11 +245,15 @@ export default function MessengerRegistrationScreen() {
     setError(null);
     try {
       const result = await login(username.trim(), password);
-      router.replace(
-        result === "password_change_required"
-          ? "/messenger/change-password"
-          : "/messenger/rooms",
-      );
+      if (result === "password_change_required") {
+        router.replace({
+          pathname: "/messenger/change-password",
+          params:
+            params.sharePending === "1" ? { sharePending: "1" } : undefined,
+        });
+      } else {
+        router.replace(authenticatedDestination);
+      }
     } catch (loginError) {
       setError(
         loginError instanceof Error ? loginError.message : "Не удалось войти",

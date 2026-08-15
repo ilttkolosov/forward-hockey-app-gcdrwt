@@ -1,6 +1,6 @@
 {
   "name": "Natively",
-  "version": "1.0.87",
+  "version": "1.0.88",
   "main": "index.ts",
   "scripts": {
     "dev": "EXPO_NO_TELEMETRY=1 expo start --tunnel",
@@ -10,7 +10,7 @@
     "build:web": "expo export -p web && npx workbox generateSW workbox-config.js",
     "build:android": "expo prebuild -p android",
     "lint": "eslint .",
-    "postinstall": "node scripts/seed-assets.mjs restore && node scripts/generate-player-photo-assets.mjs && node scripts/generate-team-logo-assets.mjs",
+    "postinstall": "patch-package && node scripts/seed-assets.mjs restore && node scripts/generate-player-photo-assets.mjs && node scripts/generate-team-logo-assets.mjs",
     "seed:generate": "node scripts/generate-seed-database.mjs && node scripts/seed-assets.mjs pack",
     "seed:migrate": "node scripts/seed-assets.mjs restore && node scripts/migrate-seed-database.mjs && node scripts/seed-assets.mjs pack",
     "seed:restore": "node scripts/seed-assets.mjs restore",
@@ -56,6 +56,7 @@
     "expo-notifications": "~0.32.17",
     "expo-router": "~6.0.24",
     "expo-secure-store": "~15.0.8",
+    "expo-share-intent": "5.1.1",
     "expo-sharing": "~14.0.8",
     "expo-splash-screen": "~31.0.13",
     "expo-sqlite": "~16.0.10",
@@ -97,6 +98,7 @@
     "eslint-plugin-react": "^7.37.4",
     "globals": "^15.14.0",
     "metro-cache": "^0.83.1",
+    "patch-package": "8.0.0",
     "sql.js": "^1.14.1",
     "typescript": "^5.8.3",
     "workbox-cli": "^7.4.0"

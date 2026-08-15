@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -19,6 +19,9 @@ import { colors } from "../../styles/commonStyles";
 
 export default function MessengerChangePasswordScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ sharePending?: string }>();
+  const authenticatedDestination =
+    params.sharePending === "1" ? "/messenger/share" : "/messenger/rooms";
   const {
     status,
     passwordChange,
@@ -31,11 +34,21 @@ export default function MessengerChangePasswordScreen() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (status === "authenticated") router.replace("/messenger/rooms");
+    if (status === "authenticated") router.replace(authenticatedDestination);
     else if (status === "unauthenticated" && !passwordChange) {
-      router.replace("/messenger/register");
+      router.replace({
+        pathname: "/messenger/register",
+        params:
+          params.sharePending === "1" ? { sharePending: "1" } : undefined,
+      });
     }
-  }, [passwordChange, router, status]);
+  }, [
+    authenticatedDestination,
+    params.sharePending,
+    passwordChange,
+    router,
+    status,
+  ]);
 
   const submit = async () => {
     if (password.length < 6) {
@@ -50,7 +63,7 @@ export default function MessengerChangePasswordScreen() {
     setError(null);
     try {
       await completePasswordChange(password, passwordConfirmation);
-      router.replace("/messenger/rooms");
+      router.replace(authenticatedDestination);
     } catch (changeError) {
       setError(
         changeError instanceof Error
@@ -73,7 +86,15 @@ export default function MessengerChangePasswordScreen() {
           style: "destructive",
           onPress: () => {
             void cancelPasswordChange()
-              .then(() => router.replace("/messenger/register"))
+              .then(() =>
+                router.replace({
+                  pathname: "/messenger/register",
+                  params:
+                    params.sharePending === "1"
+                      ? { sharePending: "1" }
+                      : undefined,
+                }),
+              )
               .catch((cancelError: unknown) => {
                 setError(
                   cancelError instanceof Error

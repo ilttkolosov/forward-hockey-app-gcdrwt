@@ -11,6 +11,7 @@ import {
   Animated,
   AppState,
   Easing,
+  Platform,
 } from 'react-native';
 import { colors } from '../styles/commonStyles';
 import { playerDownloadService } from '../services/playerDataService';
@@ -53,9 +54,14 @@ import {
   normalizeMessengerPushPayload,
   processMessengerPushPayload,
 } from '../services/messengerPush';
-import { remotePushNotificationsSupported } from '../services/runtimeEnvironment';
+import {
+  isExpoGo,
+  remotePushNotificationsSupported,
+} from '../services/runtimeEnvironment';
 import { getMessengerActiveRoomId } from '../services/messengerRealtime';
 import { publishReferenceDataUpdate } from '../services/referenceDataUpdates';
+import { ShareIntentProvider } from 'expo-share-intent';
+import MessengerShareIntentBridge from '../features/messenger/MessengerShareIntentBridge';
 global.Buffer = Buffer;
 
 Notifications.setNotificationHandler({
@@ -710,6 +716,7 @@ function RootLayoutContent() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="dark" backgroundColor={colors.background} />
+      <MessengerShareIntentBridge />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="players" />
@@ -725,6 +732,10 @@ function RootLayoutContent() {
         <Stack.Screen name="messenger/register" />
         <Stack.Screen name="messenger/change-password" />
         <Stack.Screen name="messenger/rooms" />
+        <Stack.Screen
+          name="messenger/share"
+          options={{ gestureEnabled: false }}
+        />
         <Stack.Screen name="messenger/room/[id]" />
       </Stack>
     </GestureHandlerRootView>
@@ -733,17 +744,26 @@ function RootLayoutContent() {
 
 export default function RootLayout() {
   return (
-    <SQLiteProvider
-      databaseName={DATABASE_NAME}
-      assetSource={DATABASE_ASSET_SOURCE}
-      onInit={migrateDatabase}
+    <ShareIntentProvider
+      options={{
+        scheme: 'natively',
+        resetOnBackground: false,
+        debug: __DEV__,
+        disabled: Platform.OS === 'web' || isExpoGo,
+      }}
     >
-      <NetworkStatusProvider>
-        <MessengerAuthProvider>
-          <MessengerPersistenceBridge />
-          <RootLayoutContent />
-        </MessengerAuthProvider>
-      </NetworkStatusProvider>
-    </SQLiteProvider>
+      <SQLiteProvider
+        databaseName={DATABASE_NAME}
+        assetSource={DATABASE_ASSET_SOURCE}
+        onInit={migrateDatabase}
+      >
+        <NetworkStatusProvider>
+          <MessengerAuthProvider>
+            <MessengerPersistenceBridge />
+            <RootLayoutContent />
+          </MessengerAuthProvider>
+        </NetworkStatusProvider>
+      </SQLiteProvider>
+    </ShareIntentProvider>
   );
 }

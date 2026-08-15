@@ -18,6 +18,16 @@ export interface MessengerUploadFile {
   height?: number;
 }
 
+export interface MessengerSharedFile {
+  uri: string;
+  name?: string | null;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  width?: number | null;
+  height?: number | null;
+  duration_ms?: number | null;
+}
+
 export interface MessengerMediaPreparationProgress {
   item: number;
   total: number;
@@ -617,6 +627,143 @@ export async function pickMessengerMedia(
       );
     } else {
       files.push(await compressedPhoto(asset));
+    }
+  }
+  assertMessengerUploadLimits(files);
+  return files;
+}
+
+function normalizedSharedFileUri(uri: string): string {
+  const value = uri.trim();
+  if (!value || /^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return value;
+  return value.startsWith("/") ? `file://${value}` : value;
+}
+
+function sharedFileKind(
+  mimeType: string,
+  name: string,
+): MessengerUploadFile["kind"] {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  const extension = name.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  if (
+    ["avif", "heic", "heif", "jpeg", "jpg", "png", "webp"].includes(
+      extension || "",
+    )
+  ) {
+    return "image";
+  }
+  if (["3gp", "m4v", "mov", "mp4", "webm"].includes(extension || "")) {
+    return "video";
+  }
+  return "file";
+}
+
+function sharedFileMimeType(
+  mimeType: string | null | undefined,
+  name: string,
+  kind: MessengerUploadFile["kind"],
+): string {
+  const reported = mimeType?.trim().toLowerCase();
+  if (reported) return reported;
+  const extension = name.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  const byExtension: Record<string, string> = {
+    avif: "image/avif",
+    heic: "image/heic",
+    heif: "image/heif",
+    jpeg: "image/jpeg",
+    jpg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+    "3gp": "video/3gpp",
+    m4v: "video/x-m4v",
+    mov: "video/quicktime",
+    mp4: "video/mp4",
+    webm: "video/webm",
+  };
+  return (
+    (extension && byExtension[extension]) ||
+    (kind === "image"
+      ? "image/jpeg"
+      : kind === "video"
+        ? "video/mp4"
+        : "application/octet-stream")
+  );
+}
+
+/**
+ * Converts files received through the native OS share sheet into the exact
+ * upload representation used by the messenger composer. Photos and videos
+ * therefore keep the same compression and 50 MiB validation rules as media
+ * selected from the in-app picker.
+ */
+export async function prepareMessengerSharedFiles(
+  sharedFiles: readonly MessengerSharedFile[],
+  onPreparationProgress?: (progress: MessengerMediaPreparationProgress) => void,
+): Promise<MessengerUploadFile[]> {
+  if (!sharedFiles.length) return [];
+  if (sharedFiles.length > MAX_MESSENGER_MEDIA_SELECTION) {
+    throw new Error(
+      `За один раз можно отправить не более ${MAX_MESSENGER_MEDIA_SELECTION} вложений`,
+    );
+  }
+
+  const files: MessengerUploadFile[] = [];
+  for (const [index, shared] of sharedFiles.entries()) {
+    const uri = normalizedSharedFileUri(shared.uri);
+    if (!uri) throw new Error("Система не передала путь к вложению");
+    const name = shared.name?.trim() || `shared-${Date.now()}-${index + 1}`;
+    const reportedMimeType = shared.mime_type?.trim().toLowerCase() || "";
+    const kind = sharedFileKind(reportedMimeType, name);
+    const mimeType = sharedFileMimeType(reportedMimeType, name, kind);
+    const reportedSize =
+      typeof shared.size_bytes === "number" && shared.size_bytes >= 0
+        ? shared.size_bytes
+        : null;
+
+    if (kind === "image") {
+      files.push(
+        await compressedPhoto({
+          uri,
+          width: shared.width ?? 0,
+          height: shared.height ?? 0,
+          type: "image",
+          fileName: name,
+          fileSize: reportedSize ?? undefined,
+          mimeType,
+        }),
+      );
+    } else if (kind === "video") {
+      files.push(
+        await compressedVideo(
+          {
+            uri,
+            width: shared.width ?? 0,
+            height: shared.height ?? 0,
+            type: "video",
+            fileName: name,
+            fileSize: reportedSize ?? undefined,
+            mimeType,
+            duration: shared.duration_ms ?? null,
+          },
+          (percent) =>
+            onPreparationProgress?.({
+              item: index + 1,
+              total: sharedFiles.length,
+              percent,
+            }),
+        ),
+      );
+    } else {
+      const size = await localFileSize(uri, reportedSize);
+      files.push({
+        uri,
+        name,
+        type: mimeType,
+        kind: "file",
+        size_bytes: size,
+        original_size_bytes: size,
+      });
     }
   }
   assertMessengerUploadLimits(files);

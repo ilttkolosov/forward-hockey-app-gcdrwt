@@ -1,0 +1,140 @@
+diff --git a/node_modules/expo-share-intent/plugin/build/ios/ShareExtensionViewController.swift b/node_modules/expo-share-intent/plugin/build/ios/ShareExtensionViewController.swift
+index 156d8d6..8f43c4c 100644
+--- a/node_modules/expo-share-intent/plugin/build/ios/ShareExtensionViewController.swift
++++ b/node_modules/expo-share-intent/plugin/build/ios/ShareExtensionViewController.swift
+@@ -71 +71 @@
+-    Task.detached {
++    await Task.detached {
+@@ -77 +77 @@
+-          Task { @MainActor in
++          await Task { @MainActor in
+@@ -79 +79 @@
+-          }
++          }.value
+@@ -83 +83 @@
+-          Task { @MainActor in
++          await Task { @MainActor in
+@@ -85 +85 @@
+-          }
++          }.value
+@@ -94 +94 @@
+-    }
++    }.value
+@@ -98 +98 @@
+-    Task.detached {
++    await Task.detached {
+@@ -102 +102 @@
+-        Task { @MainActor in
++        await Task { @MainActor in
+@@ -113 +113 @@
+-        }
++        }.value
+@@ -119 +119 @@
+-    }
++    }.value
+@@ -123 +123 @@
+-    Task.detached {
++    await Task.detached {
+@@ -125 +125 @@
+-        Task { @MainActor in
++        await Task { @MainActor in
+@@ -136 +136 @@
+-        }
++        }.value
+@@ -142 +142 @@
+-    }
++    }.value
+@@ -148 +148 @@
+-    Task.detached {
++    await Task.detached {
+@@ -153 +153 @@
+-        Task { @MainActor in
++        await Task { @MainActor in
+@@ -176 +176 @@
+-        }
++        }.value
+@@ -182 +182 @@
+-    }
++    }.value
+@@ -186 +186 @@
+-      Task.detached {
++      await Task.detached {
+@@ -212 +212 @@
+-                  Task { @MainActor in
++                  await Task { @MainActor in
+@@ -214 +214 @@
+-                  }
++                  }.value
+@@ -220 +220 @@
+-              Task { @MainActor in
++              await Task { @MainActor in
+@@ -222 +222 @@
+-              }
++              }.value
+@@ -224 +224 @@
+-      }
++      }.value
+@@ -229 +229 @@
+-    Task.detached {
++    await Task.detached {
+@@ -233 +233 @@
+-        Task { @MainActor in
++        await Task { @MainActor in
+@@ -309 +309 @@
+-        }
++        }.value
+@@ -314 +314 @@
+-    }
++    }.value
+@@ -361 +361 @@
+-    Task.detached {
++    await Task.detached {
+@@ -364 +364 @@
+-        Task { @MainActor in
++        await Task { @MainActor in
+@@ -395 +395 @@
+-        }
++        }.value
+@@ -401 +401 @@
+-    }
++    }.value
+@@ -405 +405 @@
+-    Task.detached {
++    await Task.detached {
+@@ -407 +407 @@
+-        Task { @MainActor in
++        await Task { @MainActor in
+@@ -411 +411 @@
+-        }
++        }.value
+@@ -417 +417 @@
+-    }
++    }.value
+@@ -421 +421 @@
+-    Task.detached {
++    await Task.detached {
+@@ -423 +423 @@
+-        Task { @MainActor in
++        await Task { @MainActor in
+@@ -427 +427 @@
+-        }
++        }.value
+@@ -433 +433 @@
+-    }
++    }.value
+diff --git a/node_modules/expo-share-intent/build/utils.js b/node_modules/expo-share-intent/build/utils.js
+index 498e9ec..c14f3d0 100644
+--- a/node_modules/expo-share-intent/build/utils.js
++++ b/node_modules/expo-share-intent/build/utils.js
+@@ -60 +60,2 @@
+-    if (shareIntent?.text) {
++    if (shareIntent?.text &&
++        !shareIntent?.files?.some((file) => file.path || file.contentUri)) {
+@@ -114,0 +116,7 @@
++            text: shareIntent?.text || null,
++            webUrl: shareIntent?.text
++                ?.match(/[(http(s)?)://(www.)?-a-zA-Z0-9@:%._+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_+.~#?&//=]*)/gi)
++                ?.find((link) => link.startsWith("http")) || null,
++            meta: {
++                title: shareIntent?.meta?.title ?? undefined,
++            },

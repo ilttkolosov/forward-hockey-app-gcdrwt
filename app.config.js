@@ -20,7 +20,7 @@ export default ({ config }) => {
     // to users is restored per platform by withAppDisplayName below.
     name: "ForwardHockey14",
     slug: "Forward",
-    version: "1.0.87",
+    version: "1.0.88",
     orientation: "portrait",
     icon: "./assets/icons/myIcon.png",
     userInterfaceStyle: "light",
@@ -109,6 +109,26 @@ export default ({ config }) => {
         },
       ],
       "react-native-compressor",
+      [
+        "expo-share-intent",
+        {
+          iosShareExtensionName: "Forward 14 — ХК Форвард",
+          iosShareExtensionBundleIdentifier:
+            "com.aleksandrkolosov.forward2014.share",
+          iosAppGroupIdentifier:
+            "group.com.aleksandrkolosov.forward2014.share",
+          iosActivationRules: {
+            NSExtensionActivationSupportsText: true,
+            NSExtensionActivationSupportsWebURLWithMaxCount: 1,
+            NSExtensionActivationSupportsWebPageWithMaxCount: 1,
+            NSExtensionActivationSupportsImageWithMaxCount: 10,
+            NSExtensionActivationSupportsMovieWithMaxCount: 10,
+            NSExtensionActivationSupportsFileWithMaxCount: 10,
+          },
+          androidIntentFilters: ["*/*"],
+          androidMultiIntentFilters: ["*/*"],
+        },
+      ],
       [
         "./plugins/withAppMetrica.js",
         {

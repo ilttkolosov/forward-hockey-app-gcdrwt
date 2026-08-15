@@ -1,8 +1,9 @@
-name: Native rich text experiment
+name: Native modules
 
 on:
   push:
     branches:
+      - main
       - stabilization/native-rich-text-input
 
 jobs:
@@ -45,9 +46,9 @@ jobs:
           EXPO_NO_TELEMETRY: "1"
         run: npx expo prebuild --platform android --no-install
 
-      - name: Compile native rich text module
+      - name: Compile Android app and native modules
         working-directory: android
-        run: ./gradlew :forward-rich-text-input:compileDebugKotlin --stacktrace
+        run: ./gradlew :app:compileDebugKotlin --stacktrace
 
   ios-native-module:
     runs-on: macos-15
@@ -81,6 +82,17 @@ jobs:
           xcodebuild
           -project Pods/Pods.xcodeproj
           -target ForwardRichTextInput
+          -configuration Debug
+          -sdk iphonesimulator
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Compile iOS share extension
+        working-directory: ios
+        run: >-
+          xcodebuild
+          -project ForwardHockey14.xcodeproj
+          -target Forward14
           -configuration Debug
           -sdk iphonesimulator
           CODE_SIGNING_ALLOWED=NO
