@@ -6,7 +6,13 @@ public final class ForwardRichTextInputModule: Module {
     Name("ForwardRichTextInput")
 
     View(ForwardRichTextInputView.self) {
-      Events("onValueChange", "onFocus", "onBlur", "onContentSizeChange")
+      Events(
+        "onValueChange",
+        "onFocus",
+        "onBlur",
+        "onContentSizeChange",
+        "onPasteAttachment"
+      )
 
       Prop("value") { (view, value: String?) in
         view.setEncodedValue(value ?? "")
@@ -22,6 +28,10 @@ public final class ForwardRichTextInputModule: Module {
 
       Prop("editable") { (view, value: Bool?) in
         view.isEditable = value ?? true
+      }
+
+      Prop("pasteAttachmentsEnabled") { (view, value: Bool?) in
+        view.pasteAttachmentsEnabled = value ?? false
       }
 
       Prop("fontSize") { (view, value: Double?) in

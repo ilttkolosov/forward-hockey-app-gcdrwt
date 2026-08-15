@@ -57,6 +57,7 @@ import MessengerLinkPreview, {
 import {
   ForwardRichTextInput,
   type ForwardRichTextInputHandle,
+  type ForwardRichTextPastedAttachment,
 } from "../../../modules/forward-rich-text-input";
 import {
   DEFAULT_QUICK_REACTIONS,
@@ -125,6 +126,7 @@ import {
   assertMessengerUploadLimits,
   currentMessengerLocation,
   MAX_MESSENGER_MEDIA_SELECTION,
+  pasteMessengerClipboardImage,
   pickMessengerFile,
   pickMessengerMedia,
   takeMessengerPhoto,
@@ -3166,6 +3168,81 @@ export default function MessengerRoomScreen() {
     ],
   );
 
+  const handlePastedAttachment = useCallback(
+    async (pasted: ForwardRichTextPastedAttachment) => {
+      if (pasted.error) {
+        Alert.alert("Не удалось вставить вложение", pasted.error);
+        return;
+      }
+      if (!canMedia || sending || attachmentDraft || editingMessage) {
+        Alert.alert(
+          "Вложение не вставлено",
+          editingMessage
+            ? "При редактировании сообщения нельзя добавлять новое вложение"
+            : attachmentDraft
+              ? "Сначала отправьте или удалите уже добавленное вложение"
+              : "Сейчас добавление вложений недоступно",
+        );
+        return;
+      }
+
+      try {
+        let file: MessengerUploadFile | null = null;
+        if (pasted.clipboardImage) {
+          file = await pasteMessengerClipboardImage();
+        } else if (pasted.uri && pasted.kind) {
+          const sizeBytes =
+            typeof pasted.sizeBytes === "number" && pasted.sizeBytes >= 0
+              ? Math.round(pasted.sizeBytes)
+              : null;
+          const name = pasted.name?.trim() || `clipboard-${Date.now()}`;
+          file = {
+            uri: pasted.uri,
+            name,
+            type:
+              pasted.mimeType?.trim() ||
+              fallbackUploadMimeType(name, pasted.kind),
+            kind: pasted.kind,
+            size_bytes: sizeBytes,
+            original_size_bytes: sizeBytes,
+          };
+        }
+        if (!file) {
+          throw new Error(
+            "Буфер обмена не содержит доступного файла или изображения",
+          );
+        }
+
+        assertMessengerUploadLimits([file]);
+        setAttachmentDraft({
+          source: file.kind === "file" ? "file" : "library",
+          files: [file],
+        });
+        void warmMessengerBufferedUploadFiles([file]);
+        setOffline(false);
+        setSyncError(null);
+        messengerLog("info", "attachment.clipboard.prepared", {
+          room_id: roomId,
+          kind: file.kind,
+          mime_type: file.type,
+          size_bytes: file.size_bytes,
+        });
+      } catch (error) {
+        const message = messengerErrorMessage(
+          error,
+          "Не удалось подготовить вложение из буфера обмена",
+        );
+        setSyncError(message);
+        messengerLog("warn", "attachment.clipboard.failed", {
+          room_id: roomId,
+          message,
+        });
+        Alert.alert("Не удалось вставить вложение", message);
+      }
+    },
+    [attachmentDraft, canMedia, editingMessage, roomId, sending],
+  );
+
   const sendAttachmentDraft = useCallback(() => {
     if (!attachmentDraft || !roomId || !session || sending) return;
     const clientMessageId = Crypto.randomUUID();
@@ -4907,10 +4984,19 @@ export default function MessengerRoomScreen() {
                       ? 1000
                       : 4000
                 }
+                pasteAttachmentsEnabled={
+                  canMedia &&
+                  !attachmentDraft &&
+                  !editingMessage &&
+                  !composerBusy
+                }
                 textColor={colors.text}
                 placeholderTextColor={colors.textSecondary}
                 selectionColor={colors.accent}
                 onContentSizeChange={handleComposerContentSizeChange}
+                onPasteAttachment={(attachment) => {
+                  void handlePastedAttachment(attachment);
+                }}
                 onFocus={() => {
                   if (!nearLatest.current) return;
                   keyboardScrollPending.current = true;

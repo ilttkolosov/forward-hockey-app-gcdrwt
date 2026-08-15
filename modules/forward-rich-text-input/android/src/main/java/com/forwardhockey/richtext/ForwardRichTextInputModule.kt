@@ -9,7 +9,7 @@ class ForwardRichTextInputModule : Module() {
     Name("ForwardRichTextInput")
 
     View(ForwardRichTextInputView::class) {
-      Events("onValueChange", "onFocus", "onBlur", "onContentSizeChange")
+      Events("onValueChange", "onFocus", "onBlur", "onContentSizeChange", "onPasteAttachment")
 
       Prop("value") { view: ForwardRichTextInputView, value: String? ->
         view.setEncodedValue(value.orEmpty())
@@ -26,6 +26,11 @@ class ForwardRichTextInputModule : Module() {
       Prop("editable") { view: ForwardRichTextInputView, value: Boolean? ->
         view.setEditable(value ?: true)
       }
+
+      // Clipboard attachments are currently handled by the iOS native editor.
+      // Keep the prop in the Android view contract so the shared JS component
+      // can pass it without producing an unknown-property error.
+      Prop("pasteAttachmentsEnabled") { _: ForwardRichTextInputView, _: Boolean? -> }
 
       Prop("fontSize") { view: ForwardRichTextInputView, value: Double? ->
         view.setEditorFontSize((value ?: 16.0).toFloat())

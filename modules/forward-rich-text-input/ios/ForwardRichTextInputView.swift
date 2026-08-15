@@ -1,5 +1,6 @@
 import ExpoModulesCore
 import UIKit
+import UniformTypeIdentifiers
 
 fileprivate enum ForwardTextFormat: CaseIterable, Hashable {
   case bold
@@ -45,7 +46,18 @@ fileprivate final class ForwardAttributedTextView: UITextView {
       action == #selector(formatStrikethrough(_:)) {
       return selectedRange.length > 0
     }
+    if action == #selector(paste(_:)),
+      formattingOwner?.canPasteAttachmentFromPasteboard() == true {
+      return true
+    }
     return super.canPerformAction(action, withSender: sender)
+  }
+
+  override func paste(_ sender: Any?) {
+    if formattingOwner?.pasteAttachmentFromPasteboard() == true {
+      return
+    }
+    super.paste(sender)
   }
 
   @objc fileprivate func formatBold(_ sender: Any?) {
@@ -70,6 +82,7 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
   let onFocus = EventDispatcher()
   let onBlur = EventDispatcher()
   let onContentSizeChange = EventDispatcher()
+  let onPasteAttachment = EventDispatcher()
 
   private let editor = ForwardAttributedTextView(frame: .zero, textContainer: nil)
   private let placeholderLabel = UILabel()
@@ -113,6 +126,8 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
   }
 
   var maxLength = 4000
+
+  var pasteAttachmentsEnabled = false
 
   var isEditable = true {
     didSet {
@@ -334,9 +349,7 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
   private func updateTypingAttributes() {
     var attributes: [NSAttributedString.Key: Any] = [
       .font: UIFont.systemFont(ofSize: fontSize),
-      .foregroundColor: editorTextColor,
-      .underlineStyle: 0,
-      .strikethroughStyle: 0
+      .foregroundColor: editorTextColor
     ]
     if let paragraphStyle = editor.typingAttributes[.paragraphStyle] {
       attributes[.paragraphStyle] = paragraphStyle
@@ -385,9 +398,9 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
       case .italic:
         active = (attributes[.font] as? UIFont)?.fontDescriptor.symbolicTraits.contains(.traitItalic) == true
       case .underline:
-        active = (attributes[.underlineStyle] as? NSNumber)?.intValue != 0
+        active = decorationStyleIsEnabled(attributes[.underlineStyle])
       case .strikethrough:
-        active = (attributes[.strikethroughStyle] as? NSNumber)?.intValue != 0
+        active = decorationStyleIsEnabled(attributes[.strikethroughStyle])
       }
       if !active {
         covered = false
@@ -405,6 +418,191 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
       UIMenuItem(title: "Подчёркнутый", action: #selector(ForwardAttributedTextView.formatUnderline(_:))),
       UIMenuItem(title: "Зачёркнутый", action: #selector(ForwardAttributedTextView.formatStrikethrough(_:)))
     ]
+  }
+
+  fileprivate func canPasteAttachmentFromPasteboard() -> Bool {
+    guard pasteAttachmentsEnabled else { return false }
+    let pasteboard = UIPasteboard.general
+    if pasteboard.hasImages { return true }
+    if pasteboard.itemProviders.contains(where: { provider in
+      provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+    }) {
+      return true
+    }
+    return pasteboard.itemProviders.contains { preferredAttachmentType(for: $0) != nil }
+  }
+
+  fileprivate func pasteAttachmentFromPasteboard() -> Bool {
+    guard pasteAttachmentsEnabled else { return false }
+    let pasteboard = UIPasteboard.general
+
+    if pasteboard.hasImages {
+      onPasteAttachment([
+        "kind": "image",
+        "clipboardImage": true
+      ])
+      return true
+    }
+
+    if let sourceURL = pasteboard.urls?.first(where: { $0.isFileURL }) {
+      cacheAndEmitPastedFile(
+        sourceURL,
+        suggestedName: sourceURL.lastPathComponent,
+        contentType: UTType(filenameExtension: sourceURL.pathExtension)
+      )
+      return true
+    }
+
+    guard let provider = pasteboard.itemProviders.first(where: {
+      preferredAttachmentType(for: $0) != nil
+    }), let contentType = preferredAttachmentType(for: provider) else {
+      return false
+    }
+
+    provider.loadFileRepresentation(forTypeIdentifier: contentType.identifier) { [weak self] url, error in
+      guard let self else { return }
+      guard let url else {
+        self.emitPasteAttachmentError(error?.localizedDescription ?? "Не удалось прочитать вложение из буфера обмена")
+        return
+      }
+      do {
+        let payload = try self.cachePastedFile(
+          from: url,
+          suggestedName: provider.suggestedName,
+          contentType: contentType
+        )
+        DispatchQueue.main.async { [weak self] in
+          self?.onPasteAttachment(payload)
+        }
+      } catch {
+        self.emitPasteAttachmentError(error.localizedDescription)
+      }
+    }
+    return true
+  }
+
+  private func preferredAttachmentType(for provider: NSItemProvider) -> UTType? {
+    let contentTypes = provider.registeredTypeIdentifiers.compactMap { UTType($0) }
+    if let image = contentTypes.first(where: { $0.conforms(to: .image) }) {
+      return image
+    }
+    if let movie = contentTypes.first(where: { $0.conforms(to: .movie) }) {
+      return movie
+    }
+    return contentTypes.first { type in
+      !type.conforms(to: .text) &&
+        !type.conforms(to: .url) &&
+        (type.conforms(to: .content) || type.conforms(to: .data))
+    }
+  }
+
+  private func cacheAndEmitPastedFile(
+    _ sourceURL: URL,
+    suggestedName: String?,
+    contentType: UTType?
+  ) {
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      guard let self else { return }
+      do {
+        let payload = try self.cachePastedFile(
+          from: sourceURL,
+          suggestedName: suggestedName,
+          contentType: contentType
+        )
+        DispatchQueue.main.async { [weak self] in
+          self?.onPasteAttachment(payload)
+        }
+      } catch {
+        self.emitPasteAttachmentError(error.localizedDescription)
+      }
+    }
+  }
+
+  private func cachePastedFile(
+    from sourceURL: URL,
+    suggestedName: String?,
+    contentType: UTType?
+  ) throws -> [String: Any] {
+    let fileManager = FileManager.default
+    guard let cachesDirectory = fileManager.urls(
+      for: .cachesDirectory,
+      in: .userDomainMask
+    ).first else {
+      throw NSError(
+        domain: "ForwardRichTextInput",
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "Локальное хранилище для вставки файла недоступно"]
+      )
+    }
+
+    let clipboardDirectory = cachesDirectory.appendingPathComponent(
+      "forward-messenger-clipboard",
+      isDirectory: true
+    )
+    try fileManager.createDirectory(
+      at: clipboardDirectory,
+      withIntermediateDirectories: true
+    )
+
+    let resolvedType = contentType ?? UTType(filenameExtension: sourceURL.pathExtension)
+    let resolvedName = pastedFileName(
+      suggestedName: suggestedName,
+      sourceURL: sourceURL,
+      contentType: resolvedType
+    )
+    let destinationURL = clipboardDirectory.appendingPathComponent(
+      "\(UUID().uuidString)-\(resolvedName)",
+      isDirectory: false
+    )
+    let accessedSecurityScope = sourceURL.startAccessingSecurityScopedResource()
+    defer {
+      if accessedSecurityScope {
+        sourceURL.stopAccessingSecurityScopedResource()
+      }
+    }
+    try fileManager.copyItem(at: sourceURL, to: destinationURL)
+
+    let attributes = try fileManager.attributesOfItem(atPath: destinationURL.path)
+    let sizeBytes = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+    let kind: String
+    if resolvedType?.conforms(to: .image) == true {
+      kind = "image"
+    } else if resolvedType?.conforms(to: .movie) == true {
+      kind = "video"
+    } else {
+      kind = "file"
+    }
+    return [
+      "kind": kind,
+      "uri": destinationURL.absoluteString,
+      "name": resolvedName,
+      "mimeType": resolvedType?.preferredMIMEType ?? "application/octet-stream",
+      "sizeBytes": NSNumber(value: sizeBytes)
+    ]
+  }
+
+  private func pastedFileName(
+    suggestedName: String?,
+    sourceURL: URL,
+    contentType: UTType?
+  ) -> String {
+    let candidate = suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines)
+    var name = candidate.flatMap { $0.isEmpty ? nil : $0 } ?? sourceURL.lastPathComponent
+    if name.isEmpty {
+      name = "clipboard-\(Int(Date().timeIntervalSince1970))"
+    }
+    name = URL(fileURLWithPath: name).lastPathComponent
+    if URL(fileURLWithPath: name).pathExtension.isEmpty,
+      let fileExtension = contentType?.preferredFilenameExtension {
+      name += ".\(fileExtension)"
+    }
+    return name
+  }
+
+  private func emitPasteAttachmentError(_ message: String) {
+    DispatchQueue.main.async { [weak self] in
+      self?.onPasteAttachment(["error": message])
+    }
   }
 
   private func decodeAttributedText(_ encoded: String) -> NSAttributedString {
@@ -541,9 +739,13 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
     case .italic:
       return (attributes[.font] as? UIFont)?.fontDescriptor.symbolicTraits.contains(.traitItalic) == true
     case .underline:
-      return (attributes[.underlineStyle] as? NSNumber)?.intValue != 0
+      return decorationStyleIsEnabled(attributes[.underlineStyle])
     case .strikethrough:
-      return (attributes[.strikethroughStyle] as? NSNumber)?.intValue != 0
+      return decorationStyleIsEnabled(attributes[.strikethroughStyle])
     }
+  }
+
+  private func decorationStyleIsEnabled(_ value: Any?) -> Bool {
+    ((value as? NSNumber)?.intValue ?? 0) != 0
   }
 }

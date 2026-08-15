@@ -27,12 +27,33 @@ interface NativeContentSizeChangeEvent {
   height: number;
 }
 
+interface NativePasteAttachmentEvent {
+  kind?: "image" | "video" | "file";
+  uri?: string;
+  name?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  clipboardImage?: boolean;
+  error?: string;
+}
+
+export interface ForwardRichTextPastedAttachment {
+  kind?: "image" | "video" | "file";
+  uri?: string;
+  name?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  clipboardImage?: boolean;
+  error?: string;
+}
+
 interface NativeForwardRichTextInputProps {
   style?: StyleProp<TextStyle>;
   value: string;
   placeholder?: string;
   maxLength?: number;
   editable?: boolean;
+  pasteAttachmentsEnabled?: boolean;
   fontSize?: number;
   textColor?: string;
   placeholderTextColor?: string;
@@ -44,6 +65,9 @@ interface NativeForwardRichTextInputProps {
   onBlur?: () => void;
   onContentSizeChange?: (
     event: NativeSyntheticEvent<NativeContentSizeChangeEvent>,
+  ) => void;
+  onPasteAttachment?: (
+    event: NativeSyntheticEvent<NativePasteAttachmentEvent>,
   ) => void;
 }
 
@@ -64,6 +88,7 @@ export interface ForwardRichTextInputProps {
   placeholder?: string;
   maxLength?: number;
   editable?: boolean;
+  pasteAttachmentsEnabled?: boolean;
   fontSize?: number;
   textColor?: string;
   placeholderTextColor?: string;
@@ -71,6 +96,7 @@ export interface ForwardRichTextInputProps {
   onFocus?: () => void;
   onBlur?: () => void;
   onContentSizeChange?: (height: number) => void;
+  onPasteAttachment?: (attachment: ForwardRichTextPastedAttachment) => void;
 }
 
 type NativeComponent = React.ComponentType<
@@ -124,6 +150,7 @@ export const ForwardRichTextInput = forwardRef<
     placeholder,
     maxLength,
     editable = true,
+    pasteAttachmentsEnabled = false,
     fontSize = 16,
     textColor = "#1F3347",
     placeholderTextColor = "#8A969C",
@@ -131,6 +158,7 @@ export const ForwardRichTextInput = forwardRef<
     onFocus,
     onBlur,
     onContentSizeChange,
+    onPasteAttachment,
   },
   forwardedRef,
 ) {
@@ -165,6 +193,13 @@ export const ForwardRichTextInput = forwardRef<
       onContentSizeChange?.(event.nativeEvent.height);
     },
     [onContentSizeChange],
+  );
+
+  const handleNativePasteAttachment = useCallback(
+    (event: NativeSyntheticEvent<NativePasteAttachmentEvent>) => {
+      onPasteAttachment?.(event.nativeEvent);
+    },
+    [onPasteAttachment],
   );
 
   if (!NativeView) {
@@ -202,6 +237,7 @@ export const ForwardRichTextInput = forwardRef<
       placeholder={placeholder}
       maxLength={maxLength}
       editable={editable}
+      pasteAttachmentsEnabled={pasteAttachmentsEnabled}
       fontSize={fontSize}
       textColor={textColor}
       placeholderTextColor={placeholderTextColor}
@@ -210,6 +246,7 @@ export const ForwardRichTextInput = forwardRef<
       onFocus={onFocus}
       onBlur={onBlur}
       onContentSizeChange={handleNativeContentSize}
+      onPasteAttachment={handleNativePasteAttachment}
     />
   );
 });
