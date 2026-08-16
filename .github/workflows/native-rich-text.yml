@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - agent/fix-ios-xcode-26-share
       - stabilization/native-rich-text-input
 
 jobs:
@@ -51,11 +52,14 @@ jobs:
         run: ./gradlew :app:compileDebugKotlin --stacktrace
 
   ios-native-module:
-    runs-on: macos-15
-    timeout-minutes: 35
+    runs-on: macos-26
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Select Xcode 26.5
+        run: sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -87,13 +91,13 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           build
 
-      - name: Compile iOS share extension
+      - name: Compile iOS app and native extensions
         working-directory: ios
         run: >-
           xcodebuild
-          -project ForwardHockey14.xcodeproj
-          -target Forward14
-          -configuration Debug
+          -workspace ForwardHockey14.xcworkspace
+          -scheme ForwardHockey14
+          -configuration Release
           -sdk iphonesimulator
           CODE_SIGNING_ALLOWED=NO
           build
