@@ -1,0 +1,12 @@
+diff --git a/node_modules/expo-sqlite/ios/ExpoSQLite.podspec b/node_modules/expo-sqlite/ios/ExpoSQLite.podspec
+index 8591efd..a64f784 100644
+--- a/node_modules/expo-sqlite/ios/ExpoSQLite.podspec
++++ b/node_modules/expo-sqlite/ios/ExpoSQLite.podspec
+@@ -62,6 +62,7 @@ Pod::Spec.new do |s|
+   end
+ 
+   # Swift/Objective-C compatibility
++  s.static_framework = true
+   s.pod_target_xcconfig = {
+     'DEFINES_MODULE' => 'YES',
+     'OTHER_CFLAGS' => '$(inherited) ' + sqlite_cflags,
