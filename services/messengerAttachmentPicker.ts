@@ -215,6 +215,7 @@ function originalPhotoType(
     ?.toLowerCase();
   const byMime: Record<string, string> = {
     "image/avif": "avif",
+    "image/gif": "gif",
     "image/heic": "heic",
     "image/heif": "heic",
     "image/jpeg": "jpg",
@@ -226,6 +227,7 @@ function originalPhotoType(
   }
   const byExtension: Record<string, string> = {
     avif: "image/avif",
+    gif: "image/gif",
     heic: "image/heic",
     heif: "image/heif",
     jpeg: "image/jpeg",
@@ -325,7 +327,8 @@ async function compressedPhoto(
     originalType &&
     originalSize !== null &&
     originalSize <= MAX_MESSENGER_UPLOAD_BYTES &&
-    (originalSize <= PHOTO_COMPRESSION_SKIP_BYTES ||
+    (originalType.mimeType === "image/gif" ||
+      originalSize <= PHOTO_COMPRESSION_SKIP_BYTES ||
       (expectedSavings !== null &&
         expectedSavings < MIN_EXPECTED_COMPRESSION_SAVINGS))
   ) {
@@ -647,7 +650,7 @@ function sharedFileKind(
   if (mimeType.startsWith("video/")) return "video";
   const extension = name.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
   if (
-    ["avif", "heic", "heif", "jpeg", "jpg", "png", "webp"].includes(
+    ["avif", "gif", "heic", "heif", "jpeg", "jpg", "png", "webp"].includes(
       extension || "",
     )
   ) {
@@ -669,6 +672,7 @@ function sharedFileMimeType(
   const extension = name.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
   const byExtension: Record<string, string> = {
     avif: "image/avif",
+    gif: "image/gif",
     heic: "image/heic",
     heif: "image/heif",
     jpeg: "image/jpeg",

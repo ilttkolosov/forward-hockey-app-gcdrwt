@@ -17,11 +17,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
+import SavedMessagesAvatar from "../../features/messenger/SavedMessagesAvatar";
 import {
   cacheMessengerRooms,
   loadCachedMessengerRooms,
 } from "../../features/messenger/repository";
 import type { MessengerRoom } from "../../features/messenger/types";
+import { useTypingDots } from "../../features/messenger/useTypingDots";
 import {
   getMessengerRooms,
   isMessengerConnectionError,
@@ -93,11 +95,17 @@ function formatRoomActivityTime(iso: string | undefined): string {
     : `${date}.${String(activity.getFullYear()).slice(-2)}`;
 }
 
-function typingLabel(names: readonly string[]): string {
+function typingLabel(
+  names: readonly string[],
+  showNames: boolean,
+  dots: string,
+): string {
   if (names.length === 0) return "";
-  if (names.length === 1) return `${names[0]} печатает…`;
-  if (names.length === 2) return `${names[0]} и ${names[1]} печатают…`;
-  return `${names[0]}, ${names[1]} и ещё ${names.length - 2} печатают…`;
+  if (!showNames)
+    return `${names.length > 1 ? "Печатают" : "Печатает"}${dots}`;
+  if (names.length === 1) return `${names[0]} печатает${dots}`;
+  if (names.length === 2) return `${names[0]} и ${names[1]} печатают${dots}`;
+  return `${names[0]}, ${names[1]} и ещё ${names.length - 2} печатают${dots}`;
 }
 
 export default function MessengerRoomsScreen() {
@@ -113,6 +121,11 @@ export default function MessengerRoomsScreen() {
   const [typingByRoom, setTypingByRoom] = useState<
     Record<string, Record<string, string>>
   >({});
+  const typingDots = useTypingDots(
+    Object.values(typingByRoom).some(
+      (roomTyping) => Object.keys(roomTyping).length > 0,
+    ),
+  );
   const typingTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const connectionSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -489,6 +502,7 @@ export default function MessengerRoomsScreen() {
         }
         renderItem={({ item, index }) => {
           const direct = item.room_type === "direct" || item.kind === "direct";
+          const saved = item.room_type === "saved";
           const preset = isPresetRoom(item);
           const hasNextRoom = index < orderedRooms.length - 1;
           const nextRoom = orderedRooms[index + 1];
@@ -503,7 +517,11 @@ export default function MessengerRoomsScreen() {
             item.last_message?.created_at,
           );
           const typingNames = Object.values(typingByRoom[item.id] || {});
-          const activeTypingLabel = typingLabel(typingNames);
+          const activeTypingLabel = typingLabel(
+            typingNames,
+            !direct && !saved && (item.member_count ?? 0) >= 3,
+            typingDots,
+          );
           return (
             <>
               <TouchableOpacity
@@ -517,7 +535,9 @@ export default function MessengerRoomsScreen() {
                     : ""
                 }`}
               >
-                {direct && item.peer ? (
+                {saved ? (
+                  <SavedMessagesAvatar size={62} />
+                ) : direct && item.peer ? (
                   <AuthenticatedAvatar
                     displayName={item.peer.display_name}
                     avatarUrl={item.peer.avatar_url}

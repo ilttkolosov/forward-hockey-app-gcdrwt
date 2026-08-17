@@ -202,6 +202,61 @@ diff --git a/node_modules/expo-share-intent/plugin/build/ios/ShareExtensionViewC
 +      redirectToHostApp(type: .text)
 +    } else {
 +      dismissWithError(message: "No supported content found")
+@@ -560,6 +553,9 @@
+   {
+     let asset = AVAsset(url: forVideo)
+     let thumbnailPath = getThumbnailPath(for: forVideo)
+-    let duration = (CMTimeGetSeconds(asset.duration) * 1000).rounded()
++    let durationSeconds = CMTimeGetSeconds(asset.duration)
++    let duration: Double? = durationSeconds.isFinite && durationSeconds >= 0
++      ? (durationSeconds * 1000).rounded()
++      : nil
+     var trackWidth: Int? = nil
+     var trackHeight: Int? = nil
+@@ -582,12 +578,20 @@
+-    var saved = false
++    var thumbnail: String? = nil
+     let assetImgGenerate = AVAssetImageGenerator(asset: asset)
+     assetImgGenerate.appliesPreferredTrackTransform = true
+     assetImgGenerate.maximumSize = CGSize(width: 360, height: 360)
+-    do {
+-      let img = try assetImgGenerate.copyCGImage(
+-        at: CMTimeMakeWithSeconds(600, preferredTimescale: Int32(1.0)), actualTime: nil)
+-      try UIImage.pngData(UIImage(cgImage: img))()?.write(to: thumbnailPath)
+-      saved = true
+-    } catch {
+-      saved = false
++    let preferredSecond = durationSeconds.isFinite && durationSeconds > 0
++      ? min(max(durationSeconds * 0.25, 0), max(durationSeconds - 0.05, 0))
++      : 0
++    for second in [preferredSecond, 0] {
++      do {
++        let img = try assetImgGenerate.copyCGImage(
++          at: CMTime(seconds: second, preferredTimescale: 600), actualTime: nil)
++        if let data = UIImage(cgImage: img).pngData() {
++          try data.write(to: thumbnailPath)
++          thumbnail = thumbnailPath.absoluteString
++          break
++        }
++      } catch {
++        NSLog("[WARN] Cannot create video thumbnail at \(second)s: \(error.localizedDescription)")
++      }
+     }
+@@ -595,6 +599,9 @@
+-    return saved
+-      ? SharedMediaFile(
+-        path: forVideo.absoluteString, thumbnail: thumbnailPath.absoluteString, fileName: fileName,
+-        fileSize: fileSize, width: trackWidth, height: trackHeight, duration: duration,
+-        mimeType: mimeType, type: .video) : nil
++    // A preview frame is optional. Telegram frequently provides short or
++    // lazily-backed videos for which AVAssetImageGenerator cannot make a
++    // thumbnail immediately; dropping the whole asset here used to leave only
++    // the caption in the share payload.
++    return SharedMediaFile(
++      path: forVideo.absoluteString, thumbnail: thumbnail, fileName: fileName,
++      fileSize: fileSize, width: trackWidth, height: trackHeight, duration: duration,
++      mimeType: mimeType, type: .video)
+   }
 @@ -784 +776,0 @@
 -
 diff --git a/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift b/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift

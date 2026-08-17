@@ -54,6 +54,8 @@ import MessengerAttachmentView from "../../../features/messenger/MessengerAttach
 import MessengerLinkPreview, {
   MessengerLinkifiedText,
 } from "../../../features/messenger/MessengerLinkPreview";
+import SavedMessagesAvatar from "../../../features/messenger/SavedMessagesAvatar";
+import { useTypingDots } from "../../../features/messenger/useTypingDots";
 import {
   ForwardRichTextInput,
   type ForwardRichTextInputHandle,
@@ -238,6 +240,7 @@ function fallbackUploadMimeType(
   const extension = fileName.split(".").pop()?.toLowerCase();
   const known: Record<string, string> = {
     avif: "image/avif",
+    gif: "image/gif",
     heic: "image/heic",
     heif: "image/heif",
     jpeg: "image/jpeg",
@@ -433,11 +436,18 @@ function participantCountText(count: number | null): string {
   return `${count} ${noun}`;
 }
 
-function typingUsersText(names: readonly string[]): string {
-  if (names.length === 1) return `${names[0]} печатает…`;
-  if (names.length === 2) return `${names[0]} и ${names[1]} печатают…`;
+function typingUsersText(
+  names: readonly string[],
+  showNames: boolean,
+  dots: string,
+): string {
+  if (!showNames) {
+    return `${names.length > 1 ? "Печатают" : "Печатает"}${dots}`;
+  }
+  if (names.length === 1) return `${names[0]} печатает${dots}`;
+  if (names.length === 2) return `${names[0]} и ${names[1]} печатают${dots}`;
   if (names.length > 2)
-    return `${names[0]}, ${names[1]} и ещё ${names.length - 2} печатают…`;
+    return `${names[0]}, ${names[1]} и ещё ${names.length - 2} печатают${dots}`;
   return "";
 }
 
@@ -4316,9 +4326,17 @@ export default function MessengerRoomScreen() {
   }, [forwardContacts, forwardRooms]);
 
   const typingNames = Object.values(typingByUser);
+  const typingDots = useTypingDots(typingNames.length > 0);
+  const showTypingNames = Boolean(
+    roomType &&
+      roomType !== "direct" &&
+      roomType !== "saved" &&
+      roomMemberCount !== null &&
+      roomMemberCount >= 3,
+  );
   const roomSubtitle =
     typingNames.length > 0
-      ? typingUsersText(typingNames)
+      ? typingUsersText(typingNames, showTypingNames, typingDots)
       : !initialDataReady || !roomDetailsReady || !roomType
         ? "Обновление"
         : offline || !realtimeConnected
@@ -4527,12 +4545,16 @@ export default function MessengerRoomScreen() {
                   : "Информация о чате обновляется"
             }
           >
-            <AuthenticatedAvatar
-              displayName={roomTitle}
-              avatarUrl={roomAvatarUrl}
-              accessToken={session?.access_token}
-              size={42}
-            />
+            {roomType === "saved" ? (
+              <SavedMessagesAvatar size={42} />
+            ) : (
+              <AuthenticatedAvatar
+                displayName={roomTitle}
+                avatarUrl={roomAvatarUrl}
+                accessToken={session?.access_token}
+                size={42}
+              />
+            )}
             <View style={styles.headerText}>
               <Text style={styles.title} numberOfLines={1}>
                 {roomTitle}
@@ -5022,9 +5044,7 @@ export default function MessengerRoomScreen() {
                     onPress={() => void forwardToSaved()}
                     disabled={Boolean(forwardBusy)}
                   >
-                    <View style={styles.forwardSavedIcon}>
-                      <Icon name="star" size={22} color="#FFFFFF" />
-                    </View>
+                    <SavedMessagesAvatar size={44} />
                     <View style={styles.forwardTargetText}>
                       <Text style={styles.forwardTargetTitle}>Избранное</Text>
                       <Text style={styles.forwardTargetSubtitle}>
@@ -6179,14 +6199,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 22,
     backgroundColor: "#EAF3FF",
-  },
-  forwardSavedIcon: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 22,
-    backgroundColor: "#F2B233",
   },
   forwardTargetText: { flex: 1, minWidth: 0 },
   forwardTargetTitle: { color: colors.text, fontSize: 15, fontWeight: "800" },

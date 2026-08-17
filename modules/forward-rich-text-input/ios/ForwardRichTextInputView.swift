@@ -78,6 +78,13 @@ fileprivate final class ForwardAttributedTextView: UITextView {
 }
 
 public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
+  private struct EmbeddedImage {
+    let range: NSRange
+    let data: Data
+    let contentType: UTType
+    let suggestedName: String
+  }
+
   let onValueChange = EventDispatcher()
   let onFocus = EventDispatcher()
   let onBlur = EventDispatcher()
@@ -210,6 +217,12 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
   }
 
   public func textViewDidChange(_ textView: UITextView) {
+    // Memoji stickers and Genmoji are inserted by the iOS text system as an
+    // attributed-string attachment, not as ordinary characters. If they are
+    // serialized through `textView.text`, only U+FFFC reaches JavaScript and
+    // both users see an empty bubble. Promote the embedded image to the normal
+    // messenger attachment flow before emitting the residual caption text.
+    if captureEmbeddedImageIfNeeded(from: textView) { return }
     updatePlaceholder()
     emitValueChange()
     emitContentHeight()
@@ -436,11 +449,12 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
     guard pasteAttachmentsEnabled else { return false }
     let pasteboard = UIPasteboard.general
 
-    if pasteboard.hasImages {
-      onPasteAttachment([
-        "kind": "image",
-        "clipboardImage": true
-      ])
+    if let image = pasteboard.image, let data = image.pngData() {
+      cacheAndEmitPastedImageData(
+        data,
+        contentType: .png,
+        suggestedName: "sticker-\(Int(Date().timeIntervalSince1970)).png"
+      )
       return true
     }
 
@@ -516,6 +530,193 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
         self.emitPasteAttachmentError(error.localizedDescription)
       }
     }
+  }
+
+  private func cacheAndEmitPastedImageData(
+    _ data: Data,
+    contentType: UTType,
+    suggestedName: String
+  ) {
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      guard let self else { return }
+      do {
+        let payload = try self.cachePastedImageData(
+          data,
+          contentType: contentType,
+          suggestedName: suggestedName
+        )
+        DispatchQueue.main.async { [weak self] in
+          self?.onPasteAttachment(payload)
+        }
+      } catch {
+        self.emitPasteAttachmentError(error.localizedDescription)
+      }
+    }
+  }
+
+  private func captureEmbeddedImageIfNeeded(from textView: UITextView) -> Bool {
+    guard pasteAttachmentsEnabled,
+      let embedded = firstEmbeddedImage(in: textView.attributedText)
+    else {
+      return false
+    }
+
+    do {
+      let payload = try cachePastedImageData(
+        embedded.data,
+        contentType: embedded.contentType,
+        suggestedName: embedded.suggestedName
+      )
+      suppressEvents = true
+      textView.textStorage.deleteCharacters(in: embedded.range)
+      textView.selectedRange = NSRange(
+        location: min(embedded.range.location, textView.textStorage.length),
+        length: 0
+      )
+      suppressEvents = false
+      updateTypingAttributes()
+      updatePlaceholder()
+      emitValueChange()
+      emitContentHeight()
+      onPasteAttachment(payload)
+      return true
+    } catch {
+      emitPasteAttachmentError(error.localizedDescription)
+      return false
+    }
+  }
+
+  private func firstEmbeddedImage(in attributed: NSAttributedString?) -> EmbeddedImage? {
+    guard let attributed, attributed.length > 0 else { return nil }
+    var result: EmbeddedImage?
+    attributed.enumerateAttributes(
+      in: NSRange(location: 0, length: attributed.length),
+      options: []
+    ) { attributes, range, stop in
+      if let attachment = attributes[.attachment] as? NSTextAttachment,
+        let normalized = self.normalizedAttachmentImage(attachment, at: range.location) {
+        result = EmbeddedImage(
+          range: range,
+          data: normalized.data,
+          contentType: normalized.contentType,
+          suggestedName: normalized.name
+        )
+        stop.pointee = true
+        return
+      }
+
+      if #available(iOS 18.0, *),
+        let glyph = attributes[.adaptiveImageGlyph] as? NSAdaptiveImageGlyph {
+        let sourceData = glyph.imageContent
+        if let image = UIImage(data: sourceData), let png = image.pngData() {
+          result = EmbeddedImage(
+            range: range,
+            data: png,
+            contentType: .png,
+            suggestedName: "adaptive-sticker-\(glyph.contentIdentifier).png"
+          )
+        } else {
+          result = EmbeddedImage(
+            range: range,
+            data: sourceData,
+            contentType: NSAdaptiveImageGlyph.contentType,
+            suggestedName: "adaptive-sticker-\(glyph.contentIdentifier).heic"
+          )
+        }
+        stop.pointee = true
+      }
+    }
+    return result
+  }
+
+  private func normalizedAttachmentImage(
+    _ attachment: NSTextAttachment,
+    at characterIndex: Int
+  ) -> (data: Data, contentType: UTType, name: String)? {
+    let wrappedName = attachment.fileWrapper?.preferredFilename
+    let declaredType = attachment.fileType.flatMap { UTType($0) }
+      ?? wrappedName.flatMap { UTType(filenameExtension: URL(fileURLWithPath: $0).pathExtension) }
+    let originalData = attachment.contents ?? attachment.fileWrapper?.regularFileContents
+
+    if let originalData, originalData.starts(with: Data("GIF8".utf8)) {
+      return (
+        originalData,
+        .gif,
+        wrappedName ?? "sticker-\(Int(Date().timeIntervalSince1970)).gif"
+      )
+    }
+
+    let image = attachment.image ?? attachment.image(
+      forBounds: attachment.bounds,
+      textContainer: editor.textContainer,
+      characterIndex: characterIndex
+    ) ?? originalData.flatMap { UIImage(data: $0) }
+    if let image, let png = image.pngData() {
+      return (
+        png,
+        .png,
+        "sticker-\(Int(Date().timeIntervalSince1970)).png"
+      )
+    }
+
+    guard let originalData,
+      let declaredType,
+      declaredType.conforms(to: .image)
+    else {
+      return nil
+    }
+    let fileExtension = declaredType.preferredFilenameExtension ?? "img"
+    return (
+      originalData,
+      declaredType,
+      wrappedName ?? "sticker-\(Int(Date().timeIntervalSince1970)).\(fileExtension)"
+    )
+  }
+
+  private func cachePastedImageData(
+    _ data: Data,
+    contentType: UTType,
+    suggestedName: String
+  ) throws -> [String: Any] {
+    guard !data.isEmpty else {
+      throw NSError(
+        domain: "ForwardRichTextInput",
+        code: 2,
+        userInfo: [NSLocalizedDescriptionKey: "Вставленное изображение пусто"]
+      )
+    }
+    let fileManager = FileManager.default
+    guard let cachesDirectory = fileManager.urls(
+      for: .cachesDirectory,
+      in: .userDomainMask
+    ).first else {
+      throw NSError(
+        domain: "ForwardRichTextInput",
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "Локальное хранилище для вставки файла недоступно"]
+      )
+    }
+    let clipboardDirectory = cachesDirectory.appendingPathComponent(
+      "forward-messenger-clipboard",
+      isDirectory: true
+    )
+    try fileManager.createDirectory(
+      at: clipboardDirectory,
+      withIntermediateDirectories: true
+    )
+    let safeName = URL(fileURLWithPath: suggestedName).lastPathComponent
+    let destinationURL = clipboardDirectory.appendingPathComponent(
+      "\(UUID().uuidString)-\(safeName)",
+      isDirectory: false
+    )
+    try data.write(to: destinationURL, options: .atomic)
+    return [
+      "kind": "image",
+      "uri": destinationURL.absoluteString,
+      "name": safeName,
+      "mimeType": contentType.preferredMIMEType ?? "image/png",
+      "sizeBytes": NSNumber(value: data.count)
+    ]
   }
 
   private func cachePastedFile(

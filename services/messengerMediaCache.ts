@@ -55,6 +55,7 @@ function elapsedSince(startedAt: number): number {
 function extensionFor(media: MessengerMedia): string {
   const byMime: Record<string, string> = {
     "image/jpeg": "jpg",
+    "image/gif": "gif",
     "image/png": "png",
     "image/webp": "webp",
     "image/heic": "heic",
