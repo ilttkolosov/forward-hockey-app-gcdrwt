@@ -8,8 +8,10 @@ diff --git a/node_modules/expo-share-intent/plugin/build/ios/ShareExtensionViewC
 @@ -71 +74 @@
 -    Task.detached {
 +    await Task.detached {
-@@ -77 +80 @@
+@@ -76,2 +79,2 @@
+-          _ = self.copyFile(at: url, to: tmp)
 -          Task { @MainActor in
++          _ = await self.copyFile(at: url, to: tmp)
 +          await Task { @MainActor in
 @@ -79 +82 @@
 -          }
@@ -164,7 +166,7 @@ diff --git a/node_modules/expo-share-intent/plugin/build/ios/ShareExtensionViewC
 @@ -433 +400 @@
 -    }
 +    }.value
-@@ -456,3 +423,26 @@
+@@ -456,3 +423,17 @@
 -    if index == (content.attachments?.count)! - 1 {
 -      let userDefaults = UserDefaults(suiteName: self.hostAppGroupIdentifier)
 -      userDefaults?.set(self.toData(data: self.sharedMedia), forKey: self.sharedKey)
@@ -185,30 +187,22 @@ diff --git a/node_modules/expo-share-intent/plugin/build/ios/ShareExtensionViewC
 +      } else {
 +        userDefaults?.removeObject(forKey: sharedKey + "Text")
 +      }
-+      userDefaults?.synchronize()
+@@ -460 +441,13 @@
+-      self.redirectToHostApp(type: .file)
 +      let redirectType: RedirectType =
 +        sharedMedia.allSatisfy({ $0.type == .file }) ? .file : .media
 +      redirectToHostApp(type: redirectType)
-+      return
-+    }
-+
-+    if !sharedWebUrl.isEmpty {
++    } else if !sharedWebUrl.isEmpty {
 +      userDefaults?.set(toData(data: sharedWebUrl), forKey: sharedKey)
-@@ -460 +450,2 @@
--      self.redirectToHostApp(type: .file)
++      userDefaults?.synchronize()
 +      redirectToHostApp(type: .weburl)
-+      return
-@@ -461,0 +453,9 @@
-+
-+    if !sharedText.isEmpty {
++    } else if !sharedText.isEmpty {
 +      userDefaults?.set(sharedText, forKey: sharedKey)
 +      userDefaults?.synchronize()
 +      redirectToHostApp(type: .text)
-+      return
-+    }
-+
-+    dismissWithError(message: "No supported content found")
-@@ -784 +783,0 @@
++    } else {
++      dismissWithError(message: "No supported content found")
+@@ -784 +776,0 @@
 -
 diff --git a/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift b/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift
 --- a/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift
