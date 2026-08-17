@@ -164,7 +164,7 @@ diff --git a/node_modules/expo-share-intent/plugin/build/ios/ShareExtensionViewC
 @@ -433 +400 @@
 -    }
 +    }.value
-@@ -456,3 +423,24 @@
+@@ -456,3 +423,26 @@
 -    if index == (content.attachments?.count)! - 1 {
 -      let userDefaults = UserDefaults(suiteName: self.hostAppGroupIdentifier)
 -      userDefaults?.set(self.toData(data: self.sharedMedia), forKey: self.sharedKey)
@@ -186,17 +186,19 @@ diff --git a/node_modules/expo-share-intent/plugin/build/ios/ShareExtensionViewC
 +        userDefaults?.removeObject(forKey: sharedKey + "Text")
 +      }
 +      userDefaults?.synchronize()
-+      redirectToHostApp(type: sharedMedia.allSatisfy { $0.type == .file } ? .file : .media)
++      let redirectType: RedirectType =
++        sharedMedia.allSatisfy({ $0.type == .file }) ? .file : .media
++      redirectToHostApp(type: redirectType)
 +      return
 +    }
 +
 +    if !sharedWebUrl.isEmpty {
 +      userDefaults?.set(toData(data: sharedWebUrl), forKey: sharedKey)
-@@ -460 +448,2 @@
+@@ -460 +450,2 @@
 -      self.redirectToHostApp(type: .file)
 +      redirectToHostApp(type: .weburl)
 +      return
-@@ -461,0 +451,9 @@
+@@ -461,0 +453,9 @@
 +
 +    if !sharedText.isEmpty {
 +      userDefaults?.set(sharedText, forKey: sharedKey)
@@ -206,7 +208,7 @@ diff --git a/node_modules/expo-share-intent/plugin/build/ios/ShareExtensionViewC
 +    }
 +
 +    dismissWithError(message: "No supported content found")
-@@ -784 +781,0 @@
+@@ -784 +783,0 @@
 -
 diff --git a/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift b/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift
 --- a/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift
