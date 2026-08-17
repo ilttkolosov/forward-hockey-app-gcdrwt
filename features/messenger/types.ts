@@ -83,7 +83,7 @@ export interface MessengerRoom {
   kind: string;
   title: string;
   sort_order: number;
-  room_type: "group" | "direct" | "private_group";
+  room_type: "group" | "direct" | "private_group" | "saved";
   avatar_url: string | null;
   peer: null | {
     id: string;

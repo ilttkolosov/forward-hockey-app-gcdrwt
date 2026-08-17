@@ -89,6 +89,14 @@ interface MessengerRoomMessagesSyncResponse extends MessengerMessagesResponse {
   reconciled_items: MessengerMessage[];
 }
 
+export interface MessengerMessageSearchResponse {
+  items: MessengerMessage[];
+  page: {
+    has_more: boolean;
+    next_cursor: string | null;
+  };
+}
+
 export class MessengerApiError extends Error {
   constructor(
     message: string,
@@ -858,6 +866,30 @@ export function getMessengerMessage(messageId: string) {
   );
 }
 
+export function searchMessengerMessages(options: {
+  query?: string;
+  roomId?: string;
+  authorUserId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  cursor?: string;
+  limit?: number;
+}) {
+  const query = new URLSearchParams();
+  const text = options.query?.trim();
+  if (text) query.set("q", text);
+  if (options.roomId) query.set("room_id", options.roomId);
+  if (options.authorUserId) query.set("author_user_id", options.authorUserId);
+  if (options.dateFrom) query.set("date_from", options.dateFrom);
+  if (options.dateTo) query.set("date_to", options.dateTo);
+  if (options.cursor) query.set("cursor", options.cursor);
+  query.set("limit", String(options.limit ?? 50));
+  return messengerRequest<MessengerMessageSearchResponse>(
+    `/chat/messages/search?${query.toString()}`,
+    { transportPriority: "foreground" },
+  );
+}
+
 export function updateMessengerMessage(messageId: string, text: string) {
   return messengerRequest<{ message: MessengerMessage }>(
     `/chat/messages/${encodeURIComponent(messageId)}`,
@@ -1623,6 +1655,20 @@ export function forwardMessengerMessage(
       }),
     },
   );
+}
+
+export function saveMessengerMessage(
+  messageId: string,
+  clientMessageId: string,
+) {
+  return messengerRequest<{
+    message: MessengerMessage;
+    room: MessengerRoom;
+    created: boolean;
+  }>(`/chat/messages/${messageId}/save`, {
+    method: "POST",
+    body: JSON.stringify({ client_message_id: clientMessageId }),
+  });
 }
 
 export function getMessengerMessageReceipts(messageId: string) {

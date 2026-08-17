@@ -1,10 +1,13 @@
 package com.forwardhockey.richtext
 
 import android.annotation.SuppressLint
+import android.content.ClipDescription
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Build
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
@@ -20,6 +23,10 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.inputmethod.InputMethodManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputConnectionWrapper
+import android.view.inputmethod.InputContentInfo
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
@@ -29,6 +36,31 @@ import expo.modules.kotlin.views.ExpoView
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
+import java.io.File
+import java.util.UUID
+
+private class ForwardRichEditText(context: Context) : EditText(context) {
+  var richContentEnabled = false
+  var onRichContent: ((InputContentInfo, Int) -> Boolean)? = null
+
+  override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
+    val connection = super.onCreateInputConnection(outAttrs) ?: return null
+    if (!richContentEnabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1) {
+      return connection
+    }
+    outAttrs.contentMimeTypes = arrayOf("image/*")
+    return object : InputConnectionWrapper(connection, false) {
+      override fun commitContent(
+        inputContentInfo: InputContentInfo,
+        flags: Int,
+        opts: android.os.Bundle?
+      ): Boolean {
+        if (onRichContent?.invoke(inputContentInfo, flags) == true) return true
+        return super.commitContent(inputContentInfo, flags, opts)
+      }
+    }
+  }
+}
 
 private enum class ForwardTextFormat(val token: String, val title: String) {
   BOLD("\u2063\u2063", "Жирный"),
@@ -60,8 +92,9 @@ class ForwardRichTextInputView(
   val onFocus by EventDispatcher<Unit>()
   val onBlur by EventDispatcher<Unit>()
   val onContentSizeChange by EventDispatcher<Map<String, Any>>()
+  val onPasteAttachment by EventDispatcher<Map<String, Any>>()
 
-  private val editor = EditText(context)
+  private val editor = ForwardRichEditText(context)
   private var suppressEvents = false
   private var maximumLength = 4000
   private var lastContentHeight = -1
@@ -116,6 +149,7 @@ class ForwardRichTextInputView(
     editor.setHintTextColor(Color.rgb(138, 150, 156))
     editor.highlightColor = Color.argb(88, 47, 128, 237)
     editor.setCustomSelectionActionModeCallback(selectionActionModeCallback)
+    editor.onRichContent = ::acceptRichContent
     editor.setOnFocusChangeListener { _, hasFocus ->
       if (hasFocus) onFocus(Unit) else onBlur(Unit)
     }
@@ -162,6 +196,12 @@ class ForwardRichTextInputView(
     editor.isCursorVisible = value
   }
 
+  fun setPasteAttachmentsEnabled(value: Boolean) {
+    if (editor.richContentEnabled == value) return
+    editor.richContentEnabled = value
+    editor.restartInputConnection()
+  }
+
   fun setEditorFontSize(value: Float) {
     editor.textSize = value
     emitContentHeight()
@@ -197,6 +237,109 @@ class ForwardRichTextInputView(
     editor.clearFocus()
     val inputMethod = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
     inputMethod?.hideSoftInputFromWindow(editor.windowToken, 0)
+  }
+
+  private fun acceptRichContent(content: InputContentInfo, flags: Int): Boolean {
+    if (!editor.richContentEnabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1) {
+      return false
+    }
+    val description = content.description
+    val mimeType = preferredImageMimeType(description) ?: return false
+    val permissionRequested =
+      flags and InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION != 0
+    if (permissionRequested) {
+      try {
+        content.requestPermission()
+      } catch (_: SecurityException) {
+        onPasteAttachment(mapOf("error" to "Не удалось получить доступ к стикеру"))
+        return true
+      }
+    }
+    val uri = content.contentUri
+    Thread {
+      try {
+        val resolver = context.contentResolver
+        val metadata = queryContentMetadata(uri)
+        val extension = extensionForMimeType(mimeType)
+        val directory = File(context.cacheDir, "forward-rich-content")
+        if (!directory.exists() && !directory.mkdirs()) {
+          throw IllegalStateException("Could not create rich content cache")
+        }
+        val target = File(directory, "sticker-${UUID.randomUUID()}.$extension")
+        val input = resolver.openInputStream(uri)
+          ?: throw IllegalStateException("Could not open rich content")
+        input.use { source ->
+          target.outputStream().use { output -> source.copyTo(output) }
+        }
+        val displayName = metadata.first?.takeIf { it.isNotBlank() }
+          ?: "sticker-${System.currentTimeMillis()}.$extension"
+        val sizeBytes = target.length().takeIf { it > 0 } ?: metadata.second
+        post {
+          val payload = mutableMapOf<String, Any>(
+            "kind" to "image",
+            "uri" to Uri.fromFile(target).toString(),
+            "name" to displayName,
+            "mimeType" to mimeType
+          )
+          if (sizeBytes != null && sizeBytes >= 0) payload["sizeBytes"] = sizeBytes.toDouble()
+          onPasteAttachment(payload)
+        }
+      } catch (_: Exception) {
+        post {
+          onPasteAttachment(mapOf("error" to "Не удалось вставить стикер или изображение"))
+        }
+      } finally {
+        if (permissionRequested) {
+          try {
+            content.releasePermission()
+          } catch (_: Exception) {
+            // Some keyboards grant a process-scoped URI that needs no release.
+          }
+        }
+      }
+    }.start()
+    return true
+  }
+
+  private fun preferredImageMimeType(description: ClipDescription): String? {
+    for (index in 0 until description.mimeTypeCount) {
+      val value = description.getMimeType(index)
+      if (value.startsWith("image/")) return value
+    }
+    return null
+  }
+
+  private fun extensionForMimeType(mimeType: String): String = when (mimeType.lowercase()) {
+    "image/gif" -> "gif"
+    "image/webp" -> "webp"
+    "image/heic", "image/heif" -> "heic"
+    "image/jpeg" -> "jpg"
+    else -> "png"
+  }
+
+  private fun queryContentMetadata(uri: Uri): Pair<String?, Long?> {
+    var name: String? = null
+    var size: Long? = null
+    context.contentResolver.query(
+      uri,
+      arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+      null,
+      null,
+      null
+    )?.use { cursor ->
+      if (cursor.moveToFirst()) {
+        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (nameIndex >= 0 && !cursor.isNull(nameIndex)) name = cursor.getString(nameIndex)
+        val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+        if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
+      }
+    }
+    return name to size
+  }
+
+  private fun EditText.restartInputConnection() {
+    val inputMethod = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+    inputMethod?.restartInput(this)
   }
 
   override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {

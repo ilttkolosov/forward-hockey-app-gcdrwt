@@ -268,6 +268,51 @@ export function cacheMessengerRooms(
   return write;
 }
 
+/** Upserts one authoritative room without evicting the rest of the room cache. */
+export function cacheMessengerRoomSnapshot(
+  db: SQLiteDatabase,
+  room: MessengerRoom,
+): Promise<MessengerRoom> {
+  return enqueueMessengerWrite(db, async () => {
+    const readState = await db.getFirstAsync<
+      Pick<ReadStateRow, "local_read_sequence">
+    >(
+      `SELECT local_read_sequence
+         FROM messenger_room_read_state
+        WHERE room_id = ?`,
+      room.id,
+    );
+    const nextRoom = reconcileRoomWithLocalRead(
+      room,
+      readState?.local_read_sequence || room.last_read_sequence,
+    );
+    await db.runAsync(
+      `INSERT INTO messenger_rooms
+        (id, team_id, team_name, kind, title, sort_order, unread_count, updated_at, raw_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         team_id = excluded.team_id,
+         team_name = excluded.team_name,
+         kind = excluded.kind,
+         title = excluded.title,
+         sort_order = excluded.sort_order,
+         unread_count = excluded.unread_count,
+         updated_at = excluded.updated_at,
+         raw_json = excluded.raw_json`,
+      nextRoom.id,
+      nextRoom.team_id,
+      nextRoom.team_name,
+      nextRoom.kind,
+      nextRoom.title,
+      nextRoom.sort_order,
+      nextRoom.unread_count,
+      new Date().toISOString(),
+      JSON.stringify(nextRoom),
+    );
+    return nextRoom;
+  });
+}
+
 export function markCachedMessengerRoomRead(
   db: SQLiteDatabase,
   roomId: string,

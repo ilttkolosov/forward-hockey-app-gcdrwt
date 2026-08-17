@@ -68,6 +68,7 @@ import {
 import {
   cacheMessengerDeliveryUpdates,
   cacheMessengerMessages,
+  cacheMessengerRoomSnapshot,
   cacheUpdatedMessengerMessage,
   enqueueMessengerText,
   isMessengerRoomHistoryComplete,
@@ -108,6 +109,8 @@ import {
   isMessengerUploadCancelledError,
   messengerErrorMessage,
   removeMessengerReaction,
+  saveMessengerMessage,
+  searchMessengerMessages,
   sendMessengerLocation,
   sendMessengerMedia,
   setMessengerReaction,
@@ -117,9 +120,14 @@ import {
 import { queueMessengerReadReceipt } from "../../../services/messengerReadSync";
 import {
   getMessengerRealtimeConnectionState,
+  sendMessengerTyping,
   setMessengerActiveRoom,
   subscribeMessengerRealtime,
 } from "../../../services/messengerRealtime";
+import {
+  DEFAULT_MESSENGER_QUICK_REACTION,
+  getMessengerQuickReaction,
+} from "../../../services/messengerQuickReaction";
 import { messengerLog } from "../../../services/messengerLogger";
 import { prioritizeMessengerForegroundTransport } from "../../../services/messengerTransport";
 import {
@@ -243,12 +251,14 @@ function SwipeableMessage({
   animateEntry,
   onReply,
   onLongPress,
+  onDoubleTap,
 }: {
   children: React.ReactNode;
   enabled: boolean;
   animateEntry?: boolean;
   onReply: () => void;
   onLongPress: () => void;
+  onDoubleTap?: () => void;
 }) {
   const translateX = useRef(new Animated.Value(0)).current;
   const entryProgress = useRef(
@@ -292,8 +302,17 @@ function SwipeableMessage({
       .maxDistance(12)
       .onStart(onLongPress)
       .runOnJS(true);
-    return Gesture.Race(swipe, hold);
-  }, [enabled, onLongPress, onReply, resetPosition, translateX]);
+    const doubleTap = Gesture.Tap()
+      .enabled(Boolean(onDoubleTap))
+      .numberOfTaps(2)
+      .maxDuration(260)
+      .maxDelay(260)
+      .onEnd((_event, success) => {
+        if (success) onDoubleTap?.();
+      })
+      .runOnJS(true);
+    return Gesture.Race(swipe, hold, doubleTap);
+  }, [enabled, onDoubleTap, onLongPress, onReply, resetPosition, translateX]);
 
   return (
     <View style={styles.swipeShell}>
@@ -367,6 +386,14 @@ function participantCountText(count: number | null): string {
           ? "участника"
           : "участников";
   return `${count} ${noun}`;
+}
+
+function typingUsersText(names: readonly string[]): string {
+  if (names.length === 1) return `${names[0]} печатает…`;
+  if (names.length === 2) return `${names[0]} и ${names[1]} печатают…`;
+  if (names.length > 2)
+    return `${names[0]}, ${names[1]} и ещё ${names.length - 2} печатают…`;
+  return "";
 }
 
 function lastSeenText(value: string | null): string {
@@ -746,10 +773,9 @@ interface MessengerMessageListItemProps {
   reactionAnimationKey: string | null;
   onReply: (message: MessengerMessage) => void;
   onOpenActions: (message: MessengerMessage) => void;
-  onNavigateToReply: (
-    reply: Pick<MessengerReply, "id" | "sequence">,
-  ) => void;
+  onNavigateToReply: (reply: Pick<MessengerReply, "id" | "sequence">) => void;
   onToggleReaction: (message: MessengerMessage, reaction: string) => void;
+  quickReaction: string;
 }
 
 /**
@@ -776,6 +802,7 @@ const MessengerMessageListItem = React.memo(
     onOpenActions,
     onNavigateToReply,
     onToggleReaction,
+    quickReaction,
   }: MessengerMessageListItemProps) {
     const mine = item.author.id === currentUserId;
     const media = item.deleted_at ? null : (item.media ?? null);
@@ -840,6 +867,11 @@ const MessengerMessageListItem = React.memo(
           onLongPress={() => {
             if (!item.pending || item.send_error) onOpenActions(item);
           }}
+          onDoubleTap={
+            canReact && !item.pending && !item.deleted_at
+              ? () => onToggleReaction(item, quickReaction)
+              : undefined
+          }
         >
           <View
             style={[
@@ -1019,7 +1051,10 @@ const MessengerMessageListItem = React.memo(
 function routeRoomType(
   value: string | undefined,
 ): MessengerRoom["room_type"] | null {
-  return value === "group" || value === "direct" || value === "private_group"
+  return value === "group" ||
+    value === "direct" ||
+    value === "private_group" ||
+    value === "saved"
     ? value
     : null;
 }
@@ -1058,9 +1093,9 @@ export default function MessengerRoomScreen() {
   const [roomAvatarUrl, setRoomAvatarUrl] = useState(params.avatarUrl || null);
   // PUSH navigation intentionally carries only a stable room/message ID. An
   // absent room type therefore means "not hydrated yet", not "group".
-  const [roomType, setRoomType] = useState<
-    MessengerRoom["room_type"] | null
-  >(() => routeRoomType(params.roomType));
+  const [roomType, setRoomType] = useState<MessengerRoom["room_type"] | null>(
+    () => routeRoomType(params.roomType),
+  );
   const [roomTeamId, setRoomTeamId] = useState(params.teamId || "");
   const [roomMemberCount, setRoomMemberCount] = useState<number | null>(() => {
     const initial = Number(params.memberCount);
@@ -1078,6 +1113,7 @@ export default function MessengerRoomScreen() {
   );
   const [messages, setMessages] = useState<MessengerMessage[]>([]);
   const [text, setText] = useState("");
+  const [composerFocused, setComposerFocused] = useState(false);
   const [composerInputHeight, setComposerInputHeight] = useState(46);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -1103,6 +1139,20 @@ export default function MessengerRoomScreen() {
   const [quickReactions, setQuickReactions] = useState<string[]>([
     ...DEFAULT_QUICK_REACTIONS,
   ]);
+  const [quickReaction, setQuickReaction] = useState<string>(
+    DEFAULT_MESSENGER_QUICK_REACTION,
+  );
+  const [typingByUser, setTypingByUser] = useState<Record<string, string>>({});
+  const [authorFilter, setAuthorFilter] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [filteredMessages, setFilteredMessages] = useState<MessengerMessage[]>(
+    [],
+  );
+  const [filterLoading, setFilterLoading] = useState(false);
+  const [filterCursor, setFilterCursor] = useState<string | null>(null);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [showAllReactions, setShowAllReactions] = useState(false);
   const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
   const [attachmentDraft, setAttachmentDraft] =
@@ -1155,6 +1205,8 @@ export default function MessengerRoomScreen() {
   const newerCachedMessagesLoading = useRef(false);
   const remoteHasMoreNewerMessages = useRef(true);
   const reactionMutationIds = useRef<Set<string>>(new Set());
+  const typingTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const filterLoadingRef = useRef(false);
   const connectionSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -1237,6 +1289,29 @@ export default function MessengerRoomScreen() {
   useEffect(() => {
     void loadQuickMessengerReactions().then(setQuickReactions);
   }, []);
+
+  useEffect(() => {
+    if (!session?.user.id) return;
+    let active = true;
+    void getMessengerQuickReaction(session.user.id).then((reaction) => {
+      if (active) setQuickReaction(reaction);
+    });
+    return () => {
+      active = false;
+    };
+  }, [session?.user.id]);
+
+  const composerIsTyping = Boolean(composerFocused && text.trim());
+  useEffect(() => {
+    if (!roomId) return;
+    sendMessengerTyping(roomId, composerIsTyping);
+    if (!composerIsTyping) return;
+    const timer = setInterval(() => sendMessengerTyping(roomId, true), 3_000);
+    return () => {
+      clearInterval(timer);
+      sendMessengerTyping(roomId, false);
+    };
+  }, [composerIsTyping, roomId]);
 
   const clearPendingLatestScroll = useCallback(() => {
     pendingScrollAnimation.current = null;
@@ -1464,7 +1539,7 @@ export default function MessengerRoomScreen() {
     };
   }, [clearPendingLatestScroll, scrollToLatest]);
 
-  const visibleMessages = messages;
+  const visibleMessages = authorFilter ? filteredMessages : messages;
   const waitingForInitialUnread =
     initialUnreadExpected && !unreadMarkerClientId;
 
@@ -2383,14 +2458,58 @@ export default function MessengerRoomScreen() {
     [positionInitialMessages, positionMessageNavigationTarget],
   );
 
+  const loadFilteredAuthorMessages = useCallback(
+    async (
+      filter: { id: string; name: string },
+      cursor?: string,
+    ): Promise<void> => {
+      if (filterLoadingRef.current) return;
+      filterLoadingRef.current = true;
+      setFilterLoading(true);
+      try {
+        const result = await searchMessengerMessages({
+          roomId,
+          authorUserId: filter.id,
+          cursor,
+          limit: 100,
+        });
+        const ascending = [...result.items].reverse();
+        setFilteredMessages((current) =>
+          cursor
+            ? mergeMessengerMessages(
+                ascending,
+                current,
+                reactionMutationIds.current,
+              )
+            : ascending,
+        );
+        setFilterCursor(result.page.next_cursor);
+      } catch (error) {
+        setSyncError(
+          messengerErrorMessage(error, "Не удалось применить фильтр"),
+        );
+      } finally {
+        filterLoadingRef.current = false;
+        setFilterLoading(false);
+      }
+    },
+    [roomId],
+  );
+
   const handleListScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const { contentOffset, contentSize, layoutMeasurement } =
         event.nativeEvent;
-      nearLatest.current =
+      const atLatest =
         contentOffset.y + layoutMeasurement.height >= contentSize.height - 120;
+      nearLatest.current = atLatest;
+      setShowJumpToLatest(!authorFilter && !atLatest);
       if (!pendingInitialPosition.current && contentOffset.y <= 100) {
-        void loadOlderMessages();
+        if (authorFilter && filterCursor) {
+          void loadFilteredAuthorMessages(authorFilter, filterCursor);
+        } else if (!authorFilter) {
+          void loadOlderMessages();
+        }
       }
       if (
         !pendingInitialPosition.current &&
@@ -2399,7 +2518,13 @@ export default function MessengerRoomScreen() {
         void loadNewerMessages();
       }
     },
-    [loadNewerMessages, loadOlderMessages],
+    [
+      authorFilter,
+      filterCursor,
+      loadFilteredAuthorMessages,
+      loadNewerMessages,
+      loadOlderMessages,
+    ],
   );
 
   const scheduleConnectionSync = useCallback(() => {
@@ -2559,6 +2684,17 @@ export default function MessengerRoomScreen() {
           returningToRoom || !routeRoomType(params.roomType),
         );
       });
+      const removeTypingUser = (userId: string) => {
+        const timer = typingTimers.current.get(userId);
+        if (timer) clearTimeout(timer);
+        typingTimers.current.delete(userId);
+        setTypingByUser((current) => {
+          if (!current[userId]) return current;
+          const next = { ...current };
+          delete next[userId];
+          return next;
+        });
+      };
       const unsubscribe = subscribeMessengerRealtime((event) => {
         if (event.type === "connection.state") {
           setRealtimeConnected(event.connected);
@@ -2581,6 +2717,7 @@ export default function MessengerRoomScreen() {
           event.message.room_id === roomId
         ) {
           const message = event.message;
+          removeTypingUser(message.author.id);
           setMessages((current) =>
             mergeMessengerMessages(
               current,
@@ -2668,6 +2805,22 @@ export default function MessengerRoomScreen() {
               }),
           );
         } else if (
+          event.type === "typing.updated" &&
+          event.room_id === roomId &&
+          event.user_id !== session?.user.id
+        ) {
+          removeTypingUser(event.user_id);
+          if (event.typing) {
+            setTypingByUser((current) => ({
+              ...current,
+              [event.user_id]: event.display_name,
+            }));
+            typingTimers.current.set(
+              event.user_id,
+              setTimeout(() => removeTypingUser(event.user_id), 6_000),
+            );
+          }
+        } else if (
           event.type === "sync.required" ||
           event.type === "connection.ready"
         ) {
@@ -2710,8 +2863,12 @@ export default function MessengerRoomScreen() {
         viewableServerMessageIds.current = [];
         cancelAnimationFrame(roomDetailsFrame);
         setMessengerActiveRoom(null);
+        sendMessengerTyping(roomId, false);
         unsubscribe();
         clearInterval(timer);
+        typingTimers.current.forEach(clearTimeout);
+        typingTimers.current.clear();
+        setTypingByUser({});
         if (connectionSyncTimer.current) {
           clearTimeout(connectionSyncTimer.current);
           connectionSyncTimer.current = null;
@@ -2753,6 +2910,7 @@ export default function MessengerRoomScreen() {
       router,
       scheduleConnectionSync,
       scrollToLatest,
+      session?.user.id,
     ]),
   );
 
@@ -3885,6 +4043,35 @@ export default function MessengerRoomScreen() {
     setShowAllReactions(false);
   }, []);
 
+  const applyAuthorFilter = useCallback(
+    (message: MessengerMessage) => {
+      if (message.pending || message.kind === "system") return;
+      const filter = {
+        id: message.author.id,
+        name: message.author.display_name,
+      };
+      setShowAllReactions(false);
+      setActionMessage(null);
+      setAuthorFilter(filter);
+      setFilteredMessages([]);
+      setFilterCursor(null);
+      setShowJumpToLatest(false);
+      listRef.current?.scrollToOffset({ offset: 0, animated: false });
+      void loadFilteredAuthorMessages(filter);
+    },
+    [loadFilteredAuthorMessages],
+  );
+
+  const clearAuthorFilter = useCallback(() => {
+    setAuthorFilter(null);
+    setFilteredMessages([]);
+    setFilterCursor(null);
+    requestAnimationFrame(() => {
+      nearLatest.current = false;
+      setShowJumpToLatest(true);
+    });
+  }, []);
+
   const openForward = useCallback(async (message: MessengerMessage) => {
     setForwardingMessage(message);
     setForwardLoading(true);
@@ -3895,8 +4082,10 @@ export default function MessengerRoomScreen() {
         getMessengerContacts(),
       ]);
       setForwardRooms(
-        roomsResult.filter((room) =>
-          message.kind === "text" ? room.can_write : room.can_send_media,
+        roomsResult.filter(
+          (room) =>
+            room.room_type !== "saved" &&
+            (message.kind === "text" ? room.can_write : room.can_send_media),
         ),
       );
       setForwardContacts(contactsResult);
@@ -4007,6 +4196,28 @@ export default function MessengerRoomScreen() {
     [forwardBusy, forwardingMessage, roomId, storeSentMessage],
   );
 
+  const forwardToSaved = useCallback(async () => {
+    if (!forwardingMessage || forwardBusy) return;
+    setForwardBusy("saved");
+    setForwardError(null);
+    try {
+      const result = await saveMessengerMessage(
+        forwardingMessage.id,
+        Crypto.randomUUID(),
+      );
+      await cacheMessengerRoomSnapshot(db, result.room);
+      if (result.room.id === roomId) await storeSentMessage(result.message);
+      setForwardingMessage(null);
+      Alert.alert("Сообщение сохранено", "Оно добавлено в чат «Избранное».");
+    } catch (error) {
+      setForwardError(
+        messengerErrorMessage(error, "Не удалось сохранить сообщение"),
+      );
+    } finally {
+      setForwardBusy(null);
+    }
+  }, [db, forwardBusy, forwardingMessage, roomId, storeSentMessage]);
+
   const newForwardContacts = useMemo(() => {
     const roomIds = new Set(forwardRooms.map((room) => room.id));
     return forwardContacts.filter(
@@ -4015,18 +4226,23 @@ export default function MessengerRoomScreen() {
     );
   }, [forwardContacts, forwardRooms]);
 
+  const typingNames = Object.values(typingByUser);
   const roomSubtitle =
-    !initialDataReady || !roomDetailsReady || !roomType
-      ? "Обновление"
-      : offline || !realtimeConnected
-        ? "Нет соединения с сервером"
-        : syncError
-          ? "Ошибка синхронизации"
-          : roomType === "direct"
-            ? peerPresence?.online
-              ? "В сети"
-              : lastSeenText(peerPresence?.last_seen_at ?? null)
-            : participantCountText(roomMemberCount);
+    typingNames.length > 0
+      ? typingUsersText(typingNames)
+      : !initialDataReady || !roomDetailsReady || !roomType
+        ? "Обновление"
+        : offline || !realtimeConnected
+          ? "Нет соединения с сервером"
+          : syncError
+            ? "Ошибка синхронизации"
+            : roomType === "saved"
+              ? "Ваши сохранённые сообщения"
+              : roomType === "direct"
+                ? peerPresence?.online
+                  ? "В сети"
+                  : lastSeenText(peerPresence?.last_seen_at ?? null)
+                : participantCountText(roomMemberCount);
 
   const actionMessageFailed = Boolean(
     actionMessage?.pending && actionMessage.send_error,
@@ -4061,7 +4277,7 @@ export default function MessengerRoomScreen() {
   }, []);
 
   const openGroupSettings = () => {
-    if (!roomType || roomType === "direct") return;
+    if (!roomType || roomType === "direct" || roomType === "saved") return;
     router.push({
       pathname: "/messenger/group/[id]",
       params: {
@@ -4126,6 +4342,7 @@ export default function MessengerRoomScreen() {
         onOpenActions={openMessageActions}
         onNavigateToReply={navigateToRepliedMessage}
         onToggleReaction={toggleReaction}
+        quickReaction={quickReaction}
       />
     ),
     [
@@ -4137,6 +4354,7 @@ export default function MessengerRoomScreen() {
       openMessageActions,
       pushReactionAnimation,
       reactionBusyIds,
+      quickReaction,
       roomScreenActive,
       roomType,
       session?.access_token,
@@ -4159,7 +4377,10 @@ export default function MessengerRoomScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.iconButton}
-            onPress={() => router.dismissTo("/messenger/rooms")}
+            onPress={() => {
+              if (router.canGoBack()) router.back();
+              else router.replace("/messenger/rooms");
+            }}
             accessibilityLabel="Вернуться к списку чатов"
           >
             <Icon name="chevron-back" size={28} color={colors.primary} />
@@ -4173,9 +4394,8 @@ export default function MessengerRoomScreen() {
             }
             disabled={
               !roomType ||
-              (roomType === "direct" &&
-                !peerPresence?.id &&
-                !params.peerId)
+              roomType === "saved" ||
+              (roomType === "direct" && !peerPresence?.id && !params.peerId)
             }
             accessibilityRole="button"
             accessibilityLabel={
@@ -4201,7 +4421,38 @@ export default function MessengerRoomScreen() {
               </Text>
             </View>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.iconButton}
+            onPress={() =>
+              router.push({
+                pathname: "/messenger/search",
+                params: { roomId, roomTitle },
+              })
+            }
+            accessibilityLabel="Поиск в чате"
+          >
+            <Icon name="search-outline" size={24} color={colors.primary} />
+          </TouchableOpacity>
         </View>
+
+        {authorFilter && (
+          <View style={styles.authorFilterBanner}>
+            <Icon name="funnel" size={18} color={colors.primary} />
+            <Text style={styles.authorFilterText} numberOfLines={1}>
+              Сообщения: {authorFilter.name}
+            </Text>
+            {filterLoading && (
+              <ActivityIndicator size="small" color={colors.primary} />
+            )}
+            <TouchableOpacity
+              style={styles.authorFilterClose}
+              onPress={clearAuthorFilter}
+              accessibilityLabel="Снять фильтр сообщений"
+            >
+              <Icon name="close" size={21} color={colors.primary} />
+            </TouchableOpacity>
+          </View>
+        )}
 
         <ImageBackground
           source={require("../../../assets/messenger/ice-chat-background.jpg")}
@@ -4227,6 +4478,7 @@ export default function MessengerRoomScreen() {
             initialNumToRender={18}
             maxToRenderPerBatch={14}
             windowSize={9}
+            removeClippedSubviews={false}
             keyboardDismissMode={
               Platform.OS === "ios" ? "interactive" : "on-drag"
             }
@@ -4255,7 +4507,7 @@ export default function MessengerRoomScreen() {
             }}
             renderItem={renderMessageItem}
             ListEmptyComponent={
-              loading ? (
+              loading || filterLoading ? (
                 <View style={styles.empty}>
                   <ActivityIndicator size="large" color={colors.primary} />
                 </View>
@@ -4266,7 +4518,11 @@ export default function MessengerRoomScreen() {
                     size={56}
                     color={colors.textSecondary}
                   />
-                  <Text style={styles.emptyTitle}>Начните общение</Text>
+                  <Text style={styles.emptyTitle}>
+                    {authorFilter
+                      ? "Сообщений этого пользователя не найдено"
+                      : "Начните общение"}
+                  </Text>
                 </View>
               )
             }
@@ -4295,6 +4551,20 @@ export default function MessengerRoomScreen() {
             <View style={styles.feedPositioning} pointerEvents="none">
               <ActivityIndicator color={colors.primary} />
             </View>
+          )}
+          {showJumpToLatest && !authorFilter && listReady && (
+            <TouchableOpacity
+              style={styles.jumpToLatest}
+              onPress={() => {
+                nearLatest.current = true;
+                setShowJumpToLatest(false);
+                void loadNewerMessages().finally(() => scrollToLatest(true));
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Перейти к последним сообщениям"
+            >
+              <Icon name="chevron-down" size={27} color={colors.primary} />
+            </TouchableOpacity>
           )}
         </ImageBackground>
 
@@ -4459,6 +4729,25 @@ export default function MessengerRoomScreen() {
               ) : null}
               {actionMessage &&
               !actionMessage.pending &&
+              actionMessage.kind !== "system" &&
+              roomType !== "direct" &&
+              roomType !== "saved" ? (
+                <TouchableOpacity
+                  style={styles.messageAction}
+                  onPress={() => applyAuthorFilter(actionMessage)}
+                >
+                  <Icon
+                    name="funnel-outline"
+                    size={21}
+                    color={colors.primary}
+                  />
+                  <Text style={styles.messageActionText}>
+                    Только сообщения автора
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              {actionMessage &&
+              !actionMessage.pending &&
               !actionMessage.deleted_at &&
               actionMessage.media &&
               (actionMessage.media_items?.length ?? 1) <= 1 ? (
@@ -4605,6 +4894,32 @@ export default function MessengerRoomScreen() {
                       </Text>
                     </TouchableOpacity>
                   ) : null}
+
+                  <Text style={styles.forwardSectionTitle}>Личное</Text>
+                  <TouchableOpacity
+                    style={styles.forwardTarget}
+                    onPress={() => void forwardToSaved()}
+                    disabled={Boolean(forwardBusy)}
+                  >
+                    <View style={styles.forwardSavedIcon}>
+                      <Icon name="star" size={22} color="#FFFFFF" />
+                    </View>
+                    <View style={styles.forwardTargetText}>
+                      <Text style={styles.forwardTargetTitle}>Избранное</Text>
+                      <Text style={styles.forwardTargetSubtitle}>
+                        Сохранить сообщение для себя
+                      </Text>
+                    </View>
+                    {forwardBusy === "saved" ? (
+                      <ActivityIndicator color={colors.primary} />
+                    ) : (
+                      <Icon
+                        name="chevron-forward"
+                        size={20}
+                        color={colors.textSecondary}
+                      />
+                    )}
+                  </TouchableOpacity>
 
                   {forwardRooms.length > 0 ? (
                     <Text style={styles.forwardSectionTitle}>Чаты</Text>
@@ -4998,10 +5313,12 @@ export default function MessengerRoomScreen() {
                   void handlePastedAttachment(attachment);
                 }}
                 onFocus={() => {
+                  setComposerFocused(true);
                   if (!nearLatest.current) return;
                   keyboardScrollPending.current = true;
                   scrollToLatest(true);
                 }}
+                onBlur={() => setComposerFocused(false)}
               />
               <TouchableOpacity
                 style={[
@@ -5070,12 +5387,53 @@ const styles = StyleSheet.create({
   headerText: { flex: 1, marginLeft: 6 },
   title: { fontSize: 19, fontWeight: "800", color: colors.text },
   subtitle: { marginTop: 2, fontSize: 12, color: colors.textSecondary },
+  authorFilterBanner: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingLeft: 16,
+    paddingRight: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    backgroundColor: "#EAF3FF",
+  },
+  authorFilterText: {
+    flex: 1,
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  authorFilterClose: {
+    width: 38,
+    height: 38,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   messageFeed: { flex: 1 },
   messageFeedHidden: { opacity: 0 },
   feedPositioning: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
+  },
+  jumpToLatest: {
+    position: "absolute",
+    right: 16,
+    bottom: 16,
+    width: 50,
+    height: 50,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#B8C8D5",
+    borderRadius: 25,
+    backgroundColor: "rgba(255,255,255,0.96)",
+    shadowColor: "#15283A",
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 5,
   },
   messageList: { padding: 14, paddingBottom: 20 },
   emptyList: { flexGrow: 1, justifyContent: "center" },
@@ -5567,6 +5925,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 22,
     backgroundColor: "#EAF3FF",
+  },
+  forwardSavedIcon: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 22,
+    backgroundColor: "#F2B233",
   },
   forwardTargetText: { flex: 1, minWidth: 0 },
   forwardTargetTitle: { color: colors.text, fontSize: 15, fontWeight: "800" },

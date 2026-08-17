@@ -93,6 +93,13 @@ function formatRoomActivityTime(iso: string | undefined): string {
     : `${date}.${String(activity.getFullYear()).slice(-2)}`;
 }
 
+function typingLabel(names: readonly string[]): string {
+  if (names.length === 0) return "";
+  if (names.length === 1) return `${names[0]} печатает…`;
+  if (names.length === 2) return `${names[0]} и ${names[1]} печатают…`;
+  return `${names[0]}, ${names[1]} и ещё ${names.length - 2} печатают…`;
+}
+
 export default function MessengerRoomsScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
@@ -103,6 +110,10 @@ export default function MessengerRoomsScreen() {
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newChatVisible, setNewChatVisible] = useState(false);
+  const [typingByRoom, setTypingByRoom] = useState<
+    Record<string, Record<string, string>>
+  >({});
+  const typingTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const connectionSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -227,6 +238,21 @@ export default function MessengerRoomsScreen() {
       const unsubscribe = subscribeMessengerRealtime((event) => {
         if (event.type === "message.created") {
           const message = event.message;
+          const typingKey = `${message.room_id}:${message.author.id}`;
+          const typingTimer = typingTimers.current.get(typingKey);
+          if (typingTimer) clearTimeout(typingTimer);
+          typingTimers.current.delete(typingKey);
+          setTypingByRoom((current) => {
+            const roomTyping = current[message.room_id];
+            if (!roomTyping?.[message.author.id]) return current;
+            const nextRoomTyping = { ...roomTyping };
+            delete nextRoomTyping[message.author.id];
+            const next = { ...current };
+            if (Object.keys(nextRoomTyping).length)
+              next[message.room_id] = nextRoomTyping;
+            else delete next[message.room_id];
+            return next;
+          });
           // Update the visible card immediately; REST below remains the source
           // of truth and corrects unread counters after reconnect/duplicates.
           setRooms((current) => {
@@ -291,6 +317,36 @@ export default function MessengerRoomsScreen() {
                 : room,
             ),
           );
+        } else if (event.type === "typing.updated") {
+          const key = `${event.room_id}:${event.user_id}`;
+          const previous = typingTimers.current.get(key);
+          if (previous) clearTimeout(previous);
+          const removeTyping = () => {
+            typingTimers.current.delete(key);
+            setTypingByRoom((current) => {
+              const roomTyping = current[event.room_id];
+              if (!roomTyping?.[event.user_id]) return current;
+              const nextRoomTyping = { ...roomTyping };
+              delete nextRoomTyping[event.user_id];
+              const next = { ...current };
+              if (Object.keys(nextRoomTyping).length)
+                next[event.room_id] = nextRoomTyping;
+              else delete next[event.room_id];
+              return next;
+            });
+          };
+          if (event.typing) {
+            setTypingByRoom((current) => ({
+              ...current,
+              [event.room_id]: {
+                ...current[event.room_id],
+                [event.user_id]: event.display_name,
+              },
+            }));
+            typingTimers.current.set(key, setTimeout(removeTyping, 6_000));
+          } else {
+            removeTyping();
+          }
         } else if (event.type === "room.updated") {
           scheduleConnectionSync(0);
         } else if (
@@ -302,6 +358,9 @@ export default function MessengerRoomsScreen() {
       });
       return () => {
         unsubscribe();
+        typingTimers.current.forEach(clearTimeout);
+        typingTimers.current.clear();
+        setTypingByRoom({});
         if (connectionSyncTimer.current) {
           clearTimeout(connectionSyncTimer.current);
           connectionSyncTimer.current = null;
@@ -372,6 +431,13 @@ export default function MessengerRoomsScreen() {
         </View>
         <TouchableOpacity
           style={styles.iconButton}
+          onPress={() => router.push("/messenger/search")}
+          accessibilityLabel="Поиск сообщений"
+        >
+          <Icon name="search-outline" size={25} color={colors.primary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.iconButton}
           onPress={() => setNewChatVisible(true)}
           accessibilityLabel="Новое сообщение или группа"
         >
@@ -415,7 +481,7 @@ export default function MessengerRoomsScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => void loadRooms(true, false)}
+            onRefresh={() => router.push("/messenger/search")}
           />
         }
         contentContainerStyle={
@@ -436,6 +502,8 @@ export default function MessengerRoomsScreen() {
           const activityTime = formatRoomActivityTime(
             item.last_message?.created_at,
           );
+          const typingNames = Object.values(typingByRoom[item.id] || {});
+          const activeTypingLabel = typingLabel(typingNames);
           return (
             <>
               <TouchableOpacity
@@ -478,13 +546,19 @@ export default function MessengerRoomsScreen() {
                       />
                     )}
                   </View>
-                  {!direct && item.last_message && (
+                  {!activeTypingLabel && !direct && item.last_message && (
                     <Text style={styles.messageAuthor} numberOfLines={1}>
                       {authorName}
                     </Text>
                   )}
-                  <Text style={styles.preview} numberOfLines={1}>
-                    {lastMessageText(item)}
+                  <Text
+                    style={[
+                      styles.preview,
+                      activeTypingLabel && styles.typingPreview,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {activeTypingLabel || lastMessageText(item)}
                   </Text>
                 </View>
                 <View style={styles.roomMeta}>
@@ -689,6 +763,7 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   preview: { marginTop: 3, fontSize: 13, color: colors.textSecondary },
+  typingPreview: { color: colors.primary, fontStyle: "italic" },
   roomMeta: {
     minWidth: 48,
     alignSelf: "stretch",

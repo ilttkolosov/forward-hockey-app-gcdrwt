@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -34,6 +35,13 @@ import {
 } from "../../services/messengerApi";
 import { messengerLog } from "../../services/messengerLogger";
 import {
+  DEFAULT_MESSENGER_QUICK_REACTION,
+  getMessengerQuickReaction,
+  MESSENGER_QUICK_REACTIONS,
+  setMessengerQuickReaction,
+  type MessengerQuickReaction,
+} from "../../services/messengerQuickReaction";
+import {
   clearMessengerMediaCache,
   formatMessengerBytes,
   messengerMediaCacheSize,
@@ -48,6 +56,7 @@ function newDeletionChallenge(): { left: number; right: number } {
 }
 
 function roomTypeLabel(room: MessengerRoom): string {
+  if (room.room_type === "saved") return "Личное избранное";
   if (room.room_type === "direct") return "Личный чат";
   if (room.room_type === "private_group") return "Мини-группа";
   return "Системная группа";
@@ -79,6 +88,9 @@ export default function MessengerProfileScreen() {
   const [deletionError, setDeletionError] = useState<string | null>(null);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [avatarVisible, setAvatarVisible] = useState(false);
+  const [quickReaction, setQuickReactionState] =
+    useState<MessengerQuickReaction>(DEFAULT_MESSENGER_QUICK_REACTION);
+  const [reactionPickerVisible, setReactionPickerVisible] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) router.replace("/messenger/register");
@@ -87,6 +99,17 @@ export default function MessengerProfileScreen() {
   useEffect(() => {
     setDisplayName(session?.user.display_name || "");
   }, [session?.user.display_name]);
+
+  useEffect(() => {
+    if (!session?.user.id) return;
+    let active = true;
+    void getMessengerQuickReaction(session.user.id).then((reaction) => {
+      if (active) setQuickReactionState(reaction);
+    });
+    return () => {
+      active = false;
+    };
+  }, [session?.user.id]);
 
   useEffect(() => {
     void messengerMediaCacheSize()
@@ -496,6 +519,28 @@ export default function MessengerProfileScreen() {
             </TouchableOpacity>
           </View>
 
+          <TouchableOpacity
+            style={styles.quickReactionCard}
+            onPress={() => setReactionPickerVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`Быстрая реакция ${quickReaction}`}
+          >
+            <View style={styles.quickReactionEmoji}>
+              <Text style={styles.quickReactionEmojiText}>{quickReaction}</Text>
+            </View>
+            <View style={styles.cacheText}>
+              <Text style={styles.cacheTitle}>Быстрая реакция</Text>
+              <Text style={styles.cacheSubtitle}>
+                Ставится двойным нажатием по сообщению
+              </Text>
+            </View>
+            <Icon
+              name="chevron-forward"
+              size={20}
+              color={colors.textSecondary}
+            />
+          </TouchableOpacity>
+
           <View style={styles.roomsCard}>
             <View style={styles.sectionHeadingRow}>
               <View style={styles.sectionHeadingText}>
@@ -637,6 +682,46 @@ export default function MessengerProfileScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={reactionPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setReactionPickerVisible(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setReactionPickerVisible(false)}
+        >
+          <Pressable
+            style={styles.reactionDialog}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <Text style={styles.reactionDialogTitle}>Быстрая реакция</Text>
+            <Text style={styles.reactionDialogText}>
+              Выберите эмодзи для двойного нажатия по сообщению.
+            </Text>
+            <View style={styles.reactionChoices}>
+              {MESSENGER_QUICK_REACTIONS.map((reaction) => (
+                <TouchableOpacity
+                  key={reaction}
+                  style={[
+                    styles.reactionChoice,
+                    quickReaction === reaction && styles.reactionChoiceActive,
+                  ]}
+                  onPress={() => {
+                    setQuickReactionState(reaction);
+                    setReactionPickerVisible(false);
+                    void setMessengerQuickReaction(session.user.id, reaction);
+                  }}
+                >
+                  <Text style={styles.reactionChoiceText}>{reaction}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal
         visible={deletionVisible}
@@ -781,6 +866,28 @@ const styles = StyleSheet.create({
   },
   cacheButton: { paddingVertical: 10, paddingHorizontal: 4 },
   cacheButtonText: { color: colors.error, fontSize: 12, fontWeight: "800" },
+  quickReactionCard: {
+    minHeight: 76,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginHorizontal: 18,
+    marginTop: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 18,
+    backgroundColor: colors.surface,
+  },
+  quickReactionEmoji: {
+    width: 46,
+    height: 46,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 15,
+    backgroundColor: "#FFF3D9",
+  },
+  quickReactionEmojiText: { fontSize: 27 },
   roomsCard: {
     marginHorizontal: 18,
     marginTop: 14,
@@ -926,6 +1033,48 @@ const styles = StyleSheet.create({
     padding: 22,
     backgroundColor: "rgba(15, 27, 42, 0.55)",
   },
+  reactionDialog: {
+    width: "100%",
+    maxWidth: 430,
+    padding: 22,
+    borderRadius: 22,
+    backgroundColor: colors.surface,
+  },
+  reactionDialogTitle: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  reactionDialogText: {
+    marginTop: 7,
+    color: colors.textSecondary,
+    fontSize: 13,
+    textAlign: "center",
+  },
+  reactionChoices: {
+    marginTop: 18,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 10,
+  },
+  reactionChoice: {
+    width: 58,
+    height: 58,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 18,
+    backgroundColor: colors.backgroundAlt,
+  },
+  reactionChoiceActive: {
+    borderWidth: 2,
+    borderColor: colors.primary,
+    backgroundColor: "#EAF3FF",
+  },
+  reactionChoiceText: { fontSize: 29 },
   deletionDialog: {
     width: "100%",
     maxWidth: 430,

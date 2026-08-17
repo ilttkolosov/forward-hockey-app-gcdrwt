@@ -82,7 +82,7 @@ function MessengerAttachmentView({
   playbackEnabled = false,
 }: MessengerAttachmentViewProps) {
   const insets = useSafeAreaInsets();
-  const { width: viewerWidth } = useWindowDimensions();
+  const { width: viewerWidth, height: viewerHeight } = useWindowDimensions();
   const items = useMemo(
     () => (mediaItems?.length ? mediaItems : media ? [media] : []),
     [media, mediaItems],
@@ -96,6 +96,7 @@ function MessengerAttachmentView({
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [viewerSession, setViewerSession] = useState(0);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [openingFileId, setOpeningFileId] = useState<string | null>(null);
   const openingFileRef = useRef<string | null>(null);
@@ -112,7 +113,6 @@ function MessengerAttachmentView({
 
   useEffect(() => {
     if (!playbackEnabled) {
-      setViewerIndex(null);
       return;
     }
     const video =
@@ -280,7 +280,10 @@ function MessengerAttachmentView({
       const index = viewerItems.findIndex(
         (candidate) => candidate.id === item.id,
       );
-      if (index >= 0) setViewerIndex(index);
+      if (index >= 0) {
+        setViewerSession((current) => current + 1);
+        setViewerIndex(index);
+      }
     } catch {
       // The tile keeps a visible retry state.
     }
@@ -363,6 +366,10 @@ function MessengerAttachmentView({
     single?.type === "video" ? messengerMediaUrl(single.url) : null;
   const viewerMedia =
     viewerIndex === null ? null : (viewerItems[viewerIndex] ?? null);
+  const viewerPageHeight = Math.max(
+    1,
+    viewerHeight - Math.max(insets.top, 12) - insets.bottom - 56,
+  );
 
   return (
     <>
@@ -389,9 +396,7 @@ function MessengerAttachmentView({
             </View>
           )}
         </TouchableOpacity>
-      ) : single.type === "video" &&
-        playbackEnabled &&
-        viewerIndex === null ? (
+      ) : single.type === "video" && playbackEnabled && viewerIndex === null ? (
         <View style={styles.inlineVideoCard}>
           <View style={styles.inlineVideoStage}>
             {singleLocalUri ? (
@@ -415,7 +420,10 @@ function MessengerAttachmentView({
                 <TouchableOpacity
                   style={styles.inlineVideoTap}
                   activeOpacity={1}
-                  onPress={() => setViewerIndex(0)}
+                  onPress={() => {
+                    setViewerSession((current) => current + 1);
+                    setViewerIndex(0);
+                  }}
                   accessibilityRole="button"
                   accessibilityLabel="Открыть видео на весь экран"
                 />
@@ -461,8 +469,8 @@ function MessengerAttachmentView({
                   ? "Повторите загрузку"
                   : singleLocalUri
                     ? "Готово"
-                    : "Загружается"} ·{" "}
-                {formatMessengerBytes(single.size_bytes)}
+                    : "Загружается"}{" "}
+                · {formatMessengerBytes(single.size_bytes)}
               </Text>
             </View>
           </View>
@@ -586,7 +594,7 @@ function MessengerAttachmentView({
           </View>
           {viewerIndex !== null && (
             <FlatList
-              key={`attachment-viewer-${viewerWidth}`}
+              key={`attachment-viewer-${viewerSession}-${viewerWidth}-${viewerPageHeight}`}
               style={styles.viewerPager}
               data={viewerItems}
               keyExtractor={(item) => item.id}
@@ -594,6 +602,7 @@ function MessengerAttachmentView({
               pagingEnabled
               bounces={false}
               showsHorizontalScrollIndicator={false}
+              removeClippedSubviews={false}
               initialScrollIndex={viewerIndex}
               getItemLayout={(_data, index) => ({
                 length: viewerWidth,
@@ -611,18 +620,36 @@ function MessengerAttachmentView({
                 const loading = loadingIds.has(item.id);
                 const error = errors[item.id];
                 return (
-                  <View style={[styles.viewerPage, { width: viewerWidth }]}>
+                  <View
+                    style={[
+                      styles.viewerPage,
+                      { width: viewerWidth, height: viewerPageHeight },
+                    ]}
+                  >
                     {localUri && item.type === "image" && (
                       <ScrollView
-                        style={styles.zoomContainer}
-                        contentContainerStyle={styles.zoomContent}
+                        key={`${viewerSession}:${item.id}:${viewerWidth}:${viewerPageHeight}`}
+                        style={[
+                          styles.zoomContainer,
+                          { width: viewerWidth, height: viewerPageHeight },
+                        ]}
+                        contentContainerStyle={[
+                          styles.zoomContent,
+                          { width: viewerWidth, height: viewerPageHeight },
+                        ]}
                         minimumZoomScale={1}
                         maximumZoomScale={4}
+                        zoomScale={1}
                         centerContent
+                        bouncesZoom
+                        contentOffset={{ x: 0, y: 0 }}
                       >
                         <Image
                           source={localUri}
-                          style={styles.fullImage}
+                          style={{
+                            width: viewerWidth,
+                            height: viewerPageHeight,
+                          }}
                           contentFit="contain"
                           onLoadStart={() => handleImageLoadStart(item.id)}
                           onLoad={(event) => handleImageLoad(item, event)}
@@ -870,6 +897,5 @@ const styles = StyleSheet.create({
   },
   zoomContainer: { width: "100%", height: "100%" },
   zoomContent: { flexGrow: 1, alignItems: "center", justifyContent: "center" },
-  fullImage: { width: "100%", height: "100%", minHeight: 500 },
   fullVideo: { width: "100%", height: "100%" },
 });

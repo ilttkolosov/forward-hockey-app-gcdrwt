@@ -334,11 +334,11 @@ function RootLayoutContent() {
           ? 'Открытие реакции по нажатию на уведомление мессенджера'
           : 'Открытие комнаты по нажатию на уведомление мессенджера'
       );
-      // A PUSH can be opened while another room is already on screen. Replace
-      // that route so consecutive notifications never build a room-by-room
-      // back stack.
-      router.replace({
-        pathname: '/messenger/room/[id]',
+      // Make the rooms list the stable parent, then push the selected room.
+      // The back action now uses the normal reverse transition even when the
+      // application was opened from a notification or another room.
+      const target = {
+        pathname: '/messenger/room/[id]' as const,
         params: {
           id: messengerPush.room_id,
           title: messengerPush.room_title || 'Чат',
@@ -350,7 +350,9 @@ function RootLayoutContent() {
               ? messengerPush.reaction || ''
               : '',
         },
-      });
+      };
+      router.replace('/messenger/rooms');
+      requestAnimationFrame(() => router.push(target));
     }
   }, [isInitializing, lastNotificationResponse, router]);
 

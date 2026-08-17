@@ -109,7 +109,7 @@ export default function MessengerVideoPlayer({
         player={player}
         nativeControls={nativeControls && !playbackError}
         contentFit="contain"
-        fullscreenOptions={{ enable: true, orientation: "default" }}
+        fullscreenOptions={{ enable: true, orientation: "landscape" }}
         allowsPictureInPicture={false}
         allowsVideoFrameAnalysis={false}
         surfaceType="surfaceView"

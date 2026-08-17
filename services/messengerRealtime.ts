@@ -40,6 +40,14 @@ export type MessengerRealtimeEvent =
       user_id: string;
       online: boolean;
       last_seen_at: string | null;
+    }
+  | {
+      type: "typing.updated";
+      room_id: string;
+      user_id: string;
+      display_name: string;
+      original_display_name?: string;
+      typing: boolean;
     };
 
 type RealtimeListener = (event: MessengerRealtimeEvent) => void;
@@ -345,6 +353,19 @@ export function connectMessengerRealtime(accessToken: string): void {
       >,
     ) => publish({ type: "presence.updated", ...payload }),
   );
+  nextSocket.on(
+    "typing.updated",
+    (
+      payload: Omit<
+        Extract<MessengerRealtimeEvent, { type: "typing.updated" }>,
+        "type"
+      >,
+    ) =>
+      publish({
+        type: "typing.updated",
+        ...applyMessengerAliases(payload),
+      }),
+  );
 }
 
 export function disconnectMessengerRealtime(): void {
@@ -405,6 +426,12 @@ export function setMessengerActiveRoom(roomId: string | null): void {
   ensureAppStateSubscription();
   announceActiveRoom();
   synchronizeActiveRoomRefresh();
+}
+
+/** Emits an ephemeral composer state; it is never persisted or queued offline. */
+export function sendMessengerTyping(roomId: string, typing: boolean): void {
+  if (!socket?.connected || !socketReady || !roomId) return;
+  socket.emit("typing.set", { room_id: roomId, typing });
 }
 
 export function subscribeMessengerRealtime(

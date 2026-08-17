@@ -105,6 +105,7 @@ function targetMatches(target: ShareTarget, query: string): boolean {
 }
 
 function roomSubtitle(room: MessengerRoom): string {
+  if (room.room_type === "saved") return "Ваше избранное";
   if (room.room_type === "direct") return "Личный чат";
   if (room.room_type === "private_group") {
     return typeof room.member_count === "number"
