@@ -22,6 +22,10 @@ interface IdentifiedMessageRow extends MessageRow {
   id: string;
 }
 
+interface SearchMessageRow extends MessageRow {
+  created_at: string;
+}
+
 interface MessageBoundsRow {
   oldest_sequence: string | null;
   latest_sequence: string | null;
@@ -49,6 +53,24 @@ export interface MessengerMessageWindowOptions {
   anchorSequence?: string | null;
   hasUnread?: boolean;
   limit?: number;
+}
+
+export interface MessengerCachedMessageSearchOptions {
+  query?: string;
+  roomId?: string;
+  authorUserId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface MessengerCachedMessageSearchResult {
+  items: MessengerMessage[];
+  page: {
+    has_more: boolean;
+    next_cursor: string | null;
+  };
 }
 
 const messengerWriteQueues = new WeakMap<SQLiteDatabase, Promise<void>>();
@@ -108,6 +130,35 @@ function parsedMessages(rows: MessageRow[]): MessengerMessage[] {
   return rows
     .map((row) => parseJson<MessengerMessage>(row.raw_json))
     .filter((message): message is MessengerMessage => message !== null);
+}
+
+function normalizedSearchText(value: string): string {
+  return value
+    .replace(/[\u2060-\u2063]/g, "")
+    .normalize("NFKC")
+    .toLocaleLowerCase("ru-RU");
+}
+
+function messengerMessageSearchText(message: MessengerMessage): string {
+  const mediaNames = (message.media_items?.length
+    ? message.media_items
+    : message.media
+      ? [message.media]
+      : []
+  )
+    .map((item) => item.original_name)
+    .join(" ");
+  return normalizedSearchText(
+    [message.text, mediaNames, message.author.display_name]
+      .filter(Boolean)
+      .join(" "),
+  );
+}
+
+function localSearchOffset(cursor: string | undefined): number {
+  if (!cursor?.startsWith("local:")) return 0;
+  const value = Number(cursor.slice("local:".length));
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
 function parsedRoom(row: RoomRow | null | undefined): MessengerRoom | null {
@@ -494,6 +545,62 @@ export async function loadCachedMessengerMessages(
     roomId,
   );
   return parsedMessages(rows);
+}
+
+/**
+ * Searches only messages already authorised and persisted on this device.
+ * Text matching is completed in JavaScript because stock SQLite LOWER/LIKE
+ * does not case-fold Cyrillic reliably on every iOS/Android build.
+ */
+export async function searchCachedMessengerMessages(
+  db: SQLiteDatabase,
+  options: MessengerCachedMessageSearchOptions,
+): Promise<MessengerCachedMessageSearchResult> {
+  const clauses = ["message.raw_json IS NOT NULL"];
+  const values: (string | number)[] = [];
+  if (options.roomId) {
+    clauses.push("message.room_id = ?");
+    values.push(options.roomId);
+  }
+  if (options.authorUserId) {
+    clauses.push("json_extract(message.raw_json, '$.author.id') = ?");
+    values.push(options.authorUserId);
+  }
+  if (options.dateFrom) {
+    clauses.push("message.created_at >= ?");
+    values.push(options.dateFrom);
+  }
+  if (options.dateTo) {
+    clauses.push("message.created_at <= ?");
+    values.push(options.dateTo);
+  }
+
+  const rows = await db.getAllAsync<SearchMessageRow>(
+    `SELECT message.raw_json, message.created_at
+       FROM messenger_messages message
+       JOIN messenger_rooms room ON room.id = message.room_id
+      WHERE ${clauses.join(" AND ")}
+      ORDER BY message.created_at DESC, CAST(message.sequence AS INTEGER) DESC`,
+    ...values,
+  );
+  const needle = normalizedSearchText(options.query?.trim() || "");
+  const matches = parsedMessages(rows).filter(
+    (message) =>
+      !message.deleted_at &&
+      (!needle || messengerMessageSearchText(message).includes(needle)),
+  );
+  const offset = localSearchOffset(options.cursor);
+  const limit = Math.max(1, Math.min(100, options.limit ?? 50));
+  const items = matches.slice(offset, offset + limit);
+  const nextOffset = offset + items.length;
+  const hasMore = nextOffset < matches.length;
+  return {
+    items,
+    page: {
+      has_more: hasMore,
+      next_cursor: hasMore ? `local:${nextOffset}` : null,
+    },
+  };
 }
 
 /**

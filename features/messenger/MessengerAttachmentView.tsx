@@ -12,6 +12,7 @@ import {
   Alert,
   FlatList,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -248,6 +249,10 @@ function MessengerAttachmentView({
     setOpeningFileId(item.id);
     try {
       const uri = await ensureLocal(item);
+      if (Platform.OS === "web") {
+        window.open(uri, "_blank", "noopener,noreferrer");
+        return;
+      }
       if (await tryPreviewMessengerFile(uri)) return;
 
       if (!(await Sharing.isAvailableAsync())) {

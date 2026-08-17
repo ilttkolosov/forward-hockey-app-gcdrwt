@@ -2,6 +2,7 @@ import DateTimePicker, {
   type DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useSQLiteContext } from "expo-sqlite";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -23,10 +24,14 @@ import type {
   MessengerRoom,
 } from "../../features/messenger/types";
 import {
+  cacheMessengerRooms,
+  loadCachedMessengerRooms,
+} from "../../features/messenger/repository";
+import {
   getMessengerRooms,
   messengerErrorMessage,
-  searchMessengerMessages,
 } from "../../services/messengerApi";
+import { searchMessengerMessagesLocallyFirst } from "../../services/messengerSearch";
 import { stripMessengerTextFormatting } from "../../services/messengerTextFormatting";
 import { colors } from "../../styles/commonStyles";
 
@@ -58,6 +63,7 @@ function messagePreview(message: MessengerMessage): string {
 }
 
 export default function MessengerSearchScreen() {
+  const db = useSQLiteContext();
   const router = useRouter();
   const params = useLocalSearchParams<{
     roomId?: string;
@@ -84,17 +90,30 @@ export default function MessengerSearchScreen() {
       return;
     }
     let active = true;
-    void getMessengerRooms()
-      .then((value) => {
-        if (active) setRooms(value);
-      })
-      .catch((loadError) => {
-        if (active) setError(messengerErrorMessage(loadError));
-      });
+    void (async () => {
+      let cached: MessengerRoom[] = [];
+      try {
+        cached = await loadCachedMessengerRooms(db);
+        if (active && cached.length) setRooms(cached);
+      } catch {
+        // A remote room refresh below can still repair an empty/new database.
+      }
+      try {
+        const remote = await getMessengerRooms({ priority: "background" });
+        const reconciled = await cacheMessengerRooms(db, remote).catch(
+          () => remote,
+        );
+        if (active) setRooms(reconciled);
+      } catch (loadError) {
+        if (active && !cached.length) {
+          setError(messengerErrorMessage(loadError));
+        }
+      }
+    })();
     return () => {
       active = false;
     };
-  }, [isAuthenticated, router]);
+  }, [db, isAuthenticated, router]);
 
   const roomById = useMemo(
     () => new Map(rooms.map((room) => [room.id, room] as const)),
@@ -113,7 +132,7 @@ export default function MessengerSearchScreen() {
         setError(null);
       }
       try {
-        const response = await searchMessengerMessages({
+        const response = await searchMessengerMessagesLocallyFirst(db, {
           query,
           roomId: scopedRoomId,
           dateFrom: dateFrom ? dayBoundary(dateFrom, false) : undefined,
@@ -135,7 +154,7 @@ export default function MessengerSearchScreen() {
         setLoadingMore(false);
       }
     },
-    [dateFrom, dateTo, hasFilters, loading, loadingMore, query, scopedRoomId],
+    [db, dateFrom, dateTo, hasFilters, loading, loadingMore, query, scopedRoomId],
   );
 
   const openResult = useCallback(

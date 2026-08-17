@@ -7,12 +7,14 @@ import { messengerLog } from "../../services/messengerLogger";
 import { getMessengerActiveRoomId } from "../../services/messengerRealtime";
 import {
   cacheMessengerMessages,
+  isMessengerRoomHistoryComplete,
   loadCachedMessengerMessageBounds,
+  markMessengerRoomHistoryComplete,
 } from "./repository";
 import type { MessengerRoom } from "./types";
 
-const MAX_CATCH_UP_PAGES_PER_PASS = 5;
 const CATCH_UP_PAGE_SIZE = 50;
+const HISTORY_PAGE_SIZE = 100;
 const WARMUP_CONCURRENCY = 1;
 
 const activeWarmups = new WeakMap<SQLiteDatabase, Map<string, Promise<void>>>();
@@ -55,11 +57,13 @@ export function warmMessengerRoomWindow(
 
   const task = (async () => {
     const startedAt = Date.now();
-    const bounds = await loadCachedMessengerMessageBounds(db, room.id);
+    let bounds = await loadCachedMessengerMessageBounds(db, room.id);
+    let historyComplete = await isMessengerRoomHistoryComplete(db, room.id);
     let localLatestSequence = bounds.latest_sequence;
     if (
       localLatestSequence &&
-      compareSequence(localLatestSequence, targetSequence) >= 0
+      compareSequence(localLatestSequence, targetSequence) >= 0 &&
+      historyComplete
     ) {
       return;
     }
@@ -68,7 +72,11 @@ export function warmMessengerRoomWindow(
     // room while the bounds query was queued.
     if (getMessengerActiveRoomId() === room.id) return;
 
-    const source = localLatestSequence ? "catch_up" : "missing_window";
+    const source = localLatestSequence
+      ? historyComplete
+        ? "catch_up"
+        : "history_backfill"
+      : "missing_window";
     messengerLog("debug", "room.cache.warm.started", {
       room_id: room.id,
       source,
@@ -80,7 +88,7 @@ export function warmMessengerRoomWindow(
     let pageCount = 0;
     if (!localLatestSequence) {
       const latest = await getMessengerMessages(room.id, {
-        limit: 20,
+        limit: CATCH_UP_PAGE_SIZE,
         priority: "background",
       });
       pageCount = 1;
@@ -89,9 +97,12 @@ export function warmMessengerRoomWindow(
         cachedCount += latest.items.length;
         localLatestSequence = latest.items.at(-1)?.sequence ?? null;
       }
+      if (!latest.page.has_more) {
+        await markMessengerRoomHistoryComplete(db, room.id);
+        historyComplete = true;
+      }
     } else {
       while (
-        pageCount < MAX_CATCH_UP_PAGES_PER_PASS &&
         compareSequence(localLatestSequence, targetSequence) < 0
       ) {
         const page = await getMessengerMessages(room.id, {
@@ -116,6 +127,34 @@ export function warmMessengerRoomWindow(
       }
     }
 
+    // Search is intentionally local-first, so every room is backfilled all
+    // the way to its first message. These low-priority requests are cancelled
+    // immediately whenever a user-visible API operation starts.
+    bounds = await loadCachedMessengerMessageBounds(db, room.id);
+    let oldestSequence = bounds.oldest_sequence;
+    while (!historyComplete && oldestSequence) {
+      if (getMessengerActiveRoomId() === room.id) break;
+      const page = await getMessengerMessages(room.id, {
+        cursor: oldestSequence,
+        direction: "before",
+        limit: HISTORY_PAGE_SIZE,
+        priority: "background",
+      });
+      pageCount += 1;
+      if (page.items.length) {
+        await cacheMessengerMessages(db, page.items);
+        cachedCount += page.items.length;
+      }
+      const nextOldestSequence = page.items[0]?.sequence ?? null;
+      if (!page.page.has_more || !nextOldestSequence) {
+        await markMessengerRoomHistoryComplete(db, room.id);
+        historyComplete = true;
+        break;
+      }
+      if (compareSequence(nextOldestSequence, oldestSequence) >= 0) break;
+      oldestSequence = nextOldestSequence;
+    }
+
     messengerLog("info", "room.cache.warm.completed", {
       room_id: room.id,
       source,
@@ -123,6 +162,7 @@ export function warmMessengerRoomWindow(
       page_count: pageCount,
       latest_sequence: localLatestSequence,
       target_sequence: targetSequence,
+      history_complete: historyComplete,
       duration_ms: Date.now() - startedAt,
     });
   })();

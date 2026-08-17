@@ -860,10 +860,32 @@ export function syncMessengerRoomMessages(
   return request;
 }
 
+const messengerExactMessageRequests = new Map<
+  string,
+  Promise<MessengerMessage>
+>();
+
 export function getMessengerMessage(messageId: string) {
-  return messengerRequest<MessengerMessage>(
+  const running = messengerExactMessageRequests.get(messageId);
+  if (running) return running;
+  const request = messengerRequest<MessengerMessage>(
     `/chat/messages/${encodeURIComponent(messageId)}`,
+    { transportPriority: "foreground" },
   );
+  messengerExactMessageRequests.set(messageId, request);
+  void request.then(
+    () => {
+      if (messengerExactMessageRequests.get(messageId) === request) {
+        messengerExactMessageRequests.delete(messageId);
+      }
+    },
+    () => {
+      if (messengerExactMessageRequests.get(messageId) === request) {
+        messengerExactMessageRequests.delete(messageId);
+      }
+    },
+  );
+  return request;
 }
 
 export function searchMessengerMessages(options: {

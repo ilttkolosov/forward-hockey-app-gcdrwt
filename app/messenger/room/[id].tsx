@@ -110,13 +110,13 @@ import {
   messengerErrorMessage,
   removeMessengerReaction,
   saveMessengerMessage,
-  searchMessengerMessages,
   sendMessengerLocation,
   sendMessengerMedia,
   setMessengerReaction,
   syncMessengerRoomMessages,
   updateMessengerMessage,
 } from "../../../services/messengerApi";
+import { searchMessengerMessagesLocallyFirst } from "../../../services/messengerSearch";
 import { queueMessengerReadReceipt } from "../../../services/messengerReadSync";
 import {
   getMessengerRealtimeConnectionState,
@@ -156,7 +156,11 @@ import {
   subscribeMessengerOutbox,
 } from "../../../services/messengerOutbox";
 import { firstMessengerMessageUrl } from "../../../services/messengerLinkPreview";
-import { stripMessengerTextFormatting } from "../../../services/messengerTextFormatting";
+import {
+  applyMessengerTextFormat,
+  stripMessengerTextFormatting,
+  type MessengerTextFormat,
+} from "../../../services/messengerTextFormatting";
 
 type MessengerAttachmentKind = "camera" | "library" | "file" | "location";
 type InitialAnchorMode = "read_anchor" | "unread_fallback" | "latest";
@@ -183,6 +187,22 @@ interface MediaUploadRequest extends AttachmentDraft {
 }
 
 const MESSAGE_MUTATION_WINDOW_MS = 3 * 60 * 1000;
+const WEB_COMPOSER_EMOJIS = [
+  "😀",
+  "😂",
+  "😍",
+  "👍",
+  "👏",
+  "🔥",
+  "❤️",
+  "🏒",
+  "🥅",
+  "🎉",
+] as const;
+const WEB_EMOJI_FONT =
+  Platform.OS === "web"
+    ? '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif'
+    : undefined;
 
 function messageMutationAvailable(
   message: MessengerMessage,
@@ -313,6 +333,31 @@ function SwipeableMessage({
       .runOnJS(true);
     return Gesture.Race(swipe, hold, doubleTap);
   }, [enabled, onDoubleTap, onLongPress, onReply, resetPosition, translateX]);
+
+  if (Platform.OS === "web") {
+    const webInteractionProps = {
+      onDoubleClick: (event: { preventDefault(): void }) => {
+        event.preventDefault();
+        if (enabled) onReply();
+      },
+      onContextMenu: (event: { preventDefault(): void }) => {
+        event.preventDefault();
+        onLongPress();
+      },
+    } as unknown as React.ComponentProps<typeof View>;
+    return (
+      <View style={styles.swipeShell}>
+        <Animated.View
+          style={{
+            opacity: entryProgress,
+            transform: [{ translateY: entryTranslateY }],
+          }}
+        >
+          <View {...webInteractionProps}>{children}</View>
+        </Animated.View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.swipeShell}>
@@ -1113,6 +1158,11 @@ export default function MessengerRoomScreen() {
   );
   const [messages, setMessages] = useState<MessengerMessage[]>([]);
   const [text, setText] = useState("");
+  const [composerSelection, setComposerSelection] = useState({
+    start: 0,
+    end: 0,
+  });
+  const [webEmojiPaletteVisible, setWebEmojiPaletteVisible] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
   const [composerInputHeight, setComposerInputHeight] = useState(46);
   const [loading, setLoading] = useState(true);
@@ -1947,6 +1997,46 @@ export default function MessengerRoomScreen() {
             total_duration_ms: Date.now() - cacheStartedAt,
           });
         }
+        if (
+          initial &&
+          !localSnapshotReady &&
+          params.pushMessageId &&
+          session
+        ) {
+          const pushHydrationStartedAt = Date.now();
+          try {
+            // A notification handler and this screen can request the same
+            // message concurrently. getMessengerMessage coalesces that exact
+            // request, so the push bubble becomes the first frame without
+            // waiting for a complete room sync.
+            const pushedMessage = await getMessengerMessage(
+              params.pushMessageId,
+            );
+            if (pushedMessage.room_id === roomId) {
+              await cacheMessengerMessages(db, [pushedMessage]);
+              setMessages([pushedMessage]);
+              setLoading(false);
+              setInitialDataReady(true);
+              localSnapshotReady = true;
+              localLatestSequence = pushedMessage.sequence;
+              cachedLatestSequence = pushedMessage.sequence;
+              messengerLog("info", "room.push.first_message_ready", {
+                room_id: roomId,
+                message_id: pushedMessage.id,
+                sequence: pushedMessage.sequence,
+                duration_ms: Date.now() - pushHydrationStartedAt,
+                elapsed_since_tap_ms: Date.now() - openedAt,
+              });
+            }
+          } catch (error) {
+            messengerLog("debug", "room.push.first_message_deferred", {
+              room_id: roomId,
+              message_id: params.pushMessageId,
+              message: messengerErrorMessage(error),
+              duration_ms: Date.now() - pushHydrationStartedAt,
+            });
+          }
+        }
         if (initial && localSnapshotReady) {
           // Give React two frames to commit and position the SQLite viewport
           // before any outbox or REST reconciliation work is started.
@@ -1968,16 +2058,14 @@ export default function MessengerRoomScreen() {
             }),
           );
         }
-        let outboxError: unknown = null;
-        try {
-          await flushOutbox();
-        } catch (error) {
-          outboxError = error;
+        // Sending stale/failed outbox items can consume several 8-second
+        // attempts. It must never sit on the critical path that opens a room.
+        void flushOutbox().catch((error) => {
           setOffline(isMessengerConnectionError(error));
           setSyncError(
             messengerErrorMessage(error, "Не удалось отправить сообщение"),
           );
-        }
+        });
         const applyRemoteMessages = async (
           items: MessengerMessage[],
           exposeInFeed: boolean,
@@ -2083,14 +2171,14 @@ export default function MessengerRoomScreen() {
           scrollToLatest(false);
         }
         setOffline(false);
-        if (!outboxError) setSyncError(null);
+        setSyncError(null);
         messengerLog("info", "room.sync.completed", {
           room_id: roomId,
           message_count: receivedMessageCount,
           reconciled_message_count: reconciledMessageCount,
           latest_sequence: latestSequence,
           direction: syncDirection,
-          outbox_error: Boolean(outboxError),
+          outbox_flush_detached: true,
           duration_ms: Date.now() - startedAt,
         });
       } catch (error) {
@@ -2119,6 +2207,7 @@ export default function MessengerRoomScreen() {
       openedAt,
       params.lastReadSequence,
       params.latestSequence,
+      params.pushMessageId,
       params.unreadCount,
       roomId,
       scrollToLatest,
@@ -2467,7 +2556,7 @@ export default function MessengerRoomScreen() {
       filterLoadingRef.current = true;
       setFilterLoading(true);
       try {
-        const result = await searchMessengerMessages({
+        const result = await searchMessengerMessagesLocallyFirst(db, {
           roomId,
           authorUserId: filter.id,
           cursor,
@@ -2493,7 +2582,7 @@ export default function MessengerRoomScreen() {
         setFilterLoading(false);
       }
     },
-    [roomId],
+    [db, roomId],
   );
 
   const handleListScroll = useCallback(
@@ -4275,6 +4364,38 @@ export default function MessengerRoomScreen() {
       current === nextHeight ? current : nextHeight,
     );
   }, []);
+  const applyWebComposerFormat = useCallback(
+    (format: MessengerTextFormat) => {
+      const result = applyMessengerTextFormat(text, composerSelection, format);
+      if (result.text === text) return;
+      setText(result.text);
+      setComposerSelection(result.selection);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    },
+    [composerSelection, text],
+  );
+  const insertWebComposerEmoji = useCallback(
+    (emoji: string) => {
+      const start = Math.max(
+        0,
+        Math.min(composerSelection.start, composerSelection.end, text.length),
+      );
+      const end = Math.max(
+        start,
+        Math.min(
+          Math.max(composerSelection.start, composerSelection.end),
+          text.length,
+        ),
+      );
+      const nextText = `${text.slice(0, start)}${emoji}${text.slice(end)}`;
+      const cursor = start + emoji.length;
+      setText(nextText);
+      setComposerSelection({ start: cursor, end: cursor });
+      setWebEmojiPaletteVisible(false);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    },
+    [composerSelection, text],
+  );
 
   const openGroupSettings = () => {
     if (!roomType || roomType === "direct" || roomType === "saved") return;
@@ -5263,6 +5384,64 @@ export default function MessengerRoomScreen() {
                 </TouchableOpacity>
               </View>
             )}
+            {Platform.OS === "web" && (
+              <View style={styles.webComposerTools}>
+                <View style={styles.webFormatButtons}>
+                  {(
+                    [
+                      ["bold", "B"],
+                      ["italic", "I"],
+                      ["underline", "U"],
+                      ["strikethrough", "S"],
+                    ] as const
+                  ).map(([format, label]) => (
+                    <TouchableOpacity
+                      key={format}
+                      style={styles.webFormatButton}
+                      onPress={() => applyWebComposerFormat(format)}
+                      disabled={composerBusy}
+                      accessibilityLabel={`Формат: ${format}`}
+                    >
+                      <Text
+                        style={[
+                          styles.webFormatButtonText,
+                          format === "bold" && styles.webFormatBold,
+                          format === "italic" && styles.webFormatItalic,
+                          format === "underline" && styles.webFormatUnderline,
+                          format === "strikethrough" &&
+                            styles.webFormatStrikethrough,
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                  <TouchableOpacity
+                    style={styles.webEmojiButton}
+                    onPress={() =>
+                      setWebEmojiPaletteVisible((current) => !current)
+                    }
+                    disabled={composerBusy}
+                    accessibilityLabel="Эмодзи"
+                  >
+                    <Text style={styles.webEmojiButtonText}>😀</Text>
+                  </TouchableOpacity>
+                </View>
+                {webEmojiPaletteVisible && (
+                  <View style={styles.webEmojiPalette}>
+                    {WEB_COMPOSER_EMOJIS.map((emoji) => (
+                      <TouchableOpacity
+                        key={emoji}
+                        style={styles.webEmojiChoice}
+                        onPress={() => insertWebComposerEmoji(emoji)}
+                      >
+                        <Text style={styles.webEmojiChoiceText}>{emoji}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+            )}
             <View style={styles.composer}>
               {canMedia && (
                 <TouchableOpacity
@@ -5283,6 +5462,10 @@ export default function MessengerRoomScreen() {
                 style={[styles.input, { height: composerInputHeight }]}
                 value={text}
                 onChangeText={setText}
+                selection={Platform.OS === "web" ? composerSelection : undefined}
+                onSelectionChange={
+                  Platform.OS === "web" ? setComposerSelection : undefined
+                }
                 placeholder={
                   editingMessage
                     ? "Измените сообщение"
@@ -5615,7 +5798,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   messageText: { color: colors.text, fontSize: 15, lineHeight: 20 },
-  emojiOnlyText: { fontSize: 38, lineHeight: 46 },
+  emojiOnlyText: {
+    fontSize: 38,
+    lineHeight: 46,
+    fontFamily: WEB_EMOJI_FONT,
+  },
   forwardedHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -5686,11 +5873,78 @@ const styles = StyleSheet.create({
     borderColor: colors.accent,
     backgroundColor: "#D9EBFB",
   },
-  reactionText: { color: colors.text, fontSize: 12, fontWeight: "700" },
+  reactionText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "700",
+    fontFamily: WEB_EMOJI_FONT,
+  },
   composerShell: {
     borderTopWidth: 1,
     borderTopColor: colors.border,
     backgroundColor: colors.background,
+  },
+  webComposerTools: {
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+  },
+  webFormatButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  webFormatButton: {
+    width: 32,
+    height: 30,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    backgroundColor: colors.backgroundAlt,
+  },
+  webFormatButtonText: { color: colors.text, fontSize: 14 },
+  webFormatBold: { fontWeight: "900" },
+  webFormatItalic: { fontStyle: "italic" },
+  webFormatUnderline: { textDecorationLine: "underline" },
+  webFormatStrikethrough: { textDecorationLine: "line-through" },
+  webEmojiButton: {
+    minWidth: 38,
+    height: 30,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    backgroundColor: colors.backgroundAlt,
+  },
+  webEmojiButtonText: {
+    fontSize: 19,
+    lineHeight: 23,
+    fontFamily: WEB_EMOJI_FONT,
+  },
+  webEmojiPalette: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+    padding: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+  },
+  webEmojiChoice: {
+    width: 34,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+  },
+  webEmojiChoiceText: {
+    fontSize: 21,
+    lineHeight: 25,
+    fontFamily: WEB_EMOJI_FONT,
   },
   attachmentPreparation: {
     minHeight: 36,

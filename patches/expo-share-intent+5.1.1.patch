@@ -1,127 +1,321 @@
 diff --git a/node_modules/expo-share-intent/plugin/build/ios/ShareExtensionViewController.swift b/node_modules/expo-share-intent/plugin/build/ios/ShareExtensionViewController.swift
-index 156d8d6..8f43c4c 100644
 --- a/node_modules/expo-share-intent/plugin/build/ios/ShareExtensionViewController.swift
 +++ b/node_modules/expo-share-intent/plugin/build/ios/ShareExtensionViewController.swift
-@@ -71 +71 @@
+@@ -66,0 +67,3 @@
++      await Task { @MainActor in
++        self.finishSharing()
++      }.value
+@@ -71 +74 @@
 -    Task.detached {
 +    await Task.detached {
-@@ -77 +77 @@
+@@ -77 +80 @@
 -          Task { @MainActor in
 +          await Task { @MainActor in
-@@ -79 +79 @@
+@@ -79 +82 @@
 -          }
 +          }.value
-@@ -83 +83 @@
+@@ -83 +86 @@
 -          Task { @MainActor in
 +          await Task { @MainActor in
-@@ -85 +85 @@
+@@ -85 +88 @@
 -          }
 +          }.value
-@@ -94 +94 @@
+@@ -94 +97 @@
 -    }
 +    }.value
-@@ -98 +98 @@
+@@ -98 +101 @@
 -    Task.detached {
 +    await Task.detached {
-@@ -102 +102 @@
+@@ -102 +105 @@
 -        Task { @MainActor in
 +        await Task { @MainActor in
-@@ -113 +113 @@
+@@ -105,7 +107,0 @@
+-          // If this is the last item, save sharedText in userDefaults and redirect to host app
+-          if index == (content.attachments?.count)! - 1 {
+-            let userDefaults = UserDefaults(suiteName: self.hostAppGroupIdentifier)
+-            userDefaults?.set(self.sharedText, forKey: self.sharedKey)
+-            userDefaults?.synchronize()
+-            self.redirectToHostApp(type: .text)
+-          }
+@@ -113 +109 @@
 -        }
 +        }.value
-@@ -119 +119 @@
+@@ -119 +115 @@
 -    }
 +    }.value
-@@ -123 +123 @@
+@@ -123 +119 @@
 -    Task.detached {
 +    await Task.detached {
-@@ -125 +125 @@
+@@ -125 +121 @@
 -        Task { @MainActor in
 +        await Task { @MainActor in
-@@ -136 +136 @@
+@@ -128,7 +123,0 @@
+-          // If this is the last item, save sharedText in userDefaults and redirect to host app
+-          if index == (content.attachments?.count)! - 1 {
+-            let userDefaults = UserDefaults(suiteName: self.hostAppGroupIdentifier)
+-            userDefaults?.set(self.toData(data: self.sharedWebUrl), forKey: self.sharedKey)
+-            userDefaults?.synchronize()
+-            self.redirectToHostApp(type: .weburl)
+-          }
+@@ -136 +125 @@
 -        }
 +        }.value
-@@ -142 +142 @@
+@@ -142 +131 @@
 -    }
 +    }.value
-@@ -148 +148 @@
+@@ -148 +137 @@
 -    Task.detached {
 +    await Task.detached {
-@@ -153 +153 @@
+@@ -153 +142 @@
 -        Task { @MainActor in
 +        await Task { @MainActor in
-@@ -176 +176 @@
+@@ -163,7 +151,0 @@
+-            // If this is the last item, save sharedText in userDefaults and redirect to host app
+-            if index == (content.attachments?.count)! - 1 {
+-              let userDefaults = UserDefaults(suiteName: self.hostAppGroupIdentifier)
+-              userDefaults?.set(self.toData(data: self.sharedWebUrl), forKey: self.sharedKey)
+-              userDefaults?.synchronize()
+-              self.redirectToHostApp(type: .weburl)
+-            }
+@@ -176 +158 @@
 -        }
 +        }.value
-@@ -182 +182 @@
+@@ -182 +164 @@
 -    }
 +    }.value
-@@ -186 +186 @@
+@@ -186 +168 @@
 -      Task.detached {
 +      await Task.detached {
-@@ -212 +212 @@
+@@ -212 +194 @@
 -                  Task { @MainActor in
 +                  await Task { @MainActor in
-@@ -214 +214 @@
+@@ -214 +196 @@
 -                  }
 +                  }.value
-@@ -220 +220 @@
+@@ -220 +202 @@
 -              Task { @MainActor in
 +              await Task { @MainActor in
-@@ -222 +222 @@
+@@ -222 +204 @@
 -              }
 +              }.value
-@@ -224 +224 @@
+@@ -224 +206 @@
 -      }
 +      }.value
-@@ -229 +229 @@
+@@ -229 +211 @@
 -    Task.detached {
 +    await Task.detached {
-@@ -233 +233 @@
+@@ -233 +215 @@
 -        Task { @MainActor in
 +        await Task { @MainActor in
-@@ -309 +309 @@
+@@ -302,8 +284 @@
+-          // If this is the last item, save imagesData in userDefaults and redirect to host app
+-          if index == (content.attachments?.count)! - 1 {
+-            let userDefaults = UserDefaults(suiteName: self.hostAppGroupIdentifier)
+-            userDefaults?.set(self.toData(data: self.sharedMedia), forKey: self.sharedKey)
+-            userDefaults?.synchronize()
+-            self.redirectToHostApp(type: .media)
+-          }
 -        }
 +        }.value
-@@ -314 +314 @@
+@@ -314 +289 @@
 -    }
 +    }.value
-@@ -361 +361 @@
+@@ -361 +336 @@
 -    Task.detached {
 +    await Task.detached {
-@@ -364 +364 @@
+@@ -364 +339 @@
 -        Task { @MainActor in
 +        await Task { @MainActor in
-@@ -395 +395 @@
+@@ -387,9 +362 @@
+-          // If this is the last item, save imagesData in userDefaults and redirect to host app
+-          if index == (content.attachments?.count)! - 1 {
+-            let userDefaults = UserDefaults(suiteName: self.hostAppGroupIdentifier)
+-            userDefaults?.set(self.toData(data: self.sharedMedia), forKey: self.sharedKey)
+-            userDefaults?.synchronize()
+-            self.redirectToHostApp(type: .media)
+-          }
+-
 -        }
 +        }.value
-@@ -401 +401 @@
+@@ -401 +368 @@
 -    }
 +    }.value
-@@ -405 +405 @@
+@@ -405 +372 @@
 -    Task.detached {
 +    await Task.detached {
-@@ -407 +407 @@
+@@ -407 +374 @@
 -        Task { @MainActor in
 +        await Task { @MainActor in
-@@ -411 +411 @@
+@@ -411 +378 @@
 -        }
 +        }.value
-@@ -417 +417 @@
+@@ -417 +384 @@
 -    }
 +    }.value
-@@ -421 +421 @@
+@@ -421 +388 @@
 -    Task.detached {
 +    await Task.detached {
-@@ -423 +423 @@
+@@ -423 +390 @@
 -        Task { @MainActor in
 +        await Task { @MainActor in
-@@ -427 +427 @@
+@@ -427 +394 @@
 -        }
 +        }.value
-@@ -433 +433 @@
+@@ -433 +400 @@
 -    }
 +    }.value
+@@ -456,3 +423,24 @@
+-    if index == (content.attachments?.count)! - 1 {
+-      let userDefaults = UserDefaults(suiteName: self.hostAppGroupIdentifier)
+-      userDefaults?.set(self.toData(data: self.sharedMedia), forKey: self.sharedKey)
++  }
++
++  @MainActor
++  private func finishSharing() {
++    let userDefaults = UserDefaults(suiteName: hostAppGroupIdentifier)
++
++    // Some apps (notably Telegram, WhatsApp and MAX) provide a video/photo and
++    // its caption as separate attachments. Persist the complete payload once
++    // every provider has finished, rather than letting the last attachment
++    // decide which part reaches the host app.
++    if !sharedMedia.isEmpty {
++      userDefaults?.set(toData(data: sharedMedia), forKey: sharedKey)
++      if !sharedText.isEmpty {
++        userDefaults?.set(sharedText.joined(separator: "\n"), forKey: sharedKey + "Text")
++      } else {
++        userDefaults?.removeObject(forKey: sharedKey + "Text")
++      }
++      userDefaults?.synchronize()
++      redirectToHostApp(type: sharedMedia.allSatisfy { $0.type == .file } ? .file : .media)
++      return
++    }
++
++    if !sharedWebUrl.isEmpty {
++      userDefaults?.set(toData(data: sharedWebUrl), forKey: sharedKey)
+@@ -460 +448,2 @@
+-      self.redirectToHostApp(type: .file)
++      redirectToHostApp(type: .weburl)
++      return
+@@ -461,0 +451,9 @@
++
++    if !sharedText.isEmpty {
++      userDefaults?.set(sharedText, forKey: sharedKey)
++      userDefaults?.synchronize()
++      redirectToHostApp(type: .text)
++      return
++    }
++
++    dismissWithError(message: "No supported content found")
+@@ -784 +781,0 @@
+-
+diff --git a/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift b/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift
+--- a/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift
++++ b/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift
+@@ -40 +40,2 @@
+-            userDefaults?.set(nil, forKey: sharedKey)
++            userDefaults?.removeObject(forKey: sharedKey)
++            userDefaults?.removeObject(forKey: sharedKey + "Text")
+@@ -86,2 +87,5 @@
+-                        guard let json = toJson(data: sharedMediaFiles) else { return "[]" }
+-                        return "{ \"files\": \(json), \"type\": \"\(url.fragment!)\" }"
++                        return try? ShareIntentMedia(
++                            files: sharedMediaFiles,
++                            text: userDefaults?.string(forKey: key + "Text"),
++                            type: url.fragment!
++                        ).toJSON()
+@@ -105,2 +109,5 @@
+-                        guard let json = toJson(data: sharedMediaFiles) else { return "[]" }
+-                        return "{ \"files\": \(json), \"type\": \"\(url.fragment!)\" }"
++                        return try? ShareIntentMedia(
++                            files: sharedMediaFiles,
++                            text: userDefaults?.string(forKey: key + "Text"),
++                            type: url.fragment!
++                        ).toJSON()
+@@ -237,0 +245,6 @@
++    struct ShareIntentMedia: Codable {
++        let files: [SharedMediaFile]
++        let text: String?
++        let type: String  // media / file
++    }
++
+@@ -294 +306,0 @@
+-
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
+--- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
+@@ -59 +59 @@
+-        private fun getFileInfo(uri: Uri): Map<String, String?> {
++        private fun getFileInfo(uri: Uri, fallbackMimeType: String?): Map<String, String?> {
+@@ -69,5 +69,10 @@
+-            val queryResult: Cursor = resolver.query(uri, null, null, null, null)!!
+-            queryResult.moveToFirst()
+-            val fileName = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.DISPLAY_NAME))
+-            val fileSize = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.SIZE))
+-            queryResult.close()
++            var fileName: String? = null
++            var fileSize: String? = null
++            resolver.query(uri, null, null, null, null)?.use { queryResult ->
++                if (queryResult.moveToFirst()) {
++                    val nameIndex = queryResult.getColumnIndex(OpenableColumns.DISPLAY_NAME)
++                    val sizeIndex = queryResult.getColumnIndex(OpenableColumns.SIZE)
++                    if (nameIndex >= 0) fileName = queryResult.getString(nameIndex)
++                    if (sizeIndex >= 0) fileSize = queryResult.getString(sizeIndex)
++                }
++            }
+@@ -75 +80 @@
+-            val mimeType = resolver.getType(uri)!!
++            val mimeType = resolver.getType(uri) ?: fallbackMimeType ?: "application/octet-stream"
+@@ -90,8 +95,18 @@
+-                retriever.setDataSource(instance?.getAbsolutePath(uri))
+-                mediaWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt().toString() ?: null
+-                mediaHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt().toString() ?: null
+-                // Check orientation and flip size if required
+-                val metaRotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0;
+-                if (metaRotation == 90 || metaRotation == 270) {
+-                    mediaWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt().toString() ?: null
+-                    mediaHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt().toString() ?: null
++                try {
++                    // Telegram and WhatsApp usually expose a content:// URI with no
++                    // stable filesystem path. Read metadata through ContentResolver.
++                    val module = instance ?: error("Share intent module is not initialized")
++                    retriever.setDataSource(module.context, uri)
++                    mediaWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
++                    mediaHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
++                    val metaRotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
++                    if (metaRotation == 90 || metaRotation == 270) {
++                        val originalWidth = mediaWidth
++                        mediaWidth = mediaHeight
++                        mediaHeight = originalWidth
++                    }
++                    mediaDuration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
++                } catch (exception: Exception) {
++                    Log.w("ExpoShareIntent", "Cannot read video metadata for $uri", exception)
++                } finally {
++                    retriever.release()
+@@ -99 +113,0 @@
+-                mediaDuration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toInt().toString() ?: null
+@@ -145 +159,8 @@
+-                        notifyShareIntent(mapOf( "files" to arrayOf(getFileInfo(uri), "type" to "file")))
++                        notifyShareIntent(mapOf(
++                            "files" to arrayOf(getFileInfo(uri, intent.type)),
++                            "text" to intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString(),
++                            "type" to "file",
++                            "meta" to mapOf(
++                                "title" to intent.getCharSequenceExtra(Intent.EXTRA_TITLE),
++                            )
++                        ))
+@@ -152 +173,8 @@
+-                        notifyShareIntent(mapOf( "files" to uris.map { getFileInfo(it) }, "type" to "file"))
++                        notifyShareIntent(mapOf(
++                            "files" to uris.map { getFileInfo(it, intent.type) },
++                            "text" to intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString(),
++                            "type" to "file",
++                            "meta" to mapOf(
++                                "title" to intent.getCharSequenceExtra(Intent.EXTRA_TITLE),
++                            )
++                        ))
+@@ -372 +399,0 @@
+-
 diff --git a/node_modules/expo-share-intent/build/utils.js b/node_modules/expo-share-intent/build/utils.js
 index 498e9ec..c14f3d0 100644
 --- a/node_modules/expo-share-intent/build/utils.js

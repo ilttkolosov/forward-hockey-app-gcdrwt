@@ -1,11 +1,12 @@
 import * as FileSystem from "expo-file-system/legacy";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 import type { MessengerMedia } from "../features/messenger/types";
 import { messengerMediaUrl } from "./messengerApi";
 import { messengerLog, messengerRequestId } from "./messengerLogger";
 
 const CACHE_ROOT = `${FileSystem.cacheDirectory || ""}forward-messenger-media/`;
 const downloads = new Map<string, Promise<string>>();
+const webMediaObjectUrls = new Map<string, { uri: string; size: number }>();
 const localMediaUploads = new Set<string>();
 const queuedVideoPrefetches = new Set<string>();
 const videoPrefetchQueue: {
@@ -83,6 +84,9 @@ export function messengerMediaCachePath(media: MessengerMedia): string {
 export async function getCachedMessengerMediaUri(
   media: MessengerMedia,
 ): Promise<string | null> {
+  if (Platform.OS === "web") {
+    return webMediaObjectUrls.get(media.id)?.uri ?? null;
+  }
   if (!FileSystem.cacheDirectory) return null;
   try {
     const destination = messengerMediaCachePath(media);
@@ -104,6 +108,30 @@ export async function cacheMessengerMedia(
   if (existing) return existing;
 
   const task = (async () => {
+    if (Platform.OS === "web") {
+      const source = messengerMediaUrl(media.url);
+      if (!source) throw new Error("У вложения отсутствует адрес");
+      const response = await fetch(source, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "X-Request-ID": messengerRequestId(),
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`Сервер вернул HTTP ${response.status}`);
+      }
+      const blob = await response.blob();
+      const previous = webMediaObjectUrls.get(media.id);
+      if (previous) URL.revokeObjectURL(previous.uri);
+      const uri = URL.createObjectURL(blob);
+      webMediaObjectUrls.set(media.id, { uri, size: blob.size });
+      messengerLog("info", "media.cache.web_ready", {
+        asset_id: media.id,
+        media_type: media.type,
+        downloaded_bytes: blob.size,
+      });
+      return uri;
+    }
     await ensureCacheRoot();
     const destination = messengerMediaCachePath(media);
     const info = await FileSystem.getInfoAsync(destination);
@@ -284,6 +312,7 @@ export async function seedMessengerMediaCache(
   media: MessengerMedia,
   sourceUri: string,
 ): Promise<string> {
+  if (Platform.OS === "web") return sourceUri;
   await ensureCacheRoot();
   const destination = messengerMediaCachePath(media);
   if (sourceUri === destination) return destination;
@@ -312,11 +341,27 @@ async function directorySize(uri: string): Promise<number> {
 }
 
 export async function messengerMediaCacheSize(): Promise<number> {
+  if (Platform.OS === "web") {
+    return [...webMediaObjectUrls.values()].reduce(
+      (total, item) => total + item.size,
+      0,
+    );
+  }
   if (!FileSystem.cacheDirectory) return 0;
   return directorySize(CACHE_ROOT);
 }
 
 export async function clearMessengerMediaCache(): Promise<number> {
+  if (Platform.OS === "web") {
+    const bytes = await messengerMediaCacheSize();
+    webMediaObjectUrls.forEach((item) => URL.revokeObjectURL(item.uri));
+    webMediaObjectUrls.clear();
+    downloads.clear();
+    videoPrefetchQueue.splice(0, videoPrefetchQueue.length);
+    queuedVideoPrefetches.clear();
+    messengerLog("info", "media.cache.cleared", { removed_bytes: bytes });
+    return bytes;
+  }
   if (!FileSystem.cacheDirectory) return 0;
   const bytes = await messengerMediaCacheSize();
   downloads.clear();

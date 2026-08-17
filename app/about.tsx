@@ -6,9 +6,12 @@ import {
   ScrollView,
   StyleSheet,
   Linking,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { commonStyles, colors } from '../styles/commonStyles';
+import { useRouter } from 'expo-router';
+import { colors } from '../styles/commonStyles';
+import Icon from '../components/Icon';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -22,6 +25,28 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
+  },
+  header: {
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  backButton: {
+    width: 52,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    flex: 1,
+    paddingRight: 52,
+    color: colors.text,
+    fontSize: 19,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   section: {
     marginBottom: 24,
@@ -50,6 +75,7 @@ const styles = StyleSheet.create({
 });
 
 export default function AboutScreen() {
+  const router = useRouter();
   const [licenseText, setLicenseText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -106,6 +132,11 @@ export default function AboutScreen() {
 
   // === ДАННЫЕ ОБ УСТРОЙСТВЕ И ОКРУЖЕНИИ ===
   const appVersion = Constants.expoConfig?.version || '1.0.0';
+  const nativeBuildVersion = Constants.nativeBuildVersion || '—';
+  const gitCommit =
+    typeof Constants.expoConfig?.extra?.gitCommit === 'string'
+      ? Constants.expoConfig.extra.gitCommit
+      : '—';
   const deviceModel = Device.modelName || 'Unknown';
   const osVersion = `${Device.osName || 'Unknown'} ${Device.osVersion || ''}`;
   const expoSdkVersion = Constants.expoSdkVersion || '—';
@@ -120,12 +151,25 @@ export default function AboutScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Назад"
+        >
+          <Icon name="chevron-back" size={28} color={colors.primary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>О программе</Text>
+      </View>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>О приложении</Text>
           <Text style={styles.text}>Название: ХК Динамо Форвард 2014</Text>
-          <Text style={styles.text}>Номер сборки: {appVersion}</Text>
+          <Text style={styles.text}>Версия приложения: {appVersion}</Text>
+          <Text style={styles.text}>Номер сборки: {nativeBuildVersion}</Text>
+          <Text style={styles.text}>Git-коммит: {gitCommit}</Text>
           <Text style={styles.text}>Версия данных игроков: {playersVersion ?? '—'}</Text>
           <Text style={styles.text}>Версия данных команд: {teamsVersion ?? '—'}</Text>
         </View>

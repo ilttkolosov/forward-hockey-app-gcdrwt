@@ -97,6 +97,8 @@ export interface ForwardRichTextInputProps {
   onBlur?: () => void;
   onContentSizeChange?: (height: number) => void;
   onPasteAttachment?: (attachment: ForwardRichTextPastedAttachment) => void;
+  selection?: { start: number; end: number };
+  onSelectionChange?: (selection: { start: number; end: number }) => void;
 }
 
 type NativeComponent = React.ComponentType<
@@ -159,6 +161,8 @@ export const ForwardRichTextInput = forwardRef<
     onBlur,
     onContentSizeChange,
     onPasteAttachment,
+    selection,
+    onSelectionChange,
   },
   forwardedRef,
 ) {
@@ -225,6 +229,9 @@ export const ForwardRichTextInput = forwardRef<
       onBlur,
       onContentSizeChange: (event) =>
         onContentSizeChange?.(event.nativeEvent.contentSize.height),
+      selection,
+      onSelectionChange: (event) =>
+        onSelectionChange?.(event.nativeEvent.selection),
     };
     return <TextInput ref={fallbackRef} {...fallbackProps} />;
   }

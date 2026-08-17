@@ -1,8 +1,24 @@
 // app.config.js
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
+
+function resolveGitCommit() {
+  const configured =
+    process.env.EAS_BUILD_GIT_COMMIT_HASH || process.env.GITHUB_SHA;
+  if (configured) return configured.slice(0, 12);
+  try {
+    return execFileSync("git", ["rev-parse", "--short=12", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "unknown";
+  }
+}
 
 export default ({ config }) => {
+  const gitCommit = resolveGitCommit();
   const localGoogleServicesPath = path.resolve(
     process.cwd(),
     "google-services.json",
@@ -20,7 +36,7 @@ export default ({ config }) => {
     // to users is restored per platform by withAppDisplayName below.
     name: "ForwardHockey14",
     slug: "Forward",
-    version: "1.0.89",
+    version: "1.0.90",
     orientation: "portrait",
     icon: "./assets/icons/myIcon.png",
     userInterfaceStyle: "light",
@@ -32,7 +48,7 @@ export default ({ config }) => {
     },
     ios: {
       supportsTablet: true,
-      buildNumber: "89",
+      buildNumber: "90",
       bundleIdentifier: "com.aleksandrkolosov.forward2014",
       infoPlist: {
         CFBundleDisplayName: "ХК Форвард 14",
@@ -43,7 +59,7 @@ export default ({ config }) => {
       },
     },
     android: {
-      versionCode: 89,
+      versionCode: 90,
       adaptiveIcon: {
         foregroundImage: "./assets/icons/myIcon.png",
         backgroundColor: "#ffffff",
@@ -150,6 +166,7 @@ export default ({ config }) => {
     },
     extra: {
       router: {},
+      gitCommit,
       runtimeFeatures: {
         // android.config is build-only and is not exposed through Constants.
         // Mirror only the safe boolean so JS never mounts Google MapView when

@@ -58,11 +58,17 @@ export async function saveMessengerMediaToDevice(
   accessToken: string,
 ): Promise<MessengerMediaSaveTarget> {
   const localUri = await cacheMessengerMedia(media, accessToken);
+  if (Platform.OS === "web") {
+    const anchor = document.createElement("a");
+    anchor.href = localUri;
+    anchor.download = safeFileName(media);
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    return "files";
+  }
   if (media.type === "image" || media.type === "video") {
-    if (Platform.OS === "web") {
-      await shareToFiles(localUri, media);
-      return "files";
-    }
     const permission = await MediaLibrary.requestPermissionsAsync(true);
     if (!permission.granted) {
       throw new Error("Нет разрешения на сохранение в медиатеку");
