@@ -23,6 +23,7 @@ import Icon from "../../../components/Icon";
 import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
 import MessengerAvatarViewer from "../../../features/messenger/MessengerAvatarViewer";
+import MessengerSafetyActions from "../../../features/messenger/MessengerSafetyActions";
 import type { MessengerContactProfile } from "../../../features/messenger/types";
 import {
   getMessengerRoomMemberProfile,
@@ -352,6 +353,14 @@ export default function MessengerContactProfileScreen() {
                 )}
               </TouchableOpacity>
             </View>
+
+            {profile.id !== session.user.id ? (
+              <MessengerSafetyActions
+                targetUserId={profile.id}
+                targetDisplayName={profile.display_name}
+                roomId={roomId}
+              />
+            ) : null}
           </ScrollView>
         ) : (
           <View style={styles.center}>
