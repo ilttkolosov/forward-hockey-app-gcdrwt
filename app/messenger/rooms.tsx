@@ -540,7 +540,7 @@ export default function MessengerRoomsScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => router.push("/messenger/search")}
+            onRefresh={() => void loadRooms(true, false, true)}
           />
         }
         contentContainerStyle={
