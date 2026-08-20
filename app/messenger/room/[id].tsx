@@ -987,6 +987,7 @@ const MessengerMessageListItem = React.memo(
                 displayName={item.author.display_name}
                 avatarUrl={item.author.avatar_url}
                 accessToken={accessToken}
+                identityKey={item.author.id}
                 size={40}
               />
             )}
@@ -1348,6 +1349,8 @@ export default function MessengerRoomScreen() {
     | null
   >(null);
   const floatingDateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const floatingDateLabelRef = useRef<string | null>(null);
+  const feedIsScrolling = useRef(false);
   const privateReplyHandled = useRef<string | null>(null);
   const pendingScrollAnimation = useRef<boolean | null>(null);
   const pendingScrollFallbackTimer = useRef<ReturnType<
@@ -1444,6 +1447,7 @@ export default function MessengerRoomScreen() {
   }, []);
 
   const scrollToLatest = useCallback((animated: boolean) => {
+    if (messageNavigationTarget.current) return;
     pendingScrollAnimation.current = animated;
     if (pendingScrollFallbackTimer.current) {
       clearTimeout(pendingScrollFallbackTimer.current);
@@ -1491,7 +1495,7 @@ export default function MessengerRoomScreen() {
       messageNavigationTarget.current = null;
       messageNavigationTimer.current = null;
       setHighlightedMessageId(null);
-    }, 1_200);
+    }, 2_500);
   }, []);
 
   const navigateToRepliedMessage = useCallback(
@@ -2496,7 +2500,23 @@ export default function MessengerRoomScreen() {
         .filter((token) => token.isViewable && typeof token.index === "number")
         .sort((left, right) => (left.index ?? 0) - (right.index ?? 0))[0];
       if (firstVisible) {
-        setFloatingDate(messageDateLabel(firstVisible.item.created_at));
+        const currentIndex = messagesRef.current.findIndex(
+          (message) =>
+            message.client_message_id ===
+            firstVisible.item.client_message_id,
+        );
+        const previous =
+          currentIndex > 0 ? messagesRef.current[currentIndex - 1] : null;
+        const startsDay =
+          !previous ||
+          messageDayKey(previous.created_at) !==
+            messageDayKey(firstVisible.item.created_at);
+        floatingDateLabelRef.current = startsDay
+          ? null
+          : messageDateLabel(firstVisible.item.created_at);
+        if (feedIsScrolling.current) {
+          setFloatingDate(floatingDateLabelRef.current);
+        }
       }
       const latestVisible = viewableItems
         .filter((token) => token.isViewable && !token.item.pending)
@@ -2743,11 +2763,14 @@ export default function MessengerRoomScreen() {
         contentOffset.y + layoutMeasurement.height >= contentSize.height - 120;
       nearLatest.current = atLatest;
       setShowJumpToLatest(!authorFilter && !atLatest);
+      feedIsScrolling.current = true;
+      setFloatingDate(floatingDateLabelRef.current);
       if (floatingDateTimer.current) clearTimeout(floatingDateTimer.current);
       floatingDateTimer.current = setTimeout(() => {
         floatingDateTimer.current = null;
+        feedIsScrolling.current = false;
         setFloatingDate(null);
-      }, 1_100);
+      }, 1_500);
       if (!pendingInitialPosition.current && contentOffset.y <= 100) {
         if (authorFilter && filterCursor) {
           void loadFilteredAuthorMessages(authorFilter, filterCursor);
@@ -4849,12 +4872,13 @@ export default function MessengerRoomScreen() {
             }
           >
             {roomType === "saved" ? (
-              <SavedMessagesAvatar size={42} />
+              <SavedMessagesAvatar size={42} userId={session?.user.id} />
             ) : (
               <AuthenticatedAvatar
                 displayName={roomTitle}
                 avatarUrl={roomAvatarUrl}
                 accessToken={session?.access_token}
+                identityKey={peerPresence?.id || params.peerId || roomId}
                 size={42}
               />
             )}
@@ -4945,6 +4969,10 @@ export default function MessengerRoomScreen() {
               initialListContentMeasured.current = true;
               if (pendingInitialPosition.current) {
                 positionInitialMessages();
+                return;
+              }
+              if (messageNavigationTarget.current) {
+                requestAnimationFrame(positionMessageNavigationTarget);
                 return;
               }
               const animated = pendingScrollAnimation.current;
@@ -5409,7 +5437,7 @@ export default function MessengerRoomScreen() {
                     onPress={() => void forwardToSaved()}
                     disabled={Boolean(forwardBusy)}
                   >
-                    <SavedMessagesAvatar size={44} />
+                    <SavedMessagesAvatar size={44} userId={session?.user.id} />
                     <View style={styles.forwardTargetText}>
                       <Text style={styles.forwardTargetTitle}>Избранное</Text>
                       <Text style={styles.forwardTargetSubtitle}>
@@ -5447,6 +5475,7 @@ export default function MessengerRoomScreen() {
                             displayName={target.peer.display_name}
                             avatarUrl={target.peer.avatar_url}
                             accessToken={session?.access_token}
+                            identityKey={target.peer.id}
                             size={44}
                           />
                         ) : (
@@ -5515,6 +5544,8 @@ export default function MessengerRoomScreen() {
                           displayName={contact.display_name}
                           avatarUrl={contact.avatar_url}
                           accessToken={session?.access_token}
+                          identityKey={contact.id}
+                          roles={contact.roles}
                           size={44}
                         />
                         <View style={styles.forwardTargetText}>
@@ -6021,12 +6052,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 13,
-    backgroundColor: "rgba(55, 91, 120, 0.78)",
+    backgroundColor: "rgba(96, 116, 132, 0.64)",
   },
   dateDividerText: {
     color: colors.white,
     fontSize: 12,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   floatingDate: {
     position: "absolute",
@@ -6041,9 +6072,9 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     overflow: "hidden",
     color: colors.white,
-    backgroundColor: "rgba(43, 76, 104, 0.9)",
+    backgroundColor: "rgba(86, 108, 126, 0.72)",
     fontSize: 12,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   peerMutedNotice: {
     alignSelf: "center",
