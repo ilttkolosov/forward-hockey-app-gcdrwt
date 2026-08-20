@@ -987,6 +987,7 @@ const MessengerMessageListItem = React.memo(
                 displayName={item.author.display_name}
                 avatarUrl={item.author.avatar_url}
                 accessToken={accessToken}
+                identityKey={item.author.id}
                 size={40}
               />
             )}
@@ -4849,12 +4850,13 @@ export default function MessengerRoomScreen() {
             }
           >
             {roomType === "saved" ? (
-              <SavedMessagesAvatar size={42} />
+              <SavedMessagesAvatar size={42} userId={session?.user.id} />
             ) : (
               <AuthenticatedAvatar
                 displayName={roomTitle}
                 avatarUrl={roomAvatarUrl}
                 accessToken={session?.access_token}
+                identityKey={peerPresence?.id || params.peerId || roomId}
                 size={42}
               />
             )}
@@ -5409,7 +5411,7 @@ export default function MessengerRoomScreen() {
                     onPress={() => void forwardToSaved()}
                     disabled={Boolean(forwardBusy)}
                   >
-                    <SavedMessagesAvatar size={44} />
+                    <SavedMessagesAvatar size={44} userId={session?.user.id} />
                     <View style={styles.forwardTargetText}>
                       <Text style={styles.forwardTargetTitle}>Избранное</Text>
                       <Text style={styles.forwardTargetSubtitle}>
@@ -5447,6 +5449,7 @@ export default function MessengerRoomScreen() {
                             displayName={target.peer.display_name}
                             avatarUrl={target.peer.avatar_url}
                             accessToken={session?.access_token}
+                            identityKey={target.peer.id}
                             size={44}
                           />
                         ) : (
@@ -5515,6 +5518,8 @@ export default function MessengerRoomScreen() {
                           displayName={contact.display_name}
                           avatarUrl={contact.avatar_url}
                           accessToken={session?.access_token}
+                          identityKey={contact.id}
+                          roles={contact.roles}
                           size={44}
                         />
                         <View style={styles.forwardTargetText}>
