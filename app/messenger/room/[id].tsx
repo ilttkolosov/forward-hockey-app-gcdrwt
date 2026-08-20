@@ -6052,12 +6052,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 13,
-    backgroundColor: "rgba(55, 91, 120, 0.78)",
+    backgroundColor: "rgba(96, 116, 132, 0.64)",
   },
   dateDividerText: {
     color: colors.white,
     fontSize: 12,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   floatingDate: {
     position: "absolute",
@@ -6072,9 +6072,9 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     overflow: "hidden",
     color: colors.white,
-    backgroundColor: "rgba(43, 76, 104, 0.9)",
+    backgroundColor: "rgba(86, 108, 126, 0.72)",
     fontSize: 12,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   peerMutedNotice: {
     alignSelf: "center",
