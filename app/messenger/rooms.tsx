@@ -512,6 +512,8 @@ export default function MessengerRoomsScreen() {
               displayName={session.user.display_name}
               avatarUrl={session.user.avatar_url}
               accessToken={session.access_token}
+              identityKey={session.user.id}
+              roles={session.user.roles.map((role) => role.code)}
               size={48}
             />
           </TouchableOpacity>
@@ -584,12 +586,13 @@ export default function MessengerRoomsScreen() {
                 }`}
               >
                 {saved ? (
-                  <SavedMessagesAvatar size={62} />
+                  <SavedMessagesAvatar size={62} userId={session?.user.id} />
                 ) : direct && item.peer ? (
                   <AuthenticatedAvatar
                     displayName={item.peer.display_name}
                     avatarUrl={item.peer.avatar_url}
                     accessToken={session?.access_token}
+                    identityKey={item.peer.id}
                     size={62}
                   />
                 ) : (
@@ -597,6 +600,7 @@ export default function MessengerRoomsScreen() {
                     displayName={item.title}
                     avatarUrl={item.avatar_url}
                     accessToken={session?.access_token}
+                    identityKey={item.id}
                     size={62}
                   />
                 )}
