@@ -182,6 +182,7 @@ export default function MessengerSearchScreen() {
               : "",
           peerId: room.peer?.id || "",
           peerLastSeenAt: room.peer?.last_seen_at || "",
+          peerNotificationsMuted: String(Boolean(room.peer?.notifications_muted)),
           pushMessageId: message.id,
           pushSequence: message.sequence,
         },

@@ -29,6 +29,12 @@ import { getPlayerById } from '../../data/playerData';
 import { trackScreenView } from '../../services/analyticsService';
 import { useTrackScreenView } from '../../hooks/useTrackScreenView';
 import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
+import { useKeepAwake } from 'expo-keep-awake';
+
+function KeepScreenAwakeForVideo({ tag }: { tag: string }) {
+  useKeepAwake(tag);
+  return null;
+}
 
 // Определение типа видео
 const isYouTubeUrl = (url: string): boolean => {
@@ -1184,6 +1190,7 @@ export default function GameDetailsScreen() {
         {/* Video */}
         {sp_video && (
           <View style={styles.videoContainer}>
+            <KeepScreenAwakeForVideo tag="forward-game-video" />
             <View style={styles.videoFrame}>
               <WebView
                 key={`game-video-${id}-${videoWebViewGeneration}`}
@@ -1438,6 +1445,7 @@ export default function GameDetailsScreen() {
       {/* Video Modal */}
       {videoModalUrl && (
         <View style={styles.videoModalOverlay}>
+          <KeepScreenAwakeForVideo tag="forward-game-video-modal" />
           <TouchableOpacity style={styles.videoModalCloseButton} onPress={() => setVideoModalUrl(null)}>
             <Icon name="close" size={32} color="#FFFFFF" />
           </TouchableOpacity>

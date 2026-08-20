@@ -224,6 +224,47 @@ function messageMutationAvailable(
   return age >= 0 && age <= MESSAGE_MUTATION_WINDOW_MS;
 }
 
+function messageDeletionAvailable(
+  message: MessengerMessage,
+  currentUserId: string | undefined,
+  roomType: MessengerRoom["room_type"] | null,
+): boolean {
+  if (
+    message.pending ||
+    message.deleted_at ||
+    message.author.id !== currentUserId ||
+    message.kind === "system"
+  ) {
+    return false;
+  }
+  return roomType === "saved" || messageMutationAvailable(message, currentUserId);
+}
+
+function messageDayKey(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+function messageDateLabel(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  const today = messageDayKey(now.toISOString());
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const key = messageDayKey(value);
+  if (key === today) return "Сегодня";
+  if (key === messageDayKey(yesterday.toISOString())) return "Вчера";
+  return date.toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "long",
+    ...(date.getFullYear() === now.getFullYear()
+      ? {}
+      : { year: "numeric" as const }),
+  });
+}
+
 function editableMessengerMessage(message: MessengerMessage): boolean {
   return (
     message.kind === "text" ||
@@ -828,7 +869,9 @@ interface MessengerMessageListItemProps {
   reactionAnimationKey: string | null;
   onReply: (message: MessengerMessage) => void;
   onOpenActions: (message: MessengerMessage) => void;
-  onNavigateToReply: (reply: Pick<MessengerReply, "id" | "sequence">) => void;
+  onNavigateToReply: (
+    reply: Pick<MessengerReply, "id" | "room_id" | "sequence">,
+  ) => void;
   onToggleReaction: (message: MessengerMessage, reaction: string) => void;
   quickReaction: string;
 }
@@ -1137,6 +1180,8 @@ export default function MessengerRoomScreen() {
     memberCount?: string;
     peerId?: string;
     peerLastSeenAt?: string;
+    peerNotificationsMuted?: string;
+    privateReplyMessageId?: string;
     openedAt?: string;
   }>();
   const { session, isAuthenticated } = useMessengerAuth();
@@ -1165,6 +1210,9 @@ export default function MessengerRoomScreen() {
             last_seen_at: params.peerLastSeenAt || null,
           }
         : null,
+  );
+  const [peerNotificationsMuted, setPeerNotificationsMuted] = useState(
+    params.peerNotificationsMuted === "true",
   );
   const [messages, setMessages] = useState<MessengerMessage[]>([]);
   const [text, setText] = useState("");
@@ -1213,6 +1261,7 @@ export default function MessengerRoomScreen() {
   const [filterLoading, setFilterLoading] = useState(false);
   const [filterCursor, setFilterCursor] = useState<string | null>(null);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [floatingDate, setFloatingDate] = useState<string | null>(null);
   const [showAllReactions, setShowAllReactions] = useState(false);
   const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
   const [attachmentDraft, setAttachmentDraft] =
@@ -1258,6 +1307,7 @@ export default function MessengerRoomScreen() {
   const listRef = useRef<FlatList<MessengerMessage>>(null);
   const inputRef = useRef<ForwardRichTextInputHandle>(null);
   const messagesRef = useRef<MessengerMessage[]>([]);
+  const roomTypeRef = useRef(roomType);
   const viewableServerMessageIds = useRef<string[]>([]);
   const editingMessageRef = useRef<MessengerMessage | null>(null);
   const refreshRunning = useRef(false);
@@ -1285,8 +1335,11 @@ export default function MessengerRoomScreen() {
   const pendingMessageAction = useRef<
     | { type: "forward"; message: MessengerMessage }
     | { type: "receipts"; message: MessengerMessage }
+    | { type: "private_reply"; message: MessengerMessage }
     | null
   >(null);
+  const floatingDateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const privateReplyHandled = useRef<string | null>(null);
   const pendingScrollAnimation = useRef<boolean | null>(null);
   const pendingScrollFallbackTimer = useRef<ReturnType<
     typeof setTimeout
@@ -1433,7 +1486,22 @@ export default function MessengerRoomScreen() {
   }, []);
 
   const navigateToRepliedMessage = useCallback(
-    async (reply: Pick<MessengerReply, "id" | "sequence">) => {
+    async (
+      reply: Pick<MessengerReply, "id" | "sequence"> &
+        Partial<Pick<MessengerReply, "room_id">>,
+    ) => {
+      if (reply.room_id && reply.room_id !== roomId) {
+        router.push({
+          pathname: "/messenger/room/[id]",
+          params: {
+            id: reply.room_id,
+            pushMessageId: reply.id,
+            pushSequence: reply.sequence || "",
+            openedAt: String(Date.now()),
+          },
+        });
+        return;
+      }
       beginManualFeedNavigation();
       try {
         let sequence = reply.sequence;
@@ -1489,7 +1557,13 @@ export default function MessengerRoomScreen() {
         );
       }
     },
-    [beginManualFeedNavigation, db, positionMessageNavigationTarget, roomId],
+    [
+      beginManualFeedNavigation,
+      db,
+      positionMessageNavigationTarget,
+      roomId,
+      router,
+    ],
   );
 
   useEffect(() => {
@@ -1556,6 +1630,34 @@ export default function MessengerRoomScreen() {
   ]);
 
   useEffect(() => {
+    const sourceMessageId = params.privateReplyMessageId;
+    if (
+      roomType !== "direct" ||
+      !sourceMessageId ||
+      privateReplyHandled.current === sourceMessageId
+    ) {
+      return;
+    }
+    privateReplyHandled.current = sourceMessageId;
+    let active = true;
+    void getMessengerMessage(sourceMessageId)
+      .then((source) => {
+        if (!active) return;
+        setReplyingTo(source);
+        requestAnimationFrame(() => inputRef.current?.focus());
+      })
+      .catch((error) => {
+        if (!active) return;
+        setSyncError(
+          messengerErrorMessage(error, "Не удалось подготовить личный ответ"),
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [params.privateReplyMessageId, roomType]);
+
+  useEffect(() => {
     const showEvent =
       Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent =
@@ -1599,9 +1701,24 @@ export default function MessengerRoomScreen() {
     };
   }, [clearPendingLatestScroll, scrollToLatest]);
 
-  const visibleMessages = authorFilter ? filteredMessages : messages;
+  const candidateMessages = authorFilter ? filteredMessages : messages;
+  const visibleMessages =
+    roomType === "saved"
+      ? candidateMessages.filter((message) => !message.deleted_at)
+      : candidateMessages;
   const waitingForInitialUnread =
-    initialUnreadExpected && !unreadMarkerClientId;
+    !authorFilter && initialUnreadExpected && !unreadMarkerClientId;
+
+  useEffect(
+    () => () => {
+      if (floatingDateTimer.current) clearTimeout(floatingDateTimer.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    roomTypeRef.current = roomType;
+  }, [roomType]);
 
   const flushOutbox = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -2366,6 +2483,12 @@ export default function MessengerRoomScreen() {
           ? current
           : nextViewableMessageIds,
       );
+      const firstVisible = viewableItems
+        .filter((token) => token.isViewable && typeof token.index === "number")
+        .sort((left, right) => (left.index ?? 0) - (right.index ?? 0))[0];
+      if (firstVisible) {
+        setFloatingDate(messageDateLabel(firstVisible.item.created_at));
+      }
       const latestVisible = viewableItems
         .filter((token) => token.isViewable && !token.item.pending)
         .map((token) => token.item.sequence)
@@ -2583,6 +2706,14 @@ export default function MessengerRoomScreen() {
             : ascending,
         );
         setFilterCursor(result.page.next_cursor);
+        if (!cursor) {
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              nearLatest.current = true;
+              listRef.current?.scrollToEnd({ animated: false });
+            }),
+          );
+        }
       } catch (error) {
         setSyncError(
           messengerErrorMessage(error, "Не удалось применить фильтр"),
@@ -2603,6 +2734,11 @@ export default function MessengerRoomScreen() {
         contentOffset.y + layoutMeasurement.height >= contentSize.height - 120;
       nearLatest.current = atLatest;
       setShowJumpToLatest(!authorFilter && !atLatest);
+      if (floatingDateTimer.current) clearTimeout(floatingDateTimer.current);
+      floatingDateTimer.current = setTimeout(() => {
+        floatingDateTimer.current = null;
+        setFloatingDate(null);
+      }, 1_100);
       if (!pendingInitialPosition.current && contentOffset.y <= 100) {
         if (authorFilter && filterCursor) {
           void loadFilteredAuthorMessages(authorFilter, filterCursor);
@@ -2651,6 +2787,7 @@ export default function MessengerRoomScreen() {
       setRoomMemberCount(room.member_count);
     }
     if (room.peer) {
+      setPeerNotificationsMuted(Boolean(room.peer.notifications_muted));
       setPeerPresence((current) => ({
         id: room.peer!.id,
         online: current?.id === room.peer!.id ? current.online : false,
@@ -2660,6 +2797,7 @@ export default function MessengerRoomScreen() {
             : room.peer!.last_seen_at,
       }));
     } else if (room.room_type !== "direct") {
+      setPeerNotificationsMuted(false);
       setPeerPresence(null);
     }
   }, []);
@@ -2856,13 +2994,18 @@ export default function MessengerRoomScreen() {
           // reaction view while replacing the message body and tombstone.
           const protectedReactionIds = new Set(reactionMutationIds.current);
           protectedReactionIds.add(incoming.id);
-          setMessages((current) =>
-            reconcileMessengerMessageUpdates(
-              current,
-              [incoming],
-              protectedReactionIds,
-            ),
-          );
+          setMessages((current) => {
+            const next =
+              roomTypeRef.current === "saved" && incoming.deleted_at
+                ? current.filter((message) => message.id !== incoming.id)
+                : reconcileMessengerMessageUpdates(
+                    current,
+                    [incoming],
+                    protectedReactionIds,
+                  );
+            messagesRef.current = next;
+            return next;
+          });
           setActionMessage((current) =>
             current?.id === incoming.id
               ? { ...incoming, reactions: current.reactions }
@@ -4078,7 +4221,7 @@ export default function MessengerRoomScreen() {
 
   const requestMessageDeletion = useCallback(
     (message: MessengerMessage) => {
-      if (!messageMutationAvailable(message, session?.user.id)) return;
+      if (!messageDeletionAvailable(message, session?.user.id, roomType)) return;
       setShowAllReactions(false);
       setActionMessage(null);
       if (actionDismissTimer.current) clearTimeout(actionDismissTimer.current);
@@ -4086,7 +4229,9 @@ export default function MessengerRoomScreen() {
         () =>
           Alert.alert(
             "Удалить сообщение?",
-            "В чате останется отметка «Сообщение удалено». Отменить это действие будет нельзя.",
+            roomType === "saved"
+              ? "Сообщение исчезнет только из «Избранного». Исходное сообщение в другом чате не изменится."
+              : "В чате останется отметка «Сообщение удалено». Отменить это действие будет нельзя.",
             [
               { text: "Отмена", style: "cancel" },
               {
@@ -4097,16 +4242,26 @@ export default function MessengerRoomScreen() {
                   setMessageMutationBusyId(message.id);
                   void deleteMessengerMessage(message.id)
                     .then(async (result) => {
-                      setMessages((current) =>
-                        current.map((item) =>
-                          item.id === result.message.id
-                            ? {
-                                ...result.message,
-                                reactions: item.reactions,
-                              }
-                            : item,
-                        ),
-                      );
+                      setMessages((current) => {
+                        const next =
+                          roomType === "saved"
+                            ? current.filter((item) => item.id !== result.message.id)
+                            : current.map((item) =>
+                                item.id === result.message.id
+                                  ? {
+                                      ...result.message,
+                                      reactions: item.reactions,
+                                    }
+                                  : item,
+                              );
+                        messagesRef.current = next;
+                        return next;
+                      });
+                      if (roomType === "saved") {
+                        setFilteredMessages((current) =>
+                          current.filter((item) => item.id !== result.message.id),
+                        );
+                      }
                       await cacheUpdatedMessengerMessage(db, result.message);
                       if (editingMessageRef.current?.id === result.message.id) {
                         setText("");
@@ -4132,7 +4287,7 @@ export default function MessengerRoomScreen() {
         Platform.OS === "ios" ? 500 : 120,
       );
     },
-    [db, messageMutationBusyId, session?.user.id],
+    [db, messageMutationBusyId, roomType, session?.user.id],
   );
 
   const copyMessageText = useCallback(async (message: MessengerMessage) => {
@@ -4155,7 +4310,6 @@ export default function MessengerRoomScreen() {
       setFilteredMessages([]);
       setFilterCursor(null);
       setShowJumpToLatest(false);
-      listRef.current?.scrollToOffset({ offset: 0, animated: false });
       void loadFilteredAuthorMessages(filter);
     },
     [loadFilteredAuthorMessages],
@@ -4214,6 +4368,54 @@ export default function MessengerRoomScreen() {
     }
   }, []);
 
+  const openPrivateReply = useCallback(
+    async (message: MessengerMessage) => {
+      if (
+        !roomTeamId ||
+        message.pending ||
+        message.deleted_at ||
+        message.author.id === session?.user.id
+      ) {
+        return;
+      }
+      try {
+        const result = await createMessengerDirectRoom(
+          roomTeamId,
+          message.author.id,
+        );
+        const target = result.room;
+        router.push({
+          pathname: "/messenger/room/[id]",
+          params: {
+            id: target.id,
+            title: target.title,
+            canWrite: String(target.can_write),
+            canMedia: String(target.can_send_media),
+            canReact: String(target.can_react),
+            canManage: String(target.can_manage),
+            roomType: target.room_type,
+            teamId: target.team_id,
+            avatarUrl: target.avatar_url || "",
+            memberCount: String(target.member_count ?? ""),
+            peerId: target.peer?.id || "",
+            peerLastSeenAt: target.peer?.last_seen_at || "",
+            peerNotificationsMuted: String(
+              Boolean(target.peer?.notifications_muted),
+            ),
+            privateReplyMessageId: message.id,
+            openedAt: String(Date.now()),
+          },
+        });
+      } catch (error) {
+        Alert.alert(
+          "Личный ответ не открыт",
+          messengerErrorMessage(error, "Этот пользователь недоступен для личной переписки"),
+        );
+      }
+    },
+    [roomTeamId, router, session?.user.id],
+  );
+
   const runPendingMessageAction = useCallback(() => {
     if (actionDismissTimer.current) {
       clearTimeout(actionDismissTimer.current);
@@ -4223,11 +4425,15 @@ export default function MessengerRoomScreen() {
     if (!pending) return;
     pendingMessageAction.current = null;
     if (pending.type === "forward") void openForward(pending.message);
-    else void openReceipts(pending.message);
-  }, [openForward, openReceipts]);
+    else if (pending.type === "receipts") void openReceipts(pending.message);
+    else void openPrivateReply(pending.message);
+  }, [openForward, openPrivateReply, openReceipts]);
 
   const queueMessageAction = useCallback(
-    (type: "forward" | "receipts", message: MessengerMessage) => {
+    (
+      type: "forward" | "receipts" | "private_reply",
+      message: MessengerMessage,
+    ) => {
       if (message.pending || message.deleted_at) return;
       pendingMessageAction.current = { type, message };
       setShowAllReactions(false);
@@ -4357,6 +4563,10 @@ export default function MessengerRoomScreen() {
   const actionMessageMutable = Boolean(
     actionMessage && messageMutationAvailable(actionMessage, session?.user.id),
   );
+  const actionMessageDeletable = Boolean(
+    actionMessage &&
+      messageDeletionAvailable(actionMessage, session?.user.id, roomType),
+  );
   const actionMessageEditable = Boolean(
     actionMessageMutable &&
       actionMessage &&
@@ -4454,36 +4664,51 @@ export default function MessengerRoomScreen() {
   }, []);
 
   const renderMessageItem = useCallback(
-    ({ item }: { item: MessengerMessage }) => (
-      <MessengerMessageListItem
-        item={item}
-        currentUserId={session?.user.id ?? null}
-        accessToken={session?.access_token ?? null}
-        unreadMarker={item.client_message_id === unreadMarkerClientId}
-        canWrite={canWrite}
-        canReact={canReact}
-        roomType={roomType}
-        highlighted={highlightedMessageId === item.id}
-        roomScreenActive={roomScreenActive}
-        viewable={viewableMessageIds.has(item.client_message_id)}
-        reactionBusy={reactionBusyIds.has(item.id)}
-        animatedReaction={
-          pushReactionAnimation?.messageId === item.id
-            ? pushReactionAnimation.reaction
-            : null
-        }
-        reactionAnimationKey={
-          pushReactionAnimation?.messageId === item.id
-            ? pushReactionAnimation.key
-            : null
-        }
-        onReply={beginReply}
-        onOpenActions={openMessageActions}
-        onNavigateToReply={navigateToRepliedMessage}
-        onToggleReaction={toggleReaction}
-        quickReaction={quickReaction}
-      />
-    ),
+    ({ item, index }: { item: MessengerMessage; index: number }) => {
+      const previous = visibleMessages[index - 1];
+      const startsDay =
+        !previous ||
+        messageDayKey(previous.created_at) !== messageDayKey(item.created_at);
+      return (
+        <>
+          {startsDay && (
+            <View style={styles.dateDivider}>
+              <Text style={styles.dateDividerText}>
+                {messageDateLabel(item.created_at)}
+              </Text>
+            </View>
+          )}
+          <MessengerMessageListItem
+            item={item}
+            currentUserId={session?.user.id ?? null}
+            accessToken={session?.access_token ?? null}
+            unreadMarker={item.client_message_id === unreadMarkerClientId}
+            canWrite={canWrite}
+            canReact={canReact}
+            roomType={roomType}
+            highlighted={highlightedMessageId === item.id}
+            roomScreenActive={roomScreenActive}
+            viewable={viewableMessageIds.has(item.client_message_id)}
+            reactionBusy={reactionBusyIds.has(item.id)}
+            animatedReaction={
+              pushReactionAnimation?.messageId === item.id
+                ? pushReactionAnimation.reaction
+                : null
+            }
+            reactionAnimationKey={
+              pushReactionAnimation?.messageId === item.id
+                ? pushReactionAnimation.key
+                : null
+            }
+            onReply={beginReply}
+            onOpenActions={openMessageActions}
+            onNavigateToReply={navigateToRepliedMessage}
+            onToggleReaction={toggleReaction}
+            quickReaction={quickReaction}
+          />
+        </>
+      );
+    },
     [
       beginReply,
       canReact,
@@ -4500,6 +4725,7 @@ export default function MessengerRoomScreen() {
       session?.user.id,
       toggleReaction,
       unreadMarkerClientId,
+      visibleMessages,
       viewableMessageIds,
     ],
   );
@@ -4627,7 +4853,9 @@ export default function MessengerRoomScreen() {
             }
             keyboardShouldPersistTaps="handled"
             maintainVisibleContentPosition={
-              listReady ? { minIndexForVisible: 0 } : undefined
+              listReady && !authorFilter
+                ? { minIndexForVisible: 0 }
+                : undefined
             }
             onScroll={handleListScroll}
             onScrollBeginDrag={beginManualFeedNavigation}
@@ -4649,6 +4877,20 @@ export default function MessengerRoomScreen() {
               listRef.current?.scrollToEnd({ animated });
             }}
             renderItem={renderMessageItem}
+            ListHeaderComponent={
+              roomType === "direct" && peerNotificationsMuted ? (
+                <View style={styles.peerMutedNotice}>
+                  <Icon
+                    name="notifications-off-outline"
+                    size={16}
+                    color="#7D8992"
+                  />
+                  <Text style={styles.peerMutedNoticeText}>
+                    У собеседника выключены уведомления для этого чата
+                  </Text>
+                </View>
+              ) : null
+            }
             ListEmptyComponent={
               loading || filterLoading ? (
                 <View style={styles.empty}>
@@ -4690,6 +4932,11 @@ export default function MessengerRoomScreen() {
               ) : null
             }
           />
+          {floatingDate && listReady && (
+            <View style={styles.floatingDate} pointerEvents="none">
+              <Text style={styles.floatingDateText}>{floatingDate}</Text>
+            </View>
+          )}
           {!listReady && visibleMessages.length > 0 && (
             <View style={styles.feedPositioning} pointerEvents="none">
               <ActivityIndicator color={colors.primary} />
@@ -4859,6 +5106,28 @@ export default function MessengerRoomScreen() {
               {actionMessage &&
               !actionMessage.pending &&
               !actionMessage.deleted_at &&
+              actionMessage.author.id !== session?.user.id &&
+              roomType !== "direct" &&
+              roomType !== "saved" ? (
+                <TouchableOpacity
+                  style={styles.messageAction}
+                  onPress={() =>
+                    queueMessageAction("private_reply", actionMessage)
+                  }
+                >
+                  <Icon
+                    name="person-outline"
+                    size={21}
+                    color={colors.primary}
+                  />
+                  <Text style={styles.messageActionText}>
+                    Ответить лично {actionMessage.author.display_name}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              {actionMessage &&
+              !actionMessage.pending &&
+              !actionMessage.deleted_at &&
               actionMessage.text.trim() ? (
                 <TouchableOpacity
                   style={styles.messageAction}
@@ -4924,7 +5193,7 @@ export default function MessengerRoomScreen() {
                   <Text style={styles.messageActionText}>Редактировать</Text>
                 </TouchableOpacity>
               ) : null}
-              {actionMessageMutable && actionMessage ? (
+              {actionMessageDeletable && actionMessage ? (
                 <TouchableOpacity
                   style={[styles.messageAction, styles.messageActionDanger]}
                   onPress={() => requestMessageDeletion(actionMessage)}
@@ -5323,6 +5592,7 @@ export default function MessengerRoomScreen() {
                   <Text style={styles.replyText} numberOfLines={1}>
                     {messageReplyPreview({
                       id: replyingTo.id,
+                      room_id: replyingTo.room_id,
                       kind: replyingTo.kind,
                       text: replyingTo.text,
                       deleted_at: replyingTo.deleted_at,
@@ -5639,6 +5909,56 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   messageList: { padding: 14, paddingBottom: 20 },
+  dateDivider: {
+    alignSelf: "center",
+    marginTop: 5,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 13,
+    backgroundColor: "rgba(55, 91, 120, 0.78)",
+  },
+  dateDividerText: {
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  floatingDate: {
+    position: "absolute",
+    top: 10,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+  },
+  floatingDateText: {
+    paddingHorizontal: 13,
+    paddingVertical: 6,
+    borderRadius: 14,
+    overflow: "hidden",
+    color: colors.white,
+    backgroundColor: "rgba(43, 76, 104, 0.9)",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  peerMutedNotice: {
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    maxWidth: "88%",
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 14,
+    backgroundColor: "rgba(235, 239, 242, 0.94)",
+  },
+  peerMutedNoticeText: {
+    flexShrink: 1,
+    color: "#6E7B84",
+    fontSize: 11,
+    fontWeight: "700",
+    textAlign: "center",
+  },
   emptyList: { flexGrow: 1, justifyContent: "center" },
   unreadDivider: {
     flexDirection: "row",

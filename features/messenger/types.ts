@@ -85,12 +85,16 @@ export interface MessengerRoom {
   sort_order: number;
   room_type: "group" | "direct" | "private_group" | "saved";
   avatar_url: string | null;
+  notifications_muted: boolean;
+  muted_until: string | null;
   peer: null | {
     id: string;
     display_name: string;
     original_display_name?: string;
     avatar_url: string | null;
     last_seen_at: string | null;
+    notifications_muted?: boolean;
+    muted_until?: string | null;
   };
   can_write: boolean;
   can_send_media: boolean;
@@ -183,6 +187,7 @@ export interface MessengerMessageDeliveryUpdate {
 
 export interface MessengerReply {
   id: string;
+  room_id: string;
   sequence?: string;
   kind: MessengerMessageKind;
   text: string;

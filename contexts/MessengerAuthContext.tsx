@@ -21,6 +21,7 @@ import {
   completeMessengerPasswordChange,
   ensureFreshMessengerSession,
   getMessengerMe,
+  getMessengerRooms,
   isMessengerAccessTokenUsable,
   loginToMessenger,
   logoutFromMessenger,
@@ -41,6 +42,11 @@ import {
   subscribeMessengerRealtime,
 } from "../services/messengerRealtime";
 import { cancelAllManagedMessengerMediaUploads } from "../services/messengerMediaUploadManager";
+import {
+  playMessengerSound,
+  setMessengerMutedRooms,
+  unloadMessengerSounds,
+} from "../services/messengerSounds";
 
 type MessengerAuthStatus =
   "loading" | "authenticated" | "unauthenticated" | "password_change_required";
@@ -167,6 +173,62 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       active = false;
     };
   }, [session?.access_token]);
+
+  useEffect(() => {
+    const userId = session?.user.id;
+    if (!userId) {
+      setMessengerMutedRooms([]);
+      return;
+    }
+    let active = true;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const heard = new Set<string>();
+    const refreshMutedRooms = async () => {
+      try {
+        const rooms = await getMessengerRooms({ priority: "background" });
+        if (!active) return;
+        setMessengerMutedRooms(rooms);
+      } catch {
+        // Cached room state loaded by the rooms screen remains authoritative
+        // while the network is unavailable.
+      }
+    };
+    void refreshMutedRooms();
+    const unsubscribe = subscribeMessengerRealtime((event) => {
+      if (event.type === "room.updated") {
+        if (refreshTimer) clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => {
+          refreshTimer = null;
+          void refreshMutedRooms();
+        }, 120);
+        return;
+      }
+      if (event.type !== "message.created" || event.message.kind === "system") {
+        return;
+      }
+      if (AppState.currentState !== "active" || heard.has(event.message.id)) {
+        return;
+      }
+      heard.add(event.message.id);
+      if (heard.size > 300) heard.delete(heard.values().next().value as string);
+      void playMessengerSound(
+        event.message.author.id === userId ? "sent" : "received",
+        event.message.room_id,
+      );
+    });
+    return () => {
+      active = false;
+      if (refreshTimer) clearTimeout(refreshTimer);
+      unsubscribe();
+    };
+  }, [session?.user.id]);
+
+  useEffect(
+    () => () => {
+      void unloadMessengerSounds();
+    },
+    [],
+  );
 
   useEffect(() => {
     let recovery: Promise<void> | null = null;

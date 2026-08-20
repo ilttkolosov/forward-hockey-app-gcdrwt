@@ -1,4 +1,5 @@
 import { Image } from "expo-image";
+import { Asset } from "expo-asset";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
@@ -22,6 +23,10 @@ import Icon from "../../components/Icon";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
 import MessengerAvatarViewer from "../../features/messenger/MessengerAvatarViewer";
+import {
+  MESSENGER_PRESET_AVATARS,
+  type MessengerPresetAvatar,
+} from "../../features/messenger/presetAvatars";
 import { clearMessengerLocalData } from "../../features/messenger/repository";
 import type { MessengerRoom } from "../../features/messenger/types";
 import {
@@ -88,6 +93,7 @@ export default function MessengerProfileScreen() {
   const [deletionError, setDeletionError] = useState<string | null>(null);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [avatarVisible, setAvatarVisible] = useState(false);
+  const [presetAvatarsVisible, setPresetAvatarsVisible] = useState(false);
   const [quickReaction, setQuickReactionState] =
     useState<MessengerQuickReaction>(DEFAULT_MESSENGER_QUICK_REACTION);
   const [reactionPickerVisible, setReactionPickerVisible] = useState(false);
@@ -161,6 +167,28 @@ export default function MessengerProfileScreen() {
     if (!result.canceled && result.assets[0]) {
       setSelectedAsset(result.assets[0]);
       setError(null);
+    }
+  };
+
+  const choosePresetAvatar = async (preset: MessengerPresetAvatar) => {
+    try {
+      const asset = Asset.fromModule(preset.source);
+      await asset.downloadAsync();
+      setSelectedAsset({
+        uri: asset.localUri || asset.uri,
+        width: asset.width || 512,
+        height: asset.height || 512,
+        fileName: `${preset.id}.png`,
+        mimeType: "image/png",
+      });
+      setPresetAvatarsVisible(false);
+      setError(null);
+    } catch (presetError) {
+      setError(
+        presetError instanceof Error
+          ? presetError.message
+          : "Не удалось открыть готовый аватар",
+      );
     }
   };
 
@@ -309,6 +337,7 @@ export default function MessengerProfileScreen() {
             : "",
         peerId: room.peer?.id || "",
         peerLastSeenAt: room.peer?.last_seen_at || "",
+        peerNotificationsMuted: String(Boolean(room.peer?.notifications_muted)),
       },
     });
   };
@@ -450,6 +479,13 @@ export default function MessengerProfileScreen() {
             <TouchableOpacity style={styles.photoButton} onPress={chooseAvatar}>
               <Icon name="camera" size={20} color={colors.primary} />
               <Text style={styles.photoButtonText}>Выбрать фотографию</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.presetAvatarButton}
+              onPress={() => setPresetAvatarsVisible(true)}
+            >
+              <Icon name="images-outline" size={20} color={colors.primary} />
+              <Text style={styles.photoButtonText}>Готовые аватары</Text>
             </TouchableOpacity>
             {(selectedAsset || session.user.avatar_url) && (
               <TouchableOpacity onPress={removeAvatar} disabled={busy}>
@@ -682,6 +718,57 @@ export default function MessengerProfileScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={presetAvatarsVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setPresetAvatarsVisible(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setPresetAvatarsVisible(false)}
+        >
+          <Pressable
+            style={styles.presetAvatarDialog}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <View style={styles.presetAvatarHeader}>
+              <View>
+                <Text style={styles.reactionDialogTitle}>Выберите аватар</Text>
+                <Text style={styles.reactionDialogText}>
+                  Можно заменить в любое время
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.presetAvatarClose}
+                onPress={() => setPresetAvatarsVisible(false)}
+              >
+                <Icon name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={styles.presetAvatarGrid}>
+              {MESSENGER_PRESET_AVATARS.map((preset) => (
+                <TouchableOpacity
+                  key={preset.id}
+                  style={styles.presetAvatarChoice}
+                  onPress={() => void choosePresetAvatar(preset)}
+                  accessibilityLabel={`Выбрать аватар ${preset.title}`}
+                >
+                  <Image
+                    source={preset.source}
+                    style={styles.presetAvatarImage}
+                    contentFit="cover"
+                  />
+                  <Text style={styles.presetAvatarTitle} numberOfLines={1}>
+                    {preset.title}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal
         visible={reactionPickerVisible}
@@ -1040,6 +1127,53 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     backgroundColor: colors.surface,
   },
+  presetAvatarDialog: {
+    width: "100%",
+    maxWidth: 520,
+    maxHeight: "84%",
+    padding: 18,
+    borderRadius: 24,
+    backgroundColor: colors.surface,
+  },
+  presetAvatarHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  presetAvatarClose: {
+    width: 42,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  presetAvatarGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingBottom: 8,
+  },
+  presetAvatarChoice: {
+    width: "30%",
+    minWidth: 88,
+    alignItems: "center",
+  },
+  presetAvatarImage: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    borderWidth: 2,
+    borderColor: colors.border,
+  },
+  presetAvatarTitle: {
+    width: "100%",
+    marginTop: 6,
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: "700",
+    textAlign: "center",
+  },
   reactionDialogTitle: {
     color: colors.text,
     fontSize: 20,
@@ -1162,6 +1296,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 14,
     backgroundColor: "#EAF3FF",
+  },
+  presetAvatarButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    minHeight: 44,
+    marginTop: 8,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    backgroundColor: colors.surface,
   },
   photoButtonText: { color: colors.primary, fontWeight: "800" },
   removeText: { marginTop: 12, color: colors.error, fontWeight: "700" },

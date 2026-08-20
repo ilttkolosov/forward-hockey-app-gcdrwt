@@ -600,6 +600,29 @@ export function getMessengerRooms(
   return request;
 }
 
+export type MessengerRoomMuteDuration =
+  | "unmute"
+  | "1h"
+  | "12h"
+  | "1d"
+  | "1mo"
+  | "forever";
+
+export function updateMessengerRoomNotifications(
+  roomId: string,
+  duration: MessengerRoomMuteDuration,
+) {
+  return messengerRequest<{
+    room_id: string;
+    notifications_muted: boolean;
+    muted_until: string | null;
+  }>(`/chat/rooms/${encodeURIComponent(roomId)}/notifications`, {
+    method: "PUT",
+    body: JSON.stringify({ duration }),
+    transportPriority: "foreground",
+  });
+}
+
 export function leaveMessengerRoom(roomId: string) {
   return messengerRequest<{
     left: true;

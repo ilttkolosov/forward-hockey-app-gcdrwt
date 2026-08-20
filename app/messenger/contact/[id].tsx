@@ -41,6 +41,7 @@ const ROLE_LABELS: Record<string, string> = {
   coaching_staff: "Тренерский штаб",
   parent: "Родитель",
   parent_committee: "Родительский комитет",
+  fan: "Болельщик",
   administrator: "Администратор",
 };
 

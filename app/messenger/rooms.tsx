@@ -28,12 +28,15 @@ import {
   getMessengerRooms,
   isMessengerConnectionError,
   messengerErrorMessage,
+  updateMessengerRoomNotifications,
+  type MessengerRoomMuteDuration,
 } from "../../services/messengerApi";
 import { subscribeMessengerRealtime } from "../../services/messengerRealtime";
 import { messengerLog } from "../../services/messengerLogger";
 import { stripMessengerTextFormatting } from "../../services/messengerTextFormatting";
 import { syncMessengerUnreadFromRooms } from "../../services/messengerUnread";
 import { colors } from "../../styles/commonStyles";
+import { setMessengerMutedRooms } from "../../services/messengerSounds";
 
 function lastMessageText(room: MessengerRoom): string {
   if (!room.last_message) return "Сообщений пока нет";
@@ -60,6 +63,7 @@ const BUILT_IN_ROOM_KINDS = new Set([
   "coach_parents",
   "parent_committee",
   "coaching_staff",
+  "fans",
 ]);
 
 function isPresetRoom(room: MessengerRoom): boolean {
@@ -118,6 +122,8 @@ export default function MessengerRoomsScreen() {
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newChatVisible, setNewChatVisible] = useState(false);
+  const [muteRoom, setMuteRoom] = useState<MessengerRoom | null>(null);
+  const [muteSaving, setMuteSaving] = useState(false);
   const [typingByRoom, setTypingByRoom] = useState<
     Record<string, Record<string, string>>
   >({});
@@ -174,6 +180,7 @@ export default function MessengerRoomsScreen() {
           cachedRoomCount = cached.length;
           if (cached.length) {
             setRooms(cached);
+            setMessengerMutedRooms(cached);
             void syncMessengerUnreadFromRooms(cached);
             setLoading(false);
           }
@@ -188,6 +195,7 @@ export default function MessengerRoomsScreen() {
         const remote = await getMessengerRooms();
         const reconciled = await cacheMessengerRooms(db, remote);
         setRooms(reconciled);
+        setMessengerMutedRooms(reconciled);
         void syncMessengerUnreadFromRooms(reconciled);
         setOffline(false);
         console.log(`[Messenger] Загружено комнат: ${remote.length}`);
@@ -410,9 +418,35 @@ export default function MessengerRoomsScreen() {
             : "",
         peerId: room.peer?.id || "",
         peerLastSeenAt: room.peer?.last_seen_at || "",
+        peerNotificationsMuted: String(Boolean(room.peer?.notifications_muted)),
         openedAt: String(openedAt),
       },
     });
+  };
+
+  const changeRoomMute = async (duration: MessengerRoomMuteDuration) => {
+    if (!muteRoom || muteSaving) return;
+    setMuteSaving(true);
+    try {
+      const result = await updateMessengerRoomNotifications(muteRoom.id, duration);
+      const nextRooms = rooms.map((room) =>
+        room.id === muteRoom.id
+          ? {
+              ...room,
+              notifications_muted: result.notifications_muted,
+              muted_until: result.muted_until,
+            }
+          : room,
+      );
+      setRooms(nextRooms);
+      setMessengerMutedRooms(nextRooms);
+      if (nextRooms.length) void cacheMessengerRooms(db, nextRooms);
+      setMuteRoom(null);
+    } catch (muteError) {
+      setError(messengerErrorMessage(muteError, "Не удалось изменить уведомления"));
+    } finally {
+      setMuteSaving(false);
+    }
   };
 
   if (loading || status === "loading") {
@@ -527,6 +561,8 @@ export default function MessengerRoomsScreen() {
               <TouchableOpacity
                 style={[styles.roomRow, preset && styles.presetRoomRow]}
                 onPress={() => openRoom(item)}
+                onLongPress={() => setMuteRoom(item)}
+                delayLongPress={350}
                 activeOpacity={0.68}
                 accessibilityRole="button"
                 accessibilityLabel={`${item.title}${
@@ -584,6 +620,13 @@ export default function MessengerRoomsScreen() {
                 <View style={styles.roomMeta}>
                   <Text style={styles.activityTime}>{activityTime}</Text>
                   <View style={styles.roomIndicators}>
+                    {item.notifications_muted && (
+                      <Icon
+                        name="notifications-off"
+                        size={18}
+                        color="#9AA6AF"
+                      />
+                    )}
                     {item.unread_count > 0 && (
                       <View style={styles.unreadBadge}>
                         <Text style={styles.unreadText}>
@@ -680,6 +723,55 @@ export default function MessengerRoomsScreen() {
                 </Text>
               </View>
             </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={Boolean(muteRoom)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !muteSaving && setMuteRoom(null)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => !muteSaving && setMuteRoom(null)}
+        >
+          <Pressable style={styles.muteSheet} onPress={(event) => event.stopPropagation()}>
+            <View style={styles.muteTitleRow}>
+              <Icon name="notifications-off-outline" size={23} color={colors.primary} />
+              <Text style={styles.newChatTitle} numberOfLines={1}>
+                {muteRoom?.title}
+              </Text>
+            </View>
+            {muteRoom?.notifications_muted && (
+              <TouchableOpacity
+                style={styles.muteAction}
+                disabled={muteSaving}
+                onPress={() => void changeRoomMute("unmute")}
+              >
+                <Text style={styles.muteActionText}>Включить уведомления</Text>
+              </TouchableOpacity>
+            )}
+            {(
+              [
+                ["1h", "Отключить на 1 час"],
+                ["12h", "Отключить на 12 часов"],
+                ["1d", "Отключить на 1 день"],
+                ["1mo", "Отключить на 1 месяц"],
+                ["forever", "Отключить навсегда"],
+              ] as const
+            ).map(([duration, label]) => (
+              <TouchableOpacity
+                key={duration}
+                style={styles.muteAction}
+                disabled={muteSaving}
+                onPress={() => void changeRoomMute(duration)}
+              >
+                <Text style={styles.muteActionText}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+            {muteSaving && <ActivityIndicator style={styles.muteProgress} color={colors.primary} />}
           </Pressable>
         </Pressable>
       </Modal>
@@ -824,6 +916,24 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     backgroundColor: colors.surface,
   },
+  muteSheet: {
+    padding: 18,
+    borderRadius: 22,
+    backgroundColor: colors.surface,
+  },
+  muteTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  muteAction: {
+    minHeight: 48,
+    justifyContent: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  muteActionText: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  muteProgress: { marginTop: 12 },
   newChatTitle: {
     marginBottom: 8,
     color: colors.text,

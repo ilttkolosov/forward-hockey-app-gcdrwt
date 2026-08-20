@@ -144,6 +144,7 @@ export function pendingMessengerMessage(
     reply_to: replyTarget
       ? {
           id: replyTarget.id,
+          room_id: replyTarget.room_id,
           sequence: replyTarget.sequence,
           kind: replyTarget.kind,
           text: replyTarget.text,
@@ -222,6 +223,7 @@ export function pendingMessengerAttachmentMessage(
     reply_to: replyTarget
       ? {
           id: replyTarget.id,
+          room_id: replyTarget.room_id,
           sequence: replyTarget.sequence,
           kind: replyTarget.kind,
           text: replyTarget.text,

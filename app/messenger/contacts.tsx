@@ -29,6 +29,7 @@ const ROLE_LABELS: Record<string, string> = {
   coaching_staff: "Тренерский штаб",
   parent: "Родитель",
   parent_committee: "Родительский комитет",
+  fan: "Болельщик",
 };
 
 function contactKey(contact: MessengerContact): string {
@@ -111,6 +112,9 @@ export default function MessengerContactsScreen() {
           unreadCount: String(result.room.unread_count),
           peerId: result.room.peer?.id || contact.id,
           peerLastSeenAt: result.room.peer?.last_seen_at || "",
+          peerNotificationsMuted: String(
+            Boolean(result.room.peer?.notifications_muted),
+          ),
         },
       });
     } catch (openError) {
