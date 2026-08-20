@@ -203,6 +203,8 @@ export default function MessengerContactsScreen() {
                   displayName={item.display_name}
                   avatarUrl={item.avatar_url}
                   accessToken={session?.access_token}
+                  identityKey={item.id}
+                  roles={item.roles}
                   size={50}
                 />
                 <View style={styles.contactText}>
