@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - 'stabilization/**'
+      - feature/appstore-2.0.1-compliance
   pull_request:
 
 jobs:
