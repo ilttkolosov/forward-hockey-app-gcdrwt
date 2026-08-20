@@ -1349,6 +1349,8 @@ export default function MessengerRoomScreen() {
     | null
   >(null);
   const floatingDateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const floatingDateLabelRef = useRef<string | null>(null);
+  const feedIsScrolling = useRef(false);
   const privateReplyHandled = useRef<string | null>(null);
   const pendingScrollAnimation = useRef<boolean | null>(null);
   const pendingScrollFallbackTimer = useRef<ReturnType<
@@ -1445,6 +1447,7 @@ export default function MessengerRoomScreen() {
   }, []);
 
   const scrollToLatest = useCallback((animated: boolean) => {
+    if (messageNavigationTarget.current) return;
     pendingScrollAnimation.current = animated;
     if (pendingScrollFallbackTimer.current) {
       clearTimeout(pendingScrollFallbackTimer.current);
@@ -1492,7 +1495,7 @@ export default function MessengerRoomScreen() {
       messageNavigationTarget.current = null;
       messageNavigationTimer.current = null;
       setHighlightedMessageId(null);
-    }, 1_200);
+    }, 2_500);
   }, []);
 
   const navigateToRepliedMessage = useCallback(
@@ -2497,7 +2500,23 @@ export default function MessengerRoomScreen() {
         .filter((token) => token.isViewable && typeof token.index === "number")
         .sort((left, right) => (left.index ?? 0) - (right.index ?? 0))[0];
       if (firstVisible) {
-        setFloatingDate(messageDateLabel(firstVisible.item.created_at));
+        const currentIndex = messagesRef.current.findIndex(
+          (message) =>
+            message.client_message_id ===
+            firstVisible.item.client_message_id,
+        );
+        const previous =
+          currentIndex > 0 ? messagesRef.current[currentIndex - 1] : null;
+        const startsDay =
+          !previous ||
+          messageDayKey(previous.created_at) !==
+            messageDayKey(firstVisible.item.created_at);
+        floatingDateLabelRef.current = startsDay
+          ? null
+          : messageDateLabel(firstVisible.item.created_at);
+        if (feedIsScrolling.current) {
+          setFloatingDate(floatingDateLabelRef.current);
+        }
       }
       const latestVisible = viewableItems
         .filter((token) => token.isViewable && !token.item.pending)
@@ -2744,11 +2763,14 @@ export default function MessengerRoomScreen() {
         contentOffset.y + layoutMeasurement.height >= contentSize.height - 120;
       nearLatest.current = atLatest;
       setShowJumpToLatest(!authorFilter && !atLatest);
+      feedIsScrolling.current = true;
+      setFloatingDate(floatingDateLabelRef.current);
       if (floatingDateTimer.current) clearTimeout(floatingDateTimer.current);
       floatingDateTimer.current = setTimeout(() => {
         floatingDateTimer.current = null;
+        feedIsScrolling.current = false;
         setFloatingDate(null);
-      }, 1_100);
+      }, 1_500);
       if (!pendingInitialPosition.current && contentOffset.y <= 100) {
         if (authorFilter && filterCursor) {
           void loadFilteredAuthorMessages(authorFilter, filterCursor);
@@ -4947,6 +4969,10 @@ export default function MessengerRoomScreen() {
               initialListContentMeasured.current = true;
               if (pendingInitialPosition.current) {
                 positionInitialMessages();
+                return;
+              }
+              if (messageNavigationTarget.current) {
+                requestAnimationFrame(positionMessageNavigationTarget);
                 return;
               }
               const animated = pendingScrollAnimation.current;
