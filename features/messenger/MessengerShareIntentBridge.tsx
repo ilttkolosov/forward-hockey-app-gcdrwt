@@ -3,6 +3,7 @@ import { useShareIntentContext } from "expo-share-intent";
 import { useEffect } from "react";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import { messengerLog } from "../../services/messengerLogger";
+import { trackMessengerAction } from "../../services/analyticsService";
 
 const SHARE_ROUTE = "/messenger/share";
 
@@ -38,6 +39,12 @@ export default function MessengerShareIntentBridge() {
       content_type: shareIntent.type,
       file_count: shareIntent.files?.length ?? 0,
       has_text: Boolean(shareIntent.text || shareIntent.webUrl),
+    });
+    trackMessengerAction("share_sheet_opened", {
+      content_type: shareIntent.type || "unknown",
+      attachment_count: shareIntent.files?.length ?? 0,
+      has_text: Boolean(shareIntent.text || shareIntent.webUrl),
+      authenticated: status === "authenticated",
     });
     router.push(SHARE_ROUTE);
   }, [hasShareIntent, pathname, router, shareIntent, status]);

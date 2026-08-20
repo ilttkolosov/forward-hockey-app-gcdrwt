@@ -47,6 +47,10 @@ import {
   setMessengerMutedRooms,
   unloadMessengerSounds,
 } from "../services/messengerSounds";
+import {
+  setAnalyticsMessengerRole,
+  trackMessengerAction,
+} from "../services/analyticsService";
 
 type MessengerAuthStatus =
   "loading" | "authenticated" | "unauthenticated" | "password_change_required";
@@ -92,6 +96,12 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
   const [session, setSession] = useState<MessengerSession | null>(null);
   const [passwordChange, setPasswordChange] =
     useState<MessengerPasswordChangeRequired | null>(null);
+
+  useEffect(() => {
+    setAnalyticsMessengerRole(
+      session?.user.roles.map((role) => role.code) ?? [],
+    );
+  }, [session?.user.roles]);
 
   useEffect(() => {
     let active = true;
@@ -340,6 +350,8 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
         setSession(result);
         setPasswordChange(null);
         setStatus("authenticated");
+        setAnalyticsMessengerRole(result.user.roles.map((role) => role.code));
+        trackMessengerAction("auth_completed", { method: "login" });
         return "authenticated";
       } catch (error) {
         setStatus("unauthenticated");
@@ -359,6 +371,10 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
         setSession(authenticated);
         setPasswordChange(null);
         setStatus("authenticated");
+        setAnalyticsMessengerRole(
+          authenticated.user.roles.map((role) => role.code),
+        );
+        trackMessengerAction("auth_completed", { method: "registration" });
       } catch (error) {
         setStatus("unauthenticated");
         throw error;
@@ -393,6 +409,10 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
         setSession(authenticated);
         setPasswordChange(null);
         setStatus("authenticated");
+        setAnalyticsMessengerRole(
+          authenticated.user.roles.map((role) => role.code),
+        );
+        trackMessengerAction("auth_completed", { method: "password_change" });
       } catch (error) {
         setStatus("password_change_required");
         throw error;

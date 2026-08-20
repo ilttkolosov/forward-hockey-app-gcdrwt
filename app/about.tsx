@@ -104,7 +104,7 @@ export default function AboutScreen() {
     loadLicense();
   }, []);
 
-  // Загрузка Device ID из аналитики
+  // Локальный анонимный ID установки нужен только для обращений в поддержку.
   useEffect(() => {
     const loadDeviceId = async () => {
       const id = await getOrCreateDeviceId();
@@ -150,6 +150,10 @@ export default function AboutScreen() {
     Linking.openURL('https://www.hc-forward.com');
   };
 
+  const handleAnalyticsPrivacyPress = () => {
+    Linking.openURL('https://appmetrica.yandex.ru/docs/ru/data-security/gdpr');
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.header}>
@@ -178,7 +182,23 @@ export default function AboutScreen() {
           <Text style={styles.sectionTitle}>Устройство</Text>
           <Text style={styles.text}>Модель: {deviceModel}</Text>
           <Text style={styles.text}>ОС: {osVersion}</Text>
-          <Text style={styles.text}>ID устройства: {deviceId || '—'}</Text>
+          <Text style={styles.text}>Локальный ID установки: {deviceId || '—'}</Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Аналитика и конфиденциальность</Text>
+          <Text style={styles.text}>
+            Для улучшения приложения используется AppMetrica. Собираются
+            неперсонализированные технические данные и обезличенные события
+            использования. Тексты сообщений, поисковые запросы, имена,
+            внутренние идентификаторы и координаты в аналитику не передаются.
+          </Text>
+          <Text
+            style={styles.developerLink}
+            onPress={handleAnalyticsPrivacyPress}
+          >
+            Как AppMetrica защищает данные
+          </Text>
         </View>
 
         <View style={styles.section}>

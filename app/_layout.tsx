@@ -30,7 +30,13 @@ import {
 } from '../services/tournamentsApi';
 import { getGames } from '../data/gameData';
 import type { Player } from '../types';
-import { initAnalytics } from '../services/analyticsService';
+import {
+  initAnalytics,
+  reportAnalyticsError,
+  trackMessengerAction,
+  trackScheduleAction,
+} from '../services/analyticsService';
+import AnalyticsRouteTracker from '../components/AnalyticsRouteTracker';
 import * as Notifications from 'expo-notifications';
 import { Buffer } from 'buffer';
 import NetInfo from '@react-native-community/netinfo';
@@ -319,6 +325,7 @@ function RootLayoutContent() {
     const route = response.notification.request.content.data?.route;
     if (route === '/trainings') {
       initializationLog('Открытие расписания по нажатию на уведомление о тренировке');
+      trackScheduleAction('notification_opened');
       router.push('/trainings');
       return;
     }
@@ -329,6 +336,10 @@ function RootLayoutContent() {
       || messengerPush?.type === 'messenger.reaction';
     if (opensMessengerRoom && messengerPush.room_id) {
       void processMessengerPushPayload(data);
+      trackMessengerAction('push_opened', {
+        push_type:
+          messengerPush.type === 'messenger.reaction' ? 'reaction' : 'message',
+      });
       initializationLog(
         messengerPush.type === 'messenger.reaction'
           ? 'Открытие реакции по нажатию на уведомление мессенджера'
@@ -694,6 +705,7 @@ function RootLayoutContent() {
         `[Инициализация] Критическая ошибка через ${elapsedMilliseconds(initializationStartedAt)} мс:`,
         error
       );
+      reportAnalyticsError('app_initialization_failed', error);
       setInitializationError(error instanceof Error ? error.message : 'Ошибка инициализации приложения');
       setIsInitializing(false);
     }
@@ -719,6 +731,7 @@ function RootLayoutContent() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="dark" backgroundColor={colors.background} />
       <MessengerShareIntentBridge />
+      <AnalyticsRouteTracker />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="players" />

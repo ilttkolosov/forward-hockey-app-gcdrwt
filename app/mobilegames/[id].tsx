@@ -20,7 +20,7 @@ import Icon from '../../components/Icon';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
-import { useTrackScreenView } from '../../hooks/useTrackScreenView';
+import { trackMobileGameAction } from '../../services/analyticsService';
 import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
 
 const { width } = Dimensions.get('window');
@@ -108,6 +108,7 @@ export default function MemoryGameScreen() {
               await AsyncStorage.removeItem(RECORDS_KEY);
               setRecords({});
               setShowRecordsModal(false);
+              trackMobileGameAction('memory', 'records_reset');
               Alert.alert('Рекорды сброшены', 'Все рекорды удалены.');
             } catch (err) {
               console.error('Ошибка сброса рекордов:', err);
@@ -172,6 +173,9 @@ export default function MemoryGameScreen() {
       setPlayers(allPlayers);
       setFlippedCards([]);
       timerRef.current = setInterval(() => setTimer(prev => prev + 1), 1000);
+      trackMobileGameAction('memory', 'started', {
+        level: levelIndex + 1,
+      });
     } catch (err) {
       console.error('Ошибка инициализации уровня:', err);
       Alert.alert('Ошибка', 'Не удалось загрузить уровень.');
@@ -182,7 +186,18 @@ export default function MemoryGameScreen() {
   const completeLevel = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     setGameCompleted(true);
-    saveRecord(currentLevel, moves, timer);
+    const currentRecord = records[`level_${currentLevel + 1}`];
+    const isNewRecord =
+      !currentRecord ||
+      moves < currentRecord.moves ||
+      (moves === currentRecord.moves && timer < currentRecord.time);
+    void saveRecord(currentLevel, moves, timer);
+    trackMobileGameAction('memory', 'completed', {
+      level: currentLevel + 1,
+      duration_seconds: timer,
+      moves,
+      new_record: isNewRecord,
+    });
 
     Alert.alert(
       'Победа!',
@@ -198,7 +213,7 @@ export default function MemoryGameScreen() {
         { text: 'Новая игра', onPress: () => initLevel(0) },
       ]
     );
-  }, [currentLevel, timer, moves, saveRecord, initLevel]);
+  }, [currentLevel, timer, moves, records, saveRecord, initLevel]);
 
   const handleCardPress = (cardId: string) => {
     if (gameCompleted || isProcessing) return;

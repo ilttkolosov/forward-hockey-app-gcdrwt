@@ -56,6 +56,10 @@ import {
 import { runManagedMessengerMediaUpload } from "../../services/messengerMediaUploadManager";
 import { warmMessengerBufferedUploadFiles } from "../../services/messengerMediaUploadWarmup";
 import { prioritizeMessengerForegroundTransport } from "../../services/messengerTransport";
+import {
+  reportAnalyticsError,
+  trackMessengerAction,
+} from "../../services/analyticsService";
 import { colors } from "../../styles/commonStyles";
 
 type ShareTarget =
@@ -474,9 +478,19 @@ export default function MessengerShareScreen() {
         client_message_id: clientMessageId,
         message_id: sentMessage.id,
       });
+      trackMessengerAction("share_sheet_sent", {
+        content_type: sentMessage.kind,
+        attachment_count: sharedFiles.length,
+        has_text: Boolean(body),
+        room_type:
+          selectedTarget.kind === "room"
+            ? selectedTarget.room.room_type
+            : "direct",
+      });
       await wait(500);
       await finishShare();
     } catch (error) {
+      reportAnalyticsError("messenger_share_send_failed", error);
       const messageText = messengerErrorMessage(
         error,
         "Не удалось отправить выбранный материал",

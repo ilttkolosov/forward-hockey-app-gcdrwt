@@ -12,6 +12,7 @@ import {
   sendMessengerText,
 } from './messengerApi';
 import { messengerLog } from './messengerLogger';
+import { trackMessengerAction } from './analyticsService';
 
 export type MessengerOutboxEvent =
   | { type: 'sending'; item: MessengerOutboxItem }
@@ -101,6 +102,13 @@ async function flushPass(db: SQLiteDatabase): Promise<unknown | null> {
         message: result.message,
         created: result.created,
       });
+      if (result.created) {
+        trackMessengerAction('message_sent', {
+          content_type: 'text',
+          has_reply: Boolean(item.reply_to_message_id),
+          source: 'composer',
+        });
+      }
       messengerLog('info', 'outbox.item.sent', {
         room_id: item.room_id,
         client_message_id: item.client_message_id,

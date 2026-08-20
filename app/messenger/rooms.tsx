@@ -37,6 +37,7 @@ import { stripMessengerTextFormatting } from "../../services/messengerTextFormat
 import { syncMessengerUnreadFromRooms } from "../../services/messengerUnread";
 import { colors } from "../../styles/commonStyles";
 import { setMessengerMutedRooms } from "../../services/messengerSounds";
+import { trackMessengerAction } from "../../services/analyticsService";
 
 function lastMessageText(room: MessengerRoom): string {
   if (!room.last_message) return "Сообщений пока нет";
@@ -397,6 +398,12 @@ export default function MessengerRoomsScreen() {
       cached_latest_sequence: room.last_message?.sequence || null,
       unread_count: room.unread_count,
     });
+    trackMessengerAction("chat_opened", {
+      room_type: room.room_type,
+      preset: isPresetRoom(room),
+      has_unread: room.unread_count > 0,
+      source: "room_list",
+    });
     router.push({
       pathname: "/messenger/room/[id]",
       params: {
@@ -441,6 +448,11 @@ export default function MessengerRoomsScreen() {
       setRooms(nextRooms);
       setMessengerMutedRooms(nextRooms);
       if (nextRooms.length) void cacheMessengerRooms(db, nextRooms);
+      trackMessengerAction("notifications_changed", {
+        operation: duration === "unmute" ? "enabled" : "muted",
+        mute_duration: duration,
+        room_type: muteRoom.room_type,
+      });
       setMuteRoom(null);
     } catch (muteError) {
       setError(messengerErrorMessage(muteError, "Не удалось изменить уведомления"));

@@ -28,8 +28,6 @@ import {
 import { loadTeamLogo } from '../../services/teamStorage';
 import Icon from '../../components/Icon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { trackScreenView } from '../../services/analyticsService';
-import { useTrackScreenView } from '../../hooks/useTrackScreenView';
 import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
 
 const styles = StyleSheet.create({
@@ -303,12 +301,6 @@ export default function TeamDetailScreen() {
   useEffect(() => {
     loadTeamData();
   }, [loadTeamData]);
-
-  //Аналитика команды
-  useTrackScreenView('Экран команды', {
-    team_id: teamId,
-    //tournament_name: tournamentName || 'unknown',
-  });
 
   const onRefresh = () => {
     setRefreshing(true);

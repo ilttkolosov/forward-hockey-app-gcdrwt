@@ -26,8 +26,6 @@ import SegmentedControl from '@react-native-segmented-control/segmented-control'
 import GameCardCompact from '../../components/GameCardCompact';
 import ProtocolEventCard from '../../components/ProtocolEventCard';
 import { getPlayerById } from '../../data/playerData';
-import { trackScreenView } from '../../services/analyticsService';
-import { useTrackScreenView } from '../../hooks/useTrackScreenView';
 import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
 import { useKeepAwake } from 'expo-keep-awake';
 
@@ -828,13 +826,6 @@ export default function GameDetailsScreen() {
       loadGameData();
     }
   }, [id, loadGameData]);
-
-   //Аналитика экрана
-  useTrackScreenView('Экран игры', {
-    game_id: id,
-    //tournament_name: tournamentName || 'unknown',
-  }); 
-
 
   // === ОТСЛЕЖИВАНИЕ СТАРТА ИГРЫ ===
   useEffect(() => {

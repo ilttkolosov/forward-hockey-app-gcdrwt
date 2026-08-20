@@ -15,7 +15,7 @@ import {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from '../../../components/Icon';
-import { useTrackScreenView } from '../../../hooks/useTrackScreenView';
+import { trackMobileGameAction } from '../../../services/analyticsService';
 import { colors } from '../../../styles/commonStyles';
 import IceRink from './IceRink';
 import {
@@ -171,6 +171,7 @@ export default function IceResurfacingGameScreen() {
   const animationFrameRef = useRef<number | null>(null);
   const resumeAnimationLoopRef = useRef<() => void>(() => undefined);
   const victoryStoredRef = useRef(false);
+  const terminalTrackedRef = useRef(false);
   const isAppActiveRef = useRef(AppState.currentState === 'active');
 
   const [snapshot, setSnapshot] = useState(() =>
@@ -183,7 +184,9 @@ export default function IceResurfacingGameScreen() {
   const [steeringCommand, setSteeringCommand] = useState(0);
   const [driveButtonPressed, setDriveButtonPressed] = useState(false);
 
-  useTrackScreenView('Мобильная игра — Заливка льда');
+  useEffect(() => {
+    trackMobileGameAction('ice_resurfacing', 'started');
+  }, []);
 
   const releaseAllControls = useCallback((reason: string) => {
     const hadActiveControl =
@@ -361,6 +364,25 @@ export default function IceResurfacingGameScreen() {
     }
   }, [bestTimeMs, snapshot.elapsedMs, snapshot.phase]);
 
+  useEffect(() => {
+    if (
+      terminalTrackedRef.current ||
+      (snapshot.phase !== 'won' && snapshot.phase !== 'crashed')
+    ) {
+      return;
+    }
+    terminalTrackedRef.current = true;
+    const elapsedMs = Math.round(snapshot.elapsedMs);
+    trackMobileGameAction('ice_resurfacing', 'completed', {
+      result: snapshot.phase,
+      duration_seconds: Math.round(elapsedMs / 1000),
+      coverage_percent: Math.round(100 - snapshot.remainingPercent),
+      new_record:
+        snapshot.phase === 'won' &&
+        (bestTimeMs === null || elapsedMs < bestTimeMs),
+    });
+  }, [bestTimeMs, snapshot.elapsedMs, snapshot.phase, snapshot.remainingPercent]);
+
   const restartGame = useCallback(() => {
     releaseAllControls('перезапуск');
     setDriveDirection('forward');
@@ -375,10 +397,12 @@ export default function IceResurfacingGameScreen() {
     uiAccumulatorRef.current = 0;
     coveragePathAccumulatorRef.current = 0;
     victoryStoredRef.current = false;
+    terminalTrackedRef.current = false;
     setIsNewRecord(false);
     setSnapshot(createIceGameSnapshot(newEngine, coveragePathRef.current));
     resumeAnimationLoopRef.current();
     logIceGame('Игра перезапущена пользователем');
+    trackMobileGameAction('ice_resurfacing', 'restarted');
   }, [releaseAllControls]);
 
   const handleBack = useCallback(() => {

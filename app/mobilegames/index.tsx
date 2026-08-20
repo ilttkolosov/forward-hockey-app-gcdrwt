@@ -11,9 +11,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Href, useRouter } from 'expo-router';
 import { colors, commonStyles } from '../../styles/commonStyles';
 import Icon from '../../components/Icon';
+import {
+  trackMobileGameAction,
+  type MobileGameAnalyticsName,
+} from '../../services/analyticsService';
 
 interface MobileGameCard {
   id: string;
+  analyticsName: MobileGameAnalyticsName;
   name: string;
   description: string;
   href: Href;
@@ -25,6 +30,7 @@ interface MobileGameCard {
 const games: MobileGameCard[] = [
   {
     id: 'memory',
+    analyticsName: 'memory',
     name: 'Memory',
     description: 'Найди пары игроков',
     href: '/mobilegames/1',
@@ -33,6 +39,7 @@ const games: MobileGameCard[] = [
   },
   {
     id: 'ice-resurfacing',
+    analyticsName: 'ice_resurfacing',
     name: 'Заливка льда',
     description: 'Управляй Zamboni и подготовь площадку',
     href: '/mobilegames/ice-resurfacing',
@@ -41,6 +48,7 @@ const games: MobileGameCard[] = [
   },
   {
     id: 'five-in-row',
+    analyticsName: 'five_in_row',
     name: 'Х - О, 5 в ряд',
     description: 'Бесконечное поле, компьютер или два игрока',
     href: '/mobilegames/five-in-row',
@@ -74,7 +82,10 @@ export default function MobileGamesScreen() {
           <TouchableOpacity
             key={game.id}
             style={styles.gameCard}
-            onPress={() => router.push(game.href)}
+            onPress={() => {
+              trackMobileGameAction(game.analyticsName, 'selected');
+              router.push(game.href);
+            }}
             activeOpacity={0.7}
           >
             <View style={[styles.iconContainer, { backgroundColor: `${game.accent}14` }]}>

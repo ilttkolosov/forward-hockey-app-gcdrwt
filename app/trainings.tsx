@@ -21,7 +21,10 @@ import {
   synchronizeTrainings,
 } from '../services/trainingService';
 import { useNetworkStatus } from '../contexts/NetworkStatusContext';
-import { useTrackScreenView } from '../hooks/useTrackScreenView';
+import {
+  reportAnalyticsError,
+  trackScheduleAction,
+} from '../services/analyticsService';
 
 interface TrainingSection {
   date: string;
@@ -159,8 +162,6 @@ export default function TrainingsScreen() {
   const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
   const selectedWeek = useMemo(() => getWeekRange(weekOffset), [weekOffset]);
 
-  useTrackScreenView('Расписание тренировок');
-
   const loadSchedule = useCallback(async (forceNetwork = false) => {
     try {
       const local = await loadCachedTrainings(getTrainingSyncWindow());
@@ -177,9 +178,24 @@ export default function TrainingsScreen() {
             ? 'Сервер вернул некорректное расписание. Показаны сохранённые данные.'
             : 'Не удалось получить расписание с сервера. Показаны сохранённые данные.'
         : null);
+      if (forceNetwork) {
+        trackScheduleAction('manual_refresh', {
+          result: result.updated
+            ? 'updated'
+            : result.error
+              ? 'cached_fallback'
+              : 'unchanged',
+          source: result.source,
+          training_count: result.trainings.length,
+        });
+      }
     } catch (error) {
       console.warn('[Тренировки] Не удалось подготовить экран расписания:', error);
       setNetworkError('Не удалось открыть сохранённое расписание.');
+      if (forceNetwork) {
+        trackScheduleAction('manual_refresh', { result: 'failed' });
+        reportAnalyticsError('schedule_refresh_failed', error);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -228,6 +244,10 @@ export default function TrainingsScreen() {
     if (nextOffset < MIN_WEEK_OFFSET || nextOffset > MAX_WEEK_OFFSET) return;
     setWeekOffset(nextOffset);
     if (nextOffset !== 0) setShowPastTrainings(false);
+    trackScheduleAction('week_changed', {
+      week_offset: nextOffset,
+      direction: nextOffset > weekOffset ? 'next' : 'previous',
+    });
   };
 
   const togglePastTrainings = () => {
@@ -236,6 +256,7 @@ export default function TrainingsScreen() {
       console.log(
         `[Тренировки] Прошедшие занятия текущей недели ${nextValue ? 'показаны' : 'скрыты'}`
       );
+      trackScheduleAction('past_visibility_changed', { enabled: nextValue });
       return nextValue;
     });
   };

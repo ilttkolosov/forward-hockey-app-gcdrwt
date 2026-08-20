@@ -34,6 +34,10 @@ import {
 import { searchMessengerMessagesLocallyFirst } from "../../services/messengerSearch";
 import { stripMessengerTextFormatting } from "../../services/messengerTextFormatting";
 import { colors } from "../../styles/commonStyles";
+import {
+  reportAnalyticsError,
+  trackMessengerAction,
+} from "../../services/analyticsService";
 
 type DateField = "from" | "to";
 
@@ -60,6 +64,13 @@ function messagePreview(message: MessengerMessage): string {
     return message.text || message.media?.original_name || "Файл";
   if (message.kind === "location") return message.text || "Геопозиция";
   return stripMessengerTextFormatting(message.text) || "Сообщение";
+}
+
+function searchResultBucket(count: number): string {
+  if (count === 0) return "0";
+  if (count <= 10) return "1_10";
+  if (count <= 50) return "11_50";
+  return "51_plus";
 }
 
 export default function MessengerSearchScreen() {
@@ -145,10 +156,35 @@ export default function MessengerSearchScreen() {
         );
         setNextCursor(response.page.next_cursor);
         setSearched(true);
+        if (!cursor) {
+          trackMessengerAction("search_completed", {
+            scope: scopedRoomId ? "chat" : "global",
+            filter_type: query.trim()
+              ? dateFrom || dateTo
+                ? "text_and_date"
+                : "text"
+              : "date",
+            source: response.source,
+            result: "success",
+            result_bucket: searchResultBucket(response.items.length),
+          });
+        }
       } catch (searchError) {
         setError(
           messengerErrorMessage(searchError, "Не удалось выполнить поиск"),
         );
+        if (!cursor) {
+          reportAnalyticsError("messenger_search_failed", searchError);
+          trackMessengerAction("search_completed", {
+            scope: scopedRoomId ? "chat" : "global",
+            filter_type: query.trim()
+              ? dateFrom || dateTo
+                ? "text_and_date"
+                : "text"
+              : "date",
+            result: "failed",
+          });
+        }
       } finally {
         setLoading(false);
         setLoadingMore(false);
@@ -161,6 +197,11 @@ export default function MessengerSearchScreen() {
     (message: MessengerMessage) => {
       const room = roomById.get(message.room_id);
       if (!room) return;
+      trackMessengerAction("search_result_opened", {
+        scope: scopedRoomId ? "chat" : "global",
+        content_type: message.kind,
+        room_type: room.room_type,
+      });
       router.push({
         pathname: "/messenger/room/[id]",
         params: {
@@ -188,7 +229,7 @@ export default function MessengerSearchScreen() {
         },
       });
     },
-    [roomById, router],
+    [roomById, router, scopedRoomId],
   );
 
   const handleDateChange = (event: DateTimePickerEvent, value?: Date) => {

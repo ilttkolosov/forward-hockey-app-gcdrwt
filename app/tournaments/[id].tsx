@@ -31,8 +31,6 @@ import {
 } from '../../services/tournamentsApi';
 import { loadTeamLogo } from '../../services/teamStorage';
 import CommandCard from '../../components/CommandCard';
-import { trackScreenView } from '../../services/analyticsService';
-import { useTrackScreenView } from '../../hooks/useTrackScreenView';
 
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 const TOURNAMENTS_PAST_KEY = 'tournaments_past';
@@ -363,12 +361,6 @@ export default function TournamentDetailScreen() {
       setLoading(false);
     }
   }, [id, loadData]);
-
-   // === Аналитика: отслеживание просмотра экрана турнира ===
-  useTrackScreenView('Экран турнира', {
-    tournament_id: id,
-    //tournament_name: tournamentName || 'unknown',
-  });
 
   const onRefresh = () => {
     setRefreshing(true);

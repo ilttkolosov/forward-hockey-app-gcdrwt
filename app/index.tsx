@@ -24,7 +24,6 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import Icon from '../components/Icon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDeclension } from './tournaments/index'; // ← импортируем склонение
-import { useTrackScreenView } from '../hooks/useTrackScreenView';
 import { useNetworkStatus } from '../contexts/NetworkStatusContext';
 import { useMessengerAuth } from '../contexts/MessengerAuthContext';
 import { useMessengerUnreadCount } from '../services/messengerUnread';
@@ -240,7 +239,6 @@ export default function HomeScreen() {
     void loadData(false, false);
   }), [loadData]);
 
-  useTrackScreenView('Главный экран');
 
   const onRefresh = () => {
     setRefreshing(true);

@@ -20,7 +20,6 @@ import { loadTeamLogo } from '../../services/teamStorage';
 import { getGames } from '../../data/gameData';
 // Импортируем функции для загрузки конфигурации турнира
 import { fetchTournamentConfig, getCachedTournamentConfig } from '../../services/tournamentsApi';
-import { useTrackScreenView } from '../../hooks/useTrackScreenView';
 import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
 
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
@@ -188,7 +187,6 @@ export default function TournamentsScreen() {
     loadTournamentsFromCache();
   }, [loadTournamentsFromCache]);
 
-  useTrackScreenView('Экран турнирной таблицы');
 
   const onRefresh = async () => {
     setRefreshing(true);

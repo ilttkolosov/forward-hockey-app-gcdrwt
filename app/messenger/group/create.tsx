@@ -20,6 +20,7 @@ import {
   messengerErrorMessage,
 } from "../../../services/messengerApi";
 import { colors } from "../../../styles/commonStyles";
+import { trackMessengerAction } from "../../../services/analyticsService";
 
 interface TeamOption {
   id: string;
@@ -101,6 +102,9 @@ export default function CreateMessengerGroupScreen() {
         ...selected,
       ]);
       const room = result.room;
+      trackMessengerAction("private_group_created", {
+        member_count: selected.size + 1,
+      });
       router.replace({
         pathname: "/messenger/room/[id]",
         params: {

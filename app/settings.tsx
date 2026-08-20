@@ -17,7 +17,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import Icon from '../components/Icon';
 import { commonStyles, colors } from '../styles/commonStyles';
-import { trackScreenView } from '../services/analyticsService';
 import {
   getTrainingNotificationSettings,
   setTrainingNotificationLeadMinutes,
@@ -218,7 +217,6 @@ export default function SettingsScreen() {
       .catch((error) => {
         console.warn('[Настройки] Проверка подписки на матчи отложена:', error);
       });
-    trackScreenView('Настройки');
     return () => {
       active = false;
     };

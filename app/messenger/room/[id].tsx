@@ -163,6 +163,10 @@ import {
   stripMessengerTextFormatting,
   type MessengerTextFormat,
 } from "../../../services/messengerTextFormatting";
+import {
+  reportAnalyticsError,
+  trackMessengerAction,
+} from "../../../services/analyticsService";
 
 type MessengerAttachmentKind = "camera" | "library" | "file" | "location";
 type InitialAnchorMode = "read_anchor" | "unread_fallback" | "latest";
@@ -3350,11 +3354,23 @@ export default function MessengerRoomScreen() {
           ),
           cache_seed_duration_ms: Date.now() - serverAcceptedAt,
         });
+        trackMessengerAction("message_sent", {
+          content_type:
+            request.files.length > 1
+              ? "multiple"
+              : request.files[0]?.kind || "file",
+          attachment_count: request.files.length,
+          attachment_source: request.source,
+          has_text: Boolean(request.caption),
+          has_reply: Boolean(request.replyTarget?.id),
+          room_type: roomType || "unknown",
+          source: "composer",
+        });
       } finally {
         endLocalMessengerMediaUpload(request.clientMessageId);
       }
     },
-    [roomId, storeSentMessage, updatePendingAttachment],
+    [roomId, roomType, storeSentMessage, updatePendingAttachment],
   );
 
   const chooseAttachment = useCallback(
@@ -3418,6 +3434,12 @@ export default function MessengerRoomScreen() {
             message_id: result.message.id,
             latitude: result.message.location?.latitude,
             longitude: result.message.location?.longitude,
+          });
+          trackMessengerAction("message_sent", {
+            content_type: "location",
+            has_reply: Boolean(replyTarget?.id),
+            room_type: roomType || "unknown",
+            source: "composer",
           });
           setOffline(false);
           setSyncError(null);
@@ -3506,6 +3528,7 @@ export default function MessengerRoomScreen() {
     [
       replyingTo,
       roomId,
+      roomType,
       scrollToLatest,
       session,
       storeSentMessage,
@@ -3700,6 +3723,7 @@ export default function MessengerRoomScreen() {
       })
       .catch((error) => {
         if (isMessengerUploadCancelledError(error)) return;
+        reportAnalyticsError("messenger_media_send_failed", error);
         const message = messengerErrorMessage(
           error,
           "Не удалось отправить вложение",
@@ -4117,6 +4141,10 @@ export default function MessengerRoomScreen() {
         void cacheMessengerMessages(db, [confirmedMessage]).catch(
           () => undefined,
         );
+        trackMessengerAction("reaction_changed", {
+          operation: selected ? "removed" : "set",
+          room_type: roomType || "unknown",
+        });
       } catch (error) {
         const rolledBack = { ...currentMessage, reactions: previousReactions };
         setMessages((current) =>
@@ -4137,7 +4165,7 @@ export default function MessengerRoomScreen() {
         });
       }
     },
-    [canReact, db, quickReactions],
+    [canReact, db, quickReactions, roomType],
   );
 
   const beginReply = useCallback(
@@ -4208,6 +4236,10 @@ export default function MessengerRoomScreen() {
       setText("");
       setOffline(false);
       setSyncError(null);
+      trackMessengerAction("message_edited", {
+        content_type: target.kind,
+        room_type: roomType || "unknown",
+      });
     } catch (error) {
       setOffline(isMessengerConnectionError(error));
       Alert.alert(
@@ -4217,7 +4249,14 @@ export default function MessengerRoomScreen() {
     } finally {
       setMessageMutationBusyId(null);
     }
-  }, [cancelEditing, db, editingMessage, messageMutationBusyId, text]);
+  }, [
+    cancelEditing,
+    db,
+    editingMessage,
+    messageMutationBusyId,
+    roomType,
+    text,
+  ]);
 
   const requestMessageDeletion = useCallback(
     (message: MessengerMessage) => {
@@ -4271,6 +4310,10 @@ export default function MessengerRoomScreen() {
                       );
                       setOffline(false);
                       setSyncError(null);
+                      trackMessengerAction("message_deleted", {
+                        content_type: message.kind,
+                        room_type: roomType || "unknown",
+                      });
                     })
                     .catch((error) => {
                       setOffline(isMessengerConnectionError(error));
@@ -4310,9 +4353,13 @@ export default function MessengerRoomScreen() {
       setFilteredMessages([]);
       setFilterCursor(null);
       setShowJumpToLatest(false);
+      trackMessengerAction("author_filter_changed", {
+        enabled: true,
+        room_type: roomType || "unknown",
+      });
       void loadFilteredAuthorMessages(filter);
     },
-    [loadFilteredAuthorMessages],
+    [loadFilteredAuthorMessages, roomType],
   );
 
   const clearAuthorFilter = useCallback(() => {
@@ -4323,7 +4370,11 @@ export default function MessengerRoomScreen() {
       nearLatest.current = false;
       setShowJumpToLatest(true);
     });
-  }, []);
+    trackMessengerAction("author_filter_changed", {
+      enabled: false,
+      room_type: roomType || "unknown",
+    });
+  }, [roomType]);
 
   const openForward = useCallback(async (message: MessengerMessage) => {
     setForwardingMessage(message);
@@ -4384,6 +4435,9 @@ export default function MessengerRoomScreen() {
           message.author.id,
         );
         const target = result.room;
+        trackMessengerAction("private_reply_opened", {
+          source_room_type: roomType || "unknown",
+        });
         router.push({
           pathname: "/messenger/room/[id]",
           params: {
@@ -4413,7 +4467,7 @@ export default function MessengerRoomScreen() {
         );
       }
     },
-    [roomTeamId, router, session?.user.id],
+    [roomTeamId, roomType, router, session?.user.id],
   );
 
   const runPendingMessageAction = useCallback(() => {
@@ -4489,6 +4543,11 @@ export default function MessengerRoomScreen() {
         );
         if (target.id === roomId) await storeSentMessage(result.message);
         setForwardingMessage(null);
+        trackMessengerAction("message_forwarded", {
+          content_type: forwardingMessage.kind,
+          source_room_type: roomType || "unknown",
+          target_room_type: target.room_type,
+        });
         Alert.alert("Сообщение переслано", `Получатель: ${target.title}`);
       } catch (error) {
         setForwardError(
@@ -4498,7 +4557,7 @@ export default function MessengerRoomScreen() {
         setForwardBusy(null);
       }
     },
-    [forwardBusy, forwardingMessage, roomId, storeSentMessage],
+    [forwardBusy, forwardingMessage, roomId, roomType, storeSentMessage],
   );
 
   const forwardToSaved = useCallback(async () => {
@@ -4513,6 +4572,10 @@ export default function MessengerRoomScreen() {
       await cacheMessengerRoomSnapshot(db, result.room);
       if (result.room.id === roomId) await storeSentMessage(result.message);
       setForwardingMessage(null);
+      trackMessengerAction("message_saved", {
+        content_type: forwardingMessage.kind,
+        source_room_type: roomType || "unknown",
+      });
       Alert.alert("Сообщение сохранено", "Оно добавлено в чат «Избранное».");
     } catch (error) {
       setForwardError(
@@ -4521,7 +4584,14 @@ export default function MessengerRoomScreen() {
     } finally {
       setForwardBusy(null);
     }
-  }, [db, forwardBusy, forwardingMessage, roomId, storeSentMessage]);
+  }, [
+    db,
+    forwardBusy,
+    forwardingMessage,
+    roomId,
+    roomType,
+    storeSentMessage,
+  ]);
 
   const newForwardContacts = useMemo(() => {
     const roomIds = new Set(forwardRooms.map((room) => room.id));

@@ -25,7 +25,7 @@ import {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from '../../../components/Icon';
-import { useTrackScreenView } from '../../../hooks/useTrackScreenView';
+import { trackMobileGameAction } from '../../../services/analyticsService';
 import { colors } from '../../../styles/commonStyles';
 import PaperBoard from '../../../features/mobilegames/five-in-row/PaperBoard';
 import {
@@ -112,8 +112,6 @@ export default function FiveInRowGameScreen() {
   const panStartRef = useRef<GridPoint>({ x: 0, y: 0 });
   const panCellSizeRef = useRef<number>(CONFIG.DEFAULT_CELL_SIZE);
   const zoomStartRef = useRef<number>(CONFIG.DEFAULT_CELL_SIZE);
-
-  useTrackScreenView('Мобильная игра — Х - О, 5 в ряд');
 
   const updateViewCenter = useCallback((center: GridPoint) => {
     viewCenterRef.current = center;
@@ -269,6 +267,23 @@ export default function FiveInRowGameScreen() {
           playerName: getPlayerName(settingsRef.current, winner.mark),
           moves: move.moveNumber,
           lineLength: winner.cells.length,
+        });
+        const activeSettings = settingsRef.current;
+        trackMobileGameAction('five_in_row', 'completed', {
+          mode: activeSettings.mode,
+          difficulty:
+            activeSettings.mode === 'computer'
+              ? activeSettings.difficulty
+              : undefined,
+          result:
+            activeSettings.mode === 'computer'
+              ? winner.mark === 'o'
+                ? 'computer_win'
+                : 'player_win'
+              : winner.mark === 'x'
+                ? 'player_x_win'
+                : 'player_o_win',
+          moves: move.moveNumber,
         });
         return true;
       }
@@ -433,7 +448,24 @@ export default function FiveInRowGameScreen() {
       playerX: normalized.playerXName,
       playerO: normalized.playerOName,
     });
+    trackMobileGameAction('five_in_row', 'started', {
+      mode: normalized.mode,
+      difficulty:
+        normalized.mode === 'computer' ? normalized.difficulty : undefined,
+    });
   }, [draftSettings, resetGame]);
+
+  const restartGame = useCallback(() => {
+    resetGame();
+    const activeSettings = settingsRef.current;
+    trackMobileGameAction('five_in_row', 'restarted', {
+      mode: activeSettings.mode,
+      difficulty:
+        activeSettings.mode === 'computer'
+          ? activeSettings.difficulty
+          : undefined,
+    });
+  }, [resetGame]);
 
   const activePlayerName = getPlayerName(settings, turn);
   const lastMove = moves[moves.length - 1] ?? null;
@@ -572,7 +604,7 @@ export default function FiveInRowGameScreen() {
 
       <View style={styles.footer}>
         <TouchableOpacity
-          onPress={() => resetGame()}
+          onPress={restartGame}
           style={styles.secondaryButton}
           accessibilityRole="button"
         >
@@ -819,7 +851,7 @@ export default function FiveInRowGameScreen() {
               Ходов в партии: {moves.length}
             </Text>
             <TouchableOpacity
-              onPress={() => resetGame()}
+              onPress={restartGame}
               style={styles.resultPrimaryButton}
             >
               <Icon name="refresh" size={20} color={colors.white} />

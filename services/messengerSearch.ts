@@ -12,6 +12,11 @@ import { messengerLog } from "./messengerLogger";
 
 const SERVER_CURSOR_PREFIX = "server:";
 
+export type MessengerSearchSource = "local" | "server";
+export type MessengerSearchResult = MessengerMessageSearchResponse & {
+  source: MessengerSearchSource;
+};
+
 function serverCursor(cursor: string | undefined): string | undefined {
   if (!cursor?.startsWith(SERVER_CURSOR_PREFIX)) return undefined;
   try {
@@ -35,10 +40,14 @@ function taggedServerCursor(cursor: string | null): string | null {
 export async function searchMessengerMessagesLocallyFirst(
   db: SQLiteDatabase,
   options: MessengerCachedMessageSearchOptions,
-): Promise<MessengerMessageSearchResponse> {
+): Promise<MessengerSearchResult> {
   const remoteCursor = serverCursor(options.cursor);
   if (!remoteCursor && options.cursor?.startsWith(SERVER_CURSOR_PREFIX)) {
-    return { items: [], page: { has_more: false, next_cursor: null } };
+    return {
+      items: [],
+      page: { has_more: false, next_cursor: null },
+      source: "server",
+    };
   }
 
   if (remoteCursor) {
@@ -51,6 +60,7 @@ export async function searchMessengerMessagesLocallyFirst(
     }
     return {
       ...remote,
+      source: "server",
       page: {
         ...remote.page,
         next_cursor: taggedServerCursor(remote.page.next_cursor),
@@ -65,7 +75,7 @@ export async function searchMessengerMessagesLocallyFirst(
       result_count: local.items.length,
       has_more: local.page.has_more,
     });
-    return local;
+    return { ...local, source: "local" };
   }
 
   try {
@@ -80,6 +90,7 @@ export async function searchMessengerMessagesLocallyFirst(
     });
     return {
       ...remote,
+      source: "server",
       page: {
         ...remote.page,
         next_cursor: taggedServerCursor(remote.page.next_cursor),
@@ -90,6 +101,6 @@ export async function searchMessengerMessagesLocallyFirst(
       room_id: options.roomId,
       message: error instanceof Error ? error.message : String(error),
     });
-    return local;
+    return { ...local, source: "local" };
   }
 }
