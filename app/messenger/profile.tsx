@@ -695,6 +695,32 @@ export default function MessengerProfileScreen() {
             />
           </TouchableOpacity>
 
+          <TouchableOpacity
+            style={styles.cacheCard}
+            onPress={() => router.push("/messenger/safety")}
+            accessibilityRole="button"
+            accessibilityLabel="Открыть центр безопасности"
+          >
+            <View style={styles.cacheIcon}>
+              <Icon
+                name="shield-checkmark-outline"
+                size={25}
+                color={colors.primary}
+              />
+            </View>
+            <View style={styles.cacheText}>
+              <Text style={styles.cacheTitle}>Безопасность</Text>
+              <Text style={styles.cacheSubtitle}>
+                Правила, жалобы и заблокированные пользователи
+              </Text>
+            </View>
+            <Icon
+              name="chevron-forward"
+              size={20}
+              color={colors.textSecondary}
+            />
+          </TouchableOpacity>
+
           <View style={styles.dangerCard}>
             <View style={styles.dangerIcon}>
               <Icon name="trash-outline" size={24} color={colors.error} />

@@ -50,6 +50,7 @@ import {
   reconcileMessengerMessageUpdates,
 } from "../../../features/messenger/feed";
 import MessageReceiptsModal from "../../../features/messenger/MessageReceiptsModal";
+import { MessengerReportDialog } from "../../../features/messenger/MessengerSafetyActions";
 import MessengerAttachmentView from "../../../features/messenger/MessengerAttachmentView";
 import MessengerLinkPreview, {
   MessengerLinkifiedText,
@@ -1242,6 +1243,9 @@ export default function MessengerRoomScreen() {
   const [actionMessage, setActionMessage] = useState<MessengerMessage | null>(
     null,
   );
+  const [reportMessage, setReportMessage] = useState<MessengerMessage | null>(
+    null,
+  );
   const [messageMutationBusyId, setMessageMutationBusyId] = useState<
     string | null
   >(null);
@@ -1340,6 +1344,7 @@ export default function MessengerRoomScreen() {
     | { type: "forward"; message: MessengerMessage }
     | { type: "receipts"; message: MessengerMessage }
     | { type: "private_reply"; message: MessengerMessage }
+    | { type: "report"; message: MessengerMessage }
     | null
   >(null);
   const floatingDateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -4480,12 +4485,14 @@ export default function MessengerRoomScreen() {
     pendingMessageAction.current = null;
     if (pending.type === "forward") void openForward(pending.message);
     else if (pending.type === "receipts") void openReceipts(pending.message);
-    else void openPrivateReply(pending.message);
+    else if (pending.type === "private_reply")
+      void openPrivateReply(pending.message);
+    else setReportMessage(pending.message);
   }, [openForward, openPrivateReply, openReceipts]);
 
   const queueMessageAction = useCallback(
     (
-      type: "forward" | "receipts" | "private_reply",
+      type: "forward" | "receipts" | "private_reply" | "report",
       message: MessengerMessage,
     ) => {
       if (message.pending || message.deleted_at) return;
@@ -5310,6 +5317,25 @@ export default function MessengerRoomScreen() {
                   <Text style={styles.messageActionText}>Переслать</Text>
                 </TouchableOpacity>
               ) : null}
+              {actionMessage &&
+              !actionMessage.pending &&
+              !actionMessage.deleted_at &&
+              actionMessage.kind !== "system" &&
+              actionMessage.author.id !== session?.user.id ? (
+                <TouchableOpacity
+                  style={styles.messageAction}
+                  onPress={() => queueMessageAction("report", actionMessage)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Пожаловаться на сообщение"
+                >
+                  <Icon name="flag-outline" size={21} color={colors.error} />
+                  <Text
+                    style={[styles.messageActionText, { color: colors.error }]}
+                  >
+                    Пожаловаться
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </Pressable>
           </Pressable>
         </Modal>
@@ -5533,6 +5559,15 @@ export default function MessengerRoomScreen() {
             </Pressable>
           </Pressable>
         </Modal>
+
+        <MessengerReportDialog
+          visible={Boolean(reportMessage)}
+          targetUserId={reportMessage?.author.id || ""}
+          targetDisplayName={reportMessage?.author.display_name || ""}
+          roomId={roomId}
+          messageId={reportMessage?.id}
+          onClose={() => setReportMessage(null)}
+        />
 
         <MessageReceiptsModal
           visible={Boolean(receiptMessage)}
