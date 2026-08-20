@@ -1,0 +1,72 @@
+name: App Store compliance branch
+
+on:
+  push:
+    branches: [feature/appstore-2.0.1-compliance]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: appstore-compliance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/appstore-2.0.1-compliance
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply guarded patches and validate application
+        id: validation
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          {
+            node scripts/apply-appstore-compliance-patches.mjs &&
+            npm ci &&
+            npm run check &&
+            CI=1 EXPO_NO_TELEMETRY=1 npx expo export --platform ios --output-dir /tmp/forward-appstore-ios &&
+            CI=1 EXPO_NO_TELEMETRY=1 npx expo export --platform android --output-dir /tmp/forward-appstore-android &&
+            CI=1 EXPO_NO_TELEMETRY=1 EXPO_OFFLINE=1 npx expo config --type public
+          } 2>&1 | tee /tmp/appstore-compliance-validation.log
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish validated patch
+        if: steps.validation.outputs.status == '0'
+        shell: bash
+        run: |
+          rm -f scripts/apply-appstore-compliance-patches.mjs
+          rm -f .github/workflows/feature-appstore-compliance.yml
+          rm -f docs/APP_STORE_COMPLIANCE_FAILURE.log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(messenger): finalize App Store safety controls"
+          git push
+
+      - name: Publish validation failure diagnostics
+        if: steps.validation.outputs.status != '0'
+        shell: bash
+        run: |
+          mkdir -p docs
+          cp /tmp/appstore-compliance-validation.log docs/APP_STORE_COMPLIANCE_FAILURE.log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/APP_STORE_COMPLIANCE_FAILURE.log
+          git commit -m "ci: record App Store compliance failure" || true
+          git push
+          exit 1
