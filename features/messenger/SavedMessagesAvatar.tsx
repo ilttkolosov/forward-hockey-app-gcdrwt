@@ -1,18 +1,56 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import Icon from "../../components/Icon";
-import { colors } from "../../styles/commonStyles";
+import {
+  DEFAULT_SAVED_APPEARANCE,
+  getMessengerSavedAppearance,
+  type MessengerSavedAppearance,
+} from "../../services/messengerSavedAppearance";
 
-function SavedMessagesAvatar({ size = 44 }: { size?: number }) {
+interface SavedMessagesAvatarProps {
+  size?: number;
+  userId?: string;
+  appearance?: MessengerSavedAppearance;
+}
+
+function SavedMessagesAvatar({
+  size = 44,
+  userId,
+  appearance,
+}: SavedMessagesAvatarProps) {
+  const [storedAppearance, setStoredAppearance] =
+    useState<MessengerSavedAppearance>(DEFAULT_SAVED_APPEARANCE);
+
+  useEffect(() => {
+    if (appearance || !userId) return;
+    let active = true;
+    void getMessengerSavedAppearance(userId).then((value) => {
+      if (active) setStoredAppearance(value);
+    });
+    return () => {
+      active = false;
+    };
+  }, [appearance, userId]);
+
+  const selected = appearance || storedAppearance;
   return (
     <View
       style={[
         styles.avatar,
-        { width: size, height: size, borderRadius: size / 2 },
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: selected.backgroundColor,
+        },
       ]}
       accessibilityLabel="Аватар чата Избранное"
     >
-      <Icon name="star" size={Math.round(size * 0.5)} color={colors.white} />
+      <Icon
+        name={selected.icon}
+        size={Math.round(size * 0.5)}
+        color="#FFFFFF"
+      />
     </View>
   );
 }
@@ -26,7 +64,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(27, 54, 93, 0.16)",
-    // Forward's orange accent is warmer and more on-brand than the old gold.
-    backgroundColor: colors.secondary,
   },
 });
