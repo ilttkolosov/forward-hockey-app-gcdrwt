@@ -50,7 +50,10 @@ export type MessengerAnalyticsAction =
   | 'private_reply_opened'
   | 'share_sheet_opened'
   | 'share_sheet_sent'
-  | 'push_opened';
+  | 'push_opened'
+  | 'report_submitted'
+  | 'user_block_changed'
+  | 'safety_center_opened';
 
 interface AppMetricaConfig {
   apiKey: string;
