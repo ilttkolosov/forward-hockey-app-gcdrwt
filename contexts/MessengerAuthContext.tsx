@@ -90,6 +90,16 @@ async function recoverMessengerTransport(force = false): Promise<void> {
   resumeMessengerRealtime();
 }
 
+async function loadPersistedMessengerSession(): Promise<MessengerSession | null> {
+  const delays = [0, 120, 350] as const;
+  for (const delay of delays) {
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+    const stored = await loadMessengerSession();
+    if (stored) return stored;
+  }
+  return null;
+}
+
 export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
   const pathname = usePathname();
   const [status, setStatus] = useState<MessengerAuthStatus>("loading");
@@ -123,7 +133,7 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       }
     });
     void Promise.all([
-      loadMessengerSession(),
+      loadPersistedMessengerSession(),
       loadMessengerPasswordChange(),
     ]).then(async ([stored, pendingPasswordChange]) => {
       if (!active) return;
@@ -289,7 +299,7 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       // A background notification may have attempted to read iOS Keychain
       // while the phone was locked. Retry once the device is active instead
       // of treating that temporary storage denial as a logout.
-      void loadMessengerSession().then((restored) => {
+      void loadPersistedMessengerSession().then((restored) => {
         if (!restored) return;
         void prepareMessengerAliases(restored.user.id).then(() => {
           setSession(restored);
