@@ -1191,7 +1191,7 @@ export default function MessengerRoomScreen() {
     privateReplyMessageId?: string;
     openedAt?: string;
   }>();
-  const { session, isAuthenticated } = useMessengerAuth();
+  const { session, isAuthenticated, status: authStatus } = useMessengerAuth();
   const roomId = params.id;
   const canWrite = params.canWrite !== "false";
   const canMedia = params.canMedia !== "false";
@@ -2962,6 +2962,7 @@ export default function MessengerRoomScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (authStatus === "loading") return;
       if (!isAuthenticated) {
         router.replace("/messenger/register");
         return;
@@ -3202,6 +3203,7 @@ export default function MessengerRoomScreen() {
       db,
       acknowledgeLatest,
       clearInitialPositionTimers,
+      authStatus,
       isAuthenticated,
       loadMessages,
       openedAt,
