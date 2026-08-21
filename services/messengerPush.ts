@@ -7,9 +7,13 @@ import { compareMessengerSequence } from "../features/messenger/feed";
 import {
   cacheIncomingMessengerMessage,
   cacheMessengerRooms,
+  loadCachedMessengerMessage,
   loadCachedMessengerRoom,
 } from "../features/messenger/repository";
-import type { MessengerPushRegistration } from "../features/messenger/types";
+import type {
+  MessengerPushRegistration,
+  MessengerSession,
+} from "../features/messenger/types";
 import { getDatabase } from "../database/repository";
 import {
   getMessengerMessage,
@@ -41,6 +45,14 @@ const SHARED_EXPO_PUSH_TOKEN_KEY = "expo_push_token";
 let enableMessengerPushInFlight: Promise<MessengerPushRegistration> | null =
   null;
 let observedNativePushToken: string | null = null;
+const PUSH_REGISTRATION_SYNC_MIN_INTERVAL_MS = 5 * 60_000;
+let pushRegistrationSyncState: {
+  userId: string;
+  completedAt: number;
+  inFlight: Promise<void> | null;
+} | null = null;
+const pushEventCacheInFlight = new Map<string, Promise<void>>();
+const PUSH_DATABASE_RETRY_DELAYS_MS = [80, 240, 600] as const;
 
 type NotificationPermissionRequest = "never" | "explicit" | "restore";
 
@@ -84,6 +96,41 @@ function nativePushTokenIdentity(
     data = String(token.data);
   }
   return `${userId}:${token.type}:${data}`;
+}
+
+function isSQLiteBusyError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /database is locked/i.test(message) ||
+    /SQLITE_BUSY/i.test(message) ||
+    /Error code 5/i.test(message)
+  );
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function cacheIncomingPushMessage(
+  db: Awaited<ReturnType<typeof getDatabase>>,
+  message: Awaited<ReturnType<typeof getMessengerMessage>>,
+  currentUserId: string,
+): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await cacheIncomingMessengerMessage(db, message, currentUserId);
+      return;
+    } catch (error) {
+      const delay = PUSH_DATABASE_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined || !isSQLiteBusyError(error)) throw error;
+      messengerLog("debug", "push.event.database_busy_retry", {
+        message_id: message.id,
+        attempt: attempt + 1,
+        delay_ms: delay,
+      });
+      await wait(delay);
+    }
+  }
 }
 
 function expoProjectId(): string {
@@ -240,25 +287,52 @@ export async function messengerPushStatus(): Promise<{
   }
 }
 
-export async function syncMessengerPushRegistration(): Promise<void> {
+export async function syncMessengerPushRegistration(
+  options: { force?: boolean } = {},
+): Promise<void> {
   if (!remotePushNotificationsSupported) return;
   const session = await loadMessengerSession();
   if (!session) return;
-  const status = await messengerPushStatus();
-  if (!status.enabled) {
-    await unregisterMessengerPushDevice().catch(() => undefined);
+  if (pushRegistrationSyncState?.userId !== session.user.id) {
+    pushRegistrationSyncState = {
+      userId: session.user.id,
+      completedAt: 0,
+      inFlight: null,
+    };
+  }
+  const state = pushRegistrationSyncState;
+  if (state.inFlight) return state.inFlight;
+  if (
+    !options.force &&
+    Date.now() - state.completedAt < PUSH_REGISTRATION_SYNC_MIN_INTERVAL_MS
+  ) {
     return;
   }
-  if (!(await ensureNotificationPermission("restore"))) {
-    // The account-level choice stays enabled so another authorized device is
-    // unaffected. This installation is disabled until the OS grants access.
-    await unregisterMessengerPushDevice().catch(() => undefined);
-    messengerLog("info", "push.device.permission_missing", {
-      user_id: session.user.id,
-    });
-    return;
+
+  const operation = (async () => {
+    const status = await messengerPushStatus();
+    if (!status.enabled) {
+      await unregisterMessengerPushDevice().catch(() => undefined);
+      return;
+    }
+    if (!(await ensureNotificationPermission("restore"))) {
+      // The account-level choice stays enabled so another authorized device is
+      // unaffected. This installation is disabled until the OS grants access.
+      await unregisterMessengerPushDevice().catch(() => undefined);
+      messengerLog("info", "push.device.permission_missing", {
+        user_id: session.user.id,
+      });
+      return;
+    }
+    await enableMessengerPush(false);
+  })();
+  state.inFlight = operation;
+  try {
+    await operation;
+    state.completedAt = Date.now();
+  } finally {
+    if (state.inFlight === operation) state.inFlight = null;
   }
-  await enableMessengerPush(false);
 }
 
 export async function syncMessengerPushTokenRotation(
@@ -278,7 +352,7 @@ export async function syncMessengerPushTokenRotation(
   // Store before requesting the Expo token. That request can itself emit the
   // native-token event; marking it first prevents a recursive registration loop.
   await AsyncStorage.setItem(storageKey, identity);
-  await syncMessengerPushRegistration();
+  await syncMessengerPushRegistration({ force: true });
 }
 
 export async function shouldOfferMessengerPush(
@@ -419,55 +493,38 @@ export async function processMessengerPushPayload(
   ) {
     return payload;
   }
+  const messagePayload: MessengerPushPayload & { message_id: string } = {
+    ...payload,
+    message_id: payload.message_id,
+  };
   const session = await loadMessengerSession();
   if (!session) return payload;
+  const reactionIdentity =
+    payload.type === "messenger.reaction"
+      ? `:${payload.reacting_user_id || "unknown"}:${payload.reaction || "removed"}`
+      : "";
+  const cacheKey = `${session.user.id}:${payload.type}:${messagePayload.message_id}${reactionIdentity}`;
   try {
-    const [db, message] = await Promise.all([
-      getDatabase(),
-      getMessengerMessage(payload.message_id),
-    ]);
-    if (!(await loadCachedMessengerRoom(db, message.room_id))) {
-      const rooms = await getMessengerRooms();
-      const reconciled = await cacheMessengerRooms(db, rooms);
-      await syncMessengerUnreadFromRooms(reconciled);
+    const existingOperation = pushEventCacheInFlight.get(cacheKey);
+    if (existingOperation) {
+      await existingOperation;
+      messengerLog("debug", "push.event.cache_coalesced", {
+        push_type: payload.type,
+        room_id: payload.room_id,
+        message_id: payload.message_id,
+      });
+      return payload;
     }
-    await cacheIncomingMessengerMessage(db, message, session.user.id);
-    if (
-      payload.type === "messenger.message" &&
-      message.author.id !== session.user.id
-    ) {
-      try {
-        await markMessengerDelivered(message.room_id, message.sequence);
-      } catch (error) {
-        // The message itself is already cached. A later room-list sync will
-        // retry only the missing delivery cursor without losing the push.
-        messengerLog("debug", "push.delivery_ack.deferred", {
-          room_id: message.room_id,
-          message_id: message.id,
-          sequence: message.sequence,
-          message: error instanceof Error ? error.message : String(error),
-        });
+
+    const operation = cacheMessengerPushEvent(messagePayload, session);
+    pushEventCacheInFlight.set(cacheKey, operation);
+    try {
+      await operation;
+    } finally {
+      if (pushEventCacheInFlight.get(cacheKey) === operation) {
+        pushEventCacheInFlight.delete(cacheKey);
       }
-      prefetchMessengerMedia(
-        message.media_items?.length
-          ? message.media_items
-          : message.media
-            ? [message.media]
-            : [],
-        session.access_token,
-      );
     }
-    if (payload.unread_count === undefined) {
-      await refreshMessengerUnreadFromCache(db);
-    } else {
-      await setMessengerUnreadCount(payload.unread_count);
-    }
-    messengerLog("info", "push.event.cached", {
-      push_type: payload.type,
-      room_id: message.room_id,
-      message_id: message.id,
-      sequence: message.sequence,
-    });
   } catch (error) {
     // The notification remains useful while offline; normal room sync will
     // fetch the message when connectivity returns.
@@ -479,4 +536,79 @@ export async function processMessengerPushPayload(
     });
   }
   return payload;
+}
+
+async function cacheMessengerPushEvent(
+  payload: MessengerPushPayload & { message_id: string },
+  session: MessengerSession,
+): Promise<void> {
+  const db = await getDatabase();
+
+  // A background notification task normally stores the message before the
+  // user taps the notification. Reuse that committed message instead of
+  // fetching and writing it again from the foreground React Native runtime.
+  // Reaction pushes are deliberately refreshed because the same message can
+  // receive several different reaction updates.
+  if (payload.type === "messenger.message") {
+    const cachedMessage = await loadCachedMessengerMessage(
+      db,
+      payload.message_id,
+    );
+    if (cachedMessage) {
+      if (payload.unread_count === undefined) {
+        await refreshMessengerUnreadFromCache(db);
+      }
+      messengerLog("info", "push.event.cache_reused", {
+        push_type: payload.type,
+        room_id: cachedMessage.room_id,
+        message_id: cachedMessage.id,
+        sequence: cachedMessage.sequence,
+      });
+      return;
+    }
+  }
+
+  const message = await getMessengerMessage(payload.message_id);
+  if (!(await loadCachedMessengerRoom(db, message.room_id))) {
+    const rooms = await getMessengerRooms();
+    const reconciled = await cacheMessengerRooms(db, rooms);
+    await syncMessengerUnreadFromRooms(reconciled);
+  }
+  await cacheIncomingPushMessage(db, message, session.user.id);
+  if (
+    payload.type === "messenger.message" &&
+    message.author.id !== session.user.id
+  ) {
+    try {
+      await markMessengerDelivered(message.room_id, message.sequence);
+    } catch (error) {
+      // The message itself is already cached. A later room-list sync will
+      // retry only the missing delivery cursor without losing the push.
+      messengerLog("debug", "push.delivery_ack.deferred", {
+        room_id: message.room_id,
+        message_id: message.id,
+        sequence: message.sequence,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    prefetchMessengerMedia(
+      message.media_items?.length
+        ? message.media_items
+        : message.media
+          ? [message.media]
+          : [],
+      session.access_token,
+    );
+  }
+  if (payload.unread_count === undefined) {
+    await refreshMessengerUnreadFromCache(db);
+  } else {
+    await setMessengerUnreadCount(payload.unread_count);
+  }
+  messengerLog("info", "push.event.cached", {
+    push_type: payload.type,
+    room_id: message.room_id,
+    message_id: message.id,
+    sequence: message.sequence,
+  });
 }

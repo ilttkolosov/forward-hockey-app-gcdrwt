@@ -11,6 +11,7 @@ import {
   Animated,
   AppState,
   Easing,
+  InteractionManager,
   Platform,
 } from 'react-native';
 import { colors } from '../styles/commonStyles';
@@ -69,6 +70,10 @@ import { getMessengerActiveRoomId } from '../services/messengerRealtime';
 import { publishReferenceDataUpdate } from '../services/referenceDataUpdates';
 import { ShareIntentProvider } from 'expo-share-intent';
 import MessengerShareIntentBridge from '../features/messenger/MessengerShareIntentBridge';
+import {
+  markAppInteractive,
+  waitForAppInteractive,
+} from '../services/appInteractive';
 global.Buffer = Buffer;
 
 Notifications.setNotificationHandler({
@@ -104,11 +109,15 @@ const TOURNAMENTS_NOW_KEY = 'tournaments_now';
 const TOURNAMENTS_PAST_KEY = 'tournaments_past';
 const CURRENT_TOURNAMENT_ID_KEY = 'current_tournament_id';
 const PLAYERS_VERSION_KEY = 'players_version';
-const UPCOMING_GAMES_NETWORK_GRACE_MS = 750;
 
 const elapsedMilliseconds = (startedAt: number) => Date.now() - startedAt;
 const initializationLog = (message: string) => console.log(`[Инициализация] ${message}`);
-const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
+const pause = (milliseconds: number) =>
+  new Promise<void>(resolve => setTimeout(resolve, milliseconds));
+const waitForNavigationIdle = () =>
+  new Promise<void>(resolve => {
+    InteractionManager.runAfterInteractions(() => resolve());
+  });
 
 const REFERENCE_LABELS: Record<string, string> = {
   teams: 'команды',
@@ -408,8 +417,10 @@ function RootLayoutContent() {
           );
 
           const refreshStartedAt = Date.now();
-          initializationLog('Предстоящие игры: сетевое обновление запущено в фоне');
-          upcomingGamesRefreshPromise = getUpcomingGamesMasterData(true)
+          initializationLog('Предстоящие игры: сетевое обновление отложено до готовности интерфейса');
+          upcomingGamesRefreshPromise = waitForAppInteractive()
+            .then(() => pause(1_400))
+            .then(() => getUpcomingGamesMasterData(true))
             .then(games => {
               initializationLog(
                 `Предстоящие игры: цикл сетевого обновления завершён; доступно ${games.length}, `
@@ -423,21 +434,6 @@ function RootLayoutContent() {
                 error
               );
             });
-
-          const networkFinishedWithinGrace = await Promise.race([
-            upcomingGamesRefreshPromise.then(() => true),
-            wait(UPCOMING_GAMES_NETWORK_GRACE_MS).then(() => false),
-          ]);
-          if (networkFinishedWithinGrace) {
-            initializationLog(
-              'Предстоящие игры: цикл сетевого обновления завершён в пределах быстрого запуска'
-            );
-          } else {
-            initializationLog(
-              `Предстоящие игры: сеть не ответила за ${UPCOMING_GAMES_NETWORK_GRACE_MS} мс; `
-              + 'запуск продолжается с локальным снимком'
-            );
-          }
         } catch (error) {
           console.warn('[Инициализация] Предстоящие игры: локальная подготовка не выполнена:', error);
         } finally {
@@ -449,13 +445,22 @@ function RootLayoutContent() {
     try {
       initializationLog('Запуск приложения');
 
-      // Инициализация аналитики — делаем ДО загрузки конфига
-      const analyticsStartedAt = Date.now();
-      await initAnalytics();
-      initializationLog(`Аналитика подготовлена за ${elapsedMilliseconds(analyticsStartedAt)} мс`);
+      // Аналитика не является условием показа интерфейса. Нативная активация
+      // может занимать секунды на iOS, поэтому запускаем её после быстрого
+      // старта; события до активации сохраняются во внутренней очереди.
+      afterStartupTasks.push(() => {
+        const analyticsStartedAt = Date.now();
+        void initAnalytics().then(() =>
+          initializationLog(
+            `Аналитика подготовлена в фоне за ${elapsedMilliseconds(analyticsStartedAt)} мс`
+          )
+        );
+      });
 
-      // Фоновая синхронизация статуса push-подписки
-      void syncPushSubscriptionStatus();
+      // Нативные push API и сеть не должны конкурировать с первым кадром.
+      afterStartupTasks.push(() => {
+        void syncPushSubscriptionStatus();
+      });
 
       // === 1. Конфигурация ===
       setInitializationMessage('Получение конфигурации...');
@@ -467,7 +472,9 @@ function RootLayoutContent() {
         `Конфигурация получена из ${configResult.source === 'network' ? 'сети' : 'кэша'} `
         + `за ${elapsedMilliseconds(configStartedAt)} мс; ревизия=${config.config_revision ?? 'не указана'}`
       );
-      void showAppUpdateNotice(config);
+      afterStartupTasks.push(() => {
+        void showAppUpdateNotice(config);
+      });
       if (configResult.backgroundRefresh) {
         const backgroundConfigStartedAt = Date.now();
         void configResult.backgroundRefresh.then(latestConfig => {
@@ -625,40 +632,44 @@ function RootLayoutContent() {
       setDynamicStatus(`Загружено игроков ${playersList.length}`);
       setProgress(70);
 
-      const trainingsStartedAt = Date.now();
-      initializationLog('Фоновая синхронизация расписания тренировок запущена');
-      void synchronizeTrainings(canUseNetwork)
-        .then(result => {
-          initializationLog(
-            `Расписание тренировок подготовлено за ${elapsedMilliseconds(trainingsStartedAt)} мс: `
-            + `занятий=${result.trainings.length}, источник=`
-            + `${result.source === 'network' ? 'сеть' : 'SQLite'}`
-          );
-        })
-        .catch(error => {
-          console.warn('[Инициализация] Не удалось подготовить расписание тренировок:', error);
-        });
-
-      if (canUseNetwork) {
-        const historyStartedAt = Date.now();
-        initializationLog('Фоновая синхронизация завершённых матчей запущена');
-        void syncCompletedHistoricalGames(config.sync)
+      afterStartupTasks.push(() => {
+        const trainingsStartedAt = Date.now();
+        initializationLog('Фоновая синхронизация расписания тренировок запущена');
+        void synchronizeTrainings(canUseNetwork)
           .then(result => {
-            if (result.skipped) {
-              initializationLog(
-                `Синхронизация завершённых матчей не требуется: безопасная дата ${result.requestedTo}`
-              );
-              return;
-            }
             initializationLog(
-              `Синхронизация завершённых матчей: получено ${result.received}, сохранено ${result.stored}, `
-              + `диапазон ${result.requestedFrom}—${result.requestedTo}, `
-              + `${elapsedMilliseconds(historyStartedAt)} мс`
+              `Расписание тренировок подготовлено за ${elapsedMilliseconds(trainingsStartedAt)} мс: `
+              + `занятий=${result.trainings.length}, источник=`
+              + `${result.source === 'network' ? 'сеть' : 'SQLite'}`
             );
           })
           .catch(error => {
-            console.warn('[Инициализация] Фоновая синхронизация завершённых матчей не выполнена:', error);
+            console.warn('[Инициализация] Не удалось подготовить расписание тренировок:', error);
           });
+      });
+
+      if (canUseNetwork) {
+        afterStartupTasks.push(() => {
+          const historyStartedAt = Date.now();
+          initializationLog('Фоновая синхронизация завершённых матчей запущена');
+          void syncCompletedHistoricalGames(config.sync)
+            .then(result => {
+              if (result.skipped) {
+                initializationLog(
+                  `Синхронизация завершённых матчей не требуется: безопасная дата ${result.requestedTo}`
+                );
+                return;
+              }
+              initializationLog(
+                `Синхронизация завершённых матчей: получено ${result.received}, сохранено ${result.stored}, `
+                + `диапазон ${result.requestedFrom}—${result.requestedTo}, `
+                + `${elapsedMilliseconds(historyStartedAt)} мс`
+              );
+            })
+            .catch(error => {
+              console.warn('[Инициализация] Фоновая синхронизация завершённых матчей не выполнена:', error);
+            });
+        });
       } else {
         initializationLog('Фоновая синхронизация завершённых матчей пропущена: нет интернета');
       }
@@ -667,14 +678,16 @@ function RootLayoutContent() {
       setDynamicStatus(`Запуск фоновых задач`);
       setInitializationMessage('Финальная настройка...');
       setProgress(80);
-      const tournamentsPreparation = initializeTournamentsInBackground(config, canUseNetwork);
-      void tournamentsPreparation.finally(async () => {
-        if (upcomingGamesPromise) await upcomingGamesPromise;
-        if (upcomingGamesRefreshPromise) {
-          initializationLog('Предзагрузка турнира ожидает завершения запроса предстоящих игр');
-          await upcomingGamesRefreshPromise;
-        }
-        await preloadCurrentTournamentGames(config);
+      afterStartupTasks.push(() => {
+        const tournamentsPreparation = initializeTournamentsInBackground(config, canUseNetwork);
+        void tournamentsPreparation.finally(async () => {
+          if (upcomingGamesPromise) await upcomingGamesPromise;
+          if (upcomingGamesRefreshPromise) {
+            initializationLog('Предзагрузка турнира ожидает завершения запроса предстоящих игр');
+            await upcomingGamesRefreshPromise;
+          }
+          await preloadCurrentTournamentGames(config);
+        });
       });
 
       // === Ожидаем завершения загрузки предстоящих игр, если ещё не готово ===
@@ -696,10 +709,18 @@ function RootLayoutContent() {
       setInitializationMessage('Готово!');
       setProgress(100);
       initializationLog(`Приложение готово за ${elapsedMilliseconds(initializationStartedAt)} мс`);
-      setTimeout(() => {
-        setIsInitializing(false);
-        afterStartupTasks.forEach(task => task());
-      }, 200);
+      setIsInitializing(false);
+      markAppInteractive();
+      void waitForAppInteractive().then(async () => {
+        // Do not release every optional native/network task in one burst. If
+        // the user opens Settings/About immediately, InteractionManager keeps
+        // the next task behind that transition instead of dropping frames.
+        for (const task of afterStartupTasks) {
+          await pause(350);
+          await waitForNavigationIdle();
+          task();
+        }
+      });
 
     } catch (error) {
       console.error(
@@ -712,7 +733,9 @@ function RootLayoutContent() {
     }
   }, [setProgress]);
 
-  useEffect(() => startTrainingNotificationCleanup(), []);
+  useEffect(() => {
+    void waitForAppInteractive().then(() => startTrainingNotificationCleanup());
+  }, []);
 
   useEffect(() => {
     initializeApp();

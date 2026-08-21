@@ -216,6 +216,17 @@ export async function loadCachedMessengerRoom(
   return parsedRoom(row);
 }
 
+export async function loadCachedMessengerMessage(
+  db: SQLiteDatabase,
+  messageId: string,
+): Promise<MessengerMessage | null> {
+  const row = await db.getFirstAsync<MessageRow>(
+    "SELECT raw_json FROM messenger_messages WHERE id = ?",
+    messageId,
+  );
+  return row ? parseJson<MessengerMessage>(row.raw_json) : null;
+}
+
 export function cacheMessengerRooms(
   db: SQLiteDatabase,
   rooms: MessengerRoom[],

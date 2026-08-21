@@ -58,6 +58,7 @@ export type MessengerAnalyticsAction =
 interface AppMetricaConfig {
   apiKey: string;
   appOpenTrackingEnabled?: boolean;
+  appBuildNumber?: number;
   appVersion?: string;
   crashReporting?: boolean;
   locationTracking?: boolean;
@@ -107,6 +108,31 @@ let isInitialized = false;
 let deviceId: string | null = null;
 let messengerRole = 'anonymous';
 const eventQueue: QueuedEvent[] = [];
+
+function positiveBuildNumber(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  }
+  if (typeof value !== 'string' || !/^\d+$/.test(value.trim())) return null;
+  const parsed = Number(value.trim());
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function appMetricaBuildNumber(): number {
+  const candidates: unknown[] = [
+    Constants.nativeBuildVersion,
+    Constants.expoConfig?.ios?.buildNumber,
+    Constants.expoConfig?.android?.versionCode,
+  ];
+  for (const candidate of candidates) {
+    const parsed = positiveBuildNumber(candidate);
+    if (parsed !== null) return parsed;
+  }
+  // AppMetrica rejects a missing/invalid CFBundleVersion. A positive fallback
+  // keeps analytics active even in a locally generated native project where
+  // Expo runtime constants are unavailable.
+  return 1;
+}
 
 if (!isExpoGo) {
   try {
@@ -212,6 +238,7 @@ export function initAnalytics(): Promise<void> {
       AppMetrica?.activate({
         apiKey: APP_METRICA_API_KEY,
         appOpenTrackingEnabled: true,
+        appBuildNumber: appMetricaBuildNumber(),
         appVersion: Constants.expoConfig?.version || 'unknown',
         crashReporting: true,
         // The messenger can send a location, but analytics must never collect it.

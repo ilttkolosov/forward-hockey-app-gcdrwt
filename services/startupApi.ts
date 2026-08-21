@@ -4,6 +4,7 @@ import { readPersistentCache, writePersistentCache } from './persistentCache';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import { getMetadata } from '../database/repository';
+import { waitForAppInteractive } from './appInteractive';
 
 
 export interface StartupConfig {
@@ -56,7 +57,6 @@ export interface StartupConfigResult {
 const STARTUP_CONFIG_CACHE_KEY = '@offline/startup-config/v1';
 const STARTUP_CONFIG_URL = 'https://www.hc-forward.com/wp-content/themes/marquee/inc/MobileAppConfig.txt';
 const REQUEST_TIMEOUT_MS = 8_000;
-const CACHED_CONFIG_NETWORK_GRACE_MS = 750;
 
 const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
 
@@ -185,6 +185,36 @@ export const loadStartupConfig = async (): Promise<StartupConfigResult> => {
     }
   }
 
+  // A valid local/bundled configuration is sufficient to paint every route.
+  // Starting NetInfo and HTTP before the first React surface is interactive
+  // caused multi-second cold-start stalls on iOS even though the cache was
+  // already valid. Refresh it only after the first navigation transition.
+  if (cached) {
+    const backgroundRefresh = (async (): Promise<StartupConfig | null> => {
+      await waitForAppInteractive();
+      await wait(1_000);
+      const network = await NetInfo.fetch();
+      const canUseNetwork =
+        network.isConnected !== false &&
+        network.isInternetReachable !== false;
+      if (!canUseNetwork) {
+        dataAvailability.markCachedDataUsed();
+        return null;
+      }
+      return fetchStartupConfig().catch(error => {
+        dataAvailability.markCachedDataUsed('Не удалось обновить стартовую конфигурацию');
+        console.warn('Стартовая конфигурация не обновлена, используется локальная:', error);
+        return null;
+      });
+    })();
+    return {
+      data: validateStartupConfig(cached.data),
+      source: 'cache',
+      savedAt: cached.savedAt,
+      backgroundRefresh,
+    };
+  }
+
   const network = await NetInfo.fetch();
   const canUseNetwork = network.isConnected !== false && network.isInternetReachable !== false;
   if (canUseNetwork) {
@@ -193,37 +223,10 @@ export const loadStartupConfig = async (): Promise<StartupConfigResult> => {
       return null;
     });
 
-    if (cached) {
-      const result = await Promise.race([
-        networkRefresh.then(data => ({ kind: 'network' as const, data })),
-        wait(CACHED_CONFIG_NETWORK_GRACE_MS).then(() => ({ kind: 'cache' as const, data: null })),
-      ]);
-      if (result.kind === 'network' && result.data) {
-        return { data: result.data, source: 'network', savedAt: Date.now() };
-      }
-      if (result.kind === 'cache') {
-        dataAvailability.markCachedDataUsed('Сеть медленно отвечает на запрос конфигурации');
-        console.log(
-          `[Инициализация] Конфигурация: сеть не ответила за ${CACHED_CONFIG_NETWORK_GRACE_MS} мс, `
-          + 'запуск продолжается с локальной копией'
-        );
-        return {
-          data: validateStartupConfig(cached.data),
-          source: 'cache',
-          savedAt: cached.savedAt,
-          backgroundRefresh: networkRefresh,
-        };
-      }
-    } else {
-      const data = await networkRefresh;
-      if (data) return { data, source: 'network', savedAt: Date.now() };
-    }
+    const data = await networkRefresh;
+    if (data) return { data, source: 'network', savedAt: Date.now() };
   }
 
-  if (cached) {
-    dataAvailability.markCachedDataUsed();
-    return { data: validateStartupConfig(cached.data), source: 'cache', savedAt: cached.savedAt };
-  }
   throw new Error('Не удалось открыть встроенную конфигурацию приложения. Переустановите приложение или повторите попытку.', {
     cause: new Error('Startup config is absent in cache and bundled database'),
   });

@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  InteractionManager,
   Modal,
   Pressable,
   RefreshControl,
@@ -13,6 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
@@ -67,6 +69,64 @@ const BUILT_IN_ROOM_KINDS = new Set([
   "coaching_staff",
   "fans",
 ]);
+
+const MESSENGER_BOOTSTRAP_VERSION = 1;
+const FOREGROUND_REFRESH_DELAY_MS = 800;
+
+type MessengerPreparationState = {
+  mode: "checking" | "preparing" | "ready" | "error";
+  progress: number;
+  message: string;
+};
+
+function messengerBootstrapKey(userId: string): string {
+  return `@messenger/bootstrap/${MESSENGER_BOOTSTRAP_VERSION}/${userId}`;
+}
+
+function MessengerPreparationScreen({
+  progress,
+  message,
+  error,
+  onRetry,
+}: {
+  progress: number;
+  message: string;
+  error: boolean;
+  onRetry: () => void;
+}) {
+  const normalizedProgress = Math.max(0, Math.min(100, Math.round(progress)));
+  return (
+    <SafeAreaView style={styles.preparationSafeArea} edges={["top", "bottom"]}>
+      <View style={styles.preparationCard}>
+        <Image
+          source={require("../../assets/icons/myIcon.png")}
+          style={styles.preparationLogo}
+          resizeMode="contain"
+        />
+        <Text style={styles.preparationTitle}>Подготовка мессенджера</Text>
+        <Text style={styles.preparationMessage}>{message}</Text>
+        <Text style={styles.preparationPercent}>{normalizedProgress}%</Text>
+        <View style={styles.preparationTrack}>
+          <View
+            style={[
+              styles.preparationProgress,
+              { width: `${normalizedProgress}%` },
+              error && styles.preparationProgressError,
+            ]}
+          />
+        </View>
+        {error && (
+          <TouchableOpacity style={styles.preparationRetry} onPress={onRetry}>
+            <Text style={styles.preparationRetryText}>Повторить</Text>
+          </TouchableOpacity>
+        )}
+        <Text style={styles.preparationHint}>
+          Полная подготовка выполняется только один раз после установки или для нового профиля.
+        </Text>
+      </View>
+    </SafeAreaView>
+  );
+}
 
 function isPresetRoom(room: MessengerRoom): boolean {
   return room.room_type === "group" && BUILT_IN_ROOM_KINDS.has(room.kind);
@@ -126,6 +186,12 @@ export default function MessengerRoomsScreen() {
   const [newChatVisible, setNewChatVisible] = useState(false);
   const [muteRoom, setMuteRoom] = useState<MessengerRoom | null>(null);
   const [muteSaving, setMuteSaving] = useState(false);
+  const [preparation, setPreparation] = useState<MessengerPreparationState>({
+    mode: "checking",
+    progress: 0,
+    message: "Проверяем локальные данные…",
+  });
+  const [preparationAttempt, setPreparationAttempt] = useState(0);
   const [typingByRoom, setTypingByRoom] = useState<
     Record<string, Record<string, string>>
   >({});
@@ -141,6 +207,12 @@ export default function MessengerRoomsScreen() {
   const loadRoomsRunning = useRef(false);
   const hasLoadedOnce = useRef(false);
   const lastRoomsSyncFinishedAt = useRef(0);
+
+  const applyRooms = useCallback((nextRooms: MessengerRoom[]) => {
+    setRooms(nextRooms);
+    setMessengerMutedRooms(nextRooms);
+    void syncMessengerUnreadFromRooms(nextRooms);
+  }, []);
 
   const orderedRooms = useMemo(
     () =>
@@ -181,9 +253,7 @@ export default function MessengerRoomsScreen() {
           const cached = await loadCachedMessengerRooms(db);
           cachedRoomCount = cached.length;
           if (cached.length) {
-            setRooms(cached);
-            setMessengerMutedRooms(cached);
-            void syncMessengerUnreadFromRooms(cached);
+            applyRooms(cached);
             setLoading(false);
           }
         }
@@ -196,9 +266,7 @@ export default function MessengerRoomsScreen() {
         }
         const remote = await getMessengerRooms();
         const reconciled = await cacheMessengerRooms(db, remote);
-        setRooms(reconciled);
-        setMessengerMutedRooms(reconciled);
-        void syncMessengerUnreadFromRooms(reconciled);
+        applyRooms(reconciled);
         setOffline(false);
         console.log(`[Messenger] Загружено комнат: ${remote.length}`);
         messengerLog("info", "rooms.sync.completed", {
@@ -223,7 +291,7 @@ export default function MessengerRoomsScreen() {
         if (fetchRemote) lastRoomsSyncFinishedAt.current = Date.now();
       }
     },
-    [db, isAuthenticated],
+    [applyRooms, db, isAuthenticated],
   );
 
   const scheduleConnectionSync = useCallback(
@@ -255,9 +323,111 @@ export default function MessengerRoomsScreen() {
         return;
       }
       if (status !== "authenticated") return;
+      let active = true;
+      let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+      let interactionTask: ReturnType<
+        typeof InteractionManager.runAfterInteractions
+      > | null = null;
       const fetchRemote = !hasLoadedOnce.current;
       hasLoadedOnce.current = true;
-      void loadRooms(false, true, fetchRemote);
+      const prepareRooms = async () => {
+        const userId = session?.user.id;
+        if (!userId) return;
+        setPreparation({
+          mode: "checking",
+          progress: 5,
+          message:
+            preparationAttempt > 0
+              ? "Повторно проверяем локальные данные…"
+              : "Проверяем локальные данные…",
+        });
+        let cached: MessengerRoom[] = [];
+        let preparedBefore = false;
+        try {
+          const [localRooms, marker] = await Promise.all([
+            loadCachedMessengerRooms(db),
+            AsyncStorage.getItem(messengerBootstrapKey(userId)),
+          ]);
+          cached = localRooms;
+          preparedBefore = marker === "ready";
+        } catch (cacheError) {
+          messengerLog("warn", "rooms.bootstrap.cache_failed", {
+            message: messengerErrorMessage(cacheError),
+          });
+        }
+        if (!active) return;
+
+        // Existing installations already have a usable cache. Backfill the
+        // marker silently so the one-time preparation screen is reserved for
+        // a genuinely empty installation/new messenger profile.
+        if (cached.length > 0 || preparedBefore) {
+          applyRooms(cached);
+          setLoading(false);
+          setPreparation({ mode: "ready", progress: 100, message: "Готово" });
+          if (cached.length > 0 && !preparedBefore) {
+            void AsyncStorage.setItem(messengerBootstrapKey(userId), "ready");
+          }
+          if (fetchRemote) {
+            interactionTask = InteractionManager.runAfterInteractions(() => {
+              refreshTimer = setTimeout(() => {
+                refreshTimer = null;
+                if (active) void loadRooms(false, false, true);
+              }, FOREGROUND_REFRESH_DELAY_MS);
+            });
+          }
+          return;
+        }
+
+        setPreparation({
+          mode: "preparing",
+          progress: 20,
+          message: "Подключаемся к серверу…",
+        });
+        try {
+          const remote = await getMessengerRooms();
+          if (!active) return;
+          setPreparation({
+            mode: "preparing",
+            progress: 68,
+            message: "Сохраняем список чатов…",
+          });
+          const reconciled = await cacheMessengerRooms(db, remote);
+          if (!active) return;
+          applyRooms(reconciled);
+          setPreparation({
+            mode: "preparing",
+            progress: 92,
+            message: "Завершаем подготовку…",
+          });
+          await AsyncStorage.setItem(messengerBootstrapKey(userId), "ready");
+          if (!active) return;
+          setOffline(false);
+          setError(null);
+          setLoading(false);
+          setPreparation({ mode: "ready", progress: 100, message: "Готово" });
+          lastRoomsSyncFinishedAt.current = Date.now();
+          messengerLog("info", "rooms.bootstrap.completed", {
+            room_count: reconciled.length,
+          });
+        } catch (bootstrapError) {
+          if (!active) return;
+          hasLoadedOnce.current = false;
+          setOffline(isMessengerConnectionError(bootstrapError));
+          setLoading(false);
+          setPreparation({
+            mode: "error",
+            progress: 20,
+            message: messengerErrorMessage(
+              bootstrapError,
+              "Не удалось подготовить мессенджер",
+            ),
+          });
+          messengerLog("warn", "rooms.bootstrap.failed", {
+            message: messengerErrorMessage(bootstrapError),
+          });
+        }
+      };
+      void prepareRooms();
       const unsubscribe = subscribeMessengerRealtime((event) => {
         if (event.type === "message.created") {
           const message = event.message;
@@ -380,6 +550,9 @@ export default function MessengerRoomsScreen() {
         }
       });
       return () => {
+        active = false;
+        interactionTask?.cancel();
+        if (refreshTimer) clearTimeout(refreshTimer);
         unsubscribe();
         typingTimers.current.forEach(clearTimeout);
         typingTimers.current.clear();
@@ -389,7 +562,16 @@ export default function MessengerRoomsScreen() {
           connectionSyncTimer.current = null;
         }
       };
-    }, [loadRooms, router, scheduleConnectionSync, session?.user.id, status]),
+    }, [
+      applyRooms,
+      db,
+      loadRooms,
+      preparationAttempt,
+      router,
+      scheduleConnectionSync,
+      session?.user.id,
+      status,
+    ]),
   );
 
   const openRoom = (room: MessengerRoom) => {
@@ -461,6 +643,20 @@ export default function MessengerRoomsScreen() {
       setMuteSaving(false);
     }
   };
+
+  if (status === "authenticated" && preparation.mode !== "ready") {
+    return (
+      <MessengerPreparationScreen
+        progress={preparation.progress}
+        message={preparation.message}
+        error={preparation.mode === "error"}
+        onRetry={() => {
+          setLoading(true);
+          setPreparationAttempt((current) => current + 1);
+        }}
+      />
+    );
+  }
 
   if (loading || status === "loading") {
     return (
@@ -799,6 +995,70 @@ export default function MessengerRoomsScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
+  preparationSafeArea: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 28,
+    backgroundColor: colors.background,
+  },
+  preparationCard: { alignItems: "center" },
+  preparationLogo: { width: 132, height: 132, marginBottom: 26 },
+  preparationTitle: {
+    color: colors.text,
+    fontSize: 23,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  preparationMessage: {
+    minHeight: 44,
+    marginTop: 12,
+    color: colors.textSecondary,
+    fontSize: 15,
+    lineHeight: 21,
+    textAlign: "center",
+  },
+  preparationPercent: {
+    marginTop: 18,
+    color: colors.primary,
+    fontSize: 30,
+    fontWeight: "800",
+  },
+  preparationTrack: {
+    width: "100%",
+    height: 10,
+    marginTop: 12,
+    overflow: "hidden",
+    borderRadius: 5,
+    backgroundColor: colors.border,
+  },
+  preparationProgress: {
+    height: "100%",
+    borderRadius: 5,
+    backgroundColor: colors.primary,
+  },
+  preparationProgressError: { backgroundColor: colors.error },
+  preparationRetry: {
+    minWidth: 150,
+    minHeight: 46,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 22,
+    paddingHorizontal: 22,
+    borderRadius: 14,
+    backgroundColor: colors.primary,
+  },
+  preparationRetryText: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  preparationHint: {
+    marginTop: 22,
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: "center",
+  },
   loading: {
     flex: 1,
     alignItems: "center",

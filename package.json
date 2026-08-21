@@ -1,6 +1,6 @@
 {
   "name": "Natively",
-  "version": "1.0.93",
+  "version": "1.0.94",
   "main": "index.ts",
   "scripts": {
     "dev": "EXPO_NO_TELEMETRY=1 expo start --tunnel",
@@ -25,7 +25,7 @@
     "eas-build": "npx --yes eas-cli@21.7.0 build"
   },
   "dependencies": {
-    "@appmetrica/react-native-analytics": "^3.5.0",
+    "@appmetrica/react-native-analytics": "^4.2.0",
     "@babel/runtime": "^7.26.9",
     "@expo/metro-runtime": "~6.1.2",
     "@expo/vector-icons": "^15.0.3",

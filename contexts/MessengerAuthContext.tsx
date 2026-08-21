@@ -4,11 +4,12 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { usePathname } from "expo-router";
 import NetInfo from "@react-native-community/netinfo";
-import { AppState } from "react-native";
+import { AppState, InteractionManager } from "react-native";
 import type {
   MessengerPasswordChangeRequired,
   MessengerRulesStatus,
@@ -25,7 +26,6 @@ import {
   getMessengerRulesStatus,
   ensureFreshMessengerSession,
   getMessengerMe,
-  getMessengerRooms,
   isMessengerAccessTokenUsable,
   loginToMessenger,
   logoutFromMessenger,
@@ -55,6 +55,7 @@ import {
   setAnalyticsMessengerRole,
   trackMessengerAction,
 } from "../services/analyticsService";
+import { waitForAppInteractive } from "../services/appInteractive";
 
 type MessengerAuthStatus =
   "loading" | "authenticated" | "unauthenticated" | "password_change_required";
@@ -88,6 +89,8 @@ const MessengerAuthContext = createContext<MessengerAuthContextValue | null>(
   null,
 );
 
+const RULES_STATUS_MIN_INTERVAL_MS = 5 * 60_000;
+
 async function recoverMessengerTransport(force = false): Promise<void> {
   const fresh = await ensureFreshMessengerSession({ force });
   connectMessengerRealtime(fresh.access_token);
@@ -114,6 +117,63 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
     null,
   );
   const [rulesBusy, setRulesBusy] = useState(false);
+  const rulesCheckRef = useRef<{
+    userId: string | null;
+    checkedAt: number;
+    value: MessengerRulesStatus | null;
+    inFlight: Promise<MessengerRulesStatus> | null;
+  }>({ userId: null, checkedAt: 0, value: null, inFlight: null });
+
+  const refreshRulesStatus = useCallback(
+    async (force = false): Promise<void> => {
+      const userId = session?.user.id ?? null;
+      if (!userId) {
+        rulesCheckRef.current = {
+          userId: null,
+          checkedAt: 0,
+          value: null,
+          inFlight: null,
+        };
+        setRulesStatus(null);
+        return;
+      }
+      if (rulesCheckRef.current.userId !== userId) {
+        rulesCheckRef.current = {
+          userId,
+          checkedAt: 0,
+          value: null,
+          inFlight: null,
+        };
+      }
+      const state = rulesCheckRef.current;
+      if (
+        !force &&
+        state.value &&
+        Date.now() - state.checkedAt < RULES_STATUS_MIN_INTERVAL_MS
+      ) {
+        setRulesStatus(state.value);
+        return;
+      }
+      if (state.inFlight) {
+        const value = await state.inFlight;
+        if (rulesCheckRef.current.userId === userId) setRulesStatus(value);
+        return;
+      }
+
+      const request = getMessengerRulesStatus();
+      state.inFlight = request;
+      try {
+        const value = await request;
+        if (rulesCheckRef.current.userId !== userId) return;
+        state.checkedAt = Date.now();
+        state.value = value;
+        setRulesStatus(value);
+      } finally {
+        if (state.inFlight === request) state.inFlight = null;
+      }
+    },
+    [session?.user.id],
+  );
 
   useEffect(() => {
     setAnalyticsMessengerRole(
@@ -153,6 +213,8 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
         setStatus("authenticated");
         if (pendingPasswordChange) await clearMessengerPasswordChange();
         try {
+          await waitForAppInteractive();
+          if (!active) return;
           const user = await getMessengerMe();
           const current = (await loadMessengerSession()) || stored;
           await saveMessengerSession({ ...current, user });
@@ -181,24 +243,20 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       setRulesStatus(null);
       return;
     }
-    let active = true;
-    void getMessengerRulesStatus()
-      .then((next) => {
-        if (active) setRulesStatus(next);
-      })
-      .catch((error) =>
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      void refreshRulesStatus().catch((error) =>
         console.warn("[Messenger] Проверка принятия Правил отложена:", error),
       );
-    return () => {
-      active = false;
-    };
-  }, [pathname, session?.user.id]);
+    });
+    return () => interaction.cancel();
+  }, [pathname, refreshRulesStatus, session]);
 
   useEffect(() => {
     const accessToken = session?.access_token;
     let active = true;
     if (accessToken) {
-      void ensureFreshMessengerSession()
+      void waitForAppInteractive()
+        .then(() => ensureFreshMessengerSession())
         .then((fresh) => {
           if (active) connectMessengerRealtime(fresh.access_token);
         })
@@ -230,29 +288,8 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       setMessengerMutedRooms([]);
       return;
     }
-    let active = true;
-    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     const heard = new Set<string>();
-    const refreshMutedRooms = async () => {
-      try {
-        const rooms = await getMessengerRooms({ priority: "background" });
-        if (!active) return;
-        setMessengerMutedRooms(rooms);
-      } catch {
-        // Cached room state loaded by the rooms screen remains authoritative
-        // while the network is unavailable.
-      }
-    };
-    void refreshMutedRooms();
     const unsubscribe = subscribeMessengerRealtime((event) => {
-      if (event.type === "room.updated") {
-        if (refreshTimer) clearTimeout(refreshTimer);
-        refreshTimer = setTimeout(() => {
-          refreshTimer = null;
-          void refreshMutedRooms();
-        }, 120);
-        return;
-      }
       if (event.type !== "message.created" || event.message.kind === "system") {
         return;
       }
@@ -267,8 +304,6 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       );
     });
     return () => {
-      active = false;
-      if (refreshTimer) clearTimeout(refreshTimer);
       unsubscribe();
     };
   }, [session?.user.id]);
@@ -343,9 +378,12 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
           error,
         ),
       );
+      void refreshRulesStatus().catch((error) =>
+        console.warn("[Messenger] Проверка Правил после фона отложена:", error),
+      );
     });
     return () => subscription.remove();
-  }, []);
+  }, [refreshRulesStatus]);
 
   useEffect(() => {
     let initialized = false;
@@ -510,6 +548,7 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       <MessengerRulesModal
         visible={Boolean(
           session &&
+          pathname.startsWith("/messenger") &&
           rulesStatus &&
           !rulesStatus.accepted &&
           !pathname.startsWith("/messenger/register"),
@@ -538,6 +577,19 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
                   }
                 : current,
             );
+            if (
+              rulesStatus &&
+              session &&
+              rulesCheckRef.current.userId === session.user.id
+            ) {
+              const accepted = {
+                ...rulesStatus,
+                accepted: true,
+                accepted_rules_version_id: rules.id,
+              };
+              rulesCheckRef.current.value = accepted;
+              rulesCheckRef.current.checkedAt = Date.now();
+            }
           } finally {
             setRulesBusy(false);
           }
