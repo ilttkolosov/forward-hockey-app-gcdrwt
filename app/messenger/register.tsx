@@ -22,7 +22,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import MessengerRulesModal from "../../features/messenger/MessengerRulesModal";
-import type { InvitationPreview, MessengerRulesVersion } from "../../features/messenger/types";
+import type {
+  InvitationPreview,
+  MessengerRulesVersion,
+} from "../../features/messenger/types";
 import {
   acceptMessengerRules,
   previewMessengerInvitation,
@@ -103,8 +106,7 @@ export default function MessengerRegistrationScreen() {
     if (passwordChange) {
       router.replace({
         pathname: "/messenger/change-password",
-        params:
-          params.sharePending === "1" ? { sharePending: "1" } : undefined,
+        params: params.sharePending === "1" ? { sharePending: "1" } : undefined,
       });
     }
   }, [params.sharePending, passwordChange, router]);
@@ -290,254 +292,260 @@ export default function MessengerRegistrationScreen() {
 
   return (
     <>
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        <ScrollView
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
+      <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <View style={styles.header}>
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => router.replace("/")}
-            >
-              <Icon name="chevron-back" size={28} color={colors.primary} />
-            </TouchableOpacity>
-            <View style={styles.headerText}>
-              <Text style={styles.title}>Общение</Text>
-              <Text style={styles.subtitle}>Вход в командный мессенджер</Text>
-            </View>
-          </View>
-
-          <View style={styles.modeRow}>
-            <TouchableOpacity
-              style={[
-                styles.modeButton,
-                mode === "invite" && styles.modeButtonActive,
-              ]}
-              onPress={() => {
-                setMode("invite");
-                setError(null);
-              }}
-            >
-              <Text
-                style={[
-                  styles.modeText,
-                  mode === "invite" && styles.modeTextActive,
-                ]}
+          <ScrollView
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.header}>
+              <TouchableOpacity
+                style={styles.backButton}
+                onPress={() => router.replace("/")}
               >
-                Приглашение
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.modeButton,
-                mode === "login" && styles.modeButtonActive,
-              ]}
-              onPress={() => {
-                setMode("login");
-                setError(null);
-                setScannerVisible(false);
-              }}
-            >
-              <Text
-                style={[
-                  styles.modeText,
-                  mode === "login" && styles.modeTextActive,
-                ]}
-              >
-                Уже есть аккаунт
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {mode === "invite" && !preview && (
-            <View style={styles.card}>
-              <Icon name="chatbubbles" size={42} color={colors.primary} />
-              <Text style={styles.cardTitle}>Присоединиться к команде</Text>
-              <Text style={styles.helper}>
-                Вставьте ссылку, полученную от администратора, или отсканируйте
-                QR-код.
-              </Text>
-              <TextInput
-                style={styles.input}
-                value={inviteValue}
-                onChangeText={setInviteValue}
-                placeholder="Пригласительная ссылка"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <View style={styles.actionRow}>
-                <TouchableOpacity
-                  style={styles.secondaryButton}
-                  onPress={pasteInvitation}
-                >
-                  <Icon name="clipboard" size={22} color={colors.primary} />
-                  <Text style={styles.secondaryButtonText}>Вставить</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.secondaryButton}
-                  onPress={openScanner}
-                >
-                  <Icon name="qr-code" size={22} color={colors.primary} />
-                  <Text style={styles.secondaryButtonText}>QR-код</Text>
-                </TouchableOpacity>
+                <Icon name="chevron-back" size={28} color={colors.primary} />
+              </TouchableOpacity>
+              <View style={styles.headerText}>
+                <Text style={styles.title}>Общение</Text>
+                <Text style={styles.subtitle}>Вход в командный мессенджер</Text>
               </View>
-              <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={() => void checkInvitation(inviteValue)}
-                disabled={busy}
-              >
-                {busy ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Text style={styles.primaryButtonText}>
-                    Проверить приглашение
-                  </Text>
-                )}
-              </TouchableOpacity>
             </View>
-          )}
 
-          {scannerVisible && (
-            <View style={styles.scannerCard}>
-              <CameraView
-                style={styles.camera}
-                facing="back"
-                barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-                onBarcodeScanned={handleBarcode}
-              />
-              <Text style={styles.scannerHint}>Наведите камеру на QR-код</Text>
+            <View style={styles.modeRow}>
               <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={() => setScannerVisible(false)}
-              >
-                <Text style={styles.secondaryButtonText}>Закрыть камеру</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {mode === "invite" && preview && (
-            <View style={styles.card}>
-              <View style={styles.successBadge}>
-                <Icon
-                  name="checkmark-circle"
-                  size={22}
-                  color={colors.success}
-                />
-                <Text style={styles.successText}>Приглашение подтверждено</Text>
-              </View>
-              <Text style={styles.cardTitle}>{preview.team_name}</Text>
-              <Text style={styles.helper}>
-                {preview.role_codes
-                  .map((role) => roleLabels[role] || role)
-                  .join(", ")}
-              </Text>
-              <TextInput
-                style={styles.input}
-                value={displayName}
-                onChangeText={setDisplayName}
-                placeholder="Имя и фамилия"
-              />
-              <TextInput
-                style={styles.input}
-                value={username}
-                onChangeText={setUsername}
-                placeholder="Логин (3–32 символа)"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <TextInput
-                style={styles.input}
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Пароль (не менее 6 символов)"
-                secureTextEntry
-                autoCapitalize="none"
-                maxLength={128}
-              />
-              <TextInput
-                style={styles.input}
-                value={passwordConfirmation}
-                onChangeText={setPasswordConfirmation}
-                placeholder="Повторите пароль"
-                secureTextEntry
-                autoCapitalize="none"
-                maxLength={128}
-              />
-              <TextInput
-                style={styles.input}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="E-mail (необязательно)"
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-              <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={submitRegistration}
-                disabled={busy}
-              >
-                {busy ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Text style={styles.primaryButtonText}>Создать аккаунт</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
+                style={[
+                  styles.modeButton,
+                  mode === "invite" && styles.modeButtonActive,
+                ]}
                 onPress={() => {
-                  setPreview(null);
-                  setInviteToken(null);
+                  setMode("invite");
+                  setError(null);
                 }}
               >
-                <Text style={styles.linkText}>
-                  Использовать другое приглашение
+                <Text
+                  style={[
+                    styles.modeText,
+                    mode === "invite" && styles.modeTextActive,
+                  ]}
+                >
+                  Приглашение
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modeButton,
+                  mode === "login" && styles.modeButtonActive,
+                ]}
+                onPress={() => {
+                  setMode("login");
+                  setError(null);
+                  setScannerVisible(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.modeText,
+                    mode === "login" && styles.modeTextActive,
+                  ]}
+                >
+                  Уже есть аккаунт
                 </Text>
               </TouchableOpacity>
             </View>
-          )}
 
-          {mode === "login" && (
-            <View style={styles.card}>
-              <Icon name="person-circle" size={48} color={colors.primary} />
-              <Text style={styles.cardTitle}>Вход</Text>
-              <TextInput
-                style={styles.input}
-                value={username}
-                onChangeText={setUsername}
-                placeholder="Логин"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <TextInput
-                style={styles.input}
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Пароль"
-                secureTextEntry
-                autoCapitalize="none"
-              />
-              <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={submitLogin}
-                disabled={busy}
-              >
-                {busy ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Text style={styles.primaryButtonText}>Войти</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          )}
+            {mode === "invite" && !preview && (
+              <View style={styles.card}>
+                <Icon name="chatbubbles" size={42} color={colors.primary} />
+                <Text style={styles.cardTitle}>Присоединиться к команде</Text>
+                <Text style={styles.helper}>
+                  Вставьте ссылку, полученную от администратора, или
+                  отсканируйте QR-код.
+                </Text>
+                <TextInput
+                  style={styles.input}
+                  value={inviteValue}
+                  onChangeText={setInviteValue}
+                  placeholder="Пригласительная ссылка"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <View style={styles.actionRow}>
+                  <TouchableOpacity
+                    style={styles.secondaryButton}
+                    onPress={pasteInvitation}
+                  >
+                    <Icon name="clipboard" size={22} color={colors.primary} />
+                    <Text style={styles.secondaryButtonText}>Вставить</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.secondaryButton}
+                    onPress={openScanner}
+                  >
+                    <Icon name="qr-code" size={22} color={colors.primary} />
+                    <Text style={styles.secondaryButtonText}>QR-код</Text>
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity
+                  style={styles.primaryButton}
+                  onPress={() => void checkInvitation(inviteValue)}
+                  disabled={busy}
+                >
+                  {busy ? (
+                    <ActivityIndicator color={colors.white} />
+                  ) : (
+                    <Text style={styles.primaryButtonText}>
+                      Проверить приглашение
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
 
-          {error && <Text style={styles.error}>{error}</Text>}
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+            {scannerVisible && (
+              <View style={styles.scannerCard}>
+                <CameraView
+                  style={styles.camera}
+                  facing="back"
+                  barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                  onBarcodeScanned={handleBarcode}
+                />
+                <Text style={styles.scannerHint}>
+                  Наведите камеру на QR-код
+                </Text>
+                <TouchableOpacity
+                  style={styles.secondaryButton}
+                  onPress={() => setScannerVisible(false)}
+                >
+                  <Text style={styles.secondaryButtonText}>Закрыть камеру</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {mode === "invite" && preview && (
+              <View style={styles.card}>
+                <View style={styles.successBadge}>
+                  <Icon
+                    name="checkmark-circle"
+                    size={22}
+                    color={colors.success}
+                  />
+                  <Text style={styles.successText}>
+                    Приглашение подтверждено
+                  </Text>
+                </View>
+                <Text style={styles.cardTitle}>{preview.team_name}</Text>
+                <Text style={styles.helper}>
+                  {preview.role_codes
+                    .map((role) => roleLabels[role] || role)
+                    .join(", ")}
+                </Text>
+                <TextInput
+                  style={styles.input}
+                  value={displayName}
+                  onChangeText={setDisplayName}
+                  placeholder="Имя и фамилия"
+                />
+                <TextInput
+                  style={styles.input}
+                  value={username}
+                  onChangeText={setUsername}
+                  placeholder="Логин (3–32 символа)"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TextInput
+                  style={styles.input}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Пароль (не менее 6 символов)"
+                  secureTextEntry
+                  autoCapitalize="none"
+                  maxLength={128}
+                />
+                <TextInput
+                  style={styles.input}
+                  value={passwordConfirmation}
+                  onChangeText={setPasswordConfirmation}
+                  placeholder="Повторите пароль"
+                  secureTextEntry
+                  autoCapitalize="none"
+                  maxLength={128}
+                />
+                <TextInput
+                  style={styles.input}
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="E-mail (необязательно)"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity
+                  style={styles.primaryButton}
+                  onPress={submitRegistration}
+                  disabled={busy}
+                >
+                  {busy ? (
+                    <ActivityIndicator color={colors.white} />
+                  ) : (
+                    <Text style={styles.primaryButtonText}>
+                      Создать аккаунт
+                    </Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    setPreview(null);
+                    setInviteToken(null);
+                  }}
+                >
+                  <Text style={styles.linkText}>
+                    Использовать другое приглашение
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {mode === "login" && (
+              <View style={styles.card}>
+                <Icon name="person-circle" size={48} color={colors.primary} />
+                <Text style={styles.cardTitle}>Вход</Text>
+                <TextInput
+                  style={styles.input}
+                  value={username}
+                  onChangeText={setUsername}
+                  placeholder="Логин"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TextInput
+                  style={styles.input}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Пароль"
+                  secureTextEntry
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity
+                  style={styles.primaryButton}
+                  onPress={submitLogin}
+                  disabled={busy}
+                >
+                  {busy ? (
+                    <ActivityIndicator color={colors.white} />
+                  ) : (
+                    <Text style={styles.primaryButtonText}>Войти</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {error && <Text style={styles.error}>{error}</Text>}
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
       <MessengerRulesModal
         visible={rulesVisible}
         busy={busy}
@@ -549,11 +557,18 @@ export default function MessengerRegistrationScreen() {
             const result = await rejectMessengerInvitationRules(inviteToken);
             setRulesVisible(false);
             if (result.invitation_revoked) {
-              Alert.alert("Приглашение аннулировано", "Правила не были приняты три раза.");
+              Alert.alert(
+                "Приглашение аннулировано",
+                "Правила не были приняты три раза.",
+              );
             }
             router.back();
           } catch (cancelError) {
-            setError(cancelError instanceof Error ? cancelError.message : "Не удалось отменить регистрацию");
+            setError(
+              cancelError instanceof Error
+                ? cancelError.message
+                : "Не удалось отменить регистрацию",
+            );
           } finally {
             setBusy(false);
           }
