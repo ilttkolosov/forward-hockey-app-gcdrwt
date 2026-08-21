@@ -11,14 +11,18 @@ import NetInfo from "@react-native-community/netinfo";
 import { AppState } from "react-native";
 import type {
   MessengerPasswordChangeRequired,
+  MessengerRulesStatus,
   MessengerSession,
 } from "../features/messenger/types";
+import MessengerRulesModal from "../features/messenger/MessengerRulesModal";
 import {
   clearMessengerAliases,
   prepareMessengerAliases,
 } from "../features/messenger/aliases";
 import {
+  acceptMessengerRules,
   completeMessengerPasswordChange,
+  getMessengerRulesStatus,
   ensureFreshMessengerSession,
   getMessengerMe,
   getMessengerRooms,
@@ -106,6 +110,8 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
   const [session, setSession] = useState<MessengerSession | null>(null);
   const [passwordChange, setPasswordChange] =
     useState<MessengerPasswordChangeRequired | null>(null);
+  const [rulesStatus, setRulesStatus] = useState<MessengerRulesStatus | null>(null);
+  const [rulesBusy, setRulesBusy] = useState(false);
 
   useEffect(() => {
     setAnalyticsMessengerRole(
@@ -163,6 +169,20 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!session || !pathname.startsWith("/messenger") || pathname.startsWith("/messenger/register")) {
+      setRulesStatus(null);
+      return;
+    }
+    let active = true;
+    void getMessengerRulesStatus()
+      .then((next) => {
+        if (active) setRulesStatus(next);
+      })
+      .catch((error) => console.warn("[Messenger] Проверка принятия Правил отложена:", error));
+    return () => { active = false; };
+  }, [pathname, session?.user.id]);
 
   useEffect(() => {
     const accessToken = session?.access_token;
@@ -477,6 +497,30 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
   return (
     <MessengerAuthContext.Provider value={value}>
       {children}
+      <MessengerRulesModal
+        visible={Boolean(session && rulesStatus && !rulesStatus.accepted && !pathname.startsWith("/messenger/register"))}
+        rules={rulesStatus?.current}
+        busy={rulesBusy}
+        cancelLabel="Выйти"
+        onAccept={async (rules, appVersion, appBuild) => {
+          setRulesBusy(true);
+          try {
+            await acceptMessengerRules({
+              version: rules.version,
+              sha256: rules.sha256,
+              confirmation_method: rulesStatus?.accepted_rules_version_id
+                ? "rules_update_checkbox"
+                : "login_checkbox",
+              app_version: appVersion,
+              app_build: appBuild,
+            });
+            setRulesStatus((current) => current ? { ...current, accepted: true, accepted_rules_version_id: rules.id } : current);
+          } finally {
+            setRulesBusy(false);
+          }
+        }}
+        onCancel={logout}
+      />
     </MessengerAuthContext.Provider>
   );
 }
