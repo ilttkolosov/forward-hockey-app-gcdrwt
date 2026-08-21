@@ -11,7 +11,13 @@ interface UserVersionRow {
 }
 
 export async function migrateDatabase(db: SQLiteDatabase): Promise<void> {
-  await db.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+  // A notification background task and the foreground React Native runtime
+  // may briefly open separate connections to the same database. Let SQLite
+  // wait for the active writer instead of failing the PUSH cache with
+  // SQLITE_BUSY while the other runtime commits its transaction.
+  await db.execAsync(
+    'PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;'
+  );
 
   const row = await db.getFirstAsync<UserVersionRow>('PRAGMA user_version');
   let currentVersion = row?.user_version ?? 0;
