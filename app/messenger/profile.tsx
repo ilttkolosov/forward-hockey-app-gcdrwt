@@ -22,7 +22,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
-import SavedMessagesAvatar from "../../features/messenger/SavedMessagesAvatar";
 import MessengerAvatarViewer from "../../features/messenger/MessengerAvatarViewer";
 import {
   MESSENGER_PRESET_AVATARS,
@@ -52,14 +51,6 @@ import {
   formatMessengerBytes,
   messengerMediaCacheSize,
 } from "../../services/messengerMediaCache";
-import {
-  DEFAULT_SAVED_APPEARANCE,
-  getMessengerSavedAppearance,
-  SAVED_MESSAGE_COLORS,
-  SAVED_MESSAGE_ICONS,
-  setMessengerSavedAppearance,
-  type MessengerSavedAppearance,
-} from "../../services/messengerSavedAppearance";
 import { colors } from "../../styles/commonStyles";
 
 function newDeletionChallenge(): { left: number; right: number } {
@@ -106,9 +97,6 @@ export default function MessengerProfileScreen() {
   const [quickReaction, setQuickReactionState] =
     useState<MessengerQuickReaction>(DEFAULT_MESSENGER_QUICK_REACTION);
   const [reactionPickerVisible, setReactionPickerVisible] = useState(false);
-  const [savedAppearance, setSavedAppearance] =
-    useState<MessengerSavedAppearance>(DEFAULT_SAVED_APPEARANCE);
-  const [savedAppearanceVisible, setSavedAppearanceVisible] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) router.replace("/messenger/register");
@@ -121,13 +109,8 @@ export default function MessengerProfileScreen() {
   useEffect(() => {
     if (!session?.user.id) return;
     let active = true;
-    void Promise.all([
-      getMessengerQuickReaction(session.user.id),
-      getMessengerSavedAppearance(session.user.id),
-    ]).then(([reaction, appearance]) => {
-      if (!active) return;
-      setQuickReactionState(reaction);
-      setSavedAppearance(appearance);
+    void getMessengerQuickReaction(session.user.id).then((reaction) => {
+      if (active) setQuickReactionState(reaction);
     });
     return () => {
       active = false;
@@ -596,29 +579,6 @@ export default function MessengerProfileScreen() {
             />
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.quickReactionCard}
-            onPress={() => setSavedAppearanceVisible(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Оформление Избранного"
-          >
-            <SavedMessagesAvatar
-              size={46}
-              appearance={savedAppearance}
-            />
-            <View style={styles.cacheText}>
-              <Text style={styles.cacheTitle}>Оформление Избранного</Text>
-              <Text style={styles.cacheSubtitle}>
-                Выберите символ и цвет фона личного чата
-              </Text>
-            </View>
-            <Icon
-              name="chevron-forward"
-              size={20}
-              color={colors.textSecondary}
-            />
-          </TouchableOpacity>
-
           <View style={styles.roomsCard}>
             <View style={styles.sectionHeadingRow}>
               <View style={styles.sectionHeadingText}>
@@ -835,70 +795,6 @@ export default function MessengerProfileScreen() {
                 </TouchableOpacity>
               ))}
             </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      <Modal
-        visible={savedAppearanceVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSavedAppearanceVisible(false)}
-      >
-        <Pressable
-          style={styles.modalBackdrop}
-          onPress={() => setSavedAppearanceVisible(false)}
-        >
-          <Pressable
-            style={styles.reactionDialog}
-            onPress={(event) => event.stopPropagation()}
-          >
-            <Text style={styles.reactionDialogTitle}>Оформление Избранного</Text>
-            <Text style={styles.reactionDialogText}>
-              Выберите символ и цвет фона.
-            </Text>
-            <View style={styles.savedPreview}>
-              <SavedMessagesAvatar size={72} appearance={savedAppearance} />
-            </View>
-            <Text style={styles.appearanceLabel}>Символ</Text>
-            <View style={styles.appearanceChoices}>
-              {SAVED_MESSAGE_ICONS.map((icon) => (
-                <TouchableOpacity
-                  key={icon}
-                  style={[
-                    styles.appearanceIconChoice,
-                    savedAppearance.icon === icon &&
-                      styles.appearanceChoiceActive,
-                  ]}
-                  onPress={() => {
-                    const next = { ...savedAppearance, icon };
-                    setSavedAppearance(next);
-                    void setMessengerSavedAppearance(session.user.id, next);
-                  }}
-                >
-                  <Icon name={icon} size={25} color={colors.white} />
-                </TouchableOpacity>
-              ))}
-            </View>
-            <Text style={styles.appearanceLabel}>Цвет фона</Text>
-            <View style={styles.appearanceChoices}>
-              {SAVED_MESSAGE_COLORS.map((backgroundColor) => (
-                <TouchableOpacity
-                  key={backgroundColor}
-                  style={[
-                    styles.appearanceColorChoice,
-                    { backgroundColor },
-                    savedAppearance.backgroundColor === backgroundColor &&
-                      styles.appearanceChoiceActive,
-                  ]}
-                  onPress={() => {
-                    const next = { ...savedAppearance, backgroundColor };
-                    setSavedAppearance(next);
-                    void setMessengerSavedAppearance(session.user.id, next);
-                  }}
-                />
-              ))}
-            </View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -1318,42 +1214,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 13,
     textAlign: "center",
-  },
-  savedPreview: {
-    alignItems: "center",
-    marginTop: 18,
-    marginBottom: 4,
-  },
-  appearanceLabel: {
-    marginTop: 16,
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-  },
-  appearanceChoices: {
-    marginTop: 10,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: 10,
-  },
-  appearanceIconChoice: {
-    width: 48,
-    height: 48,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 16,
-    backgroundColor: "#718096",
-  },
-  appearanceColorChoice: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-  },
-  appearanceChoiceActive: {
-    borderWidth: 3,
-    borderColor: colors.primary,
   },
   reactionChoices: {
     marginTop: 18,
