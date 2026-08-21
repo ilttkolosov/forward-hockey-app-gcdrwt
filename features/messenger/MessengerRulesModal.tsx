@@ -1,5 +1,5 @@
 import Constants from "expo-constants";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -25,6 +25,102 @@ interface Props {
     appBuild?: string,
   ): void | Promise<void>;
   onCancel(): void | Promise<void>;
+}
+
+type MarkdownBlock =
+  | { type: "heading"; level: number; content: string }
+  | { type: "paragraph"; content: string }
+  | { type: "listItem"; marker: string; content: string };
+
+function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
+  const blocks: MarkdownBlock[] = [];
+  let paragraph: string[] = [];
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    blocks.push({ type: "paragraph", content: paragraph.join("\n") });
+    paragraph = [];
+  };
+
+  markdown
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .forEach((rawLine) => {
+      const line = rawLine.trimEnd();
+      if (!line.trim()) {
+        flushParagraph();
+        return;
+      }
+      const heading = line.match(/^(#{1,6})\s+(.+)$/);
+      if (heading) {
+        flushParagraph();
+        blocks.push({
+          type: "heading",
+          level: heading[1].length,
+          content: heading[2],
+        });
+        return;
+      }
+      const unorderedItem = line.match(/^\s*[-*+]\s+(.+)$/);
+      if (unorderedItem) {
+        flushParagraph();
+        blocks.push({
+          type: "listItem",
+          marker: "•",
+          content: unorderedItem[1],
+        });
+        return;
+      }
+      const orderedItem = line.match(/^\s*(\d+)\.\s+(.+)$/);
+      if (orderedItem) {
+        flushParagraph();
+        blocks.push({
+          type: "listItem",
+          marker: `${orderedItem[1]}.`,
+          content: orderedItem[2],
+        });
+        return;
+      }
+      paragraph.push(line.trim());
+    });
+  flushParagraph();
+  return blocks;
+}
+
+function renderInlineMarkdown(content: string): React.ReactNode[] {
+  const parts = content.split(
+    /(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\*[^*]+\*|_[^_]+_)/g,
+  );
+  return parts.filter(Boolean).map((part, index) => {
+    const key = `${index}-${part}`;
+    if (
+      (part.startsWith("**") && part.endsWith("**")) ||
+      (part.startsWith("__") && part.endsWith("__"))
+    ) {
+      return (
+        <Text key={key} style={styles.inlineStrong}>
+          {part.slice(2, -2)}
+        </Text>
+      );
+    }
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return (
+        <Text key={key} style={styles.inlineCode}>
+          {part.slice(1, -1)}
+        </Text>
+      );
+    }
+    if (
+      (part.startsWith("*") && part.endsWith("*")) ||
+      (part.startsWith("_") && part.endsWith("_"))
+    ) {
+      return (
+        <Text key={key} style={styles.inlineEmphasis}>
+          {part.slice(1, -1)}
+        </Text>
+      );
+    }
+    return part;
+  });
 }
 
 export default function MessengerRulesModal({
@@ -76,6 +172,10 @@ export default function MessengerRulesModal({
     Constants.expoConfig?.ios?.buildNumber ||
     String(Constants.expoConfig?.android?.versionCode || "") ||
     undefined;
+  const documentBlocks = useMemo(
+    () => parseMarkdownBlocks(rules?.content_markdown || ""),
+    [rules?.content_markdown],
+  );
 
   return (
     <Modal
@@ -102,9 +202,42 @@ export default function MessengerRulesModal({
                 contentContainerStyle={styles.documentContent}
                 nestedScrollEnabled
               >
-                <Text selectable style={styles.rulesText}>
-                  {rules?.content_markdown}
-                </Text>
+                {documentBlocks.map((block, index) => {
+                  const key = `${block.type}-${index}`;
+                  if (block.type === "heading") {
+                    return (
+                      <Text
+                        key={key}
+                        selectable
+                        style={[
+                          styles.markdownHeading,
+                          block.level === 1
+                            ? styles.markdownHeadingOne
+                            : styles.markdownHeadingOther,
+                        ]}
+                      >
+                        {renderInlineMarkdown(block.content)}
+                      </Text>
+                    );
+                  }
+                  if (block.type === "listItem") {
+                    return (
+                      <View key={key} style={styles.markdownListItem}>
+                        <Text style={styles.markdownBullet}>
+                          {block.marker}
+                        </Text>
+                        <Text selectable style={styles.markdownParagraph}>
+                          {renderInlineMarkdown(block.content)}
+                        </Text>
+                      </View>
+                    );
+                  }
+                  return (
+                    <Text key={key} selectable style={styles.markdownParagraph}>
+                      {renderInlineMarkdown(block.content)}
+                    </Text>
+                  );
+                })}
               </ScrollView>
             )}
           </View>
@@ -175,7 +308,35 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   documentContent: { padding: 14 },
-  rulesText: { fontSize: 14, lineHeight: 20, color: colors.text },
+  markdownHeading: { color: colors.text, fontWeight: "700" },
+  markdownHeadingOne: { marginBottom: 12, fontSize: 19, lineHeight: 25 },
+  markdownHeadingOther: {
+    marginTop: 10,
+    marginBottom: 6,
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  markdownParagraph: {
+    flex: 1,
+    marginBottom: 9,
+    fontSize: 14,
+    lineHeight: 21,
+    color: colors.text,
+  },
+  markdownListItem: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingLeft: 4,
+  },
+  markdownBullet: {
+    width: 18,
+    fontSize: 16,
+    lineHeight: 21,
+    color: colors.text,
+  },
+  inlineStrong: { fontWeight: "700" },
+  inlineEmphasis: { fontStyle: "italic" },
+  inlineCode: { fontFamily: "monospace", backgroundColor: colors.background },
   loader: { marginVertical: 80 },
   error: { padding: 18, color: colors.error },
   checkRow: {
