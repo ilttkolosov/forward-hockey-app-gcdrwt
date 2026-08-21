@@ -37,6 +37,7 @@ import Svg, { Path } from "react-native-svg";
 import Icon from "../../../components/Icon";
 import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
+import LocalRoomAvatar from "../../../features/messenger/LocalRoomAvatar";
 import {
   applyMessengerDeliveryUpdates,
   applyOptimisticReaction,
@@ -4726,7 +4727,11 @@ export default function MessengerRoomScreen() {
   );
 
   const openGroupSettings = () => {
-    if (!roomType || roomType === "direct" || roomType === "saved") return;
+    if (!roomType || roomType === "direct") return;
+    if (roomType === "saved") {
+      router.push("/messenger/saved");
+      return;
+    }
     router.push({
       pathname: "/messenger/group/[id]",
       params: {
@@ -4859,7 +4864,6 @@ export default function MessengerRoomScreen() {
             }
             disabled={
               !roomType ||
-              roomType === "saved" ||
               (roomType === "direct" && !peerPresence?.id && !params.peerId)
             }
             accessibilityRole="button"
@@ -4873,12 +4877,21 @@ export default function MessengerRoomScreen() {
           >
             {roomType === "saved" ? (
               <SavedMessagesAvatar size={42} userId={session?.user.id} />
-            ) : (
+            ) : roomType === "direct" ? (
               <AuthenticatedAvatar
                 displayName={roomTitle}
                 avatarUrl={roomAvatarUrl}
                 accessToken={session?.access_token}
                 identityKey={peerPresence?.id || params.peerId || roomId}
+                size={42}
+              />
+            ) : (
+              <LocalRoomAvatar
+                roomId={roomId}
+                userId={session?.user.id}
+                displayName={roomTitle}
+                avatarUrl={roomAvatarUrl}
+                accessToken={session?.access_token}
                 size={42}
               />
             )}
