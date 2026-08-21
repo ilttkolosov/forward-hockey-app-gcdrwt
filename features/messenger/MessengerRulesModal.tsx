@@ -19,7 +19,11 @@ interface Props {
   rules?: MessengerRulesVersion | null;
   busy?: boolean;
   cancelLabel?: string;
-  onAccept(rules: MessengerRulesVersion, appVersion: string, appBuild?: string): void | Promise<void>;
+  onAccept(
+    rules: MessengerRulesVersion,
+    appVersion: string,
+    appBuild?: string,
+  ): void | Promise<void>;
   onCancel(): void | Promise<void>;
 }
 
@@ -31,7 +35,9 @@ export default function MessengerRulesModal({
   onAccept,
   onCancel,
 }: Props) {
-  const [rules, setRules] = useState<MessengerRulesVersion | null>(suppliedRules ?? null);
+  const [rules, setRules] = useState<MessengerRulesVersion | null>(
+    suppliedRules ?? null,
+  );
   const [checked, setChecked] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,9 +56,19 @@ export default function MessengerRulesModal({
     setLoading(true);
     getCurrentMessengerRules()
       .then((value) => active && setRules(value))
-      .catch((reason) => active && setError(reason instanceof Error ? reason.message : "Не удалось загрузить Правила"))
+      .catch(
+        (reason) =>
+          active &&
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Не удалось загрузить Правила",
+          ),
+      )
       .finally(() => active && setLoading(false));
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [suppliedRules, visible]);
 
   const appVersion = Constants.expoConfig?.version || "unknown";
@@ -62,12 +78,19 @@ export default function MessengerRulesModal({
     undefined;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={() => void onCancel()}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={() => void onCancel()}
+    >
       <View style={styles.backdrop}>
         <View style={styles.card}>
           <Text style={styles.title}>Правила пользования</Text>
           {rules ? (
-            <Text style={styles.edition}>Версия {rules.version} от {rules.edition_date}</Text>
+            <Text style={styles.edition}>
+              Версия {rules.version} от {rules.edition_date}
+            </Text>
           ) : null}
           <View style={styles.document}>
             {loading ? (
@@ -75,8 +98,13 @@ export default function MessengerRulesModal({
             ) : error ? (
               <Text style={styles.error}>{error}</Text>
             ) : (
-              <ScrollView contentContainerStyle={styles.documentContent} nestedScrollEnabled>
-                <Text selectable style={styles.rulesText}>{rules?.content_markdown}</Text>
+              <ScrollView
+                contentContainerStyle={styles.documentContent}
+                nestedScrollEnabled
+              >
+                <Text selectable style={styles.rulesText}>
+                  {rules?.content_markdown}
+                </Text>
               </ScrollView>
             )}
           </View>
@@ -93,15 +121,28 @@ export default function MessengerRulesModal({
             <Text style={styles.checkText}>Принимаю условия использования</Text>
           </Pressable>
           <View style={styles.actions}>
-            <TouchableOpacity style={styles.cancelButton} disabled={busy} onPress={() => void onCancel()}>
+            <TouchableOpacity
+              style={styles.cancelButton}
+              disabled={busy}
+              onPress={() => void onCancel()}
+            >
               <Text style={styles.cancelText}>{cancelLabel}</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.acceptButton, (!checked || !rules || busy) && styles.disabled]}
+              style={[
+                styles.acceptButton,
+                (!checked || !rules || busy) && styles.disabled,
+              ]}
               disabled={!checked || !rules || busy}
-              onPress={() => rules && void onAccept(rules, appVersion, appBuild)}
+              onPress={() =>
+                rules && void onAccept(rules, appVersion, appBuild)
+              }
             >
-              {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.acceptText}>Принимаю</Text>}
+              {busy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.acceptText}>Принимаю</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -111,23 +152,66 @@ export default function MessengerRulesModal({
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: "center", backgroundColor: "rgba(0,0,0,0.55)", padding: 16 },
-  card: { maxHeight: "92%", borderRadius: 18, backgroundColor: colors.background, padding: 18 },
+  backdrop: {
+    flex: 1,
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.55)",
+    padding: 16,
+  },
+  card: {
+    maxHeight: "92%",
+    borderRadius: 18,
+    backgroundColor: colors.background,
+    padding: 18,
+  },
   title: { fontSize: 21, fontWeight: "700", color: colors.text },
   edition: { marginTop: 4, marginBottom: 10, color: colors.textSecondary },
-  document: { minHeight: 240, flexShrink: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: "#fff" },
+  document: {
+    minHeight: 240,
+    flexShrink: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    backgroundColor: "#fff",
+  },
   documentContent: { padding: 14 },
   rulesText: { fontSize: 14, lineHeight: 20, color: colors.text },
   loader: { marginVertical: 80 },
   error: { padding: 18, color: colors.error },
-  checkRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 16 },
-  checkbox: { width: 24, height: 24, borderRadius: 5, borderWidth: 2, borderColor: colors.primary, alignItems: "center", justifyContent: "center" },
+  checkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 16,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   checkboxChecked: { backgroundColor: colors.primary },
   checkmark: { color: "#fff", fontWeight: "800" },
   checkText: { flex: 1, fontSize: 15, color: colors.text },
   actions: { flexDirection: "row", gap: 10 },
-  cancelButton: { flex: 1, alignItems: "center", padding: 13, borderRadius: 10, borderWidth: 1, borderColor: colors.border },
-  acceptButton: { flex: 1, alignItems: "center", padding: 13, borderRadius: 10, backgroundColor: colors.primary },
+  cancelButton: {
+    flex: 1,
+    alignItems: "center",
+    padding: 13,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  acceptButton: {
+    flex: 1,
+    alignItems: "center",
+    padding: 13,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+  },
   disabled: { opacity: 0.45 },
   cancelText: { color: colors.text, fontWeight: "600" },
   acceptText: { color: "#fff", fontWeight: "700" },
