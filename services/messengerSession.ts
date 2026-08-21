@@ -1,7 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
-import { AppState } from "react-native";
 import type {
   MessengerPasswordChangeRequired,
   MessengerSession,
@@ -56,10 +55,10 @@ export async function loadMessengerSession(): Promise<MessengerSession | null> {
     try {
       const stored = await readValue(SESSION_KEY);
       if (!stored) {
-        // A background Keychain read can transiently report no value while the
-        // phone is locked. Cache a definitive absence only in the foreground,
-        // where the storage is fully available.
-        if (AppState.currentState === "active") memorySession = null;
+        // iOS Keychain can transiently return no value during process wake-up,
+        // including a foreground transition initiated by a notification.
+        // Do not cache that absence: only an explicit logout may make the
+        // in-memory session definitively null.
         return null;
       }
 
