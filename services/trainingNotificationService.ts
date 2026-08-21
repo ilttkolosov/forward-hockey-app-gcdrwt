@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { loadTrainingsFromDatabase } from '../database/repository';
 import type { Training } from '../types/training';
 
@@ -12,6 +12,7 @@ const SCHEDULE_SIGNATURE_KEY = 'training_notification_schedule_signature_v1';
 const ANDROID_CHANNEL_ID = 'training-reminders';
 const DEFAULT_LEAD_MINUTES = 60;
 const MAX_SCHEDULED_REMINDERS = 60;
+let cleanupTimer: ReturnType<typeof setTimeout> | null = null;
 
 export interface TrainingNotificationSettings {
   enabled: boolean;
@@ -49,15 +50,113 @@ const formatTime = (date: Date, timezone: string): string => {
   }
 };
 
-const getStoredIds = async (): Promise<string[]> => {
+interface TrainingNotificationRecord {
+  identifier: string;
+  trainingUid: string;
+  startAt: string;
+}
+
+const getStoredRecords = async (): Promise<TrainingNotificationRecord[]> => {
   const raw = await AsyncStorage.getItem(SCHEDULED_IDS_KEY);
   if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter(item => typeof item === 'string') : [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap(item => {
+      if (typeof item === 'string') {
+        return [{ identifier: item, trainingUid: '', startAt: '' }];
+      }
+      if (
+        item
+        && typeof item === 'object'
+        && typeof item.identifier === 'string'
+        && typeof item.trainingUid === 'string'
+        && typeof item.startAt === 'string'
+      ) {
+        return [item as TrainingNotificationRecord];
+      }
+      return [];
+    });
   } catch {
     return [];
   }
+};
+
+const scheduleNextTrainingNotificationCleanup = (
+  records: TrainingNotificationRecord[],
+): void => {
+  if (cleanupTimer) clearTimeout(cleanupTimer);
+  cleanupTimer = null;
+  if (AppState.currentState !== 'active') return;
+  const now = Date.now();
+  const nextStart = records
+    .map(record => new Date(record.startAt).getTime())
+    .filter(start => Number.isFinite(start) && start > now)
+    .sort((left, right) => left - right)[0];
+  if (!nextStart) return;
+  cleanupTimer = setTimeout(() => {
+    cleanupTimer = null;
+    void dismissExpiredTrainingNotifications();
+  }, Math.min(Math.max(0, nextStart - now + 250), 2_147_000_000));
+};
+
+export const dismissExpiredTrainingNotifications = async (): Promise<number> => {
+  const now = Date.now();
+  const records = await getStoredRecords();
+  const expired = records.filter(record => {
+    const start = new Date(record.startAt).getTime();
+    return Number.isFinite(start) && start <= now;
+  });
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    const expiredPresented = presented.filter(notification => {
+      const data = notification.request.content.data as
+        | Record<string, unknown>
+        | undefined;
+      const start = new Date(String(data?.trainingStartAt || '')).getTime();
+      return data?.type === 'training.reminder'
+        && Number.isFinite(start)
+        && start <= now;
+    });
+    const identifiers = new Set([
+      ...expired.map(record => record.identifier),
+      ...expiredPresented.map(item => item.request.identifier),
+    ]);
+    await Promise.all(
+      [...identifiers].map(identifier =>
+        Notifications.dismissNotificationAsync(identifier).catch(() => undefined)
+      )
+    );
+    const remaining = records.filter(record => !expired.includes(record));
+    await AsyncStorage.setItem(SCHEDULED_IDS_KEY, JSON.stringify(remaining));
+    scheduleNextTrainingNotificationCleanup(remaining);
+    if (identifiers.size) {
+      console.log(
+        `[Тренировки] Удалено завершившихся уведомлений: ${identifiers.size}`
+      );
+    }
+    return identifiers.size;
+  } catch (error) {
+    console.warn('[Тренировки] Не удалось очистить завершившиеся уведомления:', error);
+    scheduleNextTrainingNotificationCleanup(records);
+    return 0;
+  }
+};
+
+export const startTrainingNotificationCleanup = (): (() => void) => {
+  void dismissExpiredTrainingNotifications();
+  const subscription = AppState.addEventListener('change', state => {
+    if (state === 'active') void dismissExpiredTrainingNotifications();
+    else if (cleanupTimer) {
+      clearTimeout(cleanupTimer);
+      cleanupTimer = null;
+    }
+  });
+  return () => {
+    subscription.remove();
+    if (cleanupTimer) clearTimeout(cleanupTimer);
+    cleanupTimer = null;
+  };
 };
 
 const ensureAndroidChannel = async (): Promise<void> => {
@@ -91,7 +190,8 @@ export const requestTrainingNotificationPermission = async (): Promise<boolean> 
 };
 
 export const cancelTrainingNotifications = async (): Promise<void> => {
-  const identifiers = await getStoredIds();
+  const records = await getStoredRecords();
+  const identifiers = records.map(record => record.identifier);
   await Promise.all(identifiers.map(identifier => (
     Notifications.cancelScheduledNotificationAsync(identifier).catch(error => {
       console.warn(`[Тренировки] Не удалось отменить напоминание ${identifier}:`, error);
@@ -136,13 +236,15 @@ export const rescheduleTrainingNotifications = async (force = false): Promise<nu
   const signature = buildScheduleSignature(trainings, settings.leadMinutes);
   const previousSignature = await AsyncStorage.getItem(SCHEDULE_SIGNATURE_KEY);
   if (!force && signature === previousSignature) {
-    const existingIds = await getStoredIds();
-    console.log(`[Тренировки] План напоминаний не изменился: ${existingIds.length}`);
-    return existingIds.length;
+    const existingRecords = await getStoredRecords();
+    await dismissExpiredTrainingNotifications();
+    scheduleNextTrainingNotificationCleanup(existingRecords);
+    console.log(`[Тренировки] План напоминаний не изменился: ${existingRecords.length}`);
+    return existingRecords.length;
   }
 
   await cancelTrainingNotifications();
-  const identifiers: string[] = [];
+  const records: TrainingNotificationRecord[] = [];
   for (const training of trainings) {
     const start = new Date(training.start_at);
     const triggerDate = new Date(start.getTime() - leadMilliseconds);
@@ -157,9 +259,11 @@ export const rescheduleTrainingNotifications = async (force = false): Promise<nu
           ].filter(Boolean).join(' · '),
           sound: 'default',
           data: {
+            type: 'training.reminder',
             route: '/trainings',
             trainingId: training.id,
             trainingUid: training.uid,
+            trainingStartAt: training.start_at,
           },
         },
         trigger: {
@@ -168,23 +272,28 @@ export const rescheduleTrainingNotifications = async (force = false): Promise<nu
           ...(Platform.OS === 'android' ? { channelId: ANDROID_CHANNEL_ID } : {}),
         },
       });
-      identifiers.push(identifier);
+      records.push({
+        identifier,
+        trainingUid: training.uid,
+        startAt: training.start_at,
+      });
     } catch (error) {
       console.warn(`[Тренировки] Не удалось запланировать занятие ${training.uid}:`, error);
     }
   }
 
-  await AsyncStorage.setItem(SCHEDULED_IDS_KEY, JSON.stringify(identifiers));
-  if (identifiers.length === trainings.length) {
+  await AsyncStorage.setItem(SCHEDULED_IDS_KEY, JSON.stringify(records));
+  scheduleNextTrainingNotificationCleanup(records);
+  if (records.length === trainings.length) {
     await AsyncStorage.setItem(SCHEDULE_SIGNATURE_KEY, signature);
   } else {
     await AsyncStorage.removeItem(SCHEDULE_SIGNATURE_KEY);
   }
   console.log(
-    `[Тренировки] Запланировано локальных напоминаний: ${identifiers.length}; `
+    `[Тренировки] Запланировано локальных напоминаний: ${records.length}; `
     + `опережение=${settings.leadMinutes} мин.`
   );
-  return identifiers.length;
+  return records.length;
 };
 
 export const setTrainingNotificationsEnabled = async (enabled: boolean): Promise<number> => {

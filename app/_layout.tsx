@@ -55,6 +55,7 @@ import {
 import { syncCompletedHistoricalGames } from '../services/historicalSync';
 import { showAppUpdateNotice } from '../services/appUpdateService';
 import { synchronizeTrainings } from '../services/trainingService';
+import { startTrainingNotificationCleanup } from '../services/trainingNotificationService';
 import {
   getProjectExpoPushToken,
   normalizeMessengerPushPayload,
@@ -710,6 +711,8 @@ function RootLayoutContent() {
       setIsInitializing(false);
     }
   }, [setProgress]);
+
+  useEffect(() => startTrainingNotificationCleanup(), []);
 
   useEffect(() => {
     initializeApp();

@@ -3,6 +3,7 @@ import Constants from "expo-constants";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
+import { compareMessengerSequence } from "../features/messenger/feed";
 import {
   cacheIncomingMessengerMessage,
   cacheMessengerRooms,
@@ -357,6 +358,50 @@ export function normalizeMessengerPushPayload(
     return null;
   }
   return null;
+}
+
+export async function dismissReadMessengerNotifications(
+  roomId: string,
+  readSequence: string,
+): Promise<number> {
+  if (!remotePushNotificationsSupported) return 0;
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    const matching = presented.filter((notification) => {
+      const payload = normalizeMessengerPushPayload(
+        notification.request.content.data,
+      );
+      return (
+        (payload?.type === "messenger.message" ||
+          payload?.type === "messenger.reaction") &&
+        payload.room_id === roomId &&
+        Boolean(payload.sequence) &&
+        compareMessengerSequence(payload.sequence!, readSequence) <= 0
+      );
+    });
+    await Promise.all(
+      matching.map((notification) =>
+        Notifications.dismissNotificationAsync(
+          notification.request.identifier,
+        ),
+      ),
+    );
+    if (matching.length) {
+      messengerLog("info", "push.read_notifications.dismissed", {
+        room_id: roomId,
+        read_sequence: readSequence,
+        count: matching.length,
+      });
+    }
+    return matching.length;
+  } catch (error) {
+    messengerLog("debug", "push.read_notifications.dismiss_deferred", {
+      room_id: roomId,
+      read_sequence: readSequence,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return 0;
+  }
 }
 
 export async function processMessengerPushPayload(
