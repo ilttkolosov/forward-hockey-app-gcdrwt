@@ -289,6 +289,7 @@ export default function MessengerRegistrationScreen() {
   };
 
   return (
+    <>
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
       <KeyboardAvoidingView
         style={styles.flex}
@@ -556,8 +557,9 @@ export default function MessengerRegistrationScreen() {
           } finally {
             setBusy(false);
           }
-        }}
-      />
+          />
+    </>
+    />
   );
 }
 
