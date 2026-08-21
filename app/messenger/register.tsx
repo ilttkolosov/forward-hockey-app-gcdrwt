@@ -21,8 +21,13 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
-import type { InvitationPreview } from "../../features/messenger/types";
-import { previewMessengerInvitation } from "../../services/messengerApi";
+import MessengerRulesModal from "../../features/messenger/MessengerRulesModal";
+import type { InvitationPreview, MessengerRulesVersion } from "../../features/messenger/types";
+import {
+  acceptMessengerRules,
+  previewMessengerInvitation,
+  rejectMessengerInvitationRules,
+} from "../../services/messengerApi";
 import {
   enableMessengerPush,
   markMessengerPushOffered,
@@ -82,6 +87,7 @@ export default function MessengerRegistrationScreen() {
   const [busy, setBusy] = useState(false);
   const [registeringNewAccount, setRegisteringNewAccount] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rulesVisible, setRulesVisible] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated && !registeringNewAccount)
@@ -168,7 +174,7 @@ export default function MessengerRegistrationScreen() {
     void checkInvitation(data);
   };
 
-  const submitRegistration = async () => {
+  const submitRegistration = () => {
     if (!inviteToken || !preview) return;
     if (password.length < 6) {
       setError("Пароль должен содержать не менее 6 символов.");
@@ -178,6 +184,16 @@ export default function MessengerRegistrationScreen() {
       setError("Введённые пароли не совпадают.");
       return;
     }
+    setError(null);
+    setRulesVisible(true);
+  };
+
+  const completeRegistration = async (
+    rules: MessengerRulesVersion,
+    appVersion: string,
+    appBuild?: string,
+  ) => {
+    if (!inviteToken) return;
     setRegisteringNewAccount(true);
     setBusy(true);
     setError(null);
@@ -189,6 +205,14 @@ export default function MessengerRegistrationScreen() {
         display_name: displayName.trim() || undefined,
         email: email.trim() || undefined,
       });
+      await acceptMessengerRules({
+        version: rules.version,
+        sha256: rules.sha256,
+        confirmation_method: "registration_checkbox",
+        app_version: appVersion,
+        app_build: appBuild,
+      });
+      setRulesVisible(false);
       const finish = () =>
         params.sharePending === "1"
           ? router.replace("/messenger/share")
@@ -513,6 +537,27 @@ export default function MessengerRegistrationScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+      <MessengerRulesModal
+        visible={rulesVisible}
+        busy={busy}
+        onAccept={completeRegistration}
+        onCancel={async () => {
+          if (!inviteToken || busy) return;
+          setBusy(true);
+          try {
+            const result = await rejectMessengerInvitationRules(inviteToken);
+            setRulesVisible(false);
+            if (result.invitation_revoked) {
+              Alert.alert("Приглашение аннулировано", "Правила не были приняты три раза.");
+            }
+            router.back();
+          } catch (cancelError) {
+            setError(cancelError instanceof Error ? cancelError.message : "Не удалось отменить регистрацию");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
   );
 }
 
