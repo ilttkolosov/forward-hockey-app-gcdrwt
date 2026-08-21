@@ -1,3 +1,21 @@
+export interface MessengerRulesVersion {
+  id: string;
+  version: string;
+  edition_date: string;
+  title: string;
+  content_markdown: string;
+  sha256: string;
+  is_current: boolean;
+  created_at: string;
+  activated_at: string | null;
+}
+
+export interface MessengerRulesStatus {
+  accepted: boolean;
+  current: MessengerRulesVersion;
+  accepted_rules_version_id: string | null;
+}
+
 export interface MessengerRole {
   code: string;
   team_season_id: string | null;
