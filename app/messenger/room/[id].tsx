@@ -154,6 +154,7 @@ import { runManagedMessengerMediaUpload } from "../../../services/messengerMedia
 import { warmMessengerBufferedUploadFiles } from "../../../services/messengerMediaUploadWarmup";
 import { saveMessengerMediaToDevice } from "../../../services/messengerMediaSave";
 import { colors } from "../../../styles/commonStyles";
+import { dismissReadMessengerNotifications } from "../../../services/messengerPush";
 import { refreshMessengerUnreadFromCache } from "../../../services/messengerUnread";
 import {
   flushMessengerOutbox,
@@ -1810,7 +1811,10 @@ export default function MessengerRoomScreen() {
       try {
         await queueMessengerReadReceipt(db, roomId, sequence, session?.user.id);
         clearInitialUnreadIfCovered(sequence);
-        await refreshMessengerUnreadFromCache(db);
+        await Promise.all([
+          refreshMessengerUnreadFromCache(db),
+          dismissReadMessengerNotifications(roomId, sequence),
+        ]);
       } catch (error) {
         if (
           acknowledgedRead.current?.room_id === roomId &&
