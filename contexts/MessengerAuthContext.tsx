@@ -110,7 +110,9 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
   const [session, setSession] = useState<MessengerSession | null>(null);
   const [passwordChange, setPasswordChange] =
     useState<MessengerPasswordChangeRequired | null>(null);
-  const [rulesStatus, setRulesStatus] = useState<MessengerRulesStatus | null>(null);
+  const [rulesStatus, setRulesStatus] = useState<MessengerRulesStatus | null>(
+    null,
+  );
   const [rulesBusy, setRulesBusy] = useState(false);
 
   useEffect(() => {
@@ -171,7 +173,11 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
   }, []);
 
   useEffect(() => {
-    if (!session || !pathname.startsWith("/messenger") || pathname.startsWith("/messenger/register")) {
+    if (
+      !session ||
+      !pathname.startsWith("/messenger") ||
+      pathname.startsWith("/messenger/register")
+    ) {
       setRulesStatus(null);
       return;
     }
@@ -180,8 +186,12 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       .then((next) => {
         if (active) setRulesStatus(next);
       })
-      .catch((error) => console.warn("[Messenger] Проверка принятия Правил отложена:", error));
-    return () => { active = false; };
+      .catch((error) =>
+        console.warn("[Messenger] Проверка принятия Правил отложена:", error),
+      );
+    return () => {
+      active = false;
+    };
   }, [pathname, session?.user.id]);
 
   useEffect(() => {
@@ -498,7 +508,12 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
     <MessengerAuthContext.Provider value={value}>
       {children}
       <MessengerRulesModal
-        visible={Boolean(session && rulesStatus && !rulesStatus.accepted && !pathname.startsWith("/messenger/register"))}
+        visible={Boolean(
+          session &&
+          rulesStatus &&
+          !rulesStatus.accepted &&
+          !pathname.startsWith("/messenger/register"),
+        )}
         rules={rulesStatus?.current}
         busy={rulesBusy}
         cancelLabel="Выйти"
@@ -514,7 +529,15 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
               app_version: appVersion,
               app_build: appBuild,
             });
-            setRulesStatus((current) => current ? { ...current, accepted: true, accepted_rules_version_id: rules.id } : current);
+            setRulesStatus((current) =>
+              current
+                ? {
+                    ...current,
+                    accepted: true,
+                    accepted_rules_version_id: rules.id,
+                  }
+                : current,
+            );
           } finally {
             setRulesBusy(false);
           }
