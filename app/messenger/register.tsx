@@ -557,9 +557,9 @@ export default function MessengerRegistrationScreen() {
           } finally {
             setBusy(false);
           }
-          />
+        }}
+      />
     </>
-    />
   );
 }
 
