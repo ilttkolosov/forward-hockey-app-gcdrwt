@@ -2674,6 +2674,32 @@ export default function MessengerRoomScreen() {
     session,
   ]);
 
+  useEffect(() => {
+    if (!params.pushMessageId || listReady) return;
+    const watchdog = setTimeout(() => {
+      if (initialPositionRetryTimer.current) {
+        clearTimeout(initialPositionRetryTimer.current);
+        initialPositionRetryTimer.current = null;
+      }
+      if (initialPositionFallbackTimer.current) {
+        clearTimeout(initialPositionFallbackTimer.current);
+        initialPositionFallbackTimer.current = null;
+      }
+      pendingInitialPosition.current = false;
+      initialPositionConfigured.current = true;
+      initialAnchorSettling.current = false;
+      initialReadAcknowledged.current = true;
+      setListReady(true);
+      messengerLog("warn", "room.push.viewport_recovered", {
+        room_id: roomId,
+        message_id: params.pushMessageId,
+        message_count: messagesRef.current.length,
+        elapsed_since_tap_ms: Date.now() - openedAt,
+      });
+    }, 3_000);
+    return () => clearTimeout(watchdog);
+  }, [listReady, openedAt, params.pushMessageId, roomId]);
+
   const handleScrollToIndexFailed = useCallback(
     (info: {
       index: number;
