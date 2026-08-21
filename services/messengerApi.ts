@@ -503,7 +503,9 @@ export function previewMessengerInvitation(token: string) {
 }
 
 export function getCurrentMessengerRules() {
-  return messengerRequest<MessengerRulesVersion>("/rules/current", { public: true });
+  return messengerRequest<MessengerRulesVersion>("/rules/current", {
+    public: true,
+  });
 }
 
 export function getMessengerRulesStatus() {
@@ -513,14 +515,18 @@ export function getMessengerRulesStatus() {
 export async function acceptMessengerRules(payload: {
   version: string;
   sha256: string;
-  confirmation_method: "registration_checkbox" | "login_checkbox" | "rules_update_checkbox";
+  confirmation_method:
+    "registration_checkbox" | "login_checkbox" | "rules_update_checkbox";
   app_version: string;
   app_build?: string;
 }) {
-  return messengerRequest<{ accepted: true; current: MessengerRulesVersion }>("/rules/accept", {
-    method: "POST",
-    body: JSON.stringify({ ...payload, ...(await sessionContext()) }),
-  });
+  return messengerRequest<{ accepted: true; current: MessengerRulesVersion }>(
+    "/rules/accept",
+    {
+      method: "POST",
+      body: JSON.stringify({ ...payload, ...(await sessionContext()) }),
+    },
+  );
 }
 
 export function rejectMessengerInvitationRules(inviteToken: string) {
@@ -636,12 +642,7 @@ export function getMessengerRooms(
 }
 
 export type MessengerRoomMuteDuration =
-  | "unmute"
-  | "1h"
-  | "12h"
-  | "1d"
-  | "1mo"
-  | "forever";
+  "unmute" | "1h" | "12h" | "1d" | "1mo" | "forever";
 
 export function updateMessengerRoomNotifications(
   roomId: string,
