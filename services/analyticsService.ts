@@ -58,6 +58,7 @@ export type MessengerAnalyticsAction =
 interface AppMetricaConfig {
   apiKey: string;
   appOpenTrackingEnabled?: boolean;
+  appBuildNumber?: number;
   appVersion?: string;
   crashReporting?: boolean;
   locationTracking?: boolean;
@@ -212,6 +213,10 @@ export function initAnalytics(): Promise<void> {
       AppMetrica?.activate({
         apiKey: APP_METRICA_API_KEY,
         appOpenTrackingEnabled: true,
+        ...(Constants.nativeBuildVersion &&
+        /^\d+$/.test(Constants.nativeBuildVersion)
+          ? { appBuildNumber: Number(Constants.nativeBuildVersion) }
+          : {}),
         appVersion: Constants.expoConfig?.version || 'unknown',
         crashReporting: true,
         // The messenger can send a location, but analytics must never collect it.

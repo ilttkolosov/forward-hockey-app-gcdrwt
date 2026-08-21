@@ -605,7 +605,10 @@ let messengerRoomsRequest: {
   promise: Promise<MessengerRoom[]>;
 } | null = null;
 let messengerRoomsSnapshot: { rooms: MessengerRoom[]; receivedAt: number } | null = null;
-const BACKGROUND_ROOMS_SNAPSHOT_MAX_AGE_MS = 5_000;
+// Realtime events keep the local cards current between full snapshots. A
+// background owner therefore does not need to repeat a successful foreground
+// room-list request during the same minute.
+const BACKGROUND_ROOMS_SNAPSHOT_MAX_AGE_MS = 60_000;
 
 /**
  * The persistence bridge, rooms screen and realtime recovery can all request

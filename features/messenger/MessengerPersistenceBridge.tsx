@@ -43,9 +43,13 @@ import {
 } from "../../services/messengerUnread";
 import { requestMessengerOutboxFlush } from "../../services/messengerOutbox";
 import { setMessengerMutedRooms } from "../../services/messengerSounds";
+import { waitForAppInteractive } from "../../services/appInteractive";
 
 const BACKGROUND_ROOMS_SYNC_DEBOUNCE_MS = 1_500;
 const BACKGROUND_ROOMS_SYNC_MIN_INTERVAL_MS = 10_000;
+const INITIAL_BACKGROUND_SYNC_DELAY_MS = 15_000;
+const INITIAL_HISTORY_WARMUP_DELAY_MS = 20_000;
+const BACKGROUND_ALIASES_SYNC_MIN_INTERVAL_MS = 5 * 60_000;
 
 /**
  * Keeps the messenger SQLite cache alive independently from any screen. A
@@ -67,8 +71,29 @@ export default function MessengerPersistenceBridge() {
     let roomsSyncRunning = false;
     let roomsSyncQueued = false;
     let roomsSyncTimer: ReturnType<typeof setTimeout> | null = null;
+    let historyWarmupTimer: ReturnType<typeof setTimeout> | null = null;
     let lastRoomsSyncStartedAt = 0;
+    let lastAliasesSyncStartedAt = 0;
+    const scheduleHistoryWarmup = (
+      rooms: Parameters<typeof warmMessengerRoomWindows>[1],
+      delay = INITIAL_HISTORY_WARMUP_DELAY_MS,
+    ) => {
+      if (historyWarmupTimer) clearTimeout(historyWarmupTimer);
+      historyWarmupTimer = setTimeout(() => {
+        historyWarmupTimer = null;
+        if (active && AppState.currentState === "active") {
+          void warmMessengerRoomWindows(db, rooms);
+        }
+      }, delay);
+    };
     const synchronizeAliases = async () => {
+      if (
+        Date.now() - lastAliasesSyncStartedAt <
+        BACKGROUND_ALIASES_SYNC_MIN_INTERVAL_MS
+      ) {
+        return;
+      }
+      lastAliasesSyncStartedAt = Date.now();
       try {
         const remoteAliases = await getMessengerContactAliases({
           priority: "background",
@@ -130,7 +155,7 @@ export default function MessengerPersistenceBridge() {
           setMessengerMutedRooms(reconciled);
           await syncMessengerUnreadFromRooms(reconciled);
         }
-        void warmMessengerRoomWindows(db, reconciled);
+        scheduleHistoryWarmup(reconciled);
       } catch (error) {
         messengerLog("debug", "rooms.background_sync.deferred", {
           message: error instanceof Error ? error.message : String(error),
@@ -180,23 +205,31 @@ export default function MessengerPersistenceBridge() {
           setMessengerMutedRooms(cached);
           await syncMessengerUnreadFromRooms(cached);
         }
-        void warmMessengerRoomWindows(db, cached);
+        await waitForAppInteractive();
+        if (!active) return;
+        scheduleHistoryWarmup(cached);
       })
       .catch((error) =>
         messengerLog("debug", "rooms.cached_sync.deferred", {
           message: error instanceof Error ? error.message : String(error),
         }),
       );
-    void warmMessengerMediaFileReader();
-    requestMessengerOutboxFlush(db);
-    scheduleRoomsSynchronization();
-    if (remotePushNotificationsSupported) {
-      void syncMessengerPushRegistration().catch((error) =>
-        messengerLog("debug", "push.registration.sync_deferred", {
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
+    void waitForAppInteractive().then(() => {
+      if (!active) return;
+      void warmMessengerMediaFileReader();
+      requestMessengerOutboxFlush(db);
+      roomsSyncTimer = setTimeout(() => {
+        roomsSyncTimer = null;
+        scheduleRoomsSynchronization();
+      }, INITIAL_BACKGROUND_SYNC_DELAY_MS);
+      if (remotePushNotificationsSupported) {
+        void syncMessengerPushRegistration().catch((error) =>
+          messengerLog("debug", "push.registration.sync_deferred", {
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    });
     const persistRealtimeMessage = (
       message: Parameters<typeof cacheIncomingMessengerMessage>[1],
     ) => {
@@ -336,6 +369,7 @@ export default function MessengerPersistenceBridge() {
     return () => {
       active = false;
       if (roomsSyncTimer) clearTimeout(roomsSyncTimer);
+      if (historyWarmupTimer) clearTimeout(historyWarmupTimer);
       unsubscribeRealtime();
       appStateSubscription.remove();
       networkSubscription();

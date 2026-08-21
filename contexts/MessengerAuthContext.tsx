@@ -9,7 +9,7 @@ import React, {
 } from "react";
 import { usePathname } from "expo-router";
 import NetInfo from "@react-native-community/netinfo";
-import { AppState } from "react-native";
+import { AppState, InteractionManager } from "react-native";
 import type {
   MessengerPasswordChangeRequired,
   MessengerRulesStatus,
@@ -55,6 +55,7 @@ import {
   setAnalyticsMessengerRole,
   trackMessengerAction,
 } from "../services/analyticsService";
+import { waitForAppInteractive } from "../services/appInteractive";
 
 type MessengerAuthStatus =
   "loading" | "authenticated" | "unauthenticated" | "password_change_required";
@@ -212,6 +213,8 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
         setStatus("authenticated");
         if (pendingPasswordChange) await clearMessengerPasswordChange();
         try {
+          await waitForAppInteractive();
+          if (!active) return;
           const user = await getMessengerMe();
           const current = (await loadMessengerSession()) || stored;
           await saveMessengerSession({ ...current, user });
@@ -240,16 +243,20 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       setRulesStatus(null);
       return;
     }
-    void refreshRulesStatus().catch((error) =>
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      void refreshRulesStatus().catch((error) =>
         console.warn("[Messenger] Проверка принятия Правил отложена:", error),
       );
+    });
+    return () => interaction.cancel();
   }, [pathname, refreshRulesStatus, session]);
 
   useEffect(() => {
     const accessToken = session?.access_token;
     let active = true;
     if (accessToken) {
-      void ensureFreshMessengerSession()
+      void waitForAppInteractive()
+        .then(() => ensureFreshMessengerSession())
         .then((fresh) => {
           if (active) connectMessengerRealtime(fresh.access_token);
         })
