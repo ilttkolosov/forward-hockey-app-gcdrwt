@@ -56,16 +56,10 @@ export interface MessengerPasswordChangeRequired {
 }
 
 export type MessengerLoginResult =
-  | MessengerSession
-  | MessengerPasswordChangeRequired;
+  MessengerSession | MessengerPasswordChangeRequired;
 
 export type MessengerMessageKind =
-  | "text"
-  | "image"
-  | "video"
-  | "file"
-  | "location"
-  | "system";
+  "text" | "image" | "video" | "file" | "location" | "system";
 
 export interface MessengerMedia {
   id: string;
@@ -227,10 +221,7 @@ export interface MessengerForward {
 }
 
 export type MessengerPendingAttachmentSource =
-  | "camera"
-  | "library"
-  | "file"
-  | "location";
+  "camera" | "library" | "file" | "location";
 
 export interface MessengerPendingAttachment {
   source: MessengerPendingAttachmentSource;
