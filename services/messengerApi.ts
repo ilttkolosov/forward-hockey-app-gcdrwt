@@ -604,6 +604,8 @@ let messengerRoomsRequest: {
   priority: MessengerTransportPriority;
   promise: Promise<MessengerRoom[]>;
 } | null = null;
+let messengerRoomsSnapshot: { rooms: MessengerRoom[]; receivedAt: number } | null = null;
+const BACKGROUND_ROOMS_SNAPSHOT_MAX_AGE_MS = 5_000;
 
 /**
  * The persistence bridge, rooms screen and realtime recovery can all request
@@ -614,6 +616,14 @@ export function getMessengerRooms(
   options: { priority?: MessengerTransportPriority } = {},
 ) {
   const priority = options.priority ?? "foreground";
+  if (
+    priority === "background" &&
+    messengerRoomsSnapshot &&
+    Date.now() - messengerRoomsSnapshot.receivedAt <
+      BACKGROUND_ROOMS_SNAPSHOT_MAX_AGE_MS
+  ) {
+    return Promise.resolve(messengerRoomsSnapshot.rooms);
+  }
   if (
     messengerRoomsRequest &&
     !(
@@ -632,7 +642,8 @@ export function getMessengerRooms(
   const tracked = { priority, promise: request };
   messengerRoomsRequest = tracked;
   void request.then(
-    () => {
+    (rooms) => {
+      messengerRoomsSnapshot = { rooms, receivedAt: Date.now() };
       if (messengerRoomsRequest === tracked) messengerRoomsRequest = null;
     },
     () => {
@@ -1760,12 +1771,73 @@ export function getMessengerMessageReceipts(messageId: string) {
   }>(`/chat/messages/${messageId}/receipts`);
 }
 
-export function markMessengerDelivered(roomId: string, sequence: string) {
-  return messengerRequest(`/chat/rooms/${roomId}/delivered`, {
-    method: "POST",
-    body: JSON.stringify({ last_delivered_sequence: sequence }),
-    transportPriority: "background",
-  });
+interface MessengerDeliveryAckState {
+  confirmedSequence: string;
+  requestedSequence: string;
+  running: Promise<unknown> | null;
+}
+
+const messengerDeliveryAcks = new Map<string, MessengerDeliveryAckState>();
+
+function compareAckSequence(left: string, right: string): number {
+  const normalizedLeft = left.replace(/^0+/, "") || "0";
+  const normalizedRight = right.replace(/^0+/, "") || "0";
+  if (normalizedLeft.length !== normalizedRight.length) {
+    return normalizedLeft.length - normalizedRight.length;
+  }
+  return normalizedLeft.localeCompare(normalizedRight);
+}
+
+/**
+ * Realtime and the iOS background notification task can observe the same
+ * message. Keep one monotonic acknowledgement pipeline per room so duplicate
+ * delivery callbacks do not create duplicate POST requests.
+ */
+export function markMessengerDelivered(
+  roomId: string,
+  sequence: string,
+): Promise<unknown> {
+  const state = messengerDeliveryAcks.get(roomId) ?? {
+    confirmedSequence: "0",
+    requestedSequence: "0",
+    running: null,
+  };
+  messengerDeliveryAcks.set(roomId, state);
+  if (compareAckSequence(sequence, state.requestedSequence) > 0) {
+    state.requestedSequence = sequence;
+  }
+  if (state.running) return state.running;
+  if (compareAckSequence(state.requestedSequence, state.confirmedSequence) <= 0) {
+    return Promise.resolve({ acknowledged: true });
+  }
+
+  const operation = (async () => {
+    let result: unknown = { acknowledged: true };
+    while (
+      compareAckSequence(state.requestedSequence, state.confirmedSequence) > 0
+    ) {
+      const targetSequence = state.requestedSequence;
+      result = await messengerRequest(`/chat/rooms/${roomId}/delivered`, {
+        method: "POST",
+        body: JSON.stringify({ last_delivered_sequence: targetSequence }),
+        transportPriority: "background",
+      });
+      if (compareAckSequence(targetSequence, state.confirmedSequence) > 0) {
+        state.confirmedSequence = targetSequence;
+      }
+    }
+    return result;
+  })();
+  state.running = operation;
+  void operation.then(
+    () => {
+      if (state.running === operation) state.running = null;
+    },
+    () => {
+      if (state.running === operation) state.running = null;
+    },
+  );
+  return operation;
 }
 
 export function markMessengerRead(roomId: string, sequence: string) {

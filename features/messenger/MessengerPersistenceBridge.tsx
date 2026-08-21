@@ -42,8 +42,9 @@ import {
   syncMessengerUnreadFromRooms,
 } from "../../services/messengerUnread";
 import { requestMessengerOutboxFlush } from "../../services/messengerOutbox";
+import { setMessengerMutedRooms } from "../../services/messengerSounds";
 
-const BACKGROUND_ROOMS_SYNC_DEBOUNCE_MS = 250;
+const BACKGROUND_ROOMS_SYNC_DEBOUNCE_MS = 1_500;
 const BACKGROUND_ROOMS_SYNC_MIN_INTERVAL_MS = 10_000;
 
 /**
@@ -125,7 +126,10 @@ export default function MessengerPersistenceBridge() {
           sessionRef.current?.access_token ?? "",
         );
         const reconciled = await cacheMessengerRooms(db, rooms);
-        if (active) await syncMessengerUnreadFromRooms(reconciled);
+        if (active) {
+          setMessengerMutedRooms(reconciled);
+          await syncMessengerUnreadFromRooms(reconciled);
+        }
         void warmMessengerRoomWindows(db, reconciled);
       } catch (error) {
         messengerLog("debug", "rooms.background_sync.deferred", {
@@ -140,7 +144,7 @@ export default function MessengerPersistenceBridge() {
       }
     };
     const scheduleRoomsSynchronization = (force = false) => {
-      if (!active) return;
+      if (!active || AppState.currentState !== "active") return;
       if (roomsSyncRunning) {
         // `connection.ready` and `sync.required` are emitted together. A
         // synchronization already in progress covers both invalidations; only
@@ -172,7 +176,10 @@ export default function MessengerPersistenceBridge() {
     };
     void loadCachedMessengerRooms(db)
       .then(async (cached) => {
-        if (active) await syncMessengerUnreadFromRooms(cached);
+        if (active) {
+          setMessengerMutedRooms(cached);
+          await syncMessengerUnreadFromRooms(cached);
+        }
         void warmMessengerRoomWindows(db, cached);
       })
       .catch((error) =>

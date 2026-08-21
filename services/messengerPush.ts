@@ -41,6 +41,12 @@ const SHARED_EXPO_PUSH_TOKEN_KEY = "expo_push_token";
 let enableMessengerPushInFlight: Promise<MessengerPushRegistration> | null =
   null;
 let observedNativePushToken: string | null = null;
+const PUSH_REGISTRATION_SYNC_MIN_INTERVAL_MS = 5 * 60_000;
+let pushRegistrationSyncState: {
+  userId: string;
+  completedAt: number;
+  inFlight: Promise<void> | null;
+} | null = null;
 
 type NotificationPermissionRequest = "never" | "explicit" | "restore";
 
@@ -240,25 +246,52 @@ export async function messengerPushStatus(): Promise<{
   }
 }
 
-export async function syncMessengerPushRegistration(): Promise<void> {
+export async function syncMessengerPushRegistration(
+  options: { force?: boolean } = {},
+): Promise<void> {
   if (!remotePushNotificationsSupported) return;
   const session = await loadMessengerSession();
   if (!session) return;
-  const status = await messengerPushStatus();
-  if (!status.enabled) {
-    await unregisterMessengerPushDevice().catch(() => undefined);
+  if (pushRegistrationSyncState?.userId !== session.user.id) {
+    pushRegistrationSyncState = {
+      userId: session.user.id,
+      completedAt: 0,
+      inFlight: null,
+    };
+  }
+  const state = pushRegistrationSyncState;
+  if (state.inFlight) return state.inFlight;
+  if (
+    !options.force &&
+    Date.now() - state.completedAt < PUSH_REGISTRATION_SYNC_MIN_INTERVAL_MS
+  ) {
     return;
   }
-  if (!(await ensureNotificationPermission("restore"))) {
-    // The account-level choice stays enabled so another authorized device is
-    // unaffected. This installation is disabled until the OS grants access.
-    await unregisterMessengerPushDevice().catch(() => undefined);
-    messengerLog("info", "push.device.permission_missing", {
-      user_id: session.user.id,
-    });
-    return;
+
+  const operation = (async () => {
+    const status = await messengerPushStatus();
+    if (!status.enabled) {
+      await unregisterMessengerPushDevice().catch(() => undefined);
+      return;
+    }
+    if (!(await ensureNotificationPermission("restore"))) {
+      // The account-level choice stays enabled so another authorized device is
+      // unaffected. This installation is disabled until the OS grants access.
+      await unregisterMessengerPushDevice().catch(() => undefined);
+      messengerLog("info", "push.device.permission_missing", {
+        user_id: session.user.id,
+      });
+      return;
+    }
+    await enableMessengerPush(false);
+  })();
+  state.inFlight = operation;
+  try {
+    await operation;
+    state.completedAt = Date.now();
+  } finally {
+    if (state.inFlight === operation) state.inFlight = null;
   }
-  await enableMessengerPush(false);
 }
 
 export async function syncMessengerPushTokenRotation(
@@ -278,7 +311,7 @@ export async function syncMessengerPushTokenRotation(
   // Store before requesting the Expo token. That request can itself emit the
   // native-token event; marking it first prevents a recursive registration loop.
   await AsyncStorage.setItem(storageKey, identity);
-  await syncMessengerPushRegistration();
+  await syncMessengerPushRegistration({ force: true });
 }
 
 export async function shouldOfferMessengerPush(

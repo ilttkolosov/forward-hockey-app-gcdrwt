@@ -29,7 +29,15 @@ type MessengerOutboxListener = (event: MessengerOutboxEvent) => void;
 interface MessengerOutboxState {
   running: Promise<void> | null;
   requested: boolean;
+  lastEmptyAt: number;
 }
+
+interface MessengerOutboxPassResult {
+  firstError: unknown | null;
+  pendingCount: number;
+}
+
+const EMPTY_OUTBOX_RECHECK_INTERVAL_MS = 5_000;
 
 const listeners = new Set<MessengerOutboxListener>();
 const states = new WeakMap<SQLiteDatabase, MessengerOutboxState>();
@@ -37,7 +45,11 @@ const states = new WeakMap<SQLiteDatabase, MessengerOutboxState>();
 function stateFor(db: SQLiteDatabase): MessengerOutboxState {
   const current = states.get(db);
   if (current) return current;
-  const created: MessengerOutboxState = { running: null, requested: false };
+  const created: MessengerOutboxState = {
+    running: null,
+    requested: false,
+    lastEmptyAt: 0,
+  };
   states.set(db, created);
   return created;
 }
@@ -61,9 +73,9 @@ export function subscribeMessengerOutbox(
   return () => listeners.delete(listener);
 }
 
-async function flushPass(db: SQLiteDatabase): Promise<unknown | null> {
+async function flushPass(db: SQLiteDatabase): Promise<MessengerOutboxPassResult> {
   const pending = await loadMessengerOutbox(db);
-  if (!pending.length) return null;
+  if (!pending.length) return { firstError: null, pendingCount: 0 };
   messengerLog('debug', 'outbox.flush.started', {
     pending_count: pending.length,
     room_count: new Set(pending.map((item) => item.room_id)).size,
@@ -131,7 +143,7 @@ async function flushPass(db: SQLiteDatabase): Promise<unknown | null> {
       if (isMessengerConnectionError(error)) break;
     }
   }
-  return firstError;
+  return { firstError, pendingCount: pending.length };
 }
 
 /**
@@ -149,13 +161,19 @@ export function flushMessengerOutbox(db: SQLiteDatabase): Promise<void> {
   let completedWithoutError = false;
   state.running = (async () => {
     let firstError: unknown = null;
+    let processedPending = false;
     do {
       state.requested = false;
-      firstError = await flushPass(db);
+      const pass = await flushPass(db);
+      firstError = pass.firstError;
+      processedPending ||= pass.pendingCount > 0;
+      if (pass.pendingCount === 0) state.lastEmptyAt = Date.now();
     } while (!firstError && state.requested);
-    messengerLog(firstError ? 'warn' : 'debug', 'outbox.flush.finished', {
-      failed: Boolean(firstError),
-    });
+    if (processedPending || firstError) {
+      messengerLog(firstError ? 'warn' : 'debug', 'outbox.flush.finished', {
+        failed: Boolean(firstError),
+      });
+    }
     if (firstError) throw firstError;
     completedWithoutError = true;
   })().finally(() => {
@@ -169,5 +187,12 @@ export function flushMessengerOutbox(db: SQLiteDatabase): Promise<void> {
 }
 
 export function requestMessengerOutboxFlush(db: SQLiteDatabase): void {
+  const state = stateFor(db);
+  if (
+    !state.running &&
+    Date.now() - state.lastEmptyAt < EMPTY_OUTBOX_RECHECK_INTERVAL_MS
+  ) {
+    return;
+  }
   void flushMessengerOutbox(db).catch(() => undefined);
 }

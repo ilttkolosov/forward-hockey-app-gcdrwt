@@ -449,10 +449,17 @@ function RootLayoutContent() {
     try {
       initializationLog('Запуск приложения');
 
-      // Инициализация аналитики — делаем ДО загрузки конфига
-      const analyticsStartedAt = Date.now();
-      await initAnalytics();
-      initializationLog(`Аналитика подготовлена за ${elapsedMilliseconds(analyticsStartedAt)} мс`);
+      // Аналитика не является условием показа интерфейса. Нативная активация
+      // может занимать секунды на iOS, поэтому запускаем её после быстрого
+      // старта; события до активации сохраняются во внутренней очереди.
+      afterStartupTasks.push(() => {
+        const analyticsStartedAt = Date.now();
+        void initAnalytics().then(() =>
+          initializationLog(
+            `Аналитика подготовлена в фоне за ${elapsedMilliseconds(analyticsStartedAt)} мс`
+          )
+        );
+      });
 
       // Фоновая синхронизация статуса push-подписки
       void syncPushSubscriptionStatus();
