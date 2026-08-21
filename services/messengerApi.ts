@@ -520,11 +520,12 @@ export async function acceptMessengerRules(payload: {
   app_version: string;
   app_build?: string;
 }) {
+  const { device_id, platform } = await sessionContext();
   return messengerRequest<{ accepted: true; current: MessengerRulesVersion }>(
     "/rules/accept",
     {
       method: "POST",
-      body: JSON.stringify({ ...payload, ...(await sessionContext()) }),
+      body: JSON.stringify({ ...payload, device_id, platform }),
     },
   );
 }
