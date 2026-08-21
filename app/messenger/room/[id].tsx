@@ -37,6 +37,7 @@ import Svg, { Path } from "react-native-svg";
 import Icon from "../../../components/Icon";
 import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
+import LocalRoomAvatar from "../../../features/messenger/LocalRoomAvatar";
 import {
   applyMessengerDeliveryUpdates,
   applyOptimisticReaction,
@@ -1190,7 +1191,7 @@ export default function MessengerRoomScreen() {
     privateReplyMessageId?: string;
     openedAt?: string;
   }>();
-  const { session, isAuthenticated } = useMessengerAuth();
+  const { session, isAuthenticated, status: authStatus } = useMessengerAuth();
   const roomId = params.id;
   const canWrite = params.canWrite !== "false";
   const canMedia = params.canMedia !== "false";
@@ -2673,6 +2674,32 @@ export default function MessengerRoomScreen() {
     session,
   ]);
 
+  useEffect(() => {
+    if (!params.pushMessageId || listReady) return;
+    const watchdog = setTimeout(() => {
+      if (initialPositionRetryTimer.current) {
+        clearTimeout(initialPositionRetryTimer.current);
+        initialPositionRetryTimer.current = null;
+      }
+      if (initialPositionFallbackTimer.current) {
+        clearTimeout(initialPositionFallbackTimer.current);
+        initialPositionFallbackTimer.current = null;
+      }
+      pendingInitialPosition.current = false;
+      initialPositionConfigured.current = true;
+      initialAnchorSettling.current = false;
+      initialReadAcknowledged.current = true;
+      setListReady(true);
+      messengerLog("warn", "room.push.viewport_recovered", {
+        room_id: roomId,
+        message_id: params.pushMessageId,
+        message_count: messagesRef.current.length,
+        elapsed_since_tap_ms: Date.now() - openedAt,
+      });
+    }, 3_000);
+    return () => clearTimeout(watchdog);
+  }, [listReady, openedAt, params.pushMessageId, roomId]);
+
   const handleScrollToIndexFailed = useCallback(
     (info: {
       index: number;
@@ -2935,6 +2962,7 @@ export default function MessengerRoomScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (authStatus === "loading") return;
       if (!isAuthenticated) {
         router.replace("/messenger/register");
         return;
@@ -3175,6 +3203,7 @@ export default function MessengerRoomScreen() {
       db,
       acknowledgeLatest,
       clearInitialPositionTimers,
+      authStatus,
       isAuthenticated,
       loadMessages,
       openedAt,
@@ -4726,7 +4755,11 @@ export default function MessengerRoomScreen() {
   );
 
   const openGroupSettings = () => {
-    if (!roomType || roomType === "direct" || roomType === "saved") return;
+    if (!roomType || roomType === "direct") return;
+    if (roomType === "saved") {
+      router.push("/messenger/saved");
+      return;
+    }
     router.push({
       pathname: "/messenger/group/[id]",
       params: {
@@ -4859,7 +4892,6 @@ export default function MessengerRoomScreen() {
             }
             disabled={
               !roomType ||
-              roomType === "saved" ||
               (roomType === "direct" && !peerPresence?.id && !params.peerId)
             }
             accessibilityRole="button"
@@ -4873,12 +4905,21 @@ export default function MessengerRoomScreen() {
           >
             {roomType === "saved" ? (
               <SavedMessagesAvatar size={42} userId={session?.user.id} />
-            ) : (
+            ) : roomType === "direct" ? (
               <AuthenticatedAvatar
                 displayName={roomTitle}
                 avatarUrl={roomAvatarUrl}
                 accessToken={session?.access_token}
                 identityKey={peerPresence?.id || params.peerId || roomId}
+                size={42}
+              />
+            ) : (
+              <LocalRoomAvatar
+                roomId={roomId}
+                userId={session?.user.id}
+                displayName={roomTitle}
+                avatarUrl={roomAvatarUrl}
+                accessToken={session?.access_token}
                 size={42}
               />
             )}

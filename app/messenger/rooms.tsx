@@ -17,6 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
+import LocalRoomAvatar from "../../features/messenger/LocalRoomAvatar";
 import SavedMessagesAvatar from "../../features/messenger/SavedMessagesAvatar";
 import {
   cacheMessengerRooms,
@@ -596,11 +597,12 @@ export default function MessengerRoomsScreen() {
                     size={62}
                   />
                 ) : (
-                  <AuthenticatedAvatar
+                  <LocalRoomAvatar
+                    roomId={item.id}
+                    userId={session?.user.id}
                     displayName={item.title}
                     avatarUrl={item.avatar_url}
                     accessToken={session?.access_token}
-                    identityKey={item.id}
                     size={62}
                   />
                 )}

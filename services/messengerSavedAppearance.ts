@@ -26,6 +26,11 @@ export interface MessengerSavedAppearance {
   backgroundColor: SavedMessageColor;
 }
 
+const listeners = new Map<
+  string,
+  Set<(appearance: MessengerSavedAppearance) => void>
+>();
+
 export const DEFAULT_SAVED_APPEARANCE: MessengerSavedAppearance = {
   icon: "star",
   backgroundColor: "#F28C28",
@@ -61,5 +66,21 @@ export async function setMessengerSavedAppearance(
   userId: string,
   appearance: MessengerSavedAppearance,
 ): Promise<void> {
-  await AsyncStorage.setItem(key(userId), JSON.stringify(appearance));
+  const storageKey = key(userId);
+  await AsyncStorage.setItem(storageKey, JSON.stringify(appearance));
+  listeners.get(storageKey)?.forEach((listener) => listener(appearance));
+}
+
+export function subscribeMessengerSavedAppearance(
+  userId: string,
+  listener: (appearance: MessengerSavedAppearance) => void,
+): () => void {
+  const storageKey = key(userId);
+  const userListeners = listeners.get(storageKey) || new Set();
+  userListeners.add(listener);
+  listeners.set(storageKey, userListeners);
+  return () => {
+    userListeners.delete(listener);
+    if (!userListeners.size) listeners.delete(storageKey);
+  };
 }

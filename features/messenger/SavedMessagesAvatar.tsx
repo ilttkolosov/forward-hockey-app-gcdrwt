@@ -4,6 +4,7 @@ import Icon from "../../components/Icon";
 import {
   DEFAULT_SAVED_APPEARANCE,
   getMessengerSavedAppearance,
+  subscribeMessengerSavedAppearance,
   type MessengerSavedAppearance,
 } from "../../services/messengerSavedAppearance";
 
@@ -27,8 +28,13 @@ function SavedMessagesAvatar({
     void getMessengerSavedAppearance(userId).then((value) => {
       if (active) setStoredAppearance(value);
     });
+    const unsubscribe = subscribeMessengerSavedAppearance(
+      userId,
+      setStoredAppearance,
+    );
     return () => {
       active = false;
+      unsubscribe();
     };
   }, [appearance, userId]);
 

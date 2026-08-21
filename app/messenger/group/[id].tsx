@@ -1,6 +1,6 @@
 import { Image } from "expo-image";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +20,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../../components/Icon";
 import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
+import LocalRoomAvatar from "../../../features/messenger/LocalRoomAvatar";
+import { MESSENGER_PRESET_AVATARS } from "../../../features/messenger/presetAvatars";
 import MessengerAvatarViewer from "../../../features/messenger/MessengerAvatarViewer";
 import type {
   MessengerContact,
@@ -42,6 +44,10 @@ import {
   pickMessengerAvatar,
   type MessengerUploadFile,
 } from "../../../services/messengerAttachmentPicker";
+import {
+  getLocalMessengerRoomAvatar,
+  setLocalMessengerRoomAvatar,
+} from "../../../services/messengerRoomAppearance";
 import { colors } from "../../../styles/commonStyles";
 
 function contactKey(contact: MessengerContact): string {
@@ -72,6 +78,7 @@ export default function MessengerGroupSettingsScreen() {
   const [memberBusy, setMemberBusy] = useState<string | null>(null);
   const [addVisible, setAddVisible] = useState(false);
   const [avatarVisible, setAvatarVisible] = useState(false);
+  const [localAvatarId, setLocalAvatarId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -110,6 +117,13 @@ export default function MessengerGroupSettingsScreen() {
       setLoading(false);
     }
   }, [isAuthenticated, roomId]);
+
+  useEffect(() => {
+    if (!session?.user.id || !roomId) return;
+    void getLocalMessengerRoomAvatar(session.user.id, roomId).then(
+      setLocalAvatarId,
+    );
+  }, [roomId, session?.user.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -391,7 +405,9 @@ export default function MessengerGroupSettingsScreen() {
                       contentFit="cover"
                     />
                   ) : (
-                    <AuthenticatedAvatar
+                    <LocalRoomAvatar
+                      roomId={roomId}
+                      userId={session.user.id}
                       displayName={settings.room.title}
                       avatarUrl={settings.room.avatar_url}
                       accessToken={session.access_token}
@@ -434,6 +450,62 @@ export default function MessengerGroupSettingsScreen() {
                     </Text>
                   </TouchableOpacity>
                 )}
+
+              <Text style={styles.localAvatarTitle}>
+                Личный аватар группы
+              </Text>
+              <Text style={styles.localAvatarHint}>
+                Видите только вы. Выберите стандартный аватар или используйте
+                общий аватар группы.
+              </Text>
+              <View style={styles.localAvatarGrid}>
+                <TouchableOpacity
+                  style={[
+                    styles.localAvatarChoice,
+                    !localAvatarId && styles.localAvatarChoiceActive,
+                  ]}
+                  onPress={() => {
+                    setLocalAvatarId(null);
+                    void setLocalMessengerRoomAvatar(
+                      session.user.id,
+                      roomId,
+                      null,
+                    );
+                  }}
+                >
+                  <LocalRoomAvatar
+                    roomId={roomId}
+                    displayName={settings.room.title}
+                    avatarUrl={settings.room.avatar_url}
+                    accessToken={session.access_token}
+                    size={58}
+                  />
+                </TouchableOpacity>
+                {MESSENGER_PRESET_AVATARS.map((preset) => (
+                  <TouchableOpacity
+                    key={preset.id}
+                    style={[
+                      styles.localAvatarChoice,
+                      localAvatarId === preset.id &&
+                        styles.localAvatarChoiceActive,
+                    ]}
+                    onPress={() => {
+                      setLocalAvatarId(preset.id);
+                      void setLocalMessengerRoomAvatar(
+                        session.user.id,
+                        roomId,
+                        preset.id,
+                      );
+                    }}
+                  >
+                    <Image
+                      source={preset.source}
+                      style={styles.localAvatarImage}
+                      contentFit="contain"
+                    />
+                  </TouchableOpacity>
+                ))}
+              </View>
 
               <Text style={styles.label}>Название группы</Text>
               <TextInput
@@ -683,6 +755,42 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   avatarWrap: { alignItems: "center", marginBottom: 12 },
+  localAvatarTitle: {
+    alignSelf: "stretch",
+    marginTop: 20,
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  localAvatarHint: {
+    alignSelf: "stretch",
+    marginTop: 4,
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  localAvatarGrid: {
+    alignSelf: "stretch",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  localAvatarChoice: {
+    width: 64,
+    height: 64,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: "transparent",
+    borderRadius: 32,
+    backgroundColor: "#397BC0",
+  },
+  localAvatarChoiceActive: { borderColor: colors.primary },
+  localAvatarImage: { width: 58, height: 58 },
+
   avatarPreview: { width: 108, height: 108, borderRadius: 54 },
   secondaryButton: {
     flexDirection: "row",
