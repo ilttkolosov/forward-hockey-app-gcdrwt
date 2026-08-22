@@ -36,7 +36,7 @@ export default ({ config }) => {
     // to users is restored per platform by withAppDisplayName below.
     name: "ForwardHockey14",
     slug: "Forward",
-    version: "1.0.94",
+    version: "2.0.1",
     orientation: "portrait",
     icon: "./assets/icons/myIcon.png",
     userInterfaceStyle: "light",
@@ -48,7 +48,7 @@ export default ({ config }) => {
     },
     ios: {
       supportsTablet: true,
-      buildNumber: "94",
+      buildNumber: "95",
       bundleIdentifier: "com.aleksandrkolosov.forward2014",
       infoPlist: {
         CFBundleDisplayName: "ХК Форвард 14",
@@ -59,7 +59,7 @@ export default ({ config }) => {
       },
     },
     android: {
-      versionCode: 94,
+      versionCode: 95,
       adaptiveIcon: {
         foregroundImage: "./assets/icons/myIcon.png",
         backgroundColor: "#ffffff",
