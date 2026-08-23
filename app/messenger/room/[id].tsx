@@ -683,6 +683,20 @@ function PendingAttachmentView({
 }) {
   const failed = pending.stage === "failed";
   const committed = pending.stage === "committed";
+  const [showTransientProgress, setShowTransientProgress] = useState(false);
+
+  useEffect(() => {
+    if (failed || committed) {
+      setShowTransientProgress(false);
+      return;
+    }
+    // A normal photo commonly uploads before the first useful progress frame.
+    // Delaying transient UI avoids a 0–5% flash while still giving feedback
+    // for work that is observably long. The preview itself stays interactive.
+    const timer = setTimeout(() => setShowTransientProgress(true), 700);
+    return () => clearTimeout(timer);
+  }, [committed, failed]);
+
   const fileSize = pendingAttachmentSize(pending.size_bytes);
   const pendingItems = pending.items?.length
     ? pending.items
@@ -739,7 +753,7 @@ function PendingAttachmentView({
           transition={120}
         />
       ) : null}
-      {!committed && (
+      {!committed && (failed || showTransientProgress) && (
         <View style={styles.pendingAttachmentStatus}>
           {failed ? (
             <Icon name="alert-circle-outline" size={21} color={colors.error} />
@@ -768,6 +782,7 @@ function PendingAttachmentView({
       )}
       {!failed &&
       pending.stage === "uploading" &&
+      showTransientProgress &&
       pending.source !== "location" ? (
         <PendingUploadProgress percent={pending.progress_percent} />
       ) : null}
@@ -3439,6 +3454,9 @@ export default function MessengerRoomScreen() {
       const { kind } = request;
       let contentPrepared = false;
       let clientMessageId: string | null = null;
+      let preparationProgressTimer: ReturnType<typeof setTimeout> | null = null;
+      let preparationProgressVisible = false;
+      let latestPreparationLabel: string | null = null;
       const preparationStartedAt = Date.now();
       messengerLog("debug", "attachment.action.started", {
         kind,
@@ -3513,11 +3531,19 @@ export default function MessengerRoomScreen() {
               )
             : kind === "library"
               ? await pickMessengerMedia(({ item, total, percent }) => {
-                  setAttachmentPreparationLabel(
+                  latestPreparationLabel =
                     total > 1
                       ? `Подготовка видео ${item} из ${total}: ${percent}%`
-                      : `Подготовка видео: ${percent}%`,
-                  );
+                      : `Подготовка видео: ${percent}%`;
+                  if (preparationProgressVisible) {
+                    setAttachmentPreparationLabel(latestPreparationLabel);
+                  } else if (!preparationProgressTimer) {
+                    preparationProgressTimer = setTimeout(() => {
+                      preparationProgressTimer = null;
+                      preparationProgressVisible = true;
+                      setAttachmentPreparationLabel(latestPreparationLabel);
+                    }, 700);
+                  }
                 })
               : [await pickMessengerFile()].filter(
                   (file): file is MessengerUploadFile => file !== null,
@@ -3582,6 +3608,9 @@ export default function MessengerRoomScreen() {
           message,
         );
       } finally {
+        if (preparationProgressTimer) {
+          clearTimeout(preparationProgressTimer);
+        }
         setAttachmentPreparationLabel(null);
         setSending(false);
       }

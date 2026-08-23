@@ -206,9 +206,11 @@ export default function MessengerRoomsScreen() {
   );
   const loadRoomsRunning = useRef(false);
   const hasLoadedOnce = useRef(false);
+  const hasVisibleRooms = useRef(false);
   const lastRoomsSyncFinishedAt = useRef(0);
 
   const applyRooms = useCallback((nextRooms: MessengerRoom[]) => {
+    hasVisibleRooms.current = nextRooms.length > 0;
     setRooms(nextRooms);
     setMessengerMutedRooms(nextRooms);
     void syncMessengerUnreadFromRooms(nextRooms);
@@ -333,6 +335,20 @@ export default function MessengerRoomsScreen() {
       const prepareRooms = async () => {
         const userId = session?.user.id;
         if (!userId) return;
+
+        // Stack screens stay mounted during a room visit. In particular, an
+        // interactive iOS back gesture exposes this screen before the pop has
+        // finished. Re-applying a freshly deserialized SQLite snapshot here
+        // needlessly replaces every row and briefly makes authenticated/local
+        // avatars fall back to their placeholders. Keep the already rendered
+        // in-memory list stable; realtime remains active below and an explicit
+        // pull-to-refresh still requests a fresh server snapshot.
+        if (hasVisibleRooms.current) {
+          setLoading(false);
+          setPreparation({ mode: "ready", progress: 100, message: "Готово" });
+          return;
+        }
+
         setPreparation({
           mode: "checking",
           progress: 5,
