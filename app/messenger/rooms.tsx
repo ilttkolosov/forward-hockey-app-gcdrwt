@@ -209,11 +209,14 @@ export default function MessengerRoomsScreen() {
   const hasVisibleRooms = useRef(false);
   const lastRoomsSyncFinishedAt = useRef(0);
 
-  const applyRooms = useCallback((nextRooms: MessengerRoom[]) => {
+  const applyRooms = useCallback((
+    nextRooms: MessengerRoom[],
+    source: "cache" | "authoritative" = "authoritative",
+  ) => {
     hasVisibleRooms.current = nextRooms.length > 0;
     setRooms(nextRooms);
     setMessengerMutedRooms(nextRooms);
-    void syncMessengerUnreadFromRooms(nextRooms);
+    void syncMessengerUnreadFromRooms(nextRooms, source);
   }, []);
 
   const orderedRooms = useMemo(
@@ -255,7 +258,7 @@ export default function MessengerRoomsScreen() {
           const cached = await loadCachedMessengerRooms(db);
           cachedRoomCount = cached.length;
           if (cached.length) {
-            applyRooms(cached);
+            applyRooms(cached, "cache");
             setLoading(false);
           }
         }
@@ -377,7 +380,7 @@ export default function MessengerRoomsScreen() {
         // marker silently so the one-time preparation screen is reserved for
         // a genuinely empty installation/new messenger profile.
         if (cached.length > 0 || preparedBefore) {
-          applyRooms(cached);
+          applyRooms(cached, "cache");
           setLoading(false);
           setPreparation({ mode: "ready", progress: 100, message: "Готово" });
           if (cached.length > 0 && !preparedBefore) {
@@ -499,7 +502,7 @@ export default function MessengerRoomsScreen() {
                 },
               };
             });
-            void syncMessengerUnreadFromRooms(next);
+            void syncMessengerUnreadFromRooms(next, "realtime");
             return next;
           });
         } else if (event.type === "message.updated") {

@@ -59,6 +59,7 @@ import { synchronizeTrainings } from '../services/trainingService';
 import { startTrainingNotificationCleanup } from '../services/trainingNotificationService';
 import {
   getProjectExpoPushToken,
+  messengerNotificationPermissionGranted,
   normalizeMessengerPushPayload,
   processMessengerPushPayload,
 } from '../services/messengerPush';
@@ -283,8 +284,8 @@ const syncPushSubscriptionStatus = async () => {
     return;
   }
   try {
-    const { status } = await Notifications.getPermissionsAsync();
-    if (status !== 'granted') {
+    const permission = await Notifications.getPermissionsAsync();
+    if (!messengerNotificationPermissionGranted(permission)) {
       await AsyncStorage.setItem('push_notifications_enabled', 'false');
       console.log('[Инициализация] Push отключены: разрешение пользователя не выдано');
       return;

@@ -1826,10 +1826,11 @@ export default function MessengerRoomScreen() {
       try {
         await queueMessengerReadReceipt(db, roomId, sequence, session?.user.id);
         clearInitialUnreadIfCovered(sequence);
-        await Promise.all([
-          refreshMessengerUnreadFromCache(db),
-          dismissReadMessengerNotifications(roomId, sequence),
-        ]);
+        // Some Android launchers derive their icon counter from presented
+        // notifications. Dismiss the notifications first, then re-apply the
+        // exact unread total so launcher bookkeeping cannot overwrite it.
+        await dismissReadMessengerNotifications(roomId, sequence);
+        await refreshMessengerUnreadFromCache(db, "local-read");
       } catch (error) {
         if (
           acknowledgedRead.current?.room_id === roomId &&

@@ -28,6 +28,7 @@ import { messengerLog } from "./messengerLogger";
 import { prefetchMessengerMedia } from "./messengerMediaCache";
 import { loadMessengerSession } from "./messengerSession";
 import {
+  beginMessengerUnreadSession,
   refreshMessengerUnreadFromCache,
   setMessengerUnreadCount,
   syncMessengerUnreadFromRooms,
@@ -182,11 +183,17 @@ async function ensureNotificationPermission(
 ): Promise<boolean> {
   if (!remotePushNotificationsSupported) return false;
   let permission = await Notifications.getPermissionsAsync();
+  let granted = messengerNotificationPermissionGranted(permission);
+  const undetermined =
+    Platform.OS === "ios"
+      ? permission.ios?.status ===
+        Notifications.IosAuthorizationStatus.NOT_DETERMINED
+      : permission.status === "undetermined";
   const shouldRequest =
-    permission.status !== "granted" &&
+    !granted &&
     permission.canAskAgain &&
     (request === "explicit" ||
-      (request === "restore" && permission.status === "undetermined"));
+      (request === "restore" && undetermined));
   if (shouldRequest) {
     permission = await Notifications.requestPermissionsAsync({
       ios: {
@@ -195,8 +202,26 @@ async function ensureNotificationPermission(
         allowSound: true,
       },
     });
+    granted = messengerNotificationPermissionGranted(permission);
   }
-  return permission.status === "granted";
+  if (granted && Platform.OS === "ios" && permission.ios?.allowsBadge === false) {
+    messengerLog("warn", "push.permission.badge_disabled", {
+      ios_authorization_status: permission.ios.status,
+    });
+  }
+  return granted;
+}
+
+export function messengerNotificationPermissionGranted(
+  permission: Notifications.NotificationPermissionsStatus,
+): boolean {
+  if (permission.granted) return true;
+  if (Platform.OS !== "ios") return false;
+  return (
+    permission.ios?.status === Notifications.IosAuthorizationStatus.AUTHORIZED ||
+    permission.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL ||
+    permission.ios?.status === Notifications.IosAuthorizationStatus.EPHEMERAL
+  );
 }
 
 export async function loadMessengerPushPreference(
@@ -434,6 +459,37 @@ export function normalizeMessengerPushPayload(
   return null;
 }
 
+/**
+ * Recovers the server total embedded in the newest still-present notification.
+ * This is especially important on Android when the OS displayed a visible
+ * push while the terminated JavaScript runtime could not run the task.
+ */
+export async function syncMessengerUnreadFromPresentedNotifications(): Promise<
+  number | null
+> {
+  if (!remotePushNotificationsSupported) return null;
+  const presented = await Notifications.getPresentedNotificationsAsync();
+  let newestDate = Number.NEGATIVE_INFINITY;
+  let newestUnreadCount: number | null = null;
+  for (const notification of presented) {
+    const payload = normalizeMessengerPushPayload(
+      notification.request.content.data,
+    );
+    if (payload?.unread_count === undefined) continue;
+    if (notification.date < newestDate) continue;
+    newestDate = notification.date;
+    newestUnreadCount = payload.unread_count;
+  }
+  if (newestUnreadCount === null) return null;
+  const next = await setMessengerUnreadCount(newestUnreadCount, "push");
+  messengerLog("info", "badge.presented_notification.recovered", {
+    presented_count: presented.length,
+    notification_unread_count: newestUnreadCount,
+    unread_count: next,
+  });
+  return next;
+}
+
 export async function dismissReadMessengerNotifications(
   roomId: string,
   readSequence: string,
@@ -483,8 +539,13 @@ export async function processMessengerPushPayload(
 ): Promise<MessengerPushPayload | null> {
   const payload = normalizeMessengerPushPayload(raw);
   if (!payload) return null;
+  const session = await loadMessengerSession();
+  if (session) beginMessengerUnreadSession(session.user.id);
   if (payload.unread_count !== undefined) {
-    await setMessengerUnreadCount(payload.unread_count);
+    await setMessengerUnreadCount(
+      payload.unread_count,
+      payload.type === "messenger.badge" ? "authoritative" : "push",
+    );
   }
   if (
     (payload.type !== "messenger.message" &&
@@ -497,7 +558,6 @@ export async function processMessengerPushPayload(
     ...payload,
     message_id: payload.message_id,
   };
-  const session = await loadMessengerSession();
   if (!session) return payload;
   const reactionIdentity =
     payload.type === "messenger.reaction"
@@ -602,8 +662,6 @@ async function cacheMessengerPushEvent(
   }
   if (payload.unread_count === undefined) {
     await refreshMessengerUnreadFromCache(db);
-  } else {
-    await setMessengerUnreadCount(payload.unread_count);
   }
   messengerLog("info", "push.event.cached", {
     push_type: payload.type,
