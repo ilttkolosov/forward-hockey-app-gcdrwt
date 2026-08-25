@@ -3,8 +3,8 @@ import {
   messengerUnreadAuthAction,
   normalizeMessengerUnreadCount,
   reconcileMessengerUnreadCount,
-  shouldReapplyMessengerBadge,
 } from "../services/messengerUnreadPolicy.ts";
+import { mergeMessengerRoomReadState } from "../features/messenger/roomListState.ts";
 
 assert.equal(
   messengerUnreadAuthAction("loading", null),
@@ -30,22 +30,6 @@ assert.equal(
 assert.equal(normalizeMessengerUnreadCount(Number.NaN), 0);
 assert.equal(normalizeMessengerUnreadCount(-3), 0);
 assert.equal(normalizeMessengerUnreadCount(4.9), 4);
-
-assert.equal(
-  shouldReapplyMessengerBadge("background", 3),
-  true,
-  "Leaving the activity with unread messages must restore the launcher badge",
-);
-assert.equal(
-  shouldReapplyMessengerBadge("active", 3),
-  false,
-  "Foreground entry must not race the launcher's own badge reset",
-);
-assert.equal(
-  shouldReapplyMessengerBadge("background", 0),
-  false,
-  "A lifecycle refresh must not clear unrelated Android notifications",
-);
 
 // Reproduces the first video pass: the OS knows about four unread messages,
 // while the terminated application's SQLite snapshot still says zero.
@@ -87,5 +71,58 @@ unread = reconcileMessengerUnreadCount(unread, 1, "local-read");
 assert.equal(unread, 1);
 unread = reconcileMessengerUnreadCount(unread, 0, "logout");
 assert.equal(unread, 0);
+
+const visibleReadRoom = {
+  id: "read-room",
+  title: "Visible title",
+  avatar_url: "visible-avatar",
+  last_read_sequence: "100",
+  unread_count: 2,
+};
+const untouchedRoom = {
+  id: "untouched-room",
+  title: "Untouched",
+  last_read_sequence: "50",
+  unread_count: 1,
+};
+const visibleRooms = [visibleReadRoom, untouchedRoom];
+const mergedRooms = mergeMessengerRoomReadState(visibleRooms, [
+  {
+    ...visibleReadRoom,
+    title: "Stale cached title",
+    avatar_url: "stale-cached-avatar",
+    last_read_sequence: "102",
+    unread_count: 0,
+  },
+  { ...untouchedRoom },
+  {
+    id: "cached-only-room",
+    title: "Must not be added",
+    last_read_sequence: "1",
+    unread_count: 1,
+  },
+]);
+assert.notStrictEqual(mergedRooms, visibleRooms);
+assert.equal(mergedRooms.length, 2);
+assert.equal(mergedRooms[0].last_read_sequence, "102");
+assert.equal(mergedRooms[0].unread_count, 0);
+assert.equal(mergedRooms[0].title, "Visible title");
+assert.equal(mergedRooms[0].avatar_url, "visible-avatar");
+assert.strictEqual(mergedRooms[1], untouchedRoom);
+
+const partiallyReadRooms = mergeMessengerRoomReadState(
+  [{ ...visibleReadRoom, unread_count: 4 }],
+  [{ ...visibleReadRoom, last_read_sequence: "101", unread_count: 2 }],
+);
+assert.equal(partiallyReadRooms[0].unread_count, 2);
+
+const staleReadRooms = [visibleReadRoom, untouchedRoom];
+assert.strictEqual(
+  mergeMessengerRoomReadState(staleReadRooms, [
+    { ...visibleReadRoom, last_read_sequence: "99", unread_count: 0 },
+  ]),
+  staleReadRooms,
+  "An older cache cursor must not overwrite the rendered room state",
+);
 
 console.log("messenger unread policy: ok");

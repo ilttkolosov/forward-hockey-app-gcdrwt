@@ -1,6 +1,6 @@
 import { useSQLiteContext } from "expo-sqlite";
 import { useEffect, useRef } from "react";
-import { AppState, Platform } from "react-native";
+import { AppState } from "react-native";
 import * as Notifications from "expo-notifications";
 import NetInfo from "@react-native-community/netinfo";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
@@ -41,16 +41,11 @@ import { remotePushNotificationsSupported } from "../../services/runtimeEnvironm
 import {
   beginMessengerUnreadSession,
   clearMessengerUnreadSession,
-  getMessengerUnreadCount,
   hydrateMessengerUnreadSession,
-  reapplyMessengerUnreadBadge,
   refreshMessengerUnreadFromCache,
   syncMessengerUnreadFromRooms,
 } from "../../services/messengerUnread";
-import {
-  messengerUnreadAuthAction,
-  shouldReapplyMessengerBadge,
-} from "../../services/messengerUnreadPolicy";
+import { messengerUnreadAuthAction } from "../../services/messengerUnreadPolicy";
 import { requestMessengerOutboxFlush } from "../../services/messengerOutbox";
 import { setMessengerMutedRooms } from "../../services/messengerSounds";
 import { waitForAppInteractive } from "../../services/appInteractive";
@@ -59,7 +54,6 @@ const BACKGROUND_ROOMS_SYNC_DEBOUNCE_MS = 1_500;
 const BACKGROUND_ROOMS_SYNC_MIN_INTERVAL_MS = 10_000;
 const INITIAL_HISTORY_WARMUP_DELAY_MS = 20_000;
 const BACKGROUND_ALIASES_SYNC_MIN_INTERVAL_MS = 5 * 60_000;
-const ANDROID_BACKGROUND_BADGE_RETRY_MS = 450;
 
 /**
  * Keeps the messenger SQLite cache alive independently from any screen. A
@@ -100,7 +94,6 @@ export default function MessengerPersistenceBridge() {
     let roomsSyncQueued = false;
     let roomsSyncTimer: ReturnType<typeof setTimeout> | null = null;
     let historyWarmupTimer: ReturnType<typeof setTimeout> | null = null;
-    let backgroundBadgeTimer: ReturnType<typeof setTimeout> | null = null;
     let lastRoomsSyncStartedAt = 0;
     let lastAliasesSyncStartedAt = 0;
     const scheduleHistoryWarmup = (
@@ -369,10 +362,6 @@ export default function MessengerPersistenceBridge() {
         // not tied to the room component.
         requestMessengerOutboxFlush(db);
         if (state === "active") {
-          if (backgroundBadgeTimer) {
-            clearTimeout(backgroundBadgeTimer);
-            backgroundBadgeTimer = null;
-          }
           void warmMessengerMediaFileReader();
           void flushMessengerReadReceipts(db);
           void hydrateMessengerUnreadSession(userId).catch(() => undefined);
@@ -382,30 +371,6 @@ export default function MessengerPersistenceBridge() {
           scheduleRoomsSynchronization(true);
           if (remotePushNotificationsSupported) {
             void syncMessengerPushRegistration().catch(() => undefined);
-          }
-        } else if (
-          shouldReapplyMessengerBadge(state, getMessengerUnreadCount())
-        ) {
-          // Xiaomi/MIUI and some other Android launchers clear the icon count
-          // simply when the activity is opened. No room was necessarily read,
-          // so restore the already reconciled total as the activity leaves.
-          void reapplyMessengerUnreadBadge();
-          if (Platform.OS === "android") {
-            if (backgroundBadgeTimer) clearTimeout(backgroundBadgeTimer);
-            backgroundBadgeTimer = setTimeout(() => {
-              backgroundBadgeTimer = null;
-              if (
-                active &&
-                shouldReapplyMessengerBadge(
-                  AppState.currentState,
-                  getMessengerUnreadCount(),
-                )
-              ) {
-                // Retry after the launcher has finished its own activity-open
-                // reset. The call is local and does not perform a server sync.
-                void reapplyMessengerUnreadBadge();
-              }
-            }, ANDROID_BACKGROUND_BADGE_RETRY_MS);
           }
         }
       },
@@ -442,7 +407,6 @@ export default function MessengerPersistenceBridge() {
       active = false;
       if (roomsSyncTimer) clearTimeout(roomsSyncTimer);
       if (historyWarmupTimer) clearTimeout(historyWarmupTimer);
-      if (backgroundBadgeTimer) clearTimeout(backgroundBadgeTimer);
       unsubscribeRealtime();
       appStateSubscription.remove();
       networkSubscription();

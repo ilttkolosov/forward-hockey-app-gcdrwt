@@ -25,6 +25,7 @@ import {
   cacheMessengerRooms,
   loadCachedMessengerRooms,
 } from "../../features/messenger/repository";
+import { mergeMessengerRoomReadState } from "../../features/messenger/roomListState";
 import type { MessengerRoom } from "../../features/messenger/types";
 import { useTypingDots } from "../../features/messenger/useTypingDots";
 import {
@@ -339,14 +340,23 @@ export default function MessengerRoomsScreen() {
         const userId = session?.user.id;
         if (!userId) return;
 
-        // Stack screens stay mounted during a room visit. In particular, an
-        // interactive iOS back gesture exposes this screen before the pop has
-        // finished. Re-applying a freshly deserialized SQLite snapshot here
-        // needlessly replaces every row and briefly makes authenticated/local
-        // avatars fall back to their placeholders. Keep the already rendered
-        // in-memory list stable; realtime remains active below and an explicit
-        // pull-to-refresh still requests a fresh server snapshot.
+        // Stack screens stay mounted during a room visit. Replacing every row
+        // from SQLite here makes avatars briefly fall back during the iOS back
+        // gesture. Merge only a newer local read cursor and its unread count;
+        // every other rendered room object remains stable.
         if (hasVisibleRooms.current) {
+          try {
+            const cached = await loadCachedMessengerRooms(db);
+            if (!active) return;
+            setRooms((current) =>
+              mergeMessengerRoomReadState(current, cached),
+            );
+          } catch (cacheError) {
+            messengerLog("debug", "rooms.read_state.refresh_deferred", {
+              message: messengerErrorMessage(cacheError),
+            });
+          }
+          if (!active) return;
           setLoading(false);
           setPreparation({ mode: "ready", progress: 100, message: "Готово" });
           return;

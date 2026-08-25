@@ -89,29 +89,6 @@ export function getMessengerUnreadCount(): number {
   return currentUnreadCount;
 }
 
-/**
- * Restores a positive launcher badge after the application activity leaves
- * the foreground. Some Android launchers clear their badge merely because the
- * activity was opened, even though no messenger room was read.
- */
-export async function reapplyMessengerUnreadBadge(): Promise<number> {
-  const unreadCount = currentUnreadCount;
-  if (unreadCount <= 0) return unreadCount;
-
-  const persistence = currentUnreadUserId
-    ? enqueueUnreadPersistence(currentUnreadUserId, unreadCount)
-    : Promise.resolve();
-  await Promise.allSettled([
-    persistence,
-    enqueueNativeBadgeUpdate("system"),
-  ]);
-  messengerLog("debug", "badge.lifecycle.reapplied", {
-    platform: Platform.OS,
-    unread_count: currentUnreadCount,
-  });
-  return currentUnreadCount;
-}
-
 export function subscribeMessengerUnreadCount(
   listener: (count: number) => void,
 ): () => void {
