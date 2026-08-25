@@ -3,6 +3,7 @@ import {
   messengerUnreadAuthAction,
   normalizeMessengerUnreadCount,
   reconcileMessengerUnreadCount,
+  shouldReapplyMessengerBadge,
 } from "../services/messengerUnreadPolicy.ts";
 
 assert.equal(
@@ -29,6 +30,22 @@ assert.equal(
 assert.equal(normalizeMessengerUnreadCount(Number.NaN), 0);
 assert.equal(normalizeMessengerUnreadCount(-3), 0);
 assert.equal(normalizeMessengerUnreadCount(4.9), 4);
+
+assert.equal(
+  shouldReapplyMessengerBadge("background", 3),
+  true,
+  "Leaving the activity with unread messages must restore the launcher badge",
+);
+assert.equal(
+  shouldReapplyMessengerBadge("active", 3),
+  false,
+  "Foreground entry must not race the launcher's own badge reset",
+);
+assert.equal(
+  shouldReapplyMessengerBadge("background", 0),
+  false,
+  "A lifecycle refresh must not clear unrelated Android notifications",
+);
 
 // Reproduces the first video pass: the OS knows about four unread messages,
 // while the terminated application's SQLite snapshot still says zero.

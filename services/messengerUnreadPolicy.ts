@@ -16,6 +16,13 @@ export type MessengerUnreadAuthStatus =
 
 export type MessengerUnreadAuthAction = "wait" | "hydrate" | "clear";
 
+export type MessengerUnreadAppState =
+  | "active"
+  | "background"
+  | "inactive"
+  | "unknown"
+  | "extension";
+
 const PRESERVE_HIGHER_SOURCES = new Set<MessengerUnreadSource>([
   "system",
   "stored",
@@ -58,4 +65,21 @@ export function messengerUnreadAuthAction(
 ): MessengerUnreadAuthAction {
   if (status === "loading") return "wait";
   return status === "authenticated" && Boolean(userId) ? "hydrate" : "clear";
+}
+
+/**
+ * Several Android launchers clear a manually applied icon badge when the main
+ * activity is opened. Reapply a positive unread total once that activity has
+ * moved to the background. A zero is deliberately skipped here: Expo's
+ * Android badge implementation clears every presented app notification when
+ * `setBadgeCountAsync(0)` is called.
+ */
+export function shouldReapplyMessengerBadge(
+  appState: MessengerUnreadAppState,
+  unreadCount: number,
+): boolean {
+  return (
+    appState === "background" &&
+    normalizeMessengerUnreadCount(unreadCount) > 0
+  );
 }
