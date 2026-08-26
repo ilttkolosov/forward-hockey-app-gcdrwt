@@ -10,7 +10,52 @@ import {
   mergeMessengerRoomReadState,
   mergeMessengerRoomSnapshots,
 } from "../features/messenger/roomListState.ts";
-import { shouldReuseMessengerRoomsSnapshot } from "../services/messengerRoomSnapshotPolicy.ts";
+import {
+  shouldReuseMessengerRoomsRequest,
+  shouldReuseMessengerRoomsSnapshot,
+} from "../services/messengerRoomSnapshotPolicy.ts";
+import {
+  presentedMessengerUnreadFloor,
+  recoveredMessengerRoomUnreadFloor,
+} from "../features/messenger/presentedUnreadPolicy.ts";
+
+assert.equal(
+  presentedMessengerUnreadFloor(
+    [
+      { messageId: "alex-6", sequence: "106" },
+      { messageId: "alex-2", sequence: "102" },
+      { messageId: "alex-5", sequence: "105" },
+      { messageId: "alex-1", sequence: "101" },
+      { messageId: "alex-4", sequence: "104" },
+      { messageId: "alex-3", sequence: "103" },
+      { messageId: "alex-3", sequence: "103" },
+    ],
+    "100",
+  ),
+  6,
+  "Six out-of-order Android notifications must restore six room unread items",
+);
+assert.equal(
+  presentedMessengerUnreadFloor(
+    [
+      { messageId: "already-read", sequence: "100" },
+      { messageId: "still-unread", sequence: "101" },
+    ],
+    "100",
+  ),
+  1,
+  "A presented notification at or below the read cursor must not return",
+);
+assert.equal(
+  recoveredMessengerRoomUnreadFloor(6, 1),
+  6,
+  "A vendor-collapsed Android notification must not hide six cached messages",
+);
+assert.equal(
+  recoveredMessengerRoomUnreadFloor(1, 6),
+  6,
+  "Six presented notifications must repair an incomplete background cache",
+);
 
 const recentSnapshot = {
   priority: "background",
@@ -36,6 +81,24 @@ assert.equal(
   }),
   false,
   "The visible room list must not reuse the background snapshot",
+);
+assert.equal(
+  shouldReuseMessengerRoomsRequest({
+    force: true,
+    priority: "background",
+    inFlightPriority: "foreground",
+  }),
+  false,
+  "A forced recovery must not join a request started before the PUSH",
+);
+assert.equal(
+  shouldReuseMessengerRoomsRequest({
+    force: false,
+    priority: "background",
+    inFlightPriority: "foreground",
+  }),
+  true,
+  "Routine background owners should still coalesce room requests",
 );
 
 assert.equal(

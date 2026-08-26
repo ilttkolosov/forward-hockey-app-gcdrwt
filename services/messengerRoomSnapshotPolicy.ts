@@ -14,3 +14,15 @@ export function shouldReuseMessengerRoomsSnapshot(options: {
     options.now - options.receivedAt < options.maxAgeMs
   );
 }
+
+export function shouldReuseMessengerRoomsRequest(options: {
+  force: boolean;
+  priority: MessengerTransportPriority;
+  inFlightPriority: MessengerTransportPriority | null;
+}): boolean {
+  if (options.force || options.inFlightPriority === null) return false;
+  return !(
+    options.priority === "foreground" &&
+    options.inFlightPriority === "background"
+  );
+}

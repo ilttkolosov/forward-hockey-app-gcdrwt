@@ -9,6 +9,7 @@ import {
   cacheMessengerRooms,
   loadCachedMessengerMessage,
   loadCachedMessengerRoom,
+  reconcileMessengerRoomsUnreadFromDevice,
 } from "../features/messenger/repository";
 import type {
   MessengerPushRegistration,
@@ -500,26 +501,65 @@ export async function syncMessengerUnreadFromPresentedNotifications(): Promise<
   let newestDate = Number.NEGATIVE_INFINITY;
   let newestUnreadCount: number | null = null;
   const presentedMessageIds: string[] = [];
+  const presentedRoomMessages: {
+    roomId: string;
+    messageId: string;
+    sequence?: string;
+  }[] = [];
   for (const notification of presented) {
     const payload = normalizeMessengerPushPayload(
       notification.request.content.data,
     );
-    if (payload?.unread_count === undefined) continue;
+    if (!payload) continue;
     if (payload.type === "messenger.message" && payload.message_id) {
       presentedMessageIds.push(payload.message_id);
+      if (payload.room_id) {
+        presentedRoomMessages.push({
+          roomId: payload.room_id,
+          messageId: payload.message_id,
+          sequence: payload.sequence,
+        });
+      }
     }
+    if (payload.unread_count === undefined) continue;
     if (notification.date < newestDate) continue;
     newestDate = notification.date;
     newestUnreadCount = payload.unread_count;
   }
-  if (newestUnreadCount === null) return null;
+  let recoveredRoomTotal = 0;
+  if (Platform.OS === "android") {
+    try {
+      const session = await loadMessengerSession();
+      if (session) {
+        const rooms = await reconcileMessengerRoomsUnreadFromDevice(
+          await getDatabase(),
+          session.user.id,
+          presentedRoomMessages,
+        );
+        recoveredRoomTotal = rooms.reduce(
+          (total, room) => total + Math.max(0, Math.floor(room.unread_count)),
+          0,
+        );
+      }
+    } catch (error) {
+      messengerLog("debug", "badge.presented_rooms.recovery_deferred", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (newestUnreadCount === null && recoveredRoomTotal === 0) return null;
+  const recoveredUnreadCount = Math.max(
+    newestUnreadCount ?? 0,
+    recoveredRoomTotal,
+  );
   const next = await setMessengerUnreadFromPresentedNotifications(
-    newestUnreadCount,
+    recoveredUnreadCount,
     presentedMessageIds,
   );
   messengerLog("info", "badge.presented_notification.recovered", {
     presented_count: presented.length,
-    notification_unread_count: newestUnreadCount,
+    notification_unread_count: newestUnreadCount ?? 0,
+    room_unread_count: recoveredRoomTotal,
     unread_count: next,
   });
   return next;

@@ -1,6 +1,6 @@
 import { useSQLiteContext } from "expo-sqlite";
 import { useEffect, useRef } from "react";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import NetInfo from "@react-native-community/netinfo";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
@@ -206,6 +206,12 @@ export default function MessengerPersistenceBridge() {
         if (active) {
           setMessengerMutedRooms(reconciled);
           await syncMessengerUnreadFromRooms(reconciled, "authoritative");
+          // Android can have newer still-present notifications than a room
+          // request which was already travelling when the PUSH arrived.
+          // Re-apply their per-room floor after every server reconciliation.
+          if (Platform.OS === "android") {
+            await syncMessengerUnreadFromPresentedNotifications();
+          }
         }
         scheduleHistoryWarmup(reconciled);
       } catch (error) {

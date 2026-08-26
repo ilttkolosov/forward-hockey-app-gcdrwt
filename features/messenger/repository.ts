@@ -3,6 +3,11 @@ import { Platform } from "react-native";
 import { enqueueDatabaseWrite } from "../../database/writeCoordinator";
 import { applyMessengerAliases } from "./aliases";
 import { mergeMessengerDelivery } from "./feed";
+import {
+  presentedMessengerUnreadFloor,
+  recoveredMessengerRoomUnreadFloor,
+  type PresentedMessengerMessage,
+} from "./presentedUnreadPolicy";
 import type {
   MessengerMessage,
   MessengerMessageDeliveryUpdate,
@@ -392,6 +397,91 @@ export function cacheMessengerRoomSnapshot(
     notifyMessengerRoomCacheChanged();
     return nextRoom;
   });
+}
+
+export interface PresentedMessengerRoomMessage
+  extends PresentedMessengerMessage {
+  roomId: string;
+}
+
+/**
+ * Rebuilds per-room Android unread floors from cached incoming messages and
+ * notifications that the OS still presents. This reconnects a terminated
+ * background runtime with the SQLite room list without guessing from the
+ * global launcher badge.
+ */
+export async function reconcileMessengerRoomsUnreadFromDevice(
+  db: SQLiteDatabase,
+  currentUserId: string,
+  messages: readonly PresentedMessengerRoomMessage[],
+): Promise<MessengerRoom[]> {
+  const messagesByRoom = new Map<string, PresentedMessengerRoomMessage[]>();
+  for (const message of messages) {
+    const roomMessages = messagesByRoom.get(message.roomId) ?? [];
+    roomMessages.push(message);
+    messagesByRoom.set(message.roomId, roomMessages);
+  }
+  let changed = false;
+  await enqueueMessengerWrite(db, async () => {
+    await withMessengerTransaction(db, async (transaction) => {
+      const rows = await transaction.getAllAsync<RoomRow & { id: string }>(
+        "SELECT id, raw_json FROM messenger_rooms",
+      );
+      for (const row of rows) {
+        const roomId = row.id;
+        const room = parseJson<MessengerRoom>(row.raw_json);
+        if (!room) continue;
+        const readState = await transaction.getFirstAsync<ReadStateRow>(
+          `SELECT room_id, local_read_sequence, synced_read_sequence, pending_read_sequence
+             FROM messenger_room_read_state
+            WHERE room_id = ?`,
+          roomId,
+        );
+        const effectiveReadSequence = newestSequence(
+          readState?.local_read_sequence || "0",
+          room.last_read_sequence,
+        );
+        const presentedUnreadFloor = presentedMessengerUnreadFloor(
+          messagesByRoom.get(roomId) ?? [],
+          effectiveReadSequence,
+        );
+        const cachedUnread = await transaction.getFirstAsync<{
+          unread_count: number;
+        }>(
+          `SELECT COUNT(*) AS unread_count
+             FROM messenger_messages
+            WHERE room_id = ?
+              AND CAST(sequence AS INTEGER) > CAST(? AS INTEGER)
+              AND json_extract(raw_json, '$.author.id') <> ?`,
+          roomId,
+          effectiveReadSequence,
+          currentUserId,
+        );
+        const unreadFloor = recoveredMessengerRoomUnreadFloor(
+          cachedUnread?.unread_count ?? 0,
+          presentedUnreadFloor,
+        );
+        if (unreadFloor <= room.unread_count) continue;
+        const nextRoom: MessengerRoom = {
+          ...room,
+          last_read_sequence: effectiveReadSequence,
+          unread_count: unreadFloor,
+        };
+        await transaction.runAsync(
+          `UPDATE messenger_rooms
+              SET unread_count = ?, updated_at = ?, raw_json = ?
+            WHERE id = ?`,
+          nextRoom.unread_count,
+          new Date().toISOString(),
+          JSON.stringify(nextRoom),
+          roomId,
+        );
+        changed = true;
+      }
+    });
+  });
+  if (changed) notifyMessengerRoomCacheChanged();
+  return loadCachedMessengerRooms(db);
 }
 
 export function markCachedMessengerRoomRead(

@@ -42,7 +42,10 @@ import {
   prioritizeMessengerForegroundTransport,
   runMessengerTransportTask,
 } from "./messengerTransport";
-import { shouldReuseMessengerRoomsSnapshot } from "./messengerRoomSnapshotPolicy";
+import {
+  shouldReuseMessengerRoomsRequest,
+  shouldReuseMessengerRoomsSnapshot,
+} from "./messengerRoomSnapshotPolicy";
 
 export const MESSENGER_SERVER_ORIGIN = "https://forward.is-gone.com";
 export const MESSENGER_API_BASE_URL = `${MESSENGER_SERVER_ORIGIN}/api/v1`;
@@ -602,10 +605,12 @@ export async function logoutFromMessenger(): Promise<void> {
 }
 
 let messengerRoomsRequest: {
+  id: number;
   priority: MessengerTransportPriority;
   promise: Promise<MessengerRoom[]>;
 } | null = null;
 let messengerRoomsSnapshot: { rooms: MessengerRoom[]; receivedAt: number } | null = null;
+let messengerRoomsRequestId = 0;
 // Realtime events keep the local cards current between full snapshots. A
 // background owner therefore does not need to repeat a successful foreground
 // room-list request during the same minute.
@@ -634,10 +639,11 @@ export function getMessengerRooms(
   }
   if (
     messengerRoomsRequest &&
-    !(
-      priority === "foreground" &&
-      messengerRoomsRequest.priority === "background"
-    )
+    shouldReuseMessengerRoomsRequest({
+      force: options.force === true,
+      priority,
+      inFlightPriority: messengerRoomsRequest.priority,
+    })
   ) {
     return messengerRoomsRequest.promise;
   }
@@ -647,11 +653,13 @@ export function getMessengerRooms(
   const request = messengerRequest<MessengerRoom[]>("/chat/rooms", {
     transportPriority: priority,
   });
-  const tracked = { priority, promise: request };
+  const tracked = { id: ++messengerRoomsRequestId, priority, promise: request };
   messengerRoomsRequest = tracked;
   void request.then(
     (rooms) => {
-      messengerRoomsSnapshot = { rooms, receivedAt: Date.now() };
+      if (tracked.id === messengerRoomsRequestId) {
+        messengerRoomsSnapshot = { rooms, receivedAt: Date.now() };
+      }
       if (messengerRoomsRequest === tracked) messengerRoomsRequest = null;
     },
     () => {
