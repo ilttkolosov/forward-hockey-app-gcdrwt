@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import {
+  MessengerUnreadMessageLedger,
   messengerUnreadAuthAction,
   normalizeMessengerUnreadCount,
   reconcileMessengerUnreadCount,
+  selectMessengerUnreadRestore,
 } from "../services/messengerUnreadPolicy.ts";
 import { mergeMessengerRoomReadState } from "../features/messenger/roomListState.ts";
 
@@ -30,20 +32,40 @@ assert.equal(
 assert.equal(normalizeMessengerUnreadCount(Number.NaN), 0);
 assert.equal(normalizeMessengerUnreadCount(-3), 0);
 assert.equal(normalizeMessengerUnreadCount(4.9), 4);
+assert.equal(selectMessengerUnreadRestore(9, 6), 6);
+assert.equal(selectMessengerUnreadRestore(6, 0), 6);
+assert.equal(selectMessengerUnreadRestore(2, 7), 7);
+
+const messageLedger = new MessengerUnreadMessageLedger(3);
+assert.equal(messageLedger.record("message-1"), true);
+assert.equal(messageLedger.record("message-1"), false);
+assert.equal(messageLedger.record("message-2"), true);
+assert.equal(messageLedger.record("message-3"), true);
+assert.equal(messageLedger.record("message-4"), true);
+assert.equal(
+  messageLedger.record("message-1"),
+  true,
+  "The bounded ledger must eventually evict the oldest message id",
+);
+messageLedger.clear();
+assert.equal(messageLedger.record("message-4"), true);
 
 // Reproduces the first video pass: the OS knows about four unread messages,
 // while the terminated application's SQLite snapshot still says zero.
 let unread = reconcileMessengerUnreadCount(0, 4, "system");
 assert.equal(unread, 4);
+unread = reconcileMessengerUnreadCount(9, 6, "system");
+assert.equal(unread, 6, "A positive native badge corrects stale persistence");
 unread = reconcileMessengerUnreadCount(unread, 0, "cache");
 assert.equal(
   unread,
-  4,
+  6,
   "A stale cold-start cache must not erase the OS/server badge",
 );
 
 // Reproduces the second pass: a new push carries total=5 while local rooms
 // still total four. Opening/minimising the app must retain five.
+unread = 4;
 unread = reconcileMessengerUnreadCount(unread, 5, "push");
 assert.equal(unread, 5);
 unread = reconcileMessengerUnreadCount(unread, 4, "cache");
@@ -64,6 +86,13 @@ assert.equal(
 );
 unread = reconcileMessengerUnreadCount(unread, 5, "realtime", true);
 assert.equal(unread, 5, "A genuine realtime message may increase the total");
+
+// Reproduces the Android video: persisted cache says 9, while the newest
+// still-present server notification says the exact current total is 6.
+unread = reconcileMessengerUnreadCount(9, 6, "presented", true);
+assert.equal(unread, 6);
+unread = reconcileMessengerUnreadCount(unread, 7, "push", true);
+assert.equal(unread, 7, "One new PUSH after six unread must produce seven");
 
 // Only a confirmed local read or logout may intentionally reduce the value
 // before the next server reconciliation.

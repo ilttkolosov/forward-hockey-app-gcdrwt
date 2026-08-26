@@ -7,8 +7,10 @@ import { loadCachedMessengerRooms } from "../features/messenger/repository";
 import type { MessengerRoom } from "../features/messenger/types";
 import { messengerLog } from "./messengerLogger";
 import {
+  MessengerUnreadMessageLedger,
   normalizeMessengerUnreadCount,
   reconcileMessengerUnreadCount,
+  selectMessengerUnreadRestore,
   type MessengerUnreadSource,
 } from "./messengerUnreadPolicy";
 import { remotePushNotificationsSupported } from "./runtimeEnvironment";
@@ -23,6 +25,7 @@ let hasAuthoritativeUnreadSnapshot = false;
 let badgeUpdateQueue: Promise<void> = Promise.resolve();
 let persistenceQueue: Promise<void> = Promise.resolve();
 let badgeUnsupportedReported = false;
+const accountedUnreadMessages = new MessengerUnreadMessageLedger();
 const listeners = new Set<(count: number) => void>();
 
 function unreadCountKey(userId: string): string {
@@ -109,6 +112,7 @@ export function beginMessengerUnreadSession(userId: string): void {
   unreadSessionGeneration += 1;
   unreadAuthoritativeRevision = 0;
   hasAuthoritativeUnreadSnapshot = false;
+  if (shouldReset) accountedUnreadMessages.clear();
   if (shouldReset && currentUnreadCount !== 0) {
     currentUnreadCount = 0;
     notifyUnreadListeners(0);
@@ -160,8 +164,11 @@ export async function hydrateMessengerUnreadSession(
           : String(systemResult.reason),
     });
   }
-  const restored = Math.max(storedCount, systemCount);
-  const next = await setMessengerUnreadCount(restored, "stored");
+  const restored = selectMessengerUnreadRestore(storedCount, systemCount);
+  const next = await setMessengerUnreadCount(
+    restored,
+    systemCount > 0 ? "system" : "stored",
+  );
   messengerLog("info", "badge.session.hydrated", {
     stored_count: storedCount,
     system_count: systemCount,
@@ -175,6 +182,7 @@ export async function clearMessengerUnreadSession(): Promise<void> {
   currentUnreadUserId = null;
   unreadSessionGeneration += 1;
   hasAuthoritativeUnreadSnapshot = false;
+  accountedUnreadMessages.clear();
   await setMessengerUnreadCount(0, "logout");
   if (previousUserId) {
     await enqueueUnreadPersistence(previousUserId, 0).catch(() => undefined);
@@ -187,6 +195,9 @@ export async function setMessengerUnreadCount(
 ): Promise<number> {
   if (
     source === "authoritative" ||
+    source === "system" ||
+    source === "presented" ||
+    source === "push" ||
     source === "local-read" ||
     source === "logout"
   ) {
@@ -200,6 +211,8 @@ export async function setMessengerUnreadCount(
   );
   if (
     source === "authoritative" ||
+    source === "system" ||
+    source === "presented" ||
     source === "local-read" ||
     source === "push"
   ) {
@@ -212,6 +225,8 @@ export async function setMessengerUnreadCount(
   const shouldRefreshPersistence =
     changed ||
     source === "authoritative" ||
+    source === "system" ||
+    source === "presented" ||
     source === "local-read" ||
     source === "push";
   const persistence =
@@ -220,6 +235,40 @@ export async function setMessengerUnreadCount(
       : Promise.resolve();
   await Promise.allSettled([persistence, enqueueNativeBadgeUpdate(source)]);
   return next;
+}
+
+/**
+ * Applies an absolute total carried by a message PUSH and remembers that
+ * message so the matching realtime event cannot increment the same unread
+ * item a second time.
+ */
+export function setMessengerUnreadFromMessagePush(
+  value: number,
+  messageId: string,
+): Promise<number> {
+  accountedUnreadMessages.record(messageId);
+  return setMessengerUnreadCount(value, "push");
+}
+
+/** Restores the exact total from the newest OS notification on cold start. */
+export function setMessengerUnreadFromPresentedNotifications(
+  value: number,
+  messageIds: readonly string[],
+): Promise<number> {
+  for (const messageId of messageIds) {
+    accountedUnreadMessages.record(messageId);
+  }
+  return setMessengerUnreadCount(value, "presented");
+}
+
+/** Increments once when realtime is the first observer of this message. */
+export function incrementMessengerUnreadForMessage(
+  messageId: string,
+): Promise<number> {
+  if (!accountedUnreadMessages.record(messageId)) {
+    return Promise.resolve(currentUnreadCount);
+  }
+  return setMessengerUnreadCount(currentUnreadCount + 1, "realtime");
 }
 
 export function syncMessengerUnreadFromRooms(

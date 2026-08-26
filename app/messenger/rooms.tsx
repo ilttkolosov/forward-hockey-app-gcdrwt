@@ -506,8 +506,9 @@ export default function MessengerRoomsScreen() {
             else delete next[message.room_id];
             return next;
           });
-          // Update the visible card immediately; REST below remains the source
-          // of truth and corrects unread counters after reconnect/duplicates.
+          // Update only the visible card here. MessengerPersistenceBridge owns
+          // the global unread total and deduplicates this realtime event
+          // against the matching PUSH by message id.
           setRooms((current) => {
             const next = current.map((room) => {
               if (
@@ -543,7 +544,6 @@ export default function MessengerRoomsScreen() {
                 },
               };
             });
-            void syncMessengerUnreadFromRooms(next, "realtime");
             return next;
           });
         } else if (event.type === "message.updated") {

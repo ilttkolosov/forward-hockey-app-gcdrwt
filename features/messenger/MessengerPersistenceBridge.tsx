@@ -42,6 +42,7 @@ import {
   beginMessengerUnreadSession,
   clearMessengerUnreadSession,
   hydrateMessengerUnreadSession,
+  incrementMessengerUnreadForMessage,
   refreshMessengerUnreadFromCache,
   syncMessengerUnreadFromRooms,
 } from "../../services/messengerUnread";
@@ -259,14 +260,16 @@ export default function MessengerPersistenceBridge() {
         message.client_message_id,
       );
       void cacheIncomingMessengerMessage(db, message, userId)
-        .then(() => {
+        .then((cacheResult) => {
           if (message.author.id === userId) {
             void removeMessengerOutboxItem(
               db,
               message.client_message_id,
             ).catch(() => undefined);
           }
-          void refreshMessengerUnreadFromCache(db, "realtime");
+          if (cacheResult.unreadIncremented) {
+            void incrementMessengerUnreadForMessage(message.id);
+          }
           if (message.author.id !== userId) {
             void markMessengerDelivered(message.room_id, message.sequence)
               .then(() =>
@@ -317,7 +320,6 @@ export default function MessengerPersistenceBridge() {
       } else if (event.type === "message.updated") {
         void cacheUpdatedMessengerMessage(db, event.message)
           .then(() => {
-            void refreshMessengerUnreadFromCache(db, "realtime");
             if (event.message.author.id !== userId) {
               prefetchMessengerMedia(
                 event.message.media_items?.length

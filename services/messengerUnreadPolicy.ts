@@ -1,6 +1,7 @@
 export type MessengerUnreadSource =
   | "system"
   | "stored"
+  | "presented"
   | "cache"
   | "realtime"
   | "push"
@@ -16,8 +17,34 @@ export type MessengerUnreadAuthStatus =
 
 export type MessengerUnreadAuthAction = "wait" | "hydrate" | "clear";
 
+export class MessengerUnreadMessageLedger {
+  private readonly ids = new Set<string>();
+  private readonly order: string[] = [];
+  private readonly capacity: number;
+
+  constructor(capacity = 256) {
+    this.capacity = capacity;
+  }
+
+  /** Returns true only for the first observation of a message. */
+  record(messageId: string): boolean {
+    if (!messageId || this.ids.has(messageId)) return false;
+    this.ids.add(messageId);
+    this.order.push(messageId);
+    while (this.order.length > this.capacity) {
+      const oldest = this.order.shift();
+      if (oldest) this.ids.delete(oldest);
+    }
+    return true;
+  }
+
+  clear(): void {
+    this.ids.clear();
+    this.order.length = 0;
+  }
+}
+
 const PRESERVE_HIGHER_SOURCES = new Set<MessengerUnreadSource>([
-  "system",
   "stored",
   "cache",
   "realtime",
@@ -30,10 +57,25 @@ export function normalizeMessengerUnreadCount(value: number): number {
 }
 
 /**
- * Cached/system values may be older than a push already accepted by the OS.
- * They can therefore recover or increase a counter, but never lower it.
- * Only an authoritative server snapshot, an explicit local read, or logout is
- * allowed to reduce the value.
+ * A positive native badge was supplied by the OS from a newer PUSH and is
+ * preferable to an older persisted JS value. Some Android launchers cannot
+ * report their badge and return zero; only then use persistence as fallback.
+ */
+export function selectMessengerUnreadRestore(
+  stored: number,
+  system: number,
+): number {
+  const normalizedSystem = normalizeMessengerUnreadCount(system);
+  return normalizedSystem > 0
+    ? normalizedSystem
+    : normalizeMessengerUnreadCount(stored);
+}
+
+/**
+ * Cached/persisted values may be older than a push already accepted by the OS,
+ * so they can recover or increase a counter but never lower it. A positive
+ * native badge and the newest still-present notification are exact OS/server
+ * snapshots and may correct stale persistence during application startup.
  */
 export function reconcileMessengerUnreadCount(
   current: number,

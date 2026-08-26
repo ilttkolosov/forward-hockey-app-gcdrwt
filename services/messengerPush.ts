@@ -29,8 +29,11 @@ import { prefetchMessengerMedia } from "./messengerMediaCache";
 import { loadMessengerSession } from "./messengerSession";
 import {
   beginMessengerUnreadSession,
+  incrementMessengerUnreadForMessage,
   refreshMessengerUnreadFromCache,
   setMessengerUnreadCount,
+  setMessengerUnreadFromMessagePush,
+  setMessengerUnreadFromPresentedNotifications,
   syncMessengerUnreadFromRooms,
 } from "./messengerUnread";
 import {
@@ -116,11 +119,10 @@ async function cacheIncomingPushMessage(
   db: Awaited<ReturnType<typeof getDatabase>>,
   message: Awaited<ReturnType<typeof getMessengerMessage>>,
   currentUserId: string,
-): Promise<void> {
+) {
   for (let attempt = 0; ; attempt += 1) {
     try {
-      await cacheIncomingMessengerMessage(db, message, currentUserId);
-      return;
+      return await cacheIncomingMessengerMessage(db, message, currentUserId);
     } catch (error) {
       const delay = PUSH_DATABASE_RETRY_DELAYS_MS[attempt];
       if (delay === undefined || !isSQLiteBusyError(error)) throw error;
@@ -471,17 +473,24 @@ export async function syncMessengerUnreadFromPresentedNotifications(): Promise<
   const presented = await Notifications.getPresentedNotificationsAsync();
   let newestDate = Number.NEGATIVE_INFINITY;
   let newestUnreadCount: number | null = null;
+  const presentedMessageIds: string[] = [];
   for (const notification of presented) {
     const payload = normalizeMessengerPushPayload(
       notification.request.content.data,
     );
     if (payload?.unread_count === undefined) continue;
+    if (payload.type === "messenger.message" && payload.message_id) {
+      presentedMessageIds.push(payload.message_id);
+    }
     if (notification.date < newestDate) continue;
     newestDate = notification.date;
     newestUnreadCount = payload.unread_count;
   }
   if (newestUnreadCount === null) return null;
-  const next = await setMessengerUnreadCount(newestUnreadCount, "push");
+  const next = await setMessengerUnreadFromPresentedNotifications(
+    newestUnreadCount,
+    presentedMessageIds,
+  );
   messengerLog("info", "badge.presented_notification.recovered", {
     presented_count: presented.length,
     notification_unread_count: newestUnreadCount,
@@ -542,10 +551,17 @@ export async function processMessengerPushPayload(
   const session = await loadMessengerSession();
   if (session) beginMessengerUnreadSession(session.user.id);
   if (payload.unread_count !== undefined) {
-    await setMessengerUnreadCount(
-      payload.unread_count,
-      payload.type === "messenger.badge" ? "authoritative" : "push",
-    );
+    if (payload.type === "messenger.message" && payload.message_id) {
+      await setMessengerUnreadFromMessagePush(
+        payload.unread_count,
+        payload.message_id,
+      );
+    } else {
+      await setMessengerUnreadCount(
+        payload.unread_count,
+        payload.type === "messenger.badge" ? "authoritative" : "push",
+      );
+    }
   }
   if (
     (payload.type !== "messenger.message" &&
@@ -634,7 +650,11 @@ async function cacheMessengerPushEvent(
     const reconciled = await cacheMessengerRooms(db, rooms);
     await syncMessengerUnreadFromRooms(reconciled);
   }
-  await cacheIncomingPushMessage(db, message, session.user.id);
+  const cacheResult = await cacheIncomingPushMessage(
+    db,
+    message,
+    session.user.id,
+  );
   if (
     payload.type === "messenger.message" &&
     message.author.id !== session.user.id
@@ -661,7 +681,9 @@ async function cacheMessengerPushEvent(
     );
   }
   if (payload.unread_count === undefined) {
-    await refreshMessengerUnreadFromCache(db);
+    if (cacheResult.unreadIncremented) {
+      await incrementMessengerUnreadForMessage(message.id);
+    }
   }
   messengerLog("info", "push.event.cached", {
     push_type: payload.type,

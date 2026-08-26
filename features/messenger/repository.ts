@@ -74,6 +74,11 @@ export interface MessengerCachedMessageSearchResult {
   };
 }
 
+export interface CacheIncomingMessengerMessageResult {
+  inserted: boolean;
+  unreadIncremented: boolean;
+}
+
 const messengerRoomCacheWrites = new WeakMap<
   SQLiteDatabase,
   WeakMap<MessengerRoom[], Promise<MessengerRoom[]>>
@@ -815,9 +820,13 @@ export function cacheIncomingMessengerMessage(
   db: SQLiteDatabase,
   message: MessengerMessage,
   currentUserId: string,
-): Promise<void> {
-  return enqueueMessengerWrite(db, () =>
-    withMessengerTransaction(db, async (transaction) => {
+): Promise<CacheIncomingMessengerMessageResult> {
+  return enqueueMessengerWrite(db, async () => {
+    let result: CacheIncomingMessengerMessageResult = {
+      inserted: false,
+      unreadIncremented: false,
+    };
+    await withMessengerTransaction(db, async (transaction) => {
       const existingRow = await transaction.getFirstAsync<IdentifiedMessageRow>(
         "SELECT id, raw_json FROM messenger_messages WHERE id = ?",
         message.id,
@@ -834,6 +843,7 @@ export function cacheIncomingMessengerMessage(
             ),
           }
         : message;
+      result = { inserted: !existingRow, unreadIncremented: false };
       await transaction.runAsync(
         `INSERT INTO messenger_messages
           (id, room_id, sequence, client_message_id, created_at, raw_json)
@@ -876,6 +886,10 @@ export function cacheIncomingMessengerMessage(
         isNewer &&
         message.author.id !== currentUserId &&
         sequenceIsNewer(message.sequence, localReadSequence);
+      result = {
+        inserted: result.inserted,
+        unreadIncremented: shouldIncrementUnread,
+      };
       const nextRoom: MessengerRoom = {
         ...room,
         last_read_sequence: localReadSequence,
@@ -907,8 +921,9 @@ export function cacheIncomingMessengerMessage(
         JSON.stringify(nextRoom),
         message.room_id,
       );
-    }),
-  );
+    });
+    return result;
+  });
 }
 
 /** Persists an edit/tombstone while preserving per-device reaction state. */

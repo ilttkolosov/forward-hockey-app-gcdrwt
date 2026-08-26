@@ -67,12 +67,12 @@ const quickNavStyles = StyleSheet.create({
   },
   unreadBadge: {
     position: 'absolute',
-    top: 8,
-    right: 10,
-    minWidth: 22,
-    height: 22,
-    paddingHorizontal: 6,
-    borderRadius: 11,
+    top: 6,
+    right: 8,
+    minWidth: 26,
+    height: 26,
+    paddingHorizontal: 7,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.accent,
@@ -81,8 +81,9 @@ const quickNavStyles = StyleSheet.create({
   },
   unreadBadgeText: {
     color: colors.white,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '800',
+    lineHeight: 15,
   },
 });
 
