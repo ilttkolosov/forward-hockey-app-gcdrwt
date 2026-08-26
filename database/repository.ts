@@ -3,6 +3,7 @@ import type { ApiTeam } from '../services/apiService';
 import type { ApiEvent, ApiLeague, ApiSeason, ApiVenue } from '../types/apiTypes';
 import type { Training } from '../types/training';
 import { DATABASE_NAME, migrateDatabase } from './index';
+import { enqueueDatabaseWrite } from './writeCoordinator';
 
 export type ReferenceEntity = 'teams' | 'venues' | 'leagues' | 'seasons' | 'players' | 'tournaments';
 
@@ -37,6 +38,12 @@ export interface StoredTournamentConfig<TConfig> {
 }
 
 let databasePromise: Promise<SQLiteDatabase> | null = null;
+
+const withExclusiveDatabaseWrite = (
+  db: SQLiteDatabase,
+  operation: (transaction: SQLiteDatabase) => Promise<void>
+): Promise<void> =>
+  enqueueDatabaseWrite(() => db.withExclusiveTransactionAsync(operation));
 
 export const getDatabase = async (): Promise<SQLiteDatabase> => {
   if (!databasePromise) {
@@ -181,7 +188,7 @@ export const loadPlayersFromDatabase = async (): Promise<DatabasePlayer[]> => {
 
 export const replaceTeams = async (items: ApiTeam[], version: number): Promise<void> => {
   const db = await getDatabase();
-  await db.withExclusiveTransactionAsync(async tx => {
+  await withExclusiveDatabaseWrite(db, async tx => {
     await tx.runAsync('DELETE FROM teams WHERE id NOT IN (SELECT team_id FROM event_teams)');
     for (const item of items) {
       await tx.runAsync(
@@ -197,7 +204,7 @@ export const replaceTeams = async (items: ApiTeam[], version: number): Promise<v
 
 export const replaceVenues = async (items: ApiVenue[], version: number): Promise<void> => {
   const db = await getDatabase();
-  await db.withExclusiveTransactionAsync(async tx => {
+  await withExclusiveDatabaseWrite(db, async tx => {
     for (const item of items) {
       await tx.runAsync(
         `INSERT INTO venues (id, name, address, latitude, longitude, updated_at, raw_json)
@@ -215,7 +222,7 @@ export const replaceVenues = async (items: ApiVenue[], version: number): Promise
 
 export const replaceLeagues = async (items: ApiLeague[], version: number): Promise<void> => {
   const db = await getDatabase();
-  await db.withExclusiveTransactionAsync(async tx => {
+  await withExclusiveDatabaseWrite(db, async tx => {
     for (const item of items) {
       await tx.runAsync(
         `INSERT INTO leagues (id, name, slug, updated_at, raw_json) VALUES (?, ?, ?, ?, ?)
@@ -230,7 +237,7 @@ export const replaceLeagues = async (items: ApiLeague[], version: number): Promi
 
 export const replaceSeasons = async (items: ApiSeason[], version: number): Promise<void> => {
   const db = await getDatabase();
-  await db.withExclusiveTransactionAsync(async tx => {
+  await withExclusiveDatabaseWrite(db, async tx => {
     for (const item of items) {
       await tx.runAsync(
         `INSERT INTO seasons (id, name, slug, updated_at, raw_json) VALUES (?, ?, ?, ?, ?)
@@ -245,7 +252,7 @@ export const replaceSeasons = async (items: ApiSeason[], version: number): Promi
 
 export const replacePlayers = async (items: DatabasePlayer[], version: number): Promise<void> => {
   const db = await getDatabase();
-  await db.withExclusiveTransactionAsync(async tx => {
+  await withExclusiveDatabaseWrite(db, async tx => {
     await tx.runAsync('DELETE FROM players');
     for (const item of items) {
       await tx.runAsync(
@@ -280,7 +287,7 @@ const ensureReference = async (
 export const upsertEvents = async (events: ApiEvent[]): Promise<number> => {
   if (events.length === 0) return 0;
   const db = await getDatabase();
-  await db.withExclusiveTransactionAsync(async tx => {
+  await withExclusiveDatabaseWrite(db, async tx => {
     for (const event of events) {
       const eventId = String(event.id);
       const teamIds = (event.teams || []).map(String);
@@ -408,20 +415,27 @@ export const replaceTrainingsInRange = async (
 ): Promise<number> => {
   const db = await getDatabase();
   const synchronizedAt = nowIso();
-  await db.withExclusiveTransactionAsync(async tx => {
+  const dateToExclusiveValue = new Date(`${dateTo}T00:00:00.000Z`);
+  dateToExclusiveValue.setUTCDate(dateToExclusiveValue.getUTCDate() + 1);
+  const dateToExclusive = dateToExclusiveValue.toISOString().slice(0, 10);
+  await withExclusiveDatabaseWrite(db, async tx => {
     await tx.runAsync(
       `DELETE FROM trainings
-       WHERE substr(start_at, 1, 10) BETWEEN ? AND ? AND team_id = ?`,
+       WHERE team_id = ? AND start_at >= ? AND start_at < ?`,
+      teamId,
       dateFrom,
-      dateTo,
-      teamId
+      dateToExclusive
     );
-    for (const item of items) {
-      await tx.runAsync(
-        `INSERT INTO trainings
-          (id, uid, type, title, start_at, end_at, timezone, location, note,
-           team_id, team_name, updated_at, raw_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    // Keep well below SQLite's usual bind-variable limit while avoiding one
+    // native bridge/finalize cycle per training. For the current 19-row
+    // schedule this is one INSERT instead of 19 separate statements.
+    const insertChunkSize = 50;
+    for (let offset = 0; offset < items.length; offset += insertChunkSize) {
+      const chunk = items.slice(offset, offset + insertChunkSize);
+      const placeholders = chunk
+        .map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .join(', ');
+      const values = chunk.flatMap(item => [
         String(item.id),
         item.uid,
         item.type,
@@ -434,7 +448,14 @@ export const replaceTrainingsInRange = async (
         item.team?.id || '',
         item.team?.name || '',
         item.updated_at || synchronizedAt,
-        JSON.stringify(item)
+        JSON.stringify(item),
+      ]);
+      await tx.runAsync(
+        `INSERT INTO trainings
+          (id, uid, type, title, start_at, end_at, timezone, location, note,
+           team_id, team_name, updated_at, raw_json)
+         VALUES ${placeholders}`,
+        ...values
       );
     }
     await tx.runAsync(

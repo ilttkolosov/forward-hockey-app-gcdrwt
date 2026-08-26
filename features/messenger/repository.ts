@@ -1,5 +1,6 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 import { Platform } from "react-native";
+import { enqueueDatabaseWrite } from "../../database/writeCoordinator";
 import { applyMessengerAliases } from "./aliases";
 import { mergeMessengerDelivery } from "./feed";
 import type {
@@ -73,26 +74,16 @@ export interface MessengerCachedMessageSearchResult {
   };
 }
 
-const messengerWriteQueues = new WeakMap<SQLiteDatabase, Promise<void>>();
 const messengerRoomCacheWrites = new WeakMap<
   SQLiteDatabase,
   WeakMap<MessengerRoom[], Promise<MessengerRoom[]>>
 >();
 
 function enqueueMessengerWrite<T>(
-  db: SQLiteDatabase,
+  _db: SQLiteDatabase,
   operation: () => Promise<T>,
 ): Promise<T> {
-  const previous = messengerWriteQueues.get(db) ?? Promise.resolve();
-  const current = previous.catch(() => undefined).then(operation);
-  messengerWriteQueues.set(
-    db,
-    current.then(
-      () => undefined,
-      () => undefined,
-    ),
-  );
-  return current;
+  return enqueueDatabaseWrite(operation);
 }
 
 async function withMessengerTransaction(

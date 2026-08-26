@@ -42,6 +42,7 @@ import { syncMessengerUnreadFromRooms } from "../../services/messengerUnread";
 import { colors } from "../../styles/commonStyles";
 import { setMessengerMutedRooms } from "../../services/messengerSounds";
 import { trackMessengerAction } from "../../services/analyticsService";
+import { isSQLiteBusyError } from "../../database/writeCoordinator";
 
 function lastMessageText(room: MessengerRoom): string {
   if (!room.last_message) return "Сообщений пока нет";
@@ -281,6 +282,20 @@ export default function MessengerRoomsScreen() {
         });
       } catch (loadError) {
         if (fetchRemote) hasLoadedOnce.current = false;
+        if (isSQLiteBusyError(loadError)) {
+          setOffline(false);
+          setError(null);
+          messengerLog("debug", "rooms.sync.database_busy_retry", {
+            duration_ms: Date.now() - startedAt,
+          });
+          if (!connectionSyncTimer.current) {
+            connectionSyncTimer.current = setTimeout(() => {
+              connectionSyncTimer.current = null;
+              void loadRooms(false, false, true);
+            }, 1_000);
+          }
+          return;
+        }
         setOffline(isMessengerConnectionError(loadError));
         setError(messengerErrorMessage(loadError, "Не удалось обновить чаты"));
         messengerLog("warn", "rooms.sync.failed", {
@@ -441,6 +456,22 @@ export default function MessengerRoomsScreen() {
         } catch (bootstrapError) {
           if (!active) return;
           hasLoadedOnce.current = false;
+          if (isSQLiteBusyError(bootstrapError)) {
+            setOffline(false);
+            setError(null);
+            setLoading(true);
+            setPreparation({
+              mode: "preparing",
+              progress: 88,
+              message: "Завершаем подготовку локальных данных…",
+            });
+            messengerLog("debug", "rooms.bootstrap.database_busy_retry", {});
+            refreshTimer = setTimeout(() => {
+              refreshTimer = null;
+              if (active) setPreparationAttempt((current) => current + 1);
+            }, 1_000);
+            return;
+          }
           setOffline(isMessengerConnectionError(bootstrapError));
           setLoading(false);
           setPreparation({
@@ -448,7 +479,7 @@ export default function MessengerRoomsScreen() {
             progress: 20,
             message: messengerErrorMessage(
               bootstrapError,
-              "Не удалось подготовить мессенджер",
+              "Не удалось подготовить мессенджер. Проверьте подключение и повторите попытку",
             ),
           });
           messengerLog("warn", "rooms.bootstrap.failed", {

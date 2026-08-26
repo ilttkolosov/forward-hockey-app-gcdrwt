@@ -125,17 +125,25 @@ export const synchronizeTrainings = async (
     const startedAt = Date.now();
     let failureStage: NonNullable<TrainingSyncResult['failureStage']> = 'network';
     try {
+      const networkStartedAt = Date.now();
       const response = await apiService.fetchTrainings(query);
+      const networkDurationMs = Date.now() - networkStartedAt;
       failureStage = 'validation';
+      const validationStartedAt = Date.now();
       const normalized = response.data.map(normalizeTraining);
       if (normalized.some(item => item.team.id !== query.team)) {
         throw new Error('Сервер вернул расписание другой команды');
       }
+      const validationDurationMs = Date.now() - validationStartedAt;
       failureStage = 'database';
+      const databaseStartedAt = Date.now();
       await replaceTrainingsInRange(normalized, query.date_from, query.date_to, query.team || '');
+      const databaseDurationMs = Date.now() - databaseStartedAt;
       console.log(
         `[Тренировки] SQLite обновлён: ${normalized.length} занятий, `
-        + `диапазон ${query.date_from}—${query.date_to}, ${Date.now() - startedAt} мс`
+        + `диапазон ${query.date_from}—${query.date_to}, запись=${databaseDurationMs} мс, `
+        + `сеть=${networkDurationMs} мс, проверка=${validationDurationMs} мс, `
+        + `всего=${Date.now() - startedAt} мс`
       );
       notifyListeners(normalized);
       void rescheduleTrainingNotifications();
