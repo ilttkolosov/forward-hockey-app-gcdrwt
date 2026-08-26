@@ -9,6 +9,13 @@ diff --git a/node_modules/expo-notifications/android/src/main/java/expo/modules/
  import expo.modules.notifications.notifications.SoundResolver
  import expo.modules.notifications.notifications.enums.NotificationPriority
  import expo.modules.notifications.notifications.interfaces.INotificationContent
+@@ -25,5 +26,6 @@ import expo.modules.notifications.service.NotificationsService
+ import expo.modules.notifications.service.NotificationsService.Companion.createNotificationResponseIntent
+ import expo.modules.notifications.service.delegates.SharedPreferencesNotificationCategoriesStore
+ import java.io.IOException
++import me.leolin.shortcutbadger.ShortcutBadger
+ import kotlin.math.max
+ import kotlin.math.min
 @@ -108,7 +109,19 @@ open class ExpoNotificationBuilder(
      builder.setStyle(NotificationCompat.BigTextStyle().bigText(content.text))
  
@@ -30,3 +37,20 @@ diff --git a/node_modules/expo-notifications/android/src/main/java/expo/modules/
      notificationContent.categoryId?.let { addActionsToBuilder(builder, it) }
  
      applySoundsAndVibrations(content, builder)
+@@ -150,8 +164,15 @@ open class ExpoNotificationBuilder(
+     if (notificationContent.containsImage()) {
+       val bitmap = notificationContent.getImage(context)
+       bitmap?.let { builder.setLargeIcon(it) }
+     } else {
+       builder.setLargeIcon(largeIcon)
+     }
+-    return builder.build()
++    val builtNotification = builder.build()
++    badgeCount?.let {
++      // Xiaomi reads the exact number from the notification's proprietary
++      // extraNotification.messageCount field. setNumber/applyCount alone let
++      // MIUI fall back to its capped count of active notification cards.
++      ShortcutBadger.applyNotification(context, builtNotification, it)
++    }
++    return builtNotification
+   }

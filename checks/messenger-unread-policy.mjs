@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   MessengerUnreadMessageLedger,
   messengerUnreadAuthAction,
@@ -20,6 +21,21 @@ import {
   recoveredMessengerRoomUnreadFloor,
 } from "../features/messenger/presentedUnreadPolicy.ts";
 import { messengerRoomInitialSyncPlan } from "../features/messenger/roomInitialSyncPolicy.ts";
+
+const expoNotificationsPatch = readFileSync(
+  new URL("../patches/expo-notifications+0.32.17.patch", import.meta.url),
+  "utf8",
+);
+assert.match(
+  expoNotificationsPatch,
+  /ShortcutBadger\.applyNotification\(context, builtNotification, it\)/,
+  "Xiaomi must receive the exact unread total on the posted notification",
+);
+assert.match(
+  expoNotificationsPatch,
+  /builder\.setNumber\(it\)/,
+  "Standard Android launchers must receive the custom notification count",
+);
 
 assert.deepEqual(
   messengerRoomInitialSyncPlan({
