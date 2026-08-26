@@ -156,7 +156,10 @@ export default function MessengerPersistenceBridge() {
         });
       }
     };
-    const synchronizeRooms = async (forceNetwork = false) => {
+    const synchronizeRooms = async (
+      forceNetwork = false,
+      startupUnreadPriority = false,
+    ) => {
       if (roomsSyncRunning) {
         roomsSyncQueued = true;
         return;
@@ -164,11 +167,17 @@ export default function MessengerPersistenceBridge() {
       roomsSyncRunning = true;
       lastRoomsSyncStartedAt = Date.now();
       try {
-        void synchronizeAliases();
         const rooms = await getMessengerRooms({
-          priority: "background",
+          priority: startupUnreadPriority ? "foreground" : "background",
           force: forceNetwork,
         });
+        if (active) {
+          // The response already contains the authoritative unread total.
+          // Publish it before delivery acknowledgements and SQLite writes so
+          // a cold Android start never waits for the database write queue.
+          await syncMessengerUnreadFromRooms(rooms, "authoritative");
+        }
+        void synchronizeAliases();
         for (const room of rooms) {
           const latest = room.last_message;
           if (
@@ -205,6 +214,8 @@ export default function MessengerPersistenceBridge() {
         const reconciled = await cacheMessengerRooms(db, rooms);
         if (active) {
           setMessengerMutedRooms(reconciled);
+          // A newer local read cursor may legitimately reduce the server
+          // snapshot after it has been cached on this device.
           await syncMessengerUnreadFromRooms(reconciled, "authoritative");
           // Android can have newer still-present notifications than a room
           // request which was already travelling when the PUSH arrived.
@@ -259,6 +270,10 @@ export default function MessengerPersistenceBridge() {
         void synchronizeRooms(force);
       }, delay);
     };
+    // Unread is part of the first home screen, unlike aliases, media and
+    // history warm-up. Start its authoritative request as soon as the restored
+    // session mounts this bridge, without waiting for InteractionManager.
+    void synchronizeRooms(true, true);
     void unreadHydration
       .then(async (cached) => {
         await waitForAppInteractive();

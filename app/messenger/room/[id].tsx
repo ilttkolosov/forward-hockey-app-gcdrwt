@@ -89,6 +89,7 @@ import {
   removeMessengerOutboxItems,
   replaceMessengerOutboxItem,
 } from "../../../features/messenger/repository";
+import { messengerRoomInitialSyncPlan } from "../../../features/messenger/roomInitialSyncPolicy";
 import type {
   MessengerContact,
   MessengerMessage,
@@ -2280,16 +2281,40 @@ export default function MessengerRoomScreen() {
         let reconciledMessageCount = 0;
         let syncDirection: "after" | "latest" = "latest";
 
-        if (reconciliationCursor) {
+        const roomSyncPlan = messengerRoomInitialSyncPlan({
+          initial,
+          expectedUnreadCount,
+          reconciliationCursor,
+        });
+        if (roomSyncPlan.direction === "latest") {
+          // Android PUSH handling can leave a sparse cache: the newest message
+          // may be present while several preceding messages were displayed by
+          // the OS without a running JS task. A maximum local sequence is not
+          // proof that the cached range is continuous. Always merge a fresh
+          // latest server window on first entry to make missing PUSH-era
+          // messages visible immediately.
+          syncDirection = "latest";
+          const remote = await getMessengerMessages(roomId, {
+            limit: roomSyncPlan.limit,
+            priority: "foreground",
+          });
+          receivedMessageCount = remote.items.length;
+          latestSequence = remote.page.latest_sequence;
+          remoteHasMoreNewerMessages.current = false;
+          await applyRemoteMessages(remote.items, true);
+          if (initial && !remote.page.has_more) {
+            await markMessengerRoomHistoryComplete(db, roomId);
+          }
+        } else {
           // One request advances the SQLite cursor and refreshes the exact
           // messages visible on this phone. Edits and tombstones keep their
           // sequence, so they are selected by id rather than by rereading an
           // arbitrary 100-message tail.
           syncDirection = "after";
           const page = await syncMessengerRoomMessages(roomId, {
-            afterSequence: reconciliationCursor,
+            afterSequence: roomSyncPlan.afterSequence,
             messageIds: reconciliationMessageIds,
-            limit: 20,
+            limit: roomSyncPlan.limit,
           });
           receivedMessageCount = page.items.length;
           reconciledMessageCount = page.reconciled_items.length;
@@ -2307,19 +2332,6 @@ export default function MessengerRoomScreen() {
           }
           if (page.page.latest_sequence) {
             latestSequence = page.page.latest_sequence;
-          }
-        } else {
-          const remote = await getMessengerMessages(roomId, { limit: 20 });
-          receivedMessageCount = remote.items.length;
-          latestSequence = remote.page.latest_sequence;
-          // `latest` already returns the newest window. Its `has_more` flag
-          // refers to older history, not messages below the visible tail.
-          remoteHasMoreNewerMessages.current = false;
-          await applyRemoteMessages(remote.items, true);
-          if (initial) {
-            if (!remote.page.has_more) {
-              await markMessengerRoomHistoryComplete(db, roomId);
-            }
           }
         }
 
@@ -5009,7 +5021,7 @@ export default function MessengerRoomScreen() {
             ref={listRef}
             data={visibleMessages}
             keyExtractor={(message) => message.client_message_id}
-            style={[styles.messageFeed, !listReady && styles.messageFeedHidden]}
+            style={styles.messageFeed}
             contentContainerStyle={
               visibleMessages.length ? styles.messageList : styles.emptyList
             }
@@ -6095,7 +6107,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   messageFeed: { flex: 1 },
-  messageFeedHidden: { opacity: 0 },
   feedPositioning: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",

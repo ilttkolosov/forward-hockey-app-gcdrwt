@@ -18,6 +18,26 @@ import {
   presentedMessengerUnreadFloor,
   recoveredMessengerRoomUnreadFloor,
 } from "../features/messenger/presentedUnreadPolicy.ts";
+import { messengerRoomInitialSyncPlan } from "../features/messenger/roomInitialSyncPolicy.ts";
+
+assert.deepEqual(
+  messengerRoomInitialSyncPlan({
+    initial: true,
+    expectedUnreadCount: 11,
+    reconciliationCursor: "500",
+  }),
+  { direction: "latest", limit: 21 },
+  "A sparse PUSH cache must not turn its maximum sequence into the first-entry cursor",
+);
+assert.deepEqual(
+  messengerRoomInitialSyncPlan({
+    initial: false,
+    expectedUnreadCount: 0,
+    reconciliationCursor: "500",
+  }),
+  { direction: "after", limit: 20, afterSequence: "500" },
+  "A later reconciliation may continue after the proven visible cursor",
+);
 
 assert.equal(
   presentedMessengerUnreadFloor(
