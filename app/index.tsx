@@ -26,7 +26,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDeclension } from './tournaments/index'; // ← импортируем склонение
 import { useNetworkStatus } from '../contexts/NetworkStatusContext';
 import { useMessengerAuth } from '../contexts/MessengerAuthContext';
-import { useMessengerUnreadCount } from '../services/messengerUnread';
+import { useMessengerUnreadSnapshot } from '../services/messengerUnread';
 import { useReferenceDataRevision } from '../services/referenceDataUpdates';
 
 const TOURNAMENTS_NOW_KEY = 'tournaments_now';
@@ -159,7 +159,8 @@ const warningStyles = StyleSheet.create({
 export default function HomeScreen() {
   const { isOffline } = useNetworkStatus();
   const { isAuthenticated: isMessengerAuthenticated } = useMessengerAuth();
-  const messengerUnreadCount = useMessengerUnreadCount();
+  const messengerUnread = useMessengerUnreadSnapshot();
+  const messengerUnreadCount = messengerUnread.count;
   const referenceRevision = useReferenceDataRevision([
     'teams',
     'venues',
@@ -312,7 +313,7 @@ export default function HomeScreen() {
             asChild
           >
             <TouchableOpacity style={quickNavStyles.item}>
-              {isMessengerAuthenticated && messengerUnreadCount > 0 && (
+              {isMessengerAuthenticated && messengerUnread.ready && messengerUnreadCount > 0 && (
                 <View style={quickNavStyles.unreadBadge}>
                   <Text style={quickNavStyles.unreadBadgeText}>
                     {messengerUnreadCount > 99 ? '99+' : messengerUnreadCount}

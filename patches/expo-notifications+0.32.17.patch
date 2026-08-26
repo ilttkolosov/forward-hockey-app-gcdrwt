@@ -1,0 +1,32 @@
+diff --git a/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt b/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt
+--- a/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt
++++ b/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt
+@@ -12,6 +12,7 @@ import android.provider.Settings
+ import android.util.Log
+ import androidx.core.app.NotificationCompat
+ import androidx.core.app.RemoteInput
++import expo.modules.notifications.badge.BadgeHelper
+ import expo.modules.notifications.notifications.SoundResolver
+ import expo.modules.notifications.notifications.enums.NotificationPriority
+ import expo.modules.notifications.notifications.interfaces.INotificationContent
+@@ -108,7 +109,19 @@ open class ExpoNotificationBuilder(
+     builder.setStyle(NotificationCompat.BigTextStyle().bigText(content.text))
+ 
+     color?.let { builder.color = it.toInt() }
+-    notificationContent.badgeCount?.toInt()?.let { builder.setNumber(it) }
++    val badgeCount = notificationContent.badgeCount?.toInt()
++      ?: content.body
++        ?.takeIf { it.has("unread_count") }
++        ?.optInt("unread_count")
++        ?.coerceAtLeast(0)
++    badgeCount?.let {
++      builder.setNumber(it)
++      // Expo Push Service maps `badge` only on iOS. Messenger PUSHes carry the
++      // absolute total in data.unread_count, so apply it natively while the JS
++      // process is stopped as well. Zero is cleared by the normal app path;
++      // BadgeHelper's zero branch cancels notifications and is unsafe here.
++      if (it > 0) BadgeHelper.setBadgeCount(context, it)
++    }
+     notificationContent.categoryId?.let { addActionsToBuilder(builder, it) }
+ 
+     applySoundsAndVibrations(content, builder)

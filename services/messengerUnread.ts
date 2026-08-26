@@ -9,6 +9,7 @@ import { messengerLog } from "./messengerLogger";
 import {
   MessengerUnreadMessageLedger,
   normalizeMessengerUnreadCount,
+  protectMessengerUnreadAfterServer,
   reconcileMessengerUnreadCount,
   selectMessengerUnreadRestore,
   type MessengerUnreadSource,
@@ -22,11 +23,19 @@ let currentUnreadUserId: string | null = null;
 let unreadSessionGeneration = 0;
 let unreadAuthoritativeRevision = 0;
 let hasAuthoritativeUnreadSnapshot = false;
+let hasServerUnreadSnapshot = false;
+let unreadDisplayReady = false;
 let badgeUpdateQueue: Promise<void> = Promise.resolve();
 let persistenceQueue: Promise<void> = Promise.resolve();
 let badgeUnsupportedReported = false;
 const accountedUnreadMessages = new MessengerUnreadMessageLedger();
 const listeners = new Set<(count: number) => void>();
+const snapshotListeners = new Set<(snapshot: MessengerUnreadSnapshot) => void>();
+
+export interface MessengerUnreadSnapshot {
+  count: number;
+  ready: boolean;
+}
 
 function unreadCountKey(userId: string): string {
   return `${MESSENGER_UNREAD_COUNT_PREFIX}${userId}`;
@@ -34,6 +43,15 @@ function unreadCountKey(userId: string): string {
 
 function notifyUnreadListeners(count: number): void {
   for (const listener of listeners) listener(count);
+}
+
+function unreadSnapshot(): MessengerUnreadSnapshot {
+  return { count: currentUnreadCount, ready: unreadDisplayReady };
+}
+
+function notifyUnreadSnapshotListeners(): void {
+  const snapshot = unreadSnapshot();
+  for (const listener of snapshotListeners) listener(snapshot);
 }
 
 function enqueueUnreadPersistence(userId: string, count: number): Promise<void> {
@@ -100,6 +118,20 @@ export function subscribeMessengerUnreadCount(
   return () => listeners.delete(listener);
 }
 
+export function subscribeMessengerUnreadSnapshot(
+  listener: (snapshot: MessengerUnreadSnapshot) => void,
+): () => void {
+  snapshotListeners.add(listener);
+  listener(unreadSnapshot());
+  return () => snapshotListeners.delete(listener);
+}
+
+export function markMessengerUnreadDisplayReady(): void {
+  if (unreadDisplayReady) return;
+  unreadDisplayReady = true;
+  notifyUnreadSnapshotListeners();
+}
+
 /**
  * Starts a user-scoped unread lifecycle without touching the native badge.
  * The first session keeps a count already supplied by a background push; a
@@ -112,11 +144,14 @@ export function beginMessengerUnreadSession(userId: string): void {
   unreadSessionGeneration += 1;
   unreadAuthoritativeRevision = 0;
   hasAuthoritativeUnreadSnapshot = false;
+  hasServerUnreadSnapshot = false;
+  unreadDisplayReady = false;
   if (shouldReset) accountedUnreadMessages.clear();
   if (shouldReset && currentUnreadCount !== 0) {
     currentUnreadCount = 0;
     notifyUnreadListeners(0);
   }
+  notifyUnreadSnapshotListeners();
 }
 
 /** Restores the best known count before the first authoritative room request. */
@@ -182,7 +217,10 @@ export async function clearMessengerUnreadSession(): Promise<void> {
   currentUnreadUserId = null;
   unreadSessionGeneration += 1;
   hasAuthoritativeUnreadSnapshot = false;
+  hasServerUnreadSnapshot = false;
+  unreadDisplayReady = false;
   accountedUnreadMessages.clear();
+  notifyUnreadSnapshotListeners();
   await setMessengerUnreadCount(0, "logout");
   if (previousUserId) {
     await enqueueUnreadPersistence(previousUserId, 0).catch(() => undefined);
@@ -193,6 +231,10 @@ export async function setMessengerUnreadCount(
   value: number,
   source: MessengerUnreadSource = "authoritative",
 ): Promise<number> {
+  const displayWasReady = unreadDisplayReady;
+  if (source === "authoritative") {
+    hasServerUnreadSnapshot = true;
+  }
   if (
     source === "authoritative" ||
     source === "system" ||
@@ -203,9 +245,15 @@ export async function setMessengerUnreadCount(
   ) {
     unreadAuthoritativeRevision += 1;
   }
-  const next = reconcileMessengerUnreadCount(
+  const protectedValue = protectMessengerUnreadAfterServer(
     currentUnreadCount,
     value,
+    source,
+    hasServerUnreadSnapshot,
+  );
+  const next = reconcileMessengerUnreadCount(
+    currentUnreadCount,
+    protectedValue,
     source,
     hasAuthoritativeUnreadSnapshot,
   );
@@ -221,6 +269,9 @@ export async function setMessengerUnreadCount(
   const changed = next !== currentUnreadCount;
   currentUnreadCount = next;
   if (changed) notifyUnreadListeners(next);
+  if (changed || displayWasReady !== unreadDisplayReady) {
+    notifyUnreadSnapshotListeners();
+  }
 
   const shouldRefreshPersistence =
     changed ||
@@ -292,4 +343,10 @@ export function useMessengerUnreadCount(): number {
   const [count, setCount] = useState(getMessengerUnreadCount);
   useEffect(() => subscribeMessengerUnreadCount(setCount), []);
   return count;
+}
+
+export function useMessengerUnreadSnapshot(): MessengerUnreadSnapshot {
+  const [snapshot, setSnapshot] = useState(unreadSnapshot);
+  useEffect(() => subscribeMessengerUnreadSnapshot(setSnapshot), []);
+  return snapshot;
 }

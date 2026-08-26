@@ -93,6 +93,30 @@ export function reconcileMessengerUnreadCount(
     : normalizedIncoming;
 }
 
+/**
+ * Once a server room snapshot has arrived, delayed device restoration is only
+ * a fallback. It may contain a newer PUSH and raise the total, but it must not
+ * flash an older lower value over the already reconciled server result.
+ */
+export function protectMessengerUnreadAfterServer(
+  current: number,
+  incoming: number,
+  source: MessengerUnreadSource,
+  hasServerSnapshot: boolean,
+): number {
+  const normalizedIncoming = normalizeMessengerUnreadCount(incoming);
+  if (
+    hasServerSnapshot &&
+    (source === "stored" || source === "system" || source === "presented")
+  ) {
+    return Math.max(
+      normalizeMessengerUnreadCount(current),
+      normalizedIncoming,
+    );
+  }
+  return normalizedIncoming;
+}
+
 /** Prevents the cold-start `loading` state from being mistaken for logout. */
 export function messengerUnreadAuthAction(
   status: MessengerUnreadAuthStatus,

@@ -43,6 +43,7 @@ import {
   clearMessengerUnreadSession,
   hydrateMessengerUnreadSession,
   incrementMessengerUnreadForMessage,
+  markMessengerUnreadDisplayReady,
   refreshMessengerUnreadFromCache,
   syncMessengerUnreadFromRooms,
 } from "../../services/messengerUnread";
@@ -223,9 +224,19 @@ export default function MessengerPersistenceBridge() {
           if (Platform.OS === "android") {
             await syncMessengerUnreadFromPresentedNotifications();
           }
+          // The home badge becomes visible only after server rooms, the local
+          // read cursors and Android's newer presented PUSHes agree. Publishing
+          // readiness earlier made cold starts visibly jump between totals.
+          markMessengerUnreadDisplayReady();
         }
         scheduleHistoryWarmup(reconciled);
       } catch (error) {
+        if (startupUnreadPriority) {
+          void unreadHydration.then(
+            markMessengerUnreadDisplayReady,
+            markMessengerUnreadDisplayReady,
+          );
+        }
         messengerLog("debug", "rooms.background_sync.deferred", {
           message: error instanceof Error ? error.message : String(error),
         });

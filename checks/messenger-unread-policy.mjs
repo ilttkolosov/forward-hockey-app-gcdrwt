@@ -3,6 +3,7 @@ import {
   MessengerUnreadMessageLedger,
   messengerUnreadAuthAction,
   normalizeMessengerUnreadCount,
+  protectMessengerUnreadAfterServer,
   reconcileMessengerUnreadCount,
   selectMessengerUnreadRestore,
 } from "../services/messengerUnreadPolicy.ts";
@@ -148,6 +149,21 @@ assert.equal(normalizeMessengerUnreadCount(4.9), 4);
 assert.equal(selectMessengerUnreadRestore(9, 6), 6);
 assert.equal(selectMessengerUnreadRestore(6, 0), 6);
 assert.equal(selectMessengerUnreadRestore(2, 7), 7);
+assert.equal(
+  protectMessengerUnreadAfterServer(13, 5, "presented", true),
+  13,
+  "A delayed Android restore must not flash five over server total thirteen",
+);
+assert.equal(
+  protectMessengerUnreadAfterServer(13, 14, "presented", true),
+  14,
+  "A newer presented PUSH may still raise the server total",
+);
+assert.equal(
+  protectMessengerUnreadAfterServer(13, 5, "presented", false),
+  5,
+  "Before the server responds, device restoration remains an exact fallback",
+);
 
 const messageLedger = new MessengerUnreadMessageLedger(3);
 assert.equal(messageLedger.record("message-1"), true);
