@@ -6,7 +6,13 @@ import {
   type ShareIntentFile,
   useShareIntentContext,
 } from "expo-share-intent";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   BackHandler,
@@ -185,6 +191,7 @@ export default function MessengerShareScreen() {
   const [sendPhase, setSendPhase] = useState<SendPhase>("idle");
   const [progress, setProgress] = useState<number | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
+  const closingShare = useRef(false);
   // Keep the controls locked after the server response too. Without this the
   // short success confirmation window allowed a second tap to start a second
   // message before the share flow was closed.
@@ -193,6 +200,7 @@ export default function MessengerShareScreen() {
     sendPhase === "preparing" || sendPhase === "uploading";
 
   useEffect(() => {
+    if (closingShare.current) return;
     const initial = normalizedShareText(
       shareIntent.text,
       shareIntent.webUrl,
@@ -316,9 +324,16 @@ export default function MessengerShareScreen() {
   );
 
   const finishShare = useCallback(async () => {
-    resetShareIntent();
+    if (closingShare.current) return;
+    closingShare.current = true;
+    // Clear both the JS payload and the native Android Activity intent before
+    // changing routes. Otherwise the bridge can observe the old ACTION_SEND
+    // once more and reopen this screen after a successful upload.
+    resetShareIntent(true);
     await cleanupIosShareFiles(sharedFiles);
     if (Platform.OS === "android") {
+      await wait(80);
+      router.replace("/messenger/rooms");
       await wait(80);
       BackHandler.exitApp();
       return;
@@ -523,7 +538,7 @@ export default function MessengerShareScreen() {
     (shareIntentError
       ? "Не удалось получить материал из системного меню"
       : null) ||
-    (shareIntentReady && !hasShareIntent
+    (shareIntentReady && !hasShareIntent && !closingShare.current
       ? "Материал для отправки больше недоступен"
       : null);
   const sendDisabled =

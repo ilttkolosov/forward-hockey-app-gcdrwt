@@ -364,6 +364,10 @@ npx --yes eas-cli@21.7.0 device:create
 - `stabilization/foundation` — текущая стабилизация и реорганизация.
 - Перед каждой сборкой выполняются `npm ci`, `npm run check` и smoke-тесты.
 - `autoIncrement` в EAS увеличивает Android `versionCode` и iOS `buildNumber`.
+- Workflow `Automatic app versioning` повышает patch-сегмент и оба native
+  build-номера для каждого рабочего коммита. При push в `main` minor-сегмент
+  повышается, patch сбрасывается в `0`, а build-номера также увеличиваются.
+  Служебные коммиты содержат `[versioned]`, чтобы исключить повторный запуск.
 
 ## Документация изменений
 

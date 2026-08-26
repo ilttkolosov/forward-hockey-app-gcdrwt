@@ -1,17 +1,20 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
   Image,
   InteractionManager,
+  LayoutAnimation,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
   Text,
   TouchableOpacity,
+  UIManager,
   View,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -24,8 +27,9 @@ import SavedMessagesAvatar from "../../features/messenger/SavedMessagesAvatar";
 import {
   cacheMessengerRooms,
   loadCachedMessengerRooms,
+  subscribeMessengerRoomCacheChanges,
 } from "../../features/messenger/repository";
-import { mergeMessengerRoomReadState } from "../../features/messenger/roomListState";
+import { mergeMessengerRoomSnapshots } from "../../features/messenger/roomListState";
 import type { MessengerRoom } from "../../features/messenger/types";
 import { useTypingDots } from "../../features/messenger/useTypingDots";
 import {
@@ -44,6 +48,13 @@ import { setMessengerMutedRooms } from "../../services/messengerSounds";
 import { trackMessengerAction } from "../../services/analyticsService";
 import { isSQLiteBusyError } from "../../database/writeCoordinator";
 
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 function lastMessageText(room: MessengerRoom): string {
   if (!room.last_message) return "Сообщений пока нет";
   if (room.last_message.kind === "image") return "Фото";
@@ -60,6 +71,23 @@ function sequenceIsNewer(candidate: string, current: string): boolean {
   return left.length !== right.length
     ? left.length > right.length
     : left.localeCompare(right) > 0;
+}
+
+function compareRoomOrder(left: MessengerRoom, right: MessengerRoom): number {
+  const leftPersonal =
+    left.room_type === "direct" || left.room_type === "private_group";
+  const rightPersonal =
+    right.room_type === "direct" || right.room_type === "private_group";
+  if (leftPersonal !== rightPersonal) return leftPersonal ? 1 : -1;
+  if (!leftPersonal && left.sort_order !== right.sort_order) {
+    return left.sort_order - right.sort_order;
+  }
+  if (leftPersonal) {
+    const leftTime = left.last_message?.created_at || "";
+    const rightTime = right.last_message?.created_at || "";
+    if (leftTime !== rightTime) return rightTime.localeCompare(leftTime);
+  }
+  return left.title.localeCompare(right.title, "ru");
 }
 
 const BUILT_IN_ROOM_KINDS = new Set([
@@ -210,6 +238,64 @@ export default function MessengerRoomsScreen() {
   const hasLoadedOnce = useRef(false);
   const hasVisibleRooms = useRef(false);
   const lastRoomsSyncFinishedAt = useRef(0);
+  const roomCacheRefreshRunning = useRef(false);
+  const roomCacheRefreshQueued = useRef(false);
+
+  const applyCachedRoomSnapshots = useCallback(
+    (cached: MessengerRoom[]) => {
+      setRooms((current) => {
+        const next = mergeMessengerRoomSnapshots(current, cached);
+        if (next === current) return current;
+        const currentOrder = [...current]
+          .sort(compareRoomOrder)
+          .map((room) => room.id)
+          .join(":");
+        const nextOrder = [...next]
+          .sort(compareRoomOrder)
+          .map((room) => room.id)
+          .join(":");
+        if (currentOrder !== nextOrder) {
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        }
+        hasVisibleRooms.current = next.length > 0;
+        setMessengerMutedRooms(next);
+        return next;
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let active = true;
+    const refreshFromCache = async () => {
+      if (roomCacheRefreshRunning.current) {
+        roomCacheRefreshQueued.current = true;
+        return;
+      }
+      roomCacheRefreshRunning.current = true;
+      try {
+        const cached = await loadCachedMessengerRooms(db);
+        if (active) applyCachedRoomSnapshots(cached);
+      } catch (cacheError) {
+        messengerLog("debug", "rooms.live_cache.refresh_deferred", {
+          message: messengerErrorMessage(cacheError),
+        });
+      } finally {
+        roomCacheRefreshRunning.current = false;
+        if (roomCacheRefreshQueued.current && active) {
+          roomCacheRefreshQueued.current = false;
+          void refreshFromCache();
+        }
+      }
+    };
+    const unsubscribe = subscribeMessengerRoomCacheChanges(() => {
+      void refreshFromCache();
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [applyCachedRoomSnapshots, db]);
 
   const applyRooms = useCallback((
     nextRooms: MessengerRoom[],
@@ -222,23 +308,7 @@ export default function MessengerRoomsScreen() {
   }, []);
 
   const orderedRooms = useMemo(
-    () =>
-      [...rooms].sort((left, right) => {
-        const leftPersonal =
-          left.room_type === "direct" || left.room_type === "private_group";
-        const rightPersonal =
-          right.room_type === "direct" || right.room_type === "private_group";
-        if (leftPersonal !== rightPersonal) return leftPersonal ? 1 : -1;
-        if (!leftPersonal && left.sort_order !== right.sort_order) {
-          return left.sort_order - right.sort_order;
-        }
-        if (leftPersonal) {
-          const leftTime = left.last_message?.created_at || "";
-          const rightTime = right.last_message?.created_at || "";
-          if (leftTime !== rightTime) return rightTime.localeCompare(leftTime);
-        }
-        return left.title.localeCompare(right.title, "ru");
-      }),
+    () => [...rooms].sort(compareRoomOrder),
     [rooms],
   );
 
@@ -363,9 +433,7 @@ export default function MessengerRoomsScreen() {
           try {
             const cached = await loadCachedMessengerRooms(db);
             if (!active) return;
-            setRooms((current) =>
-              mergeMessengerRoomReadState(current, cached),
-            );
+            applyCachedRoomSnapshots(cached);
           } catch (cacheError) {
             messengerLog("debug", "rooms.read_state.refresh_deferred", {
               message: messengerErrorMessage(cacheError),
@@ -624,6 +692,7 @@ export default function MessengerRoomsScreen() {
       };
     }, [
       applyRooms,
+      applyCachedRoomSnapshots,
       db,
       loadRooms,
       preparationAttempt,

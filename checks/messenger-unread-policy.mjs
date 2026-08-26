@@ -6,7 +6,10 @@ import {
   reconcileMessengerUnreadCount,
   selectMessengerUnreadRestore,
 } from "../services/messengerUnreadPolicy.ts";
-import { mergeMessengerRoomReadState } from "../features/messenger/roomListState.ts";
+import {
+  mergeMessengerRoomReadState,
+  mergeMessengerRoomSnapshots,
+} from "../features/messenger/roomListState.ts";
 
 assert.equal(
   messengerUnreadAuthAction("loading", null),
@@ -152,6 +155,32 @@ assert.strictEqual(
   ]),
   staleReadRooms,
   "An older cache cursor must not overwrite the rendered room state",
+);
+
+const refreshedRooms = mergeMessengerRoomSnapshots(visibleRooms, [
+  {
+    ...untouchedRoom,
+    last_message: {
+      id: "message-2",
+      sequence: "52",
+      created_at: "2026-08-26T12:02:00Z",
+    },
+  },
+  {
+    ...visibleReadRoom,
+    last_message: {
+      id: "message-1",
+      sequence: "103",
+      created_at: "2026-08-26T12:03:00Z",
+    },
+  },
+]);
+assert.equal(refreshedRooms[0].last_message.id, "message-2");
+assert.equal(refreshedRooms[1].last_message.id, "message-1");
+assert.strictEqual(
+  mergeMessengerRoomSnapshots(refreshedRooms, refreshedRooms),
+  refreshedRooms,
+  "An unchanged SQLite snapshot must not rerender the room list",
 );
 
 console.log("messenger unread policy: ok");

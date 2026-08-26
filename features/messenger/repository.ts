@@ -84,6 +84,19 @@ const messengerRoomCacheWrites = new WeakMap<
   WeakMap<MessengerRoom[], Promise<MessengerRoom[]>>
 >();
 
+const messengerRoomCacheSubscribers = new Set<() => void>();
+
+function notifyMessengerRoomCacheChanged(): void {
+  messengerRoomCacheSubscribers.forEach((subscriber) => subscriber());
+}
+
+export function subscribeMessengerRoomCacheChanges(
+  subscriber: () => void,
+): () => void {
+  messengerRoomCacheSubscribers.add(subscriber);
+  return () => messengerRoomCacheSubscribers.delete(subscriber);
+}
+
 function enqueueMessengerWrite<T>(
   _db: SQLiteDatabase,
   operation: () => Promise<T>,
@@ -190,8 +203,16 @@ export async function loadCachedMessengerRooms(
     `SELECT room.raw_json, read_state.local_read_sequence
        FROM messenger_rooms room
        LEFT JOIN messenger_room_read_state read_state ON read_state.room_id = room.id
-      ORDER BY CASE WHEN kind = 'direct' THEN 1 ELSE 0 END,
-               team_name, sort_order, title`,
+      ORDER BY CASE
+                 WHEN json_extract(room.raw_json, '$.room_type') IN ('direct', 'private_group')
+                 THEN 1 ELSE 0
+               END,
+               CASE
+                 WHEN json_extract(room.raw_json, '$.room_type') IN ('direct', 'private_group')
+                 THEN json_extract(room.raw_json, '$.last_message.created_at')
+               END DESC,
+               room.sort_order,
+               room.title`,
   );
   return rows
     .map(parsedRoom)
@@ -308,6 +329,7 @@ export function cacheMessengerRooms(
         );
       }
     });
+    notifyMessengerRoomCacheChanged();
     return reconciledRooms;
   });
   writesForDatabase.set(rooms, write);
@@ -367,6 +389,7 @@ export function cacheMessengerRoomSnapshot(
       new Date().toISOString(),
       JSON.stringify(nextRoom),
     );
+    notifyMessengerRoomCacheChanged();
     return nextRoom;
   });
 }
@@ -441,6 +464,7 @@ export function markCachedMessengerRoomRead(
         JSON.stringify(nextRoom),
         roomId,
       );
+      notifyMessengerRoomCacheChanged();
     }
   });
 }
@@ -922,6 +946,7 @@ export function cacheIncomingMessengerMessage(
         message.room_id,
       );
     });
+    notifyMessengerRoomCacheChanged();
     return result;
   });
 }
@@ -931,8 +956,9 @@ export function cacheUpdatedMessengerMessage(
   db: SQLiteDatabase,
   incoming: MessengerMessage,
 ): Promise<void> {
-  return enqueueMessengerWrite(db, () =>
-    withMessengerTransaction(db, async (transaction) => {
+  return enqueueMessengerWrite(db, async () => {
+    let roomChanged = false;
+    await withMessengerTransaction(db, async (transaction) => {
       const existingRow = await transaction.getFirstAsync<MessageRow>(
         "SELECT raw_json FROM messenger_messages WHERE id = ?",
         incoming.id,
@@ -989,8 +1015,10 @@ export function cacheUpdatedMessengerMessage(
         JSON.stringify(nextRoom),
         message.room_id,
       );
-    }),
-  );
+      roomChanged = true;
+    });
+    if (roomChanged) notifyMessengerRoomCacheChanged();
+  });
 }
 
 /** Persists receipt aggregates without changing message order or room cards. */
@@ -1157,13 +1185,14 @@ export function markMessengerRoomHistoryComplete(
 }
 
 export function clearMessengerLocalData(db: SQLiteDatabase): Promise<void> {
-  return enqueueMessengerWrite(db, () =>
-    withMessengerTransaction(db, async (transaction) => {
+  return enqueueMessengerWrite(db, async () => {
+    await withMessengerTransaction(db, async (transaction) => {
       await transaction.runAsync("DELETE FROM messenger_outbox");
       await transaction.runAsync("DELETE FROM messenger_messages");
       await transaction.runAsync("DELETE FROM messenger_room_read_state");
       await transaction.runAsync("DELETE FROM messenger_room_cache_state");
       await transaction.runAsync("DELETE FROM messenger_rooms");
-    }),
-  );
+    });
+    notifyMessengerRoomCacheChanged();
+  });
 }

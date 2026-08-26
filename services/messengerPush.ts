@@ -45,6 +45,8 @@ export const MESSENGER_NOTIFICATION_CHANNEL = "messenger";
 const MESSENGER_PUSH_ENABLED_PREFIX = "messenger_push_enabled:";
 const MESSENGER_PUSH_PROMPTED_PREFIX = "messenger_push_prompted:";
 const MESSENGER_NATIVE_PUSH_TOKEN_PREFIX = "messenger_native_push_token:";
+const MESSENGER_PERMISSION_RESTORE_PREFIX =
+  "messenger_push_permission_restore_attempted:";
 const SHARED_EXPO_PUSH_TOKEN_KEY = "expo_push_token";
 let enableMessengerPushInFlight: Promise<MessengerPushRegistration> | null =
   null;
@@ -81,6 +83,10 @@ function promptedKey(userId: string): string {
 
 function nativePushTokenKey(userId: string): string {
   return `${MESSENGER_NATIVE_PUSH_TOKEN_PREFIX}${userId}`;
+}
+
+function permissionRestoreKey(userId: string): string {
+  return `${MESSENGER_PERMISSION_RESTORE_PREFIX}${userId}`;
 }
 
 function assertRemotePushAvailable(): void {
@@ -182,6 +188,7 @@ export async function getProjectExpoPushToken(): Promise<string> {
 
 async function ensureNotificationPermission(
   request: NotificationPermissionRequest,
+  userId?: string,
 ): Promise<boolean> {
   if (!remotePushNotificationsSupported) return false;
   let permission = await Notifications.getPermissionsAsync();
@@ -191,11 +198,26 @@ async function ensureNotificationPermission(
       ? permission.ios?.status ===
         Notifications.IosAuthorizationStatus.NOT_DETERMINED
       : permission.status === "undetermined";
-  const shouldRequest =
+  let shouldRequest =
     !granted &&
     permission.canAskAgain &&
     (request === "explicit" ||
       (request === "restore" && undetermined));
+  // Several Android vendor firmwares report a fresh installation as denied
+  // instead of undetermined. The per-installation marker lets an enabled
+  // server preference trigger exactly one OS request without repeatedly
+  // prompting a user who already declined it.
+  if (
+    !shouldRequest &&
+    request === "restore" &&
+    Platform.OS === "android" &&
+    userId &&
+    !granted &&
+    permission.canAskAgain
+  ) {
+    shouldRequest =
+      (await AsyncStorage.getItem(permissionRestoreKey(userId))) !== "true";
+  }
   if (shouldRequest) {
     permission = await Notifications.requestPermissionsAsync({
       ios: {
@@ -204,6 +226,9 @@ async function ensureNotificationPermission(
         allowSound: true,
       },
     });
+    if (request === "restore" && userId) {
+      await AsyncStorage.setItem(permissionRestoreKey(userId), "true");
+    }
     granted = messengerNotificationPermissionGranted(permission);
   }
   if (granted && Platform.OS === "ios" && permission.ios?.allowsBadge === false) {
@@ -244,6 +269,7 @@ export async function enableMessengerPush(
     if (
       !(await ensureNotificationPermission(
         requestPermission ? "explicit" : "never",
+        session.user.id,
       ))
     ) {
       throw new Error(
@@ -342,7 +368,7 @@ export async function syncMessengerPushRegistration(
       await unregisterMessengerPushDevice().catch(() => undefined);
       return;
     }
-    if (!(await ensureNotificationPermission("restore"))) {
+    if (!(await ensureNotificationPermission("restore", session.user.id))) {
       // The account-level choice stays enabled so another authorized device is
       // unaffected. This installation is disabled until the OS grants access.
       await unregisterMessengerPushDevice().catch(() => undefined);

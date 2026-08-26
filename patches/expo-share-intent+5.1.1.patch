@@ -365,7 +365,17 @@ diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/s
 +                                "title" to intent.getCharSequenceExtra(Intent.EXTRA_TITLE),
 +                            )
 +                        ))
-@@ -372 +399,0 @@
+@@ -192 +220,8 @@ class ExpoShareIntentModule : Module() {
+-            ExpoShareIntentSingleton.intent = null
++            ExpoShareIntentSingleton.intent = null
++            ExpoShareIntentSingleton.isPending = false
++            // A singleTask Activity keeps its original ACTION_SEND intent even
++            // after JS clears the payload. Replace it so reopening the existing
++            // task from the launcher cannot deliver an already-consumed URI.
++            currentActivity?.setIntent(Intent(Intent.ACTION_MAIN).apply {
++                setPackage(context.packageName)
++            })
+@@ -372 +406,0 @@
 -
 diff --git a/node_modules/expo-share-intent/build/utils.js b/node_modules/expo-share-intent/build/utils.js
 index 498e9ec..c14f3d0 100644

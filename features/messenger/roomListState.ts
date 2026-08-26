@@ -40,3 +40,51 @@ export function mergeMessengerRoomReadState(
   });
   return changed ? nextRooms : visibleRooms;
 }
+
+function newestRoomSnapshot(
+  visibleRoom: MessengerRoom,
+  cachedRoom: MessengerRoom,
+): MessengerRoom {
+  const cachedTail = cachedRoom.last_message;
+  const visibleTail = visibleRoom.last_message;
+  if (
+    visibleTail &&
+    (!cachedTail ||
+      compareMessengerSequence(visibleTail.sequence, cachedTail.sequence) > 0)
+  ) {
+    return {
+      ...cachedRoom,
+      last_message: visibleTail,
+      unread_count: Math.max(
+        visibleRoom.unread_count,
+        cachedRoom.unread_count,
+      ),
+    };
+  }
+  return cachedRoom;
+}
+
+/**
+ * Reconciles the mounted room list with SQLite after any local message write.
+ * The list screen remains mounted underneath an open room, so applying the
+ * cache here makes its preview and ordering correct before the back animation
+ * reveals it.
+ */
+export function mergeMessengerRoomSnapshots(
+  visibleRooms: MessengerRoom[],
+  cachedRooms: readonly MessengerRoom[],
+): MessengerRoom[] {
+  const visibleById = new Map(visibleRooms.map((room) => [room.id, room]));
+  let changed = visibleRooms.length !== cachedRooms.length;
+  const nextRooms = cachedRooms.map((cachedRoom) => {
+    const visibleRoom = visibleById.get(cachedRoom.id);
+    if (!visibleRoom) return cachedRoom;
+    const nextRoom = newestRoomSnapshot(visibleRoom, cachedRoom);
+    if (JSON.stringify(nextRoom) === JSON.stringify(visibleRoom)) {
+      return visibleRoom;
+    }
+    changed = true;
+    return nextRoom;
+  });
+  return changed ? nextRooms : visibleRooms;
+}

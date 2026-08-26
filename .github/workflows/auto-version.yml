@@ -1,0 +1,71 @@
+name: Automatic app versioning
+
+on:
+  push:
+
+permissions:
+  contents: write
+
+jobs:
+  bump-patch:
+    if: >-
+      github.event_name == 'push' &&
+      github.ref_name != 'main' &&
+      !contains(github.event.head_commit.message, '[versioned]')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: version-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Count and apply patch increments
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        run: |
+          if [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
+            COMMIT_COUNT=1
+          else
+            COMMIT_COUNT=$(git log --format=%s "$BEFORE_SHA..$AFTER_SHA" | grep -vc '\[versioned\]' || true)
+          fi
+          if [ "$COMMIT_COUNT" -lt 1 ]; then COMMIT_COUNT=1; fi
+          node scripts/bump-app-version.mjs patch "$COMMIT_COUNT"
+      - name: Commit patch version
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.config.js package.json package-lock.json
+          git commit -m "chore: bump patch version [versioned]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+  bump-minor-after-main-merge:
+    if: >-
+      github.event_name == 'push' &&
+      github.ref_name == 'main' &&
+      !contains(github.event.head_commit.message, '[versioned]')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: version-main
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/bump-app-version.mjs minor
+      - name: Commit minor version
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.config.js package.json package-lock.json
+          git commit -m "chore: bump minor version after merge [versioned]"
+          git push origin HEAD:main
