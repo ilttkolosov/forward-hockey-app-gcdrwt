@@ -526,6 +526,26 @@ export async function syncMessengerUnreadFromPresentedNotifications(): Promise<
     newestDate = notification.date;
     newestUnreadCount = payload.unread_count;
   }
+
+  // Publish the absolute total carried by the newest PUSH before touching
+  // SQLite. On Android the per-room repair below can legitimately wait for a
+  // startup write transaction, but the home badge does not depend on that
+  // repair and must be visible as soon as the first application surface is
+  // mounted. Keeping these stages separate also prevents the 10-second room
+  // synchronization interval from becoming user-visible badge latency.
+  let nextUnreadCount: number | null = null;
+  if (newestUnreadCount !== null) {
+    nextUnreadCount = await setMessengerUnreadFromPresentedNotifications(
+      newestUnreadCount,
+      presentedMessageIds,
+    );
+    messengerLog("info", "badge.presented_notification.published", {
+      presented_count: presented.length,
+      notification_unread_count: newestUnreadCount,
+      unread_count: nextUnreadCount,
+    });
+  }
+
   let recoveredRoomTotal = 0;
   if (Platform.OS === "android") {
     try {
@@ -552,17 +572,19 @@ export async function syncMessengerUnreadFromPresentedNotifications(): Promise<
     newestUnreadCount ?? 0,
     recoveredRoomTotal,
   );
-  const next = await setMessengerUnreadFromPresentedNotifications(
-    recoveredUnreadCount,
-    presentedMessageIds,
-  );
+  if (nextUnreadCount === null || recoveredUnreadCount !== newestUnreadCount) {
+    nextUnreadCount = await setMessengerUnreadFromPresentedNotifications(
+      recoveredUnreadCount,
+      presentedMessageIds,
+    );
+  }
   messengerLog("info", "badge.presented_notification.recovered", {
     presented_count: presented.length,
     notification_unread_count: newestUnreadCount ?? 0,
     room_unread_count: recoveredRoomTotal,
-    unread_count: next,
+    unread_count: nextUnreadCount,
   });
-  return next;
+  return nextUnreadCount;
 }
 
 export async function dismissReadMessengerNotifications(
