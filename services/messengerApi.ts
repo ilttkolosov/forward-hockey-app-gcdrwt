@@ -42,6 +42,7 @@ import {
   prioritizeMessengerForegroundTransport,
   runMessengerTransportTask,
 } from "./messengerTransport";
+import { shouldReuseMessengerRoomsSnapshot } from "./messengerRoomSnapshotPolicy";
 
 export const MESSENGER_SERVER_ORIGIN = "https://forward.is-gone.com";
 export const MESSENGER_API_BASE_URL = `${MESSENGER_SERVER_ORIGIN}/api/v1`;
@@ -616,14 +617,18 @@ const BACKGROUND_ROOMS_SNAPSHOT_MAX_AGE_MS = 60_000;
  * navigation never competes with two or three identical HTTP/TLS exchanges.
  */
 export function getMessengerRooms(
-  options: { priority?: MessengerTransportPriority } = {},
+  options: { priority?: MessengerTransportPriority; force?: boolean } = {},
 ) {
   const priority = options.priority ?? "foreground";
   if (
-    priority === "background" &&
     messengerRoomsSnapshot &&
-    Date.now() - messengerRoomsSnapshot.receivedAt <
-      BACKGROUND_ROOMS_SNAPSHOT_MAX_AGE_MS
+    shouldReuseMessengerRoomsSnapshot({
+      priority,
+      force: options.force === true,
+      receivedAt: messengerRoomsSnapshot.receivedAt,
+      now: Date.now(),
+      maxAgeMs: BACKGROUND_ROOMS_SNAPSHOT_MAX_AGE_MS,
+    })
   ) {
     return Promise.resolve(messengerRoomsSnapshot.rooms);
   }

@@ -10,6 +10,33 @@ import {
   mergeMessengerRoomReadState,
   mergeMessengerRoomSnapshots,
 } from "../features/messenger/roomListState.ts";
+import { shouldReuseMessengerRoomsSnapshot } from "../services/messengerRoomSnapshotPolicy.ts";
+
+const recentSnapshot = {
+  priority: "background",
+  receivedAt: 1_000,
+  now: 1_500,
+  maxAgeMs: 60_000,
+};
+assert.equal(
+  shouldReuseMessengerRoomsSnapshot({ ...recentSnapshot, force: false }),
+  true,
+  "A routine background refresh may reuse a recent room snapshot",
+);
+assert.equal(
+  shouldReuseMessengerRoomsSnapshot({ ...recentSnapshot, force: true }),
+  false,
+  "Android foreground recovery must bypass a stale pre-push snapshot",
+);
+assert.equal(
+  shouldReuseMessengerRoomsSnapshot({
+    ...recentSnapshot,
+    priority: "foreground",
+    force: false,
+  }),
+  false,
+  "The visible room list must not reuse the background snapshot",
+);
 
 assert.equal(
   messengerUnreadAuthAction("loading", null),

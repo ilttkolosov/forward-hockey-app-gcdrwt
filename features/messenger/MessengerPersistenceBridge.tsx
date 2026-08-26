@@ -55,6 +55,7 @@ const BACKGROUND_ROOMS_SYNC_DEBOUNCE_MS = 1_500;
 const BACKGROUND_ROOMS_SYNC_MIN_INTERVAL_MS = 10_000;
 const INITIAL_HISTORY_WARMUP_DELAY_MS = 20_000;
 const BACKGROUND_ALIASES_SYNC_MIN_INTERVAL_MS = 5 * 60_000;
+const FOREGROUND_UNREAD_RECOVERY_DELAYS_MS = [350, 1_200] as const;
 
 /**
  * Keeps the messenger SQLite cache alive independently from any screen. A
@@ -76,27 +77,52 @@ export default function MessengerPersistenceBridge() {
     }
     if (!userId) return;
     beginMessengerUnreadSession(userId);
-    const unreadHydration = Promise.all([
-      hydrateMessengerUnreadSession(userId).catch(
-        (error) => {
-          messengerLog("debug", "badge.session.hydration_deferred", {
-            message: error instanceof Error ? error.message : String(error),
-          });
-        },
-      ),
-      syncMessengerUnreadFromPresentedNotifications().catch((error) => {
-        messengerLog("debug", "badge.presented_notification.deferred", {
-          message: error instanceof Error ? error.message : String(error),
-        });
-      }),
-    ]).then(() => undefined);
     let active = true;
     let roomsSyncRunning = false;
     let roomsSyncQueued = false;
     let roomsSyncTimer: ReturnType<typeof setTimeout> | null = null;
     let historyWarmupTimer: ReturnType<typeof setTimeout> | null = null;
+    const unreadRecoveryTimers = new Set<ReturnType<typeof setTimeout>>();
     let lastRoomsSyncStartedAt = 0;
     let lastAliasesSyncStartedAt = 0;
+    const recoverUnreadFromDevice = async (reason: string) => {
+      const results = await Promise.allSettled([
+        hydrateMessengerUnreadSession(userId),
+        syncMessengerUnreadFromPresentedNotifications(),
+      ]);
+      if (!active) return [];
+      const cached = await loadCachedMessengerRooms(db);
+      if (!active) return cached;
+      setMessengerMutedRooms(cached);
+      await syncMessengerUnreadFromRooms(cached, "cache");
+      const rejected = results.filter(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected",
+      );
+      if (rejected.length) {
+        messengerLog("debug", "badge.foreground_recovery.partial", {
+          reason,
+          failure_count: rejected.length,
+          message: rejected
+            .map((result) =>
+              result.reason instanceof Error
+                ? result.reason.message
+                : String(result.reason),
+            )
+            .join(" | "),
+        });
+      }
+      return cached;
+    };
+    const requestUnreadRecovery = (reason: string) => {
+      void recoverUnreadFromDevice(reason).catch((error) =>
+        messengerLog("debug", "badge.foreground_recovery.deferred", {
+          reason,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    };
+    const unreadHydration = recoverUnreadFromDevice("session-start");
     const scheduleHistoryWarmup = (
       rooms: Parameters<typeof warmMessengerRoomWindows>[1],
       delay = INITIAL_HISTORY_WARMUP_DELAY_MS,
@@ -130,7 +156,7 @@ export default function MessengerPersistenceBridge() {
         });
       }
     };
-    const synchronizeRooms = async () => {
+    const synchronizeRooms = async (forceNetwork = false) => {
       if (roomsSyncRunning) {
         roomsSyncQueued = true;
         return;
@@ -139,7 +165,10 @@ export default function MessengerPersistenceBridge() {
       lastRoomsSyncStartedAt = Date.now();
       try {
         void synchronizeAliases();
-        const rooms = await getMessengerRooms({ priority: "background" });
+        const rooms = await getMessengerRooms({
+          priority: "background",
+          force: forceNetwork,
+        });
         for (const room of rooms) {
           const latest = room.last_message;
           if (
@@ -221,16 +250,11 @@ export default function MessengerPersistenceBridge() {
       }
       roomsSyncTimer = setTimeout(() => {
         roomsSyncTimer = null;
-        void synchronizeRooms();
+        void synchronizeRooms(force);
       }, delay);
     };
     void unreadHydration
-      .then(() => loadCachedMessengerRooms(db))
       .then(async (cached) => {
-        if (active) {
-          setMessengerMutedRooms(cached);
-          await syncMessengerUnreadFromRooms(cached, "cache");
-        }
         await waitForAppInteractive();
         if (!active) return;
         scheduleHistoryWarmup(cached);
@@ -242,6 +266,14 @@ export default function MessengerPersistenceBridge() {
       );
     void waitForAppInteractive().then(() => {
       if (!active) return;
+      requestUnreadRecovery("interactive");
+      for (const delay of FOREGROUND_UNREAD_RECOVERY_DELAYS_MS) {
+        const timer = setTimeout(() => {
+          unreadRecoveryTimers.delete(timer);
+          if (active) requestUnreadRecovery(`interactive+${delay}`);
+        }, delay);
+        unreadRecoveryTimers.add(timer);
+      }
       void warmMessengerMediaFileReader();
       requestMessengerOutboxFlush(db);
       scheduleRoomsSynchronization(true);
@@ -366,10 +398,7 @@ export default function MessengerPersistenceBridge() {
         if (state === "active") {
           void warmMessengerMediaFileReader();
           void flushMessengerReadReceipts(db);
-          void hydrateMessengerUnreadSession(userId).catch(() => undefined);
-          void syncMessengerUnreadFromPresentedNotifications().catch(
-            () => undefined,
-          );
+          requestUnreadRecovery("app-active");
           scheduleRoomsSynchronization(true);
           if (remotePushNotificationsSupported) {
             void syncMessengerPushRegistration().catch(() => undefined);
@@ -409,6 +438,8 @@ export default function MessengerPersistenceBridge() {
       active = false;
       if (roomsSyncTimer) clearTimeout(roomsSyncTimer);
       if (historyWarmupTimer) clearTimeout(historyWarmupTimer);
+      unreadRecoveryTimers.forEach(clearTimeout);
+      unreadRecoveryTimers.clear();
       unsubscribeRealtime();
       appStateSubscription.remove();
       networkSubscription();
