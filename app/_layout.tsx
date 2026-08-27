@@ -609,10 +609,12 @@ function RootLayoutContent() {
       initializationLog(
         `Игроки: подготовлено ${playersList.length} записей за ${elapsedMilliseconds(playersStartedAt)} мс`
       );
-      if (canUseNetwork && localPlayersVersion !== playersVersion) {
+      const playerPhotoArchiveMissing = await playerDownloadService.needsPhotoArchiveRefresh(playersVersion);
+      if (canUseNetwork && (localPlayersVersion !== playersVersion || playerPhotoArchiveMissing)) {
         const playerRefreshStartedAt = Date.now();
         initializationLog(
-          `Игроки: версия ${localPlayersVersion}/${playersVersion}, обновление запущено в фоне`
+          `Игроки: версия ${localPlayersVersion}/${playersVersion}, `
+          + `архив фото=${playerPhotoArchiveMissing ? 'отсутствует' : 'готов'}, обновление запущено в фоне`
         );
         afterStartupTasks.push(() => {
           void playerDownloadService.refreshPlayersData(playersVersion)
