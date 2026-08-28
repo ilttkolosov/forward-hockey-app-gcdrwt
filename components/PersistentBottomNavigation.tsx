@@ -21,12 +21,12 @@ const NAVIGATION_RED = '#F2162D';
 const NAVIGATION_HEIGHT = 70;
 const NAVIGATION_CORNER_RADIUS = 27;
 const HOME_ITEM_HEIGHT = 64;
-const CENTER_BUTTON_SIZE = 73;
+const CENTER_BUTTON_SIZE = 65;
 const CENTER_BUTTON_RADIUS = CENTER_BUTTON_SIZE / 2;
-const CENTER_LOGO_SIZE = 65;
-const NAVIGATION_CRADLE_GAP = 6;
-const NAVIGATION_CRADLE_RADIUS = CENTER_BUTTON_RADIUS + NAVIGATION_CRADLE_GAP;
+const CENTER_LOGO_SIZE = 58;
+const NAVIGATION_CRADLE_RADIUS = 49.5;
 const NAVIGATION_CRADLE_FILLET_RADIUS = 21;
+const NAVIGATION_CRADLE_DROP = 20;
 const NAVIGATION_SHADOW_EXTENT = 18;
 
 type NavigationSection =
@@ -96,14 +96,16 @@ function NavigationSurface({ safeAreaBottom, width }: NavigationSurfaceProps) {
   const surfaceTop = NAVIGATION_SHADOW_EXTENT;
   const cradleRadius = NAVIGATION_CRADLE_RADIUS;
   const filletRadius = NAVIGATION_CRADLE_FILLET_RADIUS;
+  const filletToCradleCenterY = filletRadius - NAVIGATION_CRADLE_DROP;
   const filletCenterOffset = Math.sqrt(
-    (cradleRadius * cradleRadius) + (2 * cradleRadius * filletRadius),
+    ((cradleRadius + filletRadius) ** 2) - (filletToCradleCenterY ** 2),
   );
   const cradleTangentXOffset = (
     cradleRadius * filletCenterOffset / (cradleRadius + filletRadius)
   );
   const cradleTangentY = (
-    cradleRadius * filletRadius / (cradleRadius + filletRadius)
+    NAVIGATION_CRADLE_DROP
+    + (cradleRadius * filletToCradleCenterY / (cradleRadius + filletRadius))
   );
   const surfacePath = [
     `M 0 ${surfaceTop + NAVIGATION_CORNER_RADIUS}`,
@@ -344,9 +346,6 @@ export default function PersistentBottomNavigation({
                     style={styles.homeLogo}
                   />
                 </View>
-                <Text style={[styles.navigationLabel, activeSection === 'home' && styles.navigationLabelActive]}>
-                  Главная
-                </Text>
               </TouchableOpacity>
 
               <NavigationItem
@@ -432,7 +431,10 @@ const styles = StyleSheet.create({
   },
   homeButton: {
     position: 'absolute',
-    top: -(CENTER_BUTTON_RADIUS + (NAVIGATION_HEIGHT - HOME_ITEM_HEIGHT)),
+    top:
+      NAVIGATION_CRADLE_DROP
+      - CENTER_BUTTON_RADIUS
+      - (NAVIGATION_HEIGHT - HOME_ITEM_HEIGHT),
     width: CENTER_BUTTON_SIZE,
     height: CENTER_BUTTON_SIZE,
     borderRadius: CENTER_BUTTON_SIZE / 2,
