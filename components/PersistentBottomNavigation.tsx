@@ -24,7 +24,8 @@ const CENTER_BUTTON_SIZE = 58;
 const CENTER_BUTTON_RADIUS = CENTER_BUTTON_SIZE / 2;
 const NAVIGATION_CRADLE_GAP = 4;
 const NAVIGATION_CRADLE_RADIUS = CENTER_BUTTON_RADIUS + NAVIGATION_CRADLE_GAP;
-const NAVIGATION_CRADLE_FILLET_RADIUS = 8;
+const NAVIGATION_CRADLE_FILLET_RADIUS = 14;
+const NAVIGATION_SHADOW_EXTENT = 12;
 
 type NavigationSection =
   | 'trainings'
@@ -90,6 +91,7 @@ const activeSectionForPath = (pathname: string): NavigationSection | null => {
 function NavigationSurface({ safeAreaBottom, width }: NavigationSurfaceProps) {
   const centerX = width / 2;
   const totalHeight = NAVIGATION_HEIGHT + safeAreaBottom;
+  const surfaceTop = NAVIGATION_SHADOW_EXTENT;
   const cradleRadius = NAVIGATION_CRADLE_RADIUS;
   const filletRadius = NAVIGATION_CRADLE_FILLET_RADIUS;
   const filletCenterOffset = Math.sqrt(
@@ -102,26 +104,48 @@ function NavigationSurface({ safeAreaBottom, width }: NavigationSurfaceProps) {
     cradleRadius * filletRadius / (cradleRadius + filletRadius)
   );
   const surfacePath = [
-    `M 0 ${NAVIGATION_CORNER_RADIUS}`,
-    `Q 0 0 ${NAVIGATION_CORNER_RADIUS} 0`,
+    `M 0 ${surfaceTop + NAVIGATION_CORNER_RADIUS}`,
+    `Q 0 ${surfaceTop} ${NAVIGATION_CORNER_RADIUS} ${surfaceTop}`,
     `H ${centerX - filletCenterOffset}`,
-    `A ${filletRadius} ${filletRadius} 0 0 1 ${centerX - cradleTangentXOffset} ${cradleTangentY}`,
-    `A ${cradleRadius} ${cradleRadius} 0 0 0 ${centerX + cradleTangentXOffset} ${cradleTangentY}`,
-    `A ${filletRadius} ${filletRadius} 0 0 1 ${centerX + filletCenterOffset} 0`,
+    `A ${filletRadius} ${filletRadius} 0 0 1 ${centerX - cradleTangentXOffset} ${surfaceTop + cradleTangentY}`,
+    `A ${cradleRadius} ${cradleRadius} 0 0 0 ${centerX + cradleTangentXOffset} ${surfaceTop + cradleTangentY}`,
+    `A ${filletRadius} ${filletRadius} 0 0 1 ${centerX + filletCenterOffset} ${surfaceTop}`,
     `H ${width - NAVIGATION_CORNER_RADIUS}`,
-    `Q ${width} 0 ${width} ${NAVIGATION_CORNER_RADIUS}`,
-    `V ${totalHeight}`,
+    `Q ${width} ${surfaceTop} ${width} ${surfaceTop + NAVIGATION_CORNER_RADIUS}`,
+    `V ${surfaceTop + totalHeight}`,
     'H 0',
     'Z',
   ].join(' ');
 
   return (
     <Svg
-      height={totalHeight}
+      height={totalHeight + NAVIGATION_SHADOW_EXTENT}
       pointerEvents="none"
       style={styles.navigationSurface}
       width={width}
     >
+      <Path
+        d={surfacePath}
+        fill="#7C8490"
+        fillOpacity={0.02}
+        stroke="#7C8490"
+        strokeOpacity={0.025}
+        strokeWidth={18}
+      />
+      <Path
+        d={surfacePath}
+        fill="none"
+        stroke="#7C8490"
+        strokeOpacity={0.035}
+        strokeWidth={11}
+      />
+      <Path
+        d={surfacePath}
+        fill="none"
+        stroke="#7C8490"
+        strokeOpacity={0.05}
+        strokeWidth={5}
+      />
       <Path
         d={surfacePath}
         fill="#FFFFFF"
@@ -361,7 +385,7 @@ const styles = StyleSheet.create({
   navigationSurface: {
     position: 'absolute',
     left: 0,
-    top: 0,
+    top: -NAVIGATION_SHADOW_EXTENT,
   },
   navigationItems: {
     height: NAVIGATION_HEIGHT,
@@ -412,13 +436,12 @@ const styles = StyleSheet.create({
     borderRadius: CENTER_BUTTON_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
     backgroundColor: colors.white,
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 5,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.16,
+    shadowRadius: 7,
+    elevation: 9,
   },
   homeLogo: {
     width: 52,
