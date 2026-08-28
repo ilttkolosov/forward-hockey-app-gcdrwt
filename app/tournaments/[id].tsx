@@ -16,7 +16,6 @@ import { colors, commonStyles } from '../../styles/commonStyles';
 import Icon from '../../components/Icon';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import GameCardCompact from '../../components/GameCardCompact';
 import { getGames, gameDetailsCache } from '../../data/gameData';
@@ -31,9 +30,7 @@ import {
 } from '../../services/tournamentsApi';
 import { loadTeamLogo } from '../../services/teamStorage';
 import CommandCard from '../../components/CommandCard';
-
-const TOURNAMENTS_NOW_KEY = 'tournaments_now';
-const TOURNAMENTS_PAST_KEY = 'tournaments_past';
+import { loadTournamentCatalog } from '../../services/tournamentCatalog';
 
 // Русские месяцы для поиска
 const RUSSIAN_MONTHS = [
@@ -175,6 +172,7 @@ export default function TournamentDetailScreen() {
     'venues',
     'leagues',
     'seasons',
+    'tournaments',
   ]);
 
   // Состояния
@@ -220,12 +218,7 @@ export default function TournamentDetailScreen() {
   const loadTournamentInfo = useCallback(async () => {
     if (!id) return null;
     try {
-      const [nowJson, pastJson] = await Promise.all([
-        AsyncStorage.getItem(TOURNAMENTS_NOW_KEY),
-        AsyncStorage.getItem(TOURNAMENTS_PAST_KEY),
-      ]);
-      const nowTournaments = nowJson ? JSON.parse(nowJson) : [];
-      const pastTournaments = pastJson ? JSON.parse(pastJson) : [];
+      const { current: nowTournaments, past: pastTournaments } = await loadTournamentCatalog();
       const isPast = pastTournaments.some((t: any) => String(t.tournament_ID) === id);
       setIsPastTournament(isPast);
       const allTournaments = [...nowTournaments, ...pastTournaments];

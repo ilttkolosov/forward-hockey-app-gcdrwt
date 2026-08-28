@@ -48,6 +48,7 @@ import MessengerPersistenceBridge from '../features/messenger/MessengerPersisten
 import { SQLiteProvider } from 'expo-sqlite';
 import { DATABASE_ASSET_SOURCE, DATABASE_NAME, migrateDatabase } from '../database';
 import { getReferenceVersion } from '../database/repository';
+import { saveTournamentCatalog } from '../services/tournamentCatalog';
 import {
   getConfiguredReferenceVersion,
   initializeReferenceData,
@@ -106,9 +107,6 @@ Notifications.setNotificationHandler({
 });
 
 // === КОНСТАНТЫ ===
-const TOURNAMENTS_NOW_KEY = 'tournaments_now';
-const TOURNAMENTS_PAST_KEY = 'tournaments_past';
-const CURRENT_TOURNAMENT_ID_KEY = 'current_tournament_id';
 const PLAYERS_VERSION_KEY = 'players_version';
 
 const elapsedMilliseconds = (startedAt: number) => Date.now() - startedAt;
@@ -148,14 +146,12 @@ const initializeTournamentsInBackground = async (
     `Проверка ${allTournaments.length} турнирных таблиц запущена; целевая версия=${targetVersion}`
   );
   try {
-    await AsyncStorage.setItem(TOURNAMENTS_NOW_KEY, JSON.stringify(config.tournamentsNow || []));
-    await AsyncStorage.setItem(TOURNAMENTS_PAST_KEY, JSON.stringify(config.tournamentsPast || []));
-    const currentTournament = config.tournamentsNow?.[0];
-    if (currentTournament) {
-      await AsyncStorage.setItem(CURRENT_TOURNAMENT_ID_KEY, currentTournament.tournament_ID);
-    } else {
-      await AsyncStorage.removeItem(CURRENT_TOURNAMENT_ID_KEY);
-    }
+    await saveTournamentCatalog(
+      config.tournamentsNow || [],
+      config.tournamentsPast || [],
+      config.config_revision ?? 0,
+      targetVersion,
+    );
 
     const result = await synchronizeTournamentConfigs(
       allTournaments.map(tournament => tournament.tournament_ID),
@@ -476,15 +472,15 @@ function RootLayoutContent() {
       afterStartupTasks.push(() => {
         void showAppUpdateNotice(config);
       });
-      if (configResult.backgroundRefresh) {
-        const backgroundConfigStartedAt = Date.now();
-        void configResult.backgroundRefresh.then(latestConfig => {
+      const backgroundConfigStartedAt = Date.now();
+      const effectiveConfigPromise: Promise<StartupConfig> = configResult.backgroundRefresh
+        ? configResult.backgroundRefresh.then(latestConfig => {
           if (!latestConfig) {
             initializationLog(
               `Фоновое обновление конфигурации не выполнено за `
               + `${elapsedMilliseconds(backgroundConfigStartedAt)} мс; локальная копия сохранена`
             );
-            return;
+            return config;
           }
           initializationLog(
             `Фоновая конфигурация получена за ${elapsedMilliseconds(backgroundConfigStartedAt)} мс; `
@@ -492,10 +488,11 @@ function RootLayoutContent() {
           );
           void showAppUpdateNotice(latestConfig);
           if (latestConfig.config_revision !== config.config_revision) {
-            initializationLog('Новая ревизия конфигурации сохранена и будет полностью применена при следующем запуске');
+            initializationLog('Новая ревизия конфигурации будет применена в текущем сеансе');
           }
-        });
-      }
+          return latestConfig;
+        })
+        : Promise.resolve(config);
 
       const networkStartedAt = Date.now();
       const networkState = await NetInfo.fetch();
@@ -540,7 +537,12 @@ function RootLayoutContent() {
         `Справочники готовы за ${elapsedMilliseconds(referencesStartedAt)} мс; команд=${teamsCount}`
       );
       afterStartupTasks.push(() => {
-        void referenceRefresh()
+        void effectiveConfigPromise
+          .then(async effectiveConfig => {
+            if (effectiveConfig === config) return referenceRefresh();
+            const latestReferences = await initializeReferenceData(effectiveConfig, canUseNetwork);
+            return latestReferences.backgroundRefresh();
+          })
           .then(result => {
             if (result.updatedEntities.length > 0) {
               initializationLog(
@@ -609,10 +611,12 @@ function RootLayoutContent() {
       initializationLog(
         `Игроки: подготовлено ${playersList.length} записей за ${elapsedMilliseconds(playersStartedAt)} мс`
       );
-      if (canUseNetwork && localPlayersVersion !== playersVersion) {
+      const playerPhotoArchiveMissing = await playerDownloadService.needsPhotoArchiveRefresh(playersVersion);
+      if (canUseNetwork && (localPlayersVersion !== playersVersion || playerPhotoArchiveMissing)) {
         const playerRefreshStartedAt = Date.now();
         initializationLog(
-          `Игроки: версия ${localPlayersVersion}/${playersVersion}, обновление запущено в фоне`
+          `Игроки: версия ${localPlayersVersion}/${playersVersion}, `
+          + `архив фото=${playerPhotoArchiveMissing ? 'отсутствует' : 'готов'}, обновление запущено в фоне`
         );
         afterStartupTasks.push(() => {
           void playerDownloadService.refreshPlayersData(playersVersion)
@@ -680,14 +684,14 @@ function RootLayoutContent() {
       setInitializationMessage('Финальная настройка...');
       setProgress(80);
       afterStartupTasks.push(() => {
-        const tournamentsPreparation = initializeTournamentsInBackground(config, canUseNetwork);
-        void tournamentsPreparation.finally(async () => {
+        void effectiveConfigPromise.then(async effectiveConfig => {
+          await initializeTournamentsInBackground(effectiveConfig, canUseNetwork);
           if (upcomingGamesPromise) await upcomingGamesPromise;
           if (upcomingGamesRefreshPromise) {
             initializationLog('Предзагрузка турнира ожидает завершения запроса предстоящих игр');
             await upcomingGamesRefreshPromise;
           }
-          await preloadCurrentTournamentGames(config);
+          await preloadCurrentTournamentGames(effectiveConfig);
         });
       });
 

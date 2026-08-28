@@ -5,8 +5,16 @@ import {
   getInfoAsync,
   makeDirectoryAsync,
   downloadAsync,
+  deleteAsync,
+  readDirectoryAsync,
+  readAsStringAsync,
+  writeAsStringAsync,
+  moveAsync,
+  EncodingType,
 } from 'expo-file-system/legacy';
 import { Player } from '../types';
+import { unzip } from 'fflate';
+import { Buffer } from 'buffer';
 import { fetchWithTimeout } from './httpClient';
 import { Asset } from 'expo-asset';
 import playerPhotoSeed from '../assets/player-photos/seed-manifest.json';
@@ -22,7 +30,9 @@ const PLAYERS_DATA_LOADED_KEY = 'playersDataLoaded';
 const PLAYERS_STORAGE_KEY = 'localPlayersData';
 const PLAYER_PHOTOS_DOWNLOADED_KEY = 'playerPhotosDownloaded';
 const PLAYERS_DIRECTORY = `${documentDirectory || ''}players/`;
+const PHOTO_ARCHIVE_BASE_URL = 'https://www.hc-forward.com/wp-content/uploads/app/player_photos_v';
 const BUNDLED_PHOTOS_VERSION_KEY = 'bundledPlayerPhotosVersion';
+const PLAYER_PHOTO_FILENAME_PATTERN = /^player_(\d+)\.(jpe?g|png|webp)$/i;
 
 interface PlayerFullApiResponse extends DatabasePlayer {
   id: number;
@@ -82,10 +92,41 @@ export class PlayerDownloadSystem {
     return match ? match[1].toLowerCase() : 'jpg';
   }
 
-  private toPlayer(data: DatabasePlayer): Player {
+  private getVersionedPlayersDirectory(version: number): string {
+    return `${documentDirectory || ''}players_v${version}/`;
+  }
+
+  private async getVersionedPhotoUris(version: number): Promise<Map<string, string>> {
+    const directory = this.getVersionedPlayersDirectory(version);
+    const info = await getInfoAsync(directory);
+    if (!info.exists || !info.isDirectory) return new Map();
+
+    const files = await readDirectoryAsync(directory);
+    const photoUris = new Map<string, string>();
+    for (const filename of files) {
+      const match = PLAYER_PHOTO_FILENAME_PATTERN.exec(filename);
+      if (match) photoUris.set(match[1], `${directory}${filename}`);
+    }
+    return photoUris;
+  }
+
+  async needsPhotoArchiveRefresh(version: number): Promise<boolean> {
+    if (version === playerPhotoSeed.version) return false;
+    const photoUris = await this.getVersionedPhotoUris(version);
+    return photoUris.size === 0;
+  }
+
+  private toPlayer(
+    data: DatabasePlayer,
+    versionedPhotoUri?: string,
+    allowLegacyFallback = true
+  ): Player {
     const ext = this.getExtensionFromUrl(data.photo_url);
     const bundledPhoto = this.bundledPhotoUris.get(String(data.id));
-    const photoPath = bundledPhoto || (data.photo_url ? `${PLAYERS_DIRECTORY}player_${String(data.id)}.${ext}` : '');
+    const photoPath = versionedPhotoUri
+      || (allowLegacyFallback
+        ? bundledPhoto || (data.photo_url ? `${PLAYERS_DIRECTORY}player_${String(data.id)}.${ext}` : '')
+        : '');
     return {
       id: String(data.id),
       fullName: data.name,
@@ -103,6 +144,66 @@ export class PlayerDownloadSystem {
       isCaptain: data.metrics?.ka === 'К',
       isAssistantCaptain: data.metrics?.ka === 'А',
     };
+  }
+
+  private async extractPhotoArchive(zipPath: string, version: number): Promise<Map<string, string>> {
+    const targetDirectory = this.getVersionedPlayersDirectory(version);
+    const stagingDirectory = `${documentDirectory || ''}players_v${version}_staging/`;
+    const backupDirectory = `${documentDirectory || ''}players_v${version}_backup/`;
+
+    await deleteAsync(stagingDirectory, { idempotent: true });
+    await makeDirectoryAsync(stagingDirectory, { intermediates: true });
+
+    const zipBase64 = await readAsStringAsync(zipPath, { encoding: EncodingType.Base64 });
+    const zipArray = new Uint8Array(Buffer.from(zipBase64, 'base64'));
+
+    const entries = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
+      unzip(zipArray, (error, unzipped) => {
+        if (error) reject(error);
+        else resolve(unzipped as Record<string, Uint8Array>);
+      });
+    });
+
+    const photoUris = new Map<string, string>();
+    for (const [archiveName, data] of Object.entries(entries)) {
+      if (archiveName.endsWith('/')) continue;
+      const filename = archiveName.split('/').pop() || '';
+      const match = PLAYER_PHOTO_FILENAME_PATTERN.exec(filename);
+      if (!match) continue;
+      if (photoUris.has(match[1])) {
+        throw new Error(`Архив содержит несколько фотографий игрока ${match[1]}`);
+      }
+      await writeAsStringAsync(
+        `${stagingDirectory}${filename}`,
+        Buffer.from(data).toString('base64'),
+        { encoding: EncodingType.Base64 }
+      );
+      photoUris.set(match[1], `${targetDirectory}${filename}`);
+    }
+
+    if (photoUris.size === 0) {
+      throw new Error('Архив фотографий игроков пуст или имеет неверный формат');
+    }
+
+    await deleteAsync(backupDirectory, { idempotent: true });
+    const current = await getInfoAsync(targetDirectory);
+    if (current.exists) {
+      await moveAsync({ from: targetDirectory, to: backupDirectory });
+    }
+    try {
+      await moveAsync({ from: stagingDirectory, to: targetDirectory });
+    } catch (error) {
+      const backup = await getInfoAsync(backupDirectory);
+      if (backup.exists) {
+        await moveAsync({ from: backupDirectory, to: targetDirectory });
+      }
+      throw error;
+    }
+    await deleteAsync(backupDirectory, { idempotent: true }).catch(error => {
+      console.warn(`[Игроки] Не удалось удалить резервный каталог фото версии ${version}:`, error);
+    });
+
+    return photoUris;
   }
 
   private async installBundledPhotos(version: number): Promise<boolean> {
@@ -143,7 +244,15 @@ export class PlayerDownloadSystem {
     }
     onProgress?.('Локальные данные', `Загружено игроков ${localPlayers.length}`);
     await this.installBundledPhotos(localVersion || targetVersion);
-    const players = localPlayers.map(item => this.toPlayer(item)).sort((a, b) => a.number - b.number);
+    const versionedPhotoUris = await this.getVersionedPhotoUris(localVersion || targetVersion);
+    const allowLegacyFallback = versionedPhotoUris.size === 0;
+    const players = localPlayers
+      .map(item => this.toPlayer(
+        item,
+        versionedPhotoUris.get(String(item.id)),
+        allowLegacyFallback
+      ))
+      .sort((a, b) => a.number - b.number);
     await this.savePlayersToStorage(players);
     await this.setDataLoaded(true);
     return players;
@@ -183,6 +292,30 @@ export class PlayerDownloadSystem {
     return result.status === 200 ? result.uri : null;
   }
 
+  private async downloadAndExtractPhotoArchive(
+    version: number,
+    onProgress?: (message: string) => void
+  ): Promise<Map<string, string>> {
+    const zipUrl = `${PHOTO_ARCHIVE_BASE_URL}${version}.zip`;
+    const zipPath = `${documentDirectory || ''}player_photos_v${version}.zip`;
+
+    await deleteAsync(zipPath, { idempotent: true });
+    try {
+      onProgress?.('Скачивание архива фотографий…');
+      const download = await downloadAsync(zipUrl, zipPath);
+      if (download.status !== 200) {
+        throw new Error(`Архив фотографий вернул HTTP ${download.status}`);
+      }
+
+      onProgress?.('Распаковка архива фотографий…');
+      const photoUris = await this.extractPhotoArchive(zipPath, version);
+      onProgress?.(`Получено фотографий: ${photoUris.size}`);
+      return photoUris;
+    } finally {
+      await deleteAsync(zipPath, { idempotent: true });
+    }
+  }
+
   async loadAllPlayersDataWithBatch(
     version: number,
     onProgress?: (stage: string, message?: string) => void
@@ -190,34 +323,17 @@ export class PlayerDownloadSystem {
     onProgress?.('Загрузка данных игроков…');
 
     const fullPlayers = await this.fetchAllPlayersFull();
-    const total = fullPlayers.length;
-
-    onProgress?.('Загрузка фото', 'Обновление изменившихся данных игроков…');
-    const players: Player[] = [];
-    for (let i = 0; i < fullPlayers.length; i++) {
-      const data = fullPlayers[i];
-      const photoPath = data.photo_url
-        ? await this.downloadAndCacheImage(data.photo_url, String(data.id))
-        : null;
-      players.push({
-          id: String(data.id),
-          fullName: data.name,
-          name: data.name,
-          number: data.number || 0,
-          position: data.position,
-          birthDate: data.birth_date,
-          age: this.calculateAge(data.birth_date),
-          handedness: data.metrics?.onetwofive || '',
-          height: data.metrics?.height ? parseInt(data.metrics.height) || 0 : 0,
-          weight: data.metrics?.weight ? parseInt(data.metrics.weight) || 0 : 0,
-          captainStatus: data.metrics?.ka === 'К' || data.metrics?.ka === 'А' ? data.metrics.ka : '',
-          photoPath: photoPath || '',
-          photo: photoPath || '',
-          isCaptain: data.metrics?.ka === 'К',
-          isAssistantCaptain: data.metrics?.ka === 'А',
-      });
-      onProgress?.('Загрузка фото', `Загружено ${i + 1} из ${total}`);
-    }
+    const photoUris = await this.downloadAndExtractPhotoArchive(
+      version,
+      message => onProgress?.('Загрузка фото', message)
+    );
+    const players = fullPlayers.map(data => this.toPlayer(
+      data,
+      photoUris.get(String(data.id)),
+      false
+    ));
+    const playersWithPhotos = players.filter(player => Boolean(player.photoPath)).length;
+    onProgress?.('Загрузка фото', `Подготовлено ${playersWithPhotos} из ${players.length}`);
 
     players.sort((a, b) => a.number - b.number);
     await replacePlayers(fullPlayers, version);

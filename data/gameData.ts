@@ -171,6 +171,27 @@ const hydrateGameLogos = async (game: Game): Promise<Game> => {
   };
 };
 
+/** Reattaches current SQLite reference records to a persisted game snapshot. */
+const hydrateGameReferences = async (game: Game): Promise<Game> => {
+  await Promise.all([loadLeagues(), loadSeasons(), loadVenues()]);
+  const leagueId = String(game.leagueId || game.league?.id || '');
+  const seasonId = String(game.seasonId || game.season?.id || '');
+  const venueId = String(game.venueId || '');
+  const league = cachedLeagues[leagueId] || game.league;
+  const season = cachedSeasons[seasonId] || game.season;
+  const venue = cachedVenues[venueId];
+  return hydrateGameLogos({
+    ...game,
+    league,
+    league_name: league?.name || game.league_name,
+    tournament: league?.name || game.tournament,
+    season,
+    season_name: season?.name || game.season_name,
+    venue: venue || game.venue,
+    venue_name: venue?.name || game.venue_name,
+  });
+};
+
 const hydrateGamesLogos = async (games: Game[]): Promise<Game[]> => (
   Promise.all(games.map(hydrateGameLogos))
 );
@@ -662,7 +683,7 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
 
     const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
     if (persistent) {
-      const hydratedGame = await hydrateGameLogos(persistent.data);
+      const hydratedGame = await hydrateGameReferences(persistent.data);
       gameDetailsCache[id] = { data: hydratedGame, timestamp: persistent.savedAt };
       dataAvailability.markCachedDataUsed();
       return hydratedGame;
@@ -702,7 +723,7 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
     const apiGameDetails = await apiService.fetchEventById(id);
     if (!apiGameDetails) {
       const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
-      return persistent ? await hydrateGameLogos(persistent.data) : null;
+      return persistent ? await hydrateGameReferences(persistent.data) : null;
     }
     const game = await convertApiEventToGame(apiGameDetails);
 
@@ -720,7 +741,7 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
     const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
     if (persistent) {
       dataAvailability.markCachedDataUsed('Не удалось обновить данные матча');
-      return await hydrateGameLogos(persistent.data);
+      return await hydrateGameReferences(persistent.data);
     }
     throw error;
   }

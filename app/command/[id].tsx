@@ -27,8 +27,8 @@ import {
 } from '../../services/tournamentsApi';
 import { loadTeamLogo } from '../../services/teamStorage';
 import Icon from '../../components/Icon';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
+import { loadTournamentCatalog } from '../../services/tournamentCatalog';
 
 const styles = StyleSheet.create({
   container: {
@@ -222,6 +222,7 @@ export default function TeamDetailScreen() {
     'venues',
     'leagues',
     'seasons',
+    'tournaments',
   ]);
   const [teamName, setTeamName] = useState<string>('');
   const [teamLogoUri, setTeamLogoUri] = useState<string | null>(null);
@@ -267,11 +268,8 @@ export default function TeamDetailScreen() {
       }
 
       // 4. Получаем название турнира
-      const [nowJson, pastJson] = await Promise.all([
-        AsyncStorage.getItem('tournaments_now'),
-        AsyncStorage.getItem('tournaments_past'),
-      ]);
-      const allTournaments = [...(nowJson ? JSON.parse(nowJson) : []), ...(pastJson ? JSON.parse(pastJson) : [])];
+      const catalog = await loadTournamentCatalog();
+      const allTournaments = [...catalog.current, ...catalog.past];
       const foundTournament = allTournaments.find((t: any) => String(t.tournament_ID) === tournamentId);
       setTournamentName(foundTournament?.tournament_Name || `Турнир ID: ${tournamentId}`);
 

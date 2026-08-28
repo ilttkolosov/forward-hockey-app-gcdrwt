@@ -12,7 +12,6 @@ import SegmentedControl from '@react-native-segmented-control/segmented-control'
 import { colors, commonStyles } from '../../styles/commonStyles';
 import { fetchTournamentTable, getCachedTournamentTable, TournamentTable } from '../../services/tournamentsApi';
 import { useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from '../../components/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -21,9 +20,7 @@ import { getGames } from '../../data/gameData';
 // Импортируем функции для загрузки конфигурации турнира
 import { fetchTournamentConfig, getCachedTournamentConfig } from '../../services/tournamentsApi';
 import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
-
-const TOURNAMENTS_NOW_KEY = 'tournaments_now';
-const TOURNAMENTS_PAST_KEY = 'tournaments_past';
+import { loadTournamentCatalog } from '../../services/tournamentCatalog';
 
 // Функция склонения
 export const getDeclension = (number: number, words: string[]): string => {
@@ -78,7 +75,7 @@ const addLogosToTable = async (table: TournamentTable[]): Promise<TournamentTabl
 };
 
 export default function TournamentsScreen() {
-  const teamsRevision = useReferenceDataRevision('teams');
+  const referenceRevision = useReferenceDataRevision(['teams', 'tournaments']);
   const [activeTab, setActiveTab] = useState<number>(0);
   const [tables, setTables] = useState<{
     current: { name: string; id: string; data: TournamentTableWithLogos }[];
@@ -111,14 +108,13 @@ export default function TournamentsScreen() {
   }, []);
 
   const loadTournamentsFromCache = useCallback(async () => {
-    void teamsRevision;
+    void referenceRevision;
     try {
-      const cachedTournamentsNow = await AsyncStorage.getItem(TOURNAMENTS_NOW_KEY);
-      const cachedTournamentsPast = await AsyncStorage.getItem(TOURNAMENTS_PAST_KEY);
+      const catalog = await loadTournamentCatalog();
 
       let currentData: any[] = [];
-      if (cachedTournamentsNow) {
-        const currentTournaments = JSON.parse(cachedTournamentsNow);
+      if (catalog.current.length > 0) {
+        const currentTournaments = catalog.current;
         currentData = await Promise.all(
           currentTournaments.map(async (t: any) => {
             const data = await getCachedTournamentTable(t.tournament_ID);
@@ -160,8 +156,8 @@ export default function TournamentsScreen() {
       }
 
       let pastData: any[] = [];
-      if (cachedTournamentsPast) {
-        const pastTournaments = JSON.parse(cachedTournamentsPast);
+      if (catalog.past.length > 0) {
+        const pastTournaments = catalog.past;
         pastData = await Promise.all(
           pastTournaments.map(async (t: any) => {
             const data = await getCachedTournamentTable(t.tournament_ID);
@@ -181,7 +177,7 @@ export default function TournamentsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [preloadCurrentTournamentGames, teamsRevision]);
+  }, [preloadCurrentTournamentGames, referenceRevision]);
 
   useEffect(() => {
     loadTournamentsFromCache();
@@ -191,9 +187,8 @@ export default function TournamentsScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      const cachedTournamentsNow = await AsyncStorage.getItem(TOURNAMENTS_NOW_KEY);
-      if (cachedTournamentsNow) {
-        const currentTournaments = JSON.parse(cachedTournamentsNow);
+      const { current: currentTournaments } = await loadTournamentCatalog();
+      if (currentTournaments.length > 0) {
         const currentData = await Promise.all(
           currentTournaments.map(async (t: any) => {
             const data = await fetchTournamentTable(t.tournament_ID);

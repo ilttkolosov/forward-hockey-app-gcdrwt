@@ -1057,6 +1057,8 @@ export default function GameDetailsScreen() {
     team2_second,
     team2_third,
     league,
+    season,
+    season_name,
     venueId,
     sp_video,
     event_date,
@@ -1069,6 +1071,7 @@ export default function GameDetailsScreen() {
   const homeTeamName = homeTeam?.name || 'Команда 1';
   const awayTeamName = awayTeam?.name || 'Команда 2';
   const leagueName = extractNameFromEntity(league);
+  const seasonName = extractNameFromEntity(season) || season_name;
   const hideTime = formattedTime === '00:00';
   const displayDateTime = hideTime ? formattedDate : `${formattedDate} • ${formattedTime}`;
   const now = new Date();
@@ -1175,7 +1178,12 @@ export default function GameDetailsScreen() {
               )}
             </View>
           </View>
-          {leagueName && <Text style={styles.leagueText}>🏆 {leagueName}</Text>}
+          {(leagueName || seasonName) && (
+            <View style={styles.competitionRow}>
+              {leagueName && <Text style={styles.leagueText}>🏆 {leagueName}</Text>}
+              {seasonName && <Text style={styles.seasonText}>{seasonName}</Text>}
+            </View>
+          )}
         </Animated.View>
 
         {/* Video */}
@@ -1539,7 +1547,27 @@ const styles = StyleSheet.create({
   },
   gameHeader: { alignItems: 'center' },
   gameDate: { fontSize: 16, color: colors.textSecondary, fontWeight: '500' },
-  leagueText: { fontSize: 14, color: colors.textSecondary, textAlign: 'left', paddingLeft: 8, fontStyle: 'italic' },
+  competitionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  leagueText: {
+    flex: 1,
+    marginRight: 8,
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: 'left',
+    fontStyle: 'italic',
+  },
+  seasonText: {
+    flexShrink: 1,
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: 'right',
+    fontStyle: 'italic',
+  },
   teamsContainer: { flexDirection: 'row', alignItems: 'stretch', justifyContent: 'space-between', marginBottom: 24 },
   teamColumn: { flex: 1, alignItems: 'center', paddingHorizontal: 8 },
   teamLogo: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.surface, marginBottom: 12 },
