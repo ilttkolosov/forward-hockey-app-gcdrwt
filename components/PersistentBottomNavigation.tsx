@@ -19,10 +19,10 @@ import { colors } from '../styles/commonStyles';
 
 const NAVIGATION_RED = '#F2162D';
 const NAVIGATION_HEIGHT = 70;
-const NAVIGATION_BUMP_HEIGHT = 30;
-const NAVIGATION_BUMP_HALF_WIDTH = 44;
+const NAVIGATION_NOTCH_DEPTH = 22;
+const NAVIGATION_NOTCH_HALF_WIDTH = 42;
 const NAVIGATION_CORNER_RADIUS = 18;
-const CENTER_BUTTON_SIZE = 56;
+const CENTER_BUTTON_SIZE = 58;
 
 type NavigationSection =
   | 'trainings'
@@ -87,16 +87,15 @@ const activeSectionForPath = (pathname: string): NavigationSection | null => {
 
 function NavigationSurface({ safeAreaBottom, width }: NavigationSurfaceProps) {
   const centerX = width / 2;
-  const topY = NAVIGATION_BUMP_HEIGHT;
-  const totalHeight = NAVIGATION_BUMP_HEIGHT + NAVIGATION_HEIGHT + safeAreaBottom;
+  const totalHeight = NAVIGATION_HEIGHT + safeAreaBottom;
   const surfacePath = [
-    `M 0 ${topY + NAVIGATION_CORNER_RADIUS}`,
-    `Q 0 ${topY} ${NAVIGATION_CORNER_RADIUS} ${topY}`,
-    `H ${centerX - NAVIGATION_BUMP_HALF_WIDTH}`,
-    `C ${centerX - 34} ${topY} ${centerX - 34} 0 ${centerX} 0`,
-    `C ${centerX + 34} 0 ${centerX + 34} ${topY} ${centerX + NAVIGATION_BUMP_HALF_WIDTH} ${topY}`,
+    `M 0 ${NAVIGATION_CORNER_RADIUS}`,
+    `Q 0 0 ${NAVIGATION_CORNER_RADIUS} 0`,
+    `H ${centerX - NAVIGATION_NOTCH_HALF_WIDTH}`,
+    `C ${centerX - 34} 0 ${centerX - 32} ${NAVIGATION_NOTCH_DEPTH} ${centerX} ${NAVIGATION_NOTCH_DEPTH}`,
+    `C ${centerX + 32} ${NAVIGATION_NOTCH_DEPTH} ${centerX + 34} 0 ${centerX + NAVIGATION_NOTCH_HALF_WIDTH} 0`,
     `H ${width - NAVIGATION_CORNER_RADIUS}`,
-    `Q ${width} ${topY} ${width} ${topY + NAVIGATION_CORNER_RADIUS}`,
+    `Q ${width} 0 ${width} ${NAVIGATION_CORNER_RADIUS}`,
     `V ${totalHeight}`,
     'H 0',
     'Z',
@@ -109,7 +108,6 @@ function NavigationSurface({ safeAreaBottom, width }: NavigationSurfaceProps) {
       style={styles.navigationSurface}
       width={width}
     >
-      <Path d={surfacePath} fill="#000000" opacity={0.055} transform="translate(0 2)" />
       <Path
         d={surfacePath}
         fill="#FFFFFF"
@@ -349,7 +347,7 @@ const styles = StyleSheet.create({
   navigationSurface: {
     position: 'absolute',
     left: 0,
-    top: -NAVIGATION_BUMP_HEIGHT,
+    top: 0,
   },
   navigationItems: {
     height: NAVIGATION_HEIGHT,
@@ -394,13 +392,19 @@ const styles = StyleSheet.create({
   },
   homeButton: {
     position: 'absolute',
-    top: -27,
+    top: -35,
     width: CENTER_BUTTON_SIZE,
     height: CENTER_BUTTON_SIZE,
     borderRadius: CENTER_BUTTON_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'transparent',
+    overflow: 'hidden',
+    backgroundColor: colors.white,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 5,
+    elevation: 6,
   },
   homeLogo: {
     width: 52,
