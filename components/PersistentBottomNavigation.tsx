@@ -1,4 +1,4 @@
-import React, { ReactNode, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   BackHandler,
   Image,
@@ -36,10 +36,6 @@ type NavigationSection =
   | 'home'
   | 'messenger'
   | 'more';
-
-interface PersistentBottomNavigationProps {
-  children: ReactNode;
-}
 
 interface NavigationItemProps {
   active: boolean;
@@ -201,9 +197,7 @@ function NavigationItem({
   );
 }
 
-export default function PersistentBottomNavigation({
-  children,
-}: PersistentBottomNavigationProps) {
+export default function PersistentBottomNavigation() {
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
@@ -248,12 +242,11 @@ export default function PersistentBottomNavigation({
     if (pathname !== '/') router.replace('/');
   };
 
-  return (
-    <View style={styles.root}>
-      <View style={styles.content}>{children}</View>
+  if (navigationHidden) return null;
 
-      {!navigationHidden && (
-        <>
+  return (
+    <View pointerEvents="box-none" style={styles.root}>
+      <>
           {showUnreadBell && (
             <TouchableOpacity
               accessibilityLabel={`Открыть общение, непрочитанных сообщений: ${unreadCount}`}
@@ -366,19 +359,15 @@ export default function PersistentBottomNavigation({
               />
             </View>
           </View>
-        </>
-      )}
+      </>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 30,
   },
   navigationContainer: {
     position: 'absolute',

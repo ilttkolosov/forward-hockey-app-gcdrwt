@@ -764,7 +764,7 @@ function RootLayoutContent() {
       <StatusBar style="dark" backgroundColor={colors.background} />
       <MessengerShareIntentBridge />
       <AnalyticsRouteTracker />
-      <PersistentBottomNavigation>
+      <View style={{ flex: 1 }}>
         <Stack
           screenOptions={{
             headerShown: false,
@@ -793,7 +793,8 @@ function RootLayoutContent() {
           />
           <Stack.Screen name="messenger/room/[id]" />
         </Stack>
-      </PersistentBottomNavigation>
+        <PersistentBottomNavigation />
+      </View>
     </GestureHandlerRootView>
   );
 }
