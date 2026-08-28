@@ -22,14 +22,12 @@ import { getPlayers } from '../data/playerData';
 import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Icon from '../components/Icon';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDeclension } from './tournaments/index'; // ← импортируем склонение
 import { useNetworkStatus } from '../contexts/NetworkStatusContext';
 import { useMessengerAuth } from '../contexts/MessengerAuthContext';
 import { useMessengerUnreadSnapshot } from '../services/messengerUnread';
 import { useReferenceDataRevision } from '../services/referenceDataUpdates';
-
-const TOURNAMENTS_NOW_KEY = 'tournaments_now';
+import { loadTournamentCatalog } from '../services/tournamentCatalog';
 
 const quickNavStyles = StyleSheet.create({
   container: {
@@ -167,6 +165,7 @@ export default function HomeScreen() {
     'leagues',
     'seasons',
     'players',
+    'tournaments',
   ]);
   const [currentGames, setCurrentGames] = useState<Game[]>([]);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
@@ -179,9 +178,8 @@ export default function HomeScreen() {
 
   const loadTournamentsCount = useCallback(async () => {
     try {
-      const json = await AsyncStorage.getItem(TOURNAMENTS_NOW_KEY);
-      const list = json ? JSON.parse(json) : [];
-      setTournamentsCount(list.length);
+      const catalog = await loadTournamentCatalog();
+      setTournamentsCount(catalog.current.length);
     } catch (err) {
       console.warn('Failed to load tournaments count');
       setTournamentsCount(0);

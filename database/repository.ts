@@ -32,6 +32,22 @@ interface TournamentConfigRow extends RawJsonRow {
   version: number;
 }
 
+interface TournamentCatalogRow {
+  tournament_id: string;
+  name: string;
+  category: 'current' | 'past';
+}
+
+export interface TournamentCatalogItem {
+  tournament_ID: string;
+  tournament_Name: string;
+}
+
+export interface TournamentCatalog {
+  current: TournamentCatalogItem[];
+  past: TournamentCatalogItem[];
+}
+
 export interface StoredTournamentConfig<TConfig> {
   config: TConfig;
   version: number;
@@ -150,6 +166,67 @@ export const markTournamentConfigsSynchronized = async (version: number): Promis
   await setReferenceVersion(db, 'tournaments', Math.max(0, Math.trunc(version)));
 };
 
+export const loadTournamentCatalogFromDatabase = async (): Promise<TournamentCatalog> => {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<TournamentCatalogRow>(
+    `SELECT tournament_id, name, category
+     FROM tournament_catalog
+     ORDER BY CASE category WHEN 'current' THEN 0 ELSE 1 END, display_order, tournament_id`
+  );
+  const toItem = (row: TournamentCatalogRow): TournamentCatalogItem => ({
+    tournament_ID: row.tournament_id,
+    tournament_Name: row.name,
+  });
+  return {
+    current: rows.filter(row => row.category === 'current').map(toItem),
+    past: rows.filter(row => row.category === 'past').map(toItem),
+  };
+};
+
+/**
+ * Replaces only the startup-config membership/order. Tournament tables remain
+ * in tournament_configs, so historical data is retained between revisions.
+ */
+export const replaceTournamentCatalog = async (
+  current: TournamentCatalogItem[],
+  past: TournamentCatalogItem[],
+  configRevision = 0,
+): Promise<void> => {
+  const db = await getDatabase();
+  await withExclusiveDatabaseWrite(db, async tx => {
+    await tx.runAsync('DELETE FROM tournament_catalog');
+    const insert = async (
+      item: TournamentCatalogItem,
+      category: 'current' | 'past',
+      displayOrder: number,
+    ) => {
+      await tx.runAsync(
+        `INSERT INTO tournament_catalog
+          (tournament_id, name, category, display_order, config_revision, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(tournament_id) DO UPDATE SET
+           name=excluded.name,
+           category=excluded.category,
+           display_order=excluded.display_order,
+           config_revision=excluded.config_revision,
+           updated_at=excluded.updated_at`,
+        String(item.tournament_ID),
+        item.tournament_Name || `Турнир ${item.tournament_ID}`,
+        category,
+        displayOrder,
+        Math.max(0, Math.trunc(configRevision)),
+        nowIso(),
+      );
+    };
+    for (let index = 0; index < current.length; index += 1) {
+      await insert(current[index], 'current', index);
+    }
+    for (let index = 0; index < past.length; index += 1) {
+      await insert(past[index], 'past', index);
+    }
+  });
+};
+
 export const loadTeamsFromDatabase = async (): Promise<ApiTeam[]> => {
   const db = await getDatabase();
   return parseRows<ApiTeam>(await db.getAllAsync<RawJsonRow>('SELECT raw_json FROM teams ORDER BY name'));
@@ -238,6 +315,7 @@ export const replaceLeagues = async (items: ApiLeague[], version: number): Promi
 export const replaceSeasons = async (items: ApiSeason[], version: number): Promise<void> => {
   const db = await getDatabase();
   await withExclusiveDatabaseWrite(db, async tx => {
+    // Intentionally additive: historical seasons must survive later snapshots.
     for (const item of items) {
       await tx.runAsync(
         `INSERT INTO seasons (id, name, slug, updated_at, raw_json) VALUES (?, ?, ?, ?, ?)

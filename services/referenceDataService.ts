@@ -113,7 +113,9 @@ export const initializeReferenceData = async (
     } else {
       const fresh = (await apiService.fetchSeasons()).data;
       await replaceSeasons(fresh, targetVersion);
-      seasons = fresh;
+      // Seasons are historical reference data: a new API snapshot may contain
+      // only additions, so rebuild every projection from the merged SQLite set.
+      seasons = await loadSeasonsFromDatabase();
     }
     localVersions[entity] = targetVersion;
     console.log(`[Database] ${entity}: обновлено до версии ${targetVersion}`);

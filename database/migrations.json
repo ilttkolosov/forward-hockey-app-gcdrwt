@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 10,
+  "schemaVersion": 11,
   "migrations": [
     {
       "version": 1,
@@ -50,6 +50,11 @@
       "version": 10,
       "name": "messenger_numeric_sequence_index",
       "sql": "CREATE INDEX IF NOT EXISTS idx_messenger_messages_room_sequence_numeric ON messenger_messages(room_id, CAST(sequence AS INTEGER), created_at);\nINSERT INTO metadata (key, value) VALUES ('schema_version', '10') ON CONFLICT(key) DO UPDATE SET value = excluded.value;"
+    },
+    {
+      "version": 11,
+      "name": "tournament_catalog",
+      "sql": "CREATE TABLE IF NOT EXISTS tournament_catalog (tournament_id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL CHECK(category IN ('current', 'past')), display_order INTEGER NOT NULL DEFAULT 0, config_revision INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);\nCREATE INDEX IF NOT EXISTS idx_tournament_catalog_category_order ON tournament_catalog(category, display_order);\nINSERT INTO metadata (key, value) VALUES ('schema_version', '11') ON CONFLICT(key) DO UPDATE SET value = excluded.value;"
     }
   ]
 }
