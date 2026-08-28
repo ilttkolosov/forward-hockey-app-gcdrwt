@@ -57,6 +57,8 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
     time,
     venue,
     tournament,
+    season,
+    season_name,
     homeScore,
     awayScore,
     sp_video,
@@ -67,6 +69,7 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
 
   const homeTeamName = homeTeam?.name || '—';
   const awayTeamName = awayTeam?.name || '—';
+  const seasonName = season?.name || season_name || '';
 
   // --- СТАТУС ИГРЫ ---
   const getDynamicGameStatus = (gameDateStr: string, homeOutcome?: string, awayOutcome?: string) => {
@@ -214,6 +217,11 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
             <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
               {(!tournament || tournament.trim() === 'Товарищеский матч') ? '🤝 ' : '🏆 '}{getLeagueDisplayName(tournament)}
             </Text>
+            {seasonName && (
+              <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
+                📅 {seasonName}
+              </Text>
+            )}
           </View>
         </View>
       </View>

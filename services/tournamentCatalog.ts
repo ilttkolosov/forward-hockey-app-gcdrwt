@@ -45,13 +45,20 @@ export const saveTournamentCatalog = async (
   configRevision: number,
   tournamentVersion: number,
 ): Promise<void> => {
-  await replaceTournamentCatalog(current, past, configRevision);
+  // A malformed legacy config may list the same ID in both sections. The
+  // current section is authoritative; otherwise the SQLite primary key would
+  // let the later "past" row hide the active tournament.
+  const currentIds = new Set(current.map(item => String(item.tournament_ID)));
+  const normalizedPast = past.filter(
+    item => !currentIds.has(String(item.tournament_ID)),
+  );
+  await replaceTournamentCatalog(current, normalizedPast, configRevision);
 
   // Keep the legacy keys while older routes/builds may still read them.
   const currentTournament = current[0];
   await AsyncStorage.multiSet([
     [TOURNAMENTS_NOW_KEY, JSON.stringify(current)],
-    [TOURNAMENTS_PAST_KEY, JSON.stringify(past)],
+    [TOURNAMENTS_PAST_KEY, JSON.stringify(normalizedPast)],
   ]);
   if (currentTournament) {
     await AsyncStorage.setItem(CURRENT_TOURNAMENT_ID_KEY, String(currentTournament.tournament_ID));
