@@ -16,11 +16,11 @@ import { useMessengerUnreadSnapshot } from '../services/messengerUnread';
 import { colors } from '../styles/commonStyles';
 
 const NAVIGATION_RED = '#F2162D';
-const NAVIGATION_HEIGHT = 62;
-const CENTER_BUTTON_SIZE = 58;
-const HOME_CRADLE_SIZE = 78;
-const HOME_CRADLE_RAISE = 28;
-const MORE_SHEET_GAP = 6;
+const NAVIGATION_HEIGHT = 70;
+const CENTER_BUTTON_SIZE = 68;
+const HOME_CRADLE_WIDTH = 92;
+const HOME_CRADLE_HEIGHT = 31;
+const HOME_CRADLE_RAISE = 29;
 
 type NavigationSection =
   | 'trainings'
@@ -195,11 +195,7 @@ export default function PersistentBottomNavigation({
                 style={[
                   styles.moreSheet,
                   {
-                    bottom:
-                      NAVIGATION_HEIGHT
-                      + Math.max(insets.bottom, 6)
-                      + HOME_CRADLE_RAISE
-                      + MORE_SHEET_GAP,
+                    bottom: NAVIGATION_HEIGHT + Math.max(insets.bottom, 6),
                   },
                 ]}
               >
@@ -224,59 +220,66 @@ export default function PersistentBottomNavigation({
             </View>
           )}
 
-          <View style={[styles.navigation, { paddingBottom: Math.max(insets.bottom, 6) }]}>
-            <View pointerEvents="none" style={styles.homeCradle} />
-            <NavigationItem
-              accessibilityLabel="Открыть тренировки"
-              active={activeSection === 'trainings'}
-              icon="barbell-outline"
-              label="Тренировки"
-              onPress={() => pushRoute('/trainings')}
-            />
-            <NavigationItem
-              accessibilityLabel="Открыть турниры"
-              active={activeSection === 'tournaments'}
-              icon="trophy-outline"
-              label="Турниры"
-              onPress={() => pushRoute('/tournaments')}
-            />
+          <View
+            style={[
+              styles.navigationContainer,
+              { paddingBottom: Math.max(insets.bottom, 6) },
+            ]}
+          >
+            <View style={styles.navigationCard}>
+              <View pointerEvents="none" style={styles.homeCradle} />
+              <NavigationItem
+                accessibilityLabel="Открыть тренировки"
+                active={activeSection === 'trainings'}
+                icon="barbell-outline"
+                label="Тренировки"
+                onPress={() => pushRoute('/trainings')}
+              />
+              <NavigationItem
+                accessibilityLabel="Открыть турниры"
+                active={activeSection === 'tournaments'}
+                icon="trophy-outline"
+                label="Турниры"
+                onPress={() => pushRoute('/tournaments')}
+              />
 
-            <TouchableOpacity
-              accessibilityLabel="Открыть главную страницу"
-              accessibilityRole="button"
-              accessibilityState={{ selected: activeSection === 'home' }}
-              activeOpacity={0.78}
-              hitSlop={{ top: 26, right: 5, bottom: 4, left: 5 }}
-              onPress={openHome}
-              style={styles.homeItem}
-            >
-              <View style={styles.homeButton}>
-                <Image
-                  resizeMode="contain"
-                  source={require('../assets/icons/myIcon.png')}
-                  style={styles.homeLogo}
-                />
-              </View>
-              <Text style={[styles.navigationLabel, activeSection === 'home' && styles.navigationLabelActive]}>
-                Главная
-              </Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityLabel="Открыть главную страницу"
+                accessibilityRole="button"
+                accessibilityState={{ selected: activeSection === 'home' }}
+                activeOpacity={0.78}
+                hitSlop={{ top: 26, right: 5, bottom: 4, left: 5 }}
+                onPress={openHome}
+                style={styles.homeItem}
+              >
+                <View style={styles.homeButton}>
+                  <Image
+                    resizeMode="contain"
+                    source={require('../assets/icons/myIcon.png')}
+                    style={styles.homeLogo}
+                  />
+                </View>
+                <Text style={[styles.navigationLabel, activeSection === 'home' && styles.navigationLabelActive]}>
+                  Главная
+                </Text>
+              </TouchableOpacity>
 
-            <NavigationItem
-              accessibilityLabel="Открыть общение"
-              active={activeSection === 'messenger'}
-              badge={unreadCount}
-              icon="chatbubble-ellipses-outline"
-              label="Общение"
-              onPress={() => pushRoute(messengerHref)}
-            />
-            <NavigationItem
-              accessibilityLabel="Открыть дополнительное меню"
-              active={activeSection === 'more' || moreVisible}
-              icon="ellipsis-horizontal"
-              label="Ещё"
-              onPress={() => setMoreVisible(true)}
-            />
+              <NavigationItem
+                accessibilityLabel="Открыть общение"
+                active={activeSection === 'messenger'}
+                badge={unreadCount}
+                icon="chatbubble-ellipses-outline"
+                label="Общение"
+                onPress={() => pushRoute(messengerHref)}
+              />
+              <NavigationItem
+                accessibilityLabel="Открыть дополнительное меню"
+                active={activeSection === 'more' || moreVisible}
+                icon="ellipsis-horizontal"
+                label="Ещё"
+                onPress={() => setMoreVisible(true)}
+              />
+            </View>
           </View>
         </>
       )}
@@ -292,9 +295,17 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
-  navigation: {
+  navigationContainer: {
     zIndex: 30,
-    minHeight: NAVIGATION_HEIGHT,
+    backgroundColor: 'rgba(255,255,255,0.98)',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  navigationCard: {
+    height: NAVIGATION_HEIGHT,
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingTop: 7,
@@ -302,11 +313,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.98)',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#DDE1E7',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 12,
+    overflow: 'visible',
   },
   navigationItem: {
     flex: 1,
@@ -336,7 +343,7 @@ const styles = StyleSheet.create({
   homeItem: {
     flex: 1,
     minWidth: 0,
-    height: 57,
+    height: 67,
     alignItems: 'center',
     justifyContent: 'flex-end',
     paddingBottom: 3,
@@ -352,24 +359,29 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
   },
   homeLogo: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 62,
+    height: 62,
+    borderRadius: 31,
   },
   homeCradle: {
     position: 'absolute',
     left: '50%',
     top: -HOME_CRADLE_RAISE,
-    width: HOME_CRADLE_SIZE,
-    height: HOME_CRADLE_SIZE,
-    marginLeft: -(HOME_CRADLE_SIZE / 2),
-    borderRadius: HOME_CRADLE_SIZE / 2,
+    width: HOME_CRADLE_WIDTH,
+    height: HOME_CRADLE_HEIGHT,
+    marginLeft: -(HOME_CRADLE_WIDTH / 2),
+    borderTopLeftRadius: HOME_CRADLE_WIDTH / 2,
+    borderTopRightRadius: HOME_CRADLE_WIDTH / 2,
     backgroundColor: colors.white,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: '#DDE1E7',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.06,
+    shadowOpacity: 0.05,
     shadowRadius: 8,
-    elevation: 8,
+    elevation: 4,
   },
   badge: {
     position: 'absolute',
