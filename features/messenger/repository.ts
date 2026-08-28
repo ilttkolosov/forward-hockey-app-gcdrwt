@@ -399,6 +399,30 @@ export function cacheMessengerRoomSnapshot(
   });
 }
 
+/** Removes a departed room from the local list and resets its local cursor. */
+export function removeCachedMessengerRoom(
+  db: SQLiteDatabase,
+  roomId: string,
+): Promise<void> {
+  return enqueueMessengerWrite(db, async () => {
+    await withMessengerTransaction(db, async (transaction) => {
+      await transaction.runAsync(
+        "DELETE FROM messenger_outbox WHERE room_id = ?",
+        roomId,
+      );
+      await transaction.runAsync(
+        "DELETE FROM messenger_room_read_state WHERE room_id = ?",
+        roomId,
+      );
+      await transaction.runAsync(
+        "DELETE FROM messenger_rooms WHERE id = ?",
+        roomId,
+      );
+    });
+    notifyMessengerRoomCacheChanged();
+  });
+}
+
 export interface PresentedMessengerRoomMessage
   extends PresentedMessengerMessage {
   roomId: string;
