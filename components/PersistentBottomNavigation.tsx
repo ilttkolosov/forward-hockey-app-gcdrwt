@@ -1,7 +1,7 @@
-import React, { ReactNode, useMemo, useState } from 'react';
+import React, { ReactNode, useEffect, useMemo, useState } from 'react';
 import {
+  BackHandler,
   Image,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -16,8 +16,11 @@ import { useMessengerUnreadSnapshot } from '../services/messengerUnread';
 import { colors } from '../styles/commonStyles';
 
 const NAVIGATION_RED = '#F2162D';
-const NAVIGATION_HEIGHT = 70;
-const CENTER_BUTTON_SIZE = 68;
+const NAVIGATION_HEIGHT = 62;
+const CENTER_BUTTON_SIZE = 58;
+const HOME_CRADLE_SIZE = 78;
+const HOME_CRADLE_RAISE = 28;
+const MORE_SHEET_GAP = 6;
 
 type NavigationSection =
   | 'trainings'
@@ -54,8 +57,9 @@ const MORE_MENU_ITEMS: MoreMenuItem[] = [
 
 const formatUnreadCount = (count: number) => (count > 99 ? '99+' : String(count));
 
-const isMobileGameRoute = (pathname: string) => (
+const isNavigationHiddenRoute = (pathname: string) => (
   pathname.startsWith('/mobilegames/')
+  || pathname.startsWith('/messenger/room/')
 );
 
 const activeSectionForPath = (pathname: string): NavigationSection | null => {
@@ -128,12 +132,35 @@ export default function PersistentBottomNavigation({
     : '/messenger/register';
   const activeSection = useMemo(() => activeSectionForPath(pathname), [pathname]);
   const unreadCount = isAuthenticated && unread.ready ? unread.count : 0;
-  const navigationHidden = isMobileGameRoute(pathname);
+  const navigationHidden = isNavigationHiddenRoute(pathname);
   const showUnreadBell = unreadCount > 0 && !pathname.startsWith('/messenger');
 
-  const navigate = (href: Href) => {
+  useEffect(() => {
+    if (!moreVisible) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setMoreVisible(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [moreVisible]);
+
+  useEffect(() => {
+    if (navigationHidden) setMoreVisible(false);
+  }, [navigationHidden]);
+
+  const pushRoute = (href: Href) => {
     setMoreVisible(false);
-    router.navigate(href);
+    if (typeof href === 'string' && pathname === href) return;
+    router.push(href);
+  };
+
+  const openHome = () => {
+    setMoreVisible(false);
+    if (router.canDismiss()) {
+      router.dismissAll();
+      return;
+    }
+    if (pathname !== '/') router.replace('/');
   };
 
   return (
@@ -148,7 +175,7 @@ export default function PersistentBottomNavigation({
               accessibilityRole="button"
               activeOpacity={0.72}
               hitSlop={8}
-              onPress={() => navigate(messengerHref)}
+              onPress={() => pushRoute(messengerHref)}
               style={[styles.unreadBell, { top: insets.top + 8 }]}
             >
               <Icon name="notifications-outline" size={25} color={colors.text} />
@@ -156,20 +183,62 @@ export default function PersistentBottomNavigation({
             </TouchableOpacity>
           )}
 
+          {moreVisible && (
+            <View style={styles.moreOverlay}>
+              <Pressable
+                accessibilityLabel="Закрыть дополнительное меню"
+                accessibilityRole="button"
+                onPress={() => setMoreVisible(false)}
+                style={styles.backdrop}
+              />
+              <View
+                style={[
+                  styles.moreSheet,
+                  {
+                    bottom:
+                      NAVIGATION_HEIGHT
+                      + Math.max(insets.bottom, 6)
+                      + HOME_CRADLE_RAISE
+                      + MORE_SHEET_GAP,
+                  },
+                ]}
+              >
+                <View style={styles.sheetHandle} />
+                {MORE_MENU_ITEMS.map((item, index) => (
+                  <TouchableOpacity
+                    accessibilityLabel={`Открыть раздел «${item.label}»`}
+                    accessibilityRole="button"
+                    activeOpacity={0.68}
+                    key={item.label}
+                    onPress={() => pushRoute(item.href)}
+                    style={[
+                      styles.moreMenuItem,
+                      index < MORE_MENU_ITEMS.length - 1 && styles.moreMenuItemBorder,
+                    ]}
+                  >
+                    <Icon name={item.icon} size={29} color={colors.text} />
+                    <Text style={styles.moreMenuLabel}>{item.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
           <View style={[styles.navigation, { paddingBottom: Math.max(insets.bottom, 6) }]}>
+            <View pointerEvents="none" style={styles.homeCradle} />
             <NavigationItem
               accessibilityLabel="Открыть тренировки"
               active={activeSection === 'trainings'}
               icon="barbell-outline"
               label="Тренировки"
-              onPress={() => navigate('/trainings')}
+              onPress={() => pushRoute('/trainings')}
             />
             <NavigationItem
               accessibilityLabel="Открыть турниры"
               active={activeSection === 'tournaments'}
               icon="trophy-outline"
               label="Турниры"
-              onPress={() => navigate('/tournaments')}
+              onPress={() => pushRoute('/tournaments')}
             />
 
             <TouchableOpacity
@@ -178,10 +247,10 @@ export default function PersistentBottomNavigation({
               accessibilityState={{ selected: activeSection === 'home' }}
               activeOpacity={0.78}
               hitSlop={{ top: 26, right: 5, bottom: 4, left: 5 }}
-              onPress={() => navigate('/')}
+              onPress={openHome}
               style={styles.homeItem}
             >
-              <View style={[styles.homeButton, activeSection === 'home' && styles.homeButtonActive]}>
+              <View style={styles.homeButton}>
                 <Image
                   resizeMode="contain"
                   source={require('../assets/icons/myIcon.png')}
@@ -199,7 +268,7 @@ export default function PersistentBottomNavigation({
               badge={unreadCount}
               icon="chatbubble-ellipses-outline"
               label="Общение"
-              onPress={() => navigate(messengerHref)}
+              onPress={() => pushRoute(messengerHref)}
             />
             <NavigationItem
               accessibilityLabel="Открыть дополнительное меню"
@@ -209,47 +278,6 @@ export default function PersistentBottomNavigation({
               onPress={() => setMoreVisible(true)}
             />
           </View>
-
-          <Modal
-            animationType="slide"
-            onRequestClose={() => setMoreVisible(false)}
-            statusBarTranslucent
-            transparent
-            visible={moreVisible}
-          >
-            <View style={styles.modalRoot}>
-              <Pressable
-                accessibilityLabel="Закрыть дополнительное меню"
-                accessibilityRole="button"
-                onPress={() => setMoreVisible(false)}
-                style={styles.backdrop}
-              />
-              <View
-                style={[
-                  styles.moreSheet,
-                  { marginBottom: NAVIGATION_HEIGHT + Math.max(insets.bottom, 6) },
-                ]}
-              >
-                <View style={styles.sheetHandle} />
-                {MORE_MENU_ITEMS.map((item, index) => (
-                  <TouchableOpacity
-                    accessibilityLabel={`Открыть раздел «${item.label}»`}
-                    accessibilityRole="button"
-                    activeOpacity={0.68}
-                    key={item.label}
-                    onPress={() => navigate(item.href)}
-                    style={[
-                      styles.moreMenuItem,
-                      index < MORE_MENU_ITEMS.length - 1 && styles.moreMenuItemBorder,
-                    ]}
-                  >
-                    <Icon name={item.icon} size={29} color={colors.text} />
-                    <Text style={styles.moreMenuLabel}>{item.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          </Modal>
         </>
       )}
     </View>
@@ -265,6 +293,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   navigation: {
+    zIndex: 30,
     minHeight: NAVIGATION_HEIGHT,
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -307,7 +336,7 @@ const styles = StyleSheet.create({
   homeItem: {
     flex: 1,
     minWidth: 0,
-    height: 67,
+    height: 57,
     alignItems: 'center',
     justifyContent: 'flex-end',
     paddingBottom: 3,
@@ -320,23 +349,27 @@ const styles = StyleSheet.create({
     borderRadius: CENTER_BUTTON_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
     backgroundColor: colors.white,
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
-    elevation: 9,
-  },
-  homeButtonActive: {
-    borderColor: NAVIGATION_RED,
   },
   homeLogo: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+  },
+  homeCradle: {
+    position: 'absolute',
+    left: '50%',
+    top: -HOME_CRADLE_RAISE,
+    width: HOME_CRADLE_SIZE,
+    height: HOME_CRADLE_SIZE,
+    marginLeft: -(HOME_CRADLE_SIZE / 2),
+    borderRadius: HOME_CRADLE_SIZE / 2,
+    backgroundColor: colors.white,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 8,
   },
   badge: {
     position: 'absolute',
@@ -384,16 +417,18 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 6,
   },
-  modalRoot: {
-    flex: 1,
-    justifyContent: 'flex-end',
+  moreOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
   moreSheet: {
-    marginHorizontal: 10,
+    position: 'absolute',
+    left: 10,
+    right: 10,
     paddingTop: 8,
     paddingHorizontal: 14,
     borderRadius: 24,

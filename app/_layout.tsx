@@ -765,8 +765,15 @@ function RootLayoutContent() {
       <MessengerShareIntentBridge />
       <AnalyticsRouteTracker />
       <PersistentBottomNavigation>
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
-          <Stack.Screen name="index" />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            animation: 'slide_from_right',
+            gestureDirection: 'horizontal',
+            contentStyle: { backgroundColor: colors.background },
+          }}
+        >
+          <Stack.Screen name="index" options={{ gestureEnabled: false }} />
           <Stack.Screen name="players" />
           <Stack.Screen name="trainings" />
           <Stack.Screen name="player/[id]" />
