@@ -19,13 +19,15 @@ import { colors } from '../styles/commonStyles';
 
 const NAVIGATION_RED = '#F2162D';
 const NAVIGATION_HEIGHT = 70;
-const NAVIGATION_CORNER_RADIUS = 18;
-const CENTER_BUTTON_SIZE = 58;
+const NAVIGATION_CORNER_RADIUS = 27;
+const HOME_ITEM_HEIGHT = 64;
+const CENTER_BUTTON_SIZE = 87;
 const CENTER_BUTTON_RADIUS = CENTER_BUTTON_SIZE / 2;
-const NAVIGATION_CRADLE_GAP = 4;
+const CENTER_LOGO_SIZE = 78;
+const NAVIGATION_CRADLE_GAP = 6;
 const NAVIGATION_CRADLE_RADIUS = CENTER_BUTTON_RADIUS + NAVIGATION_CRADLE_GAP;
-const NAVIGATION_CRADLE_FILLET_RADIUS = 14;
-const NAVIGATION_SHADOW_EXTENT = 12;
+const NAVIGATION_CRADLE_FILLET_RADIUS = 21;
+const NAVIGATION_SHADOW_EXTENT = 18;
 
 type NavigationSection =
   | 'trainings'
@@ -130,21 +132,21 @@ function NavigationSurface({ safeAreaBottom, width }: NavigationSurfaceProps) {
         fillOpacity={0.02}
         stroke="#7C8490"
         strokeOpacity={0.025}
-        strokeWidth={18}
+        strokeWidth={27}
       />
       <Path
         d={surfacePath}
         fill="none"
         stroke="#7C8490"
         strokeOpacity={0.035}
-        strokeWidth={11}
+        strokeWidth={16.5}
       />
       <Path
         d={surfacePath}
         fill="none"
         stroke="#7C8490"
         strokeOpacity={0.05}
-        strokeWidth={5}
+        strokeWidth={7.5}
       />
       <Path
         d={surfacePath}
@@ -423,14 +425,14 @@ const styles = StyleSheet.create({
   homeItem: {
     flex: 1,
     minWidth: 0,
-    height: 64,
+    height: HOME_ITEM_HEIGHT,
     alignItems: 'center',
     justifyContent: 'flex-end',
     paddingBottom: 3,
   },
   homeButton: {
     position: 'absolute',
-    top: -35,
+    top: -(CENTER_BUTTON_RADIUS + (NAVIGATION_HEIGHT - HOME_ITEM_HEIGHT)),
     width: CENTER_BUTTON_SIZE,
     height: CENTER_BUTTON_SIZE,
     borderRadius: CENTER_BUTTON_SIZE / 2,
@@ -438,15 +440,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.white,
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.16,
-    shadowRadius: 7,
-    elevation: 9,
+    shadowRadius: 10.5,
+    elevation: 12,
   },
   homeLogo: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: CENTER_LOGO_SIZE,
+    height: CENTER_LOGO_SIZE,
+    borderRadius: CENTER_LOGO_SIZE / 2,
   },
   badge: {
     position: 'absolute',
