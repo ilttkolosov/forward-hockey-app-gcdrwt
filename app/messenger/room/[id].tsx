@@ -1340,6 +1340,7 @@ export default function MessengerRoomScreen() {
   const refreshRunning = useRef(false);
   const olderMessagesLoading = useRef(false);
   const olderPageTriggerArmed = useRef(true);
+  const feedManuallyNavigated = useRef(false);
   const newerCachedMessagesLoading = useRef(false);
   const remoteHasMoreNewerMessages = useRef(true);
   const reactionMutationIds = useRef<Set<string>>(new Set());
@@ -1484,6 +1485,7 @@ export default function MessengerRoomScreen() {
   }, []);
 
   const beginManualFeedNavigation = useCallback(() => {
+    feedManuallyNavigated.current = true;
     nearLatest.current = false;
     keyboardScrollPending.current = false;
     clearPendingLatestScroll();
@@ -2400,6 +2402,18 @@ export default function MessengerRoomScreen() {
     }
   }, []);
 
+  useEffect(
+    () => () => {
+      // Focus effects are recreated when auth/realtime dependencies change,
+      // even while the same room remains visible. Only a real component
+      // unmount may cancel the viewport watchdog.
+      clearInitialPositionTimers();
+      pendingInitialPosition.current = false;
+      initialAnchorSettling.current = false;
+    },
+    [clearInitialPositionTimers],
+  );
+
   const finishInitialPosition = useCallback(() => {
     if (!pendingInitialPosition.current) return;
     pendingInitialPosition.current = false;
@@ -2695,7 +2709,7 @@ export default function MessengerRoomScreen() {
         finishInitialPosition,
         180,
       );
-    }, 4_000);
+    }, 1_500);
     requestAnimationFrame(positionInitialMessages);
   }, [
     clearInitialPositionTimers,
@@ -2831,16 +2845,25 @@ export default function MessengerRoomScreen() {
         feedIsScrolling.current = false;
         setFloatingDate(null);
       }, 1_500);
-      // A prepend changes the native offset while FlatList preserves the
-      // visible message. Re-arm only after that adjustment (or after the user
-      // moves away from the top), otherwise several cached pages can be
-      // inserted during one visit to the threshold and make the feed jump.
-      if (contentOffset.y > 240) olderPageTriggerArmed.current = true;
+      // Start the next local page about two viewports before the reader reaches
+      // the boundary. This gives FlatList time to measure the new rows offscreen
+      // and removes the visible pause at the exact end of the loaded window.
+      // Programmatic positioning during room entry never enables this path.
+      const olderPagePrefetchOffset = Math.max(
+        600,
+        layoutMeasurement.height * 2,
+      );
+      const olderPageRearmOffset =
+        olderPagePrefetchOffset + layoutMeasurement.height;
+      if (contentOffset.y > olderPageRearmOffset) {
+        olderPageTriggerArmed.current = true;
+      }
       if (
         listReady &&
+        feedManuallyNavigated.current &&
         !pendingInitialPosition.current &&
         olderPageTriggerArmed.current &&
-        contentOffset.y <= 80
+        contentOffset.y <= olderPagePrefetchOffset
       ) {
         olderPageTriggerArmed.current = false;
         if (authorFilter && filterCursor) {
@@ -3238,16 +3261,12 @@ export default function MessengerRoomScreen() {
         }
         setPushReactionAnimation(null);
         messageNavigationTarget.current = null;
-        clearInitialPositionTimers();
-        pendingInitialPosition.current = false;
-        initialAnchorSettling.current = false;
         pendingMessageAction.current = null;
         pendingAttachmentRequest.current = null;
       };
     }, [
       db,
       acknowledgeLatest,
-      clearInitialPositionTimers,
       authStatus,
       isAuthenticated,
       loadMessages,
