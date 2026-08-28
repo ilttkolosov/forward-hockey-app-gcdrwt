@@ -6,10 +6,12 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Href, usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path } from 'react-native-svg';
 import Icon from './Icon';
 import { useMessengerAuth } from '../contexts/MessengerAuthContext';
 import { useMessengerUnreadSnapshot } from '../services/messengerUnread';
@@ -17,10 +19,10 @@ import { colors } from '../styles/commonStyles';
 
 const NAVIGATION_RED = '#F2162D';
 const NAVIGATION_HEIGHT = 70;
-const CENTER_BUTTON_SIZE = 68;
-const HOME_CRADLE_WIDTH = 92;
-const HOME_CRADLE_HEIGHT = 31;
-const HOME_CRADLE_RAISE = 29;
+const NAVIGATION_BUMP_HEIGHT = 30;
+const NAVIGATION_BUMP_HALF_WIDTH = 44;
+const NAVIGATION_CORNER_RADIUS = 18;
+const CENTER_BUTTON_SIZE = 56;
 
 type NavigationSection =
   | 'trainings'
@@ -46,6 +48,11 @@ interface MoreMenuItem {
   href: Href;
   icon: React.ComponentProps<typeof Icon>['name'];
   label: string;
+}
+
+interface NavigationSurfaceProps {
+  safeAreaBottom: number;
+  width: number;
 }
 
 const MORE_MENU_ITEMS: MoreMenuItem[] = [
@@ -77,6 +84,42 @@ const activeSectionForPath = (pathname: string): NavigationSection | null => {
   }
   return null;
 };
+
+function NavigationSurface({ safeAreaBottom, width }: NavigationSurfaceProps) {
+  const centerX = width / 2;
+  const topY = NAVIGATION_BUMP_HEIGHT;
+  const totalHeight = NAVIGATION_BUMP_HEIGHT + NAVIGATION_HEIGHT + safeAreaBottom;
+  const surfacePath = [
+    `M 0 ${topY + NAVIGATION_CORNER_RADIUS}`,
+    `Q 0 ${topY} ${NAVIGATION_CORNER_RADIUS} ${topY}`,
+    `H ${centerX - NAVIGATION_BUMP_HALF_WIDTH}`,
+    `C ${centerX - 34} ${topY} ${centerX - 34} 0 ${centerX} 0`,
+    `C ${centerX + 34} 0 ${centerX + 34} ${topY} ${centerX + NAVIGATION_BUMP_HALF_WIDTH} ${topY}`,
+    `H ${width - NAVIGATION_CORNER_RADIUS}`,
+    `Q ${width} ${topY} ${width} ${topY + NAVIGATION_CORNER_RADIUS}`,
+    `V ${totalHeight}`,
+    'H 0',
+    'Z',
+  ].join(' ');
+
+  return (
+    <Svg
+      height={totalHeight}
+      pointerEvents="none"
+      style={styles.navigationSurface}
+      width={width}
+    >
+      <Path d={surfacePath} fill="#000000" opacity={0.055} transform="translate(0 2)" />
+      <Path
+        d={surfacePath}
+        fill="#FFFFFF"
+        stroke="#DDE1E7"
+        strokeLinejoin="round"
+        strokeWidth={0.75}
+      />
+    </Svg>
+  );
+}
 
 function UnreadBadge({ count, compact = false }: { count: number; compact?: boolean }) {
   return (
@@ -123,6 +166,7 @@ export default function PersistentBottomNavigation({
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
+  const { width: viewportWidth } = useWindowDimensions();
   const { isAuthenticated } = useMessengerAuth();
   const unread = useMessengerUnreadSnapshot();
   const [moreVisible, setMoreVisible] = useState(false);
@@ -226,8 +270,11 @@ export default function PersistentBottomNavigation({
               { paddingBottom: Math.max(insets.bottom, 6) },
             ]}
           >
-            <View style={styles.navigationCard}>
-              <View pointerEvents="none" style={styles.homeCradle} />
+            <NavigationSurface
+              safeAreaBottom={Math.max(insets.bottom, 6)}
+              width={viewportWidth}
+            />
+            <View style={styles.navigationItems}>
               <NavigationItem
                 accessibilityLabel="Открыть тренировки"
                 active={activeSection === 'trainings'}
@@ -297,23 +344,20 @@ const styles = StyleSheet.create({
   },
   navigationContainer: {
     zIndex: 30,
-    backgroundColor: 'rgba(255,255,255,0.98)',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 12,
+    overflow: 'visible',
   },
-  navigationCard: {
+  navigationSurface: {
+    position: 'absolute',
+    left: 0,
+    top: -NAVIGATION_BUMP_HEIGHT,
+  },
+  navigationItems: {
     height: NAVIGATION_HEIGHT,
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingTop: 7,
     paddingHorizontal: 5,
-    backgroundColor: 'rgba(255,255,255,0.98)',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#DDE1E7',
-    overflow: 'visible',
+    backgroundColor: 'transparent',
   },
   navigationItem: {
     flex: 1,
@@ -343,45 +387,25 @@ const styles = StyleSheet.create({
   homeItem: {
     flex: 1,
     minWidth: 0,
-    height: 67,
+    height: 64,
     alignItems: 'center',
     justifyContent: 'flex-end',
     paddingBottom: 3,
   },
   homeButton: {
     position: 'absolute',
-    top: -25,
+    top: -27,
     width: CENTER_BUTTON_SIZE,
     height: CENTER_BUTTON_SIZE,
     borderRadius: CENTER_BUTTON_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.white,
+    backgroundColor: 'transparent',
   },
   homeLogo: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-  },
-  homeCradle: {
-    position: 'absolute',
-    left: '50%',
-    top: -HOME_CRADLE_RAISE,
-    width: HOME_CRADLE_WIDTH,
-    height: HOME_CRADLE_HEIGHT,
-    marginLeft: -(HOME_CRADLE_WIDTH / 2),
-    borderTopLeftRadius: HOME_CRADLE_WIDTH / 2,
-    borderTopRightRadius: HOME_CRADLE_WIDTH / 2,
-    backgroundColor: colors.white,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: '#DDE1E7',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 4,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
   },
   badge: {
     position: 'absolute',
