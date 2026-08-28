@@ -14,11 +14,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
+import { usePersistentBottomNavigationInset } from "../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import { colors } from "../../styles/commonStyles";
 
 export default function MessengerChangePasswordScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const params = useLocalSearchParams<{ sharePending?: string }>();
   const authenticatedDestination =
     params.sharePending === "1" ? "/messenger/share" : "/messenger/rooms";
@@ -111,13 +113,16 @@ export default function MessengerChangePasswordScreen() {
   if (!passwordChange) return null;
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: bottomNavigationInset },
+          ]}
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.card}>

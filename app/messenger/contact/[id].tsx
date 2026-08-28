@@ -20,6 +20,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../../components/Icon";
+import { usePersistentBottomNavigationInset } from "../../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
 import MessengerAvatarViewer from "../../../features/messenger/MessengerAvatarViewer";
@@ -60,6 +61,7 @@ function lastSeenText(value: string | null): string {
 
 export default function MessengerContactProfileScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const params = useLocalSearchParams<{
     id: string;
     roomId?: string;
@@ -219,7 +221,7 @@ export default function MessengerContactProfileScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.iconButton}
@@ -245,7 +247,10 @@ export default function MessengerContactProfileScreen() {
         ) : profile && session ? (
           <ScrollView
             ref={scrollRef}
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[
+              styles.content,
+              { paddingBottom: bottomNavigationInset },
+            ]}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={
               Platform.OS === "ios" ? "interactive" : "on-drag"

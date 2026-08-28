@@ -29,6 +29,7 @@ const NAVIGATION_CRADLE_RADIUS = CENTER_BUTTON_RADIUS + NAVIGATION_CRADLE_GAP;
 const NAVIGATION_CRADLE_FILLET_RADIUS = 21;
 const NAVIGATION_CRADLE_DROP = 20;
 const NAVIGATION_SHADOW_EXTENT = 18;
+const MORE_SHEET_GAP = 3;
 
 type NavigationSection =
   | 'trainings'
@@ -69,7 +70,13 @@ const formatUnreadCount = (count: number) => (count > 99 ? '99+' : String(count)
 const isNavigationHiddenRoute = (pathname: string) => (
   pathname.startsWith('/mobilegames/')
   || pathname.startsWith('/messenger/room/')
+  || pathname === '/messenger/search'
 );
+
+export const usePersistentBottomNavigationInset = () => {
+  const insets = useSafeAreaInsets();
+  return NAVIGATION_HEIGHT + NAVIGATION_SHADOW_EXTENT + Math.max(insets.bottom, 6);
+};
 
 const activeSectionForPath = (pathname: string): NavigationSection | null => {
   if (pathname === '/') return 'home';
@@ -273,7 +280,7 @@ export default function PersistentBottomNavigation() {
                 style={[
                   styles.moreSheet,
                   {
-                    bottom: NAVIGATION_HEIGHT + Math.max(insets.bottom, 6),
+                    bottom: NAVIGATION_HEIGHT + Math.max(insets.bottom, 6) + MORE_SHEET_GAP,
                   },
                 ]}
               >
@@ -324,23 +331,7 @@ export default function PersistentBottomNavigation() {
                 onPress={() => pushRoute('/tournaments')}
               />
 
-              <TouchableOpacity
-                accessibilityLabel="Открыть главную страницу"
-                accessibilityRole="button"
-                accessibilityState={{ selected: activeSection === 'home' }}
-                activeOpacity={0.78}
-                hitSlop={{ top: 26, right: 5, bottom: 4, left: 5 }}
-                onPress={openHome}
-                style={styles.homeItem}
-              >
-                <View style={styles.homeButton}>
-                  <Image
-                    resizeMode="contain"
-                    source={require('../assets/icons/myIcon.png')}
-                    style={styles.homeLogo}
-                  />
-                </View>
-              </TouchableOpacity>
+              <View style={styles.homeItemPlaceholder} />
 
               <NavigationItem
                 accessibilityLabel="Открыть общение"
@@ -359,6 +350,27 @@ export default function PersistentBottomNavigation() {
               />
             </View>
           </View>
+
+          <TouchableOpacity
+            accessibilityLabel="Открыть главную страницу"
+            accessibilityRole="button"
+            accessibilityState={{ selected: activeSection === 'home' }}
+            activeOpacity={0.78}
+            hitSlop={{ top: 26, right: 5, bottom: 4, left: 5 }}
+            onPress={openHome}
+            style={[
+              styles.floatingHomeItem,
+              { bottom: Math.max(insets.bottom, 6) + 17.5 },
+            ]}
+          >
+            <View style={styles.homeButton}>
+              <Image
+                resizeMode="contain"
+                source={require('../assets/icons/myIcon.png')}
+                style={styles.homeLogo}
+              />
+            </View>
+          </TouchableOpacity>
       </>
     </View>
   );
@@ -374,7 +386,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    zIndex: 30,
+    zIndex: 20,
     overflow: 'visible',
   },
   navigationSurface: {
@@ -415,20 +427,21 @@ const styles = StyleSheet.create({
     color: NAVIGATION_RED,
     fontWeight: '700',
   },
-  homeItem: {
+  homeItemPlaceholder: {
     flex: 1,
     minWidth: 0,
     height: HOME_ITEM_HEIGHT,
+  },
+  floatingHomeItem: {
+    position: 'absolute',
+    left: '40%',
+    width: '20%',
+    height: HOME_ITEM_HEIGHT,
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingBottom: 3,
+    justifyContent: 'center',
+    zIndex: 40,
   },
   homeButton: {
-    position: 'absolute',
-    top:
-      NAVIGATION_CRADLE_DROP
-      - CENTER_BUTTON_RADIUS
-      - (NAVIGATION_HEIGHT - HOME_ITEM_HEIGHT),
     width: CENTER_BUTTON_SIZE,
     height: CENTER_BUTTON_SIZE,
     borderRadius: CENTER_BUTTON_SIZE / 2,
@@ -494,7 +507,7 @@ const styles = StyleSheet.create({
   },
   moreOverlay: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 20,
+    zIndex: 30,
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,

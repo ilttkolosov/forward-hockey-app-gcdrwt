@@ -20,6 +20,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
+import { usePersistentBottomNavigationInset } from "../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
 import LocalRoomAvatar from "../../features/messenger/LocalRoomAvatar";
@@ -207,6 +208,7 @@ function typingLabel(
 export default function MessengerRoomsScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { status, session, isAuthenticated } = useMessengerAuth();
   const [rooms, setRooms] = useState<MessengerRoom[]>([]);
   const [loading, setLoading] = useState(true);
@@ -871,9 +873,10 @@ export default function MessengerRoomsScreen() {
             onRefresh={() => void loadRooms(true, false, true)}
           />
         }
-        contentContainerStyle={
-          orderedRooms.length ? styles.list : styles.emptyList
-        }
+        contentContainerStyle={[
+          orderedRooms.length ? styles.list : styles.emptyList,
+          { paddingBottom: bottomNavigationInset },
+        ]}
         renderItem={({ item, index }) => {
           const direct = item.room_type === "direct" || item.kind === "direct";
           const saved = item.room_type === "saved";

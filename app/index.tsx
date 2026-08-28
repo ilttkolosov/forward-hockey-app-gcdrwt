@@ -22,6 +22,7 @@ import { getPlayers } from '../data/playerData';
 import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Icon from '../components/Icon';
+import { usePersistentBottomNavigationInset } from '../components/PersistentBottomNavigation';
 import { getDeclension } from './tournaments/index'; // ← импортируем склонение
 import { useNetworkStatus } from '../contexts/NetworkStatusContext';
 import { useMessengerAuth } from '../contexts/MessengerAuthContext';
@@ -155,6 +156,7 @@ const warningStyles = StyleSheet.create({
 });
 
 export default function HomeScreen() {
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { isOffline } = useNetworkStatus();
   const { isAuthenticated: isMessengerAuthenticated } = useMessengerAuth();
   const messengerUnread = useMessengerUnreadSnapshot();
@@ -262,7 +264,7 @@ export default function HomeScreen() {
     <SafeAreaView edges={['top']} style={commonStyles.container}>
       <ScrollView
         style={commonStyles.content}
-        contentContainerStyle={{ paddingBottom: 32 }} // ← отступ снизу внутри ScrollView
+        contentContainerStyle={{ paddingBottom: bottomNavigationInset }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >

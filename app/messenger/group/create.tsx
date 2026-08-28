@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../../components/Icon";
+import { usePersistentBottomNavigationInset } from "../../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
 import type { MessengerContact } from "../../../features/messenger/types";
@@ -29,6 +30,7 @@ interface TeamOption {
 
 export default function CreateMessengerGroupScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { session, isAuthenticated } = useMessengerAuth();
   const [contacts, setContacts] = useState<MessengerContact[]>([]);
   const [teamId, setTeamId] = useState<string | null>(null);
@@ -130,7 +132,7 @@ export default function CreateMessengerGroupScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.iconButton}
@@ -153,7 +155,10 @@ export default function CreateMessengerGroupScreen() {
           data={teamContacts}
           keyExtractor={(contact) => contact.id}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: bottomNavigationInset },
+          ]}
           ListHeaderComponent={
             <View>
               <Text style={styles.label}>Название группы</Text>

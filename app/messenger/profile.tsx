@@ -20,6 +20,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
+import { usePersistentBottomNavigationInset } from "../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
 import MessengerAvatarViewer from "../../features/messenger/MessengerAvatarViewer";
@@ -70,6 +71,7 @@ function roomTypeLabel(room: MessengerRoom): string {
 export default function MessengerProfileScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const params = useLocalSearchParams<{ firstRun?: string }>();
   const { session, isAuthenticated, refreshUser, logout } = useMessengerAuth();
   const [displayName, setDisplayName] = useState(
@@ -414,13 +416,16 @@ export default function MessengerProfileScreen() {
   if (!session) return null;
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: bottomNavigationInset },
+          ]}
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.header}>

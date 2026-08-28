@@ -16,6 +16,7 @@ import { colors, commonStyles } from '../../styles/commonStyles';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
 import GameCardCompact from '../../components/GameCardCompact';
+import { usePersistentBottomNavigationInset } from '../../components/PersistentBottomNavigation';
 import { getGames } from '../../data/gameData';
 import type { Game } from '../../types';
 import {
@@ -216,6 +217,7 @@ scrollView: {
 
 export default function TeamDetailScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { id: teamId, tournamentId } = useLocalSearchParams<{ id: string; tournamentId: string }>();
   const referenceRevision = useReferenceDataRevision([
     'teams',
@@ -334,7 +336,7 @@ export default function TeamDetailScreen() {
   }
 
     return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top']} style={styles.container}>
         {/* Header */}
         <View style={styles.headerContainer}>
           <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
@@ -355,6 +357,7 @@ export default function TeamDetailScreen() {
           <View style={styles.headerRight} />
         </View>
       <ScrollView
+        contentContainerStyle={{ paddingBottom: bottomNavigationInset }}
         style={styles.scrollView}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}

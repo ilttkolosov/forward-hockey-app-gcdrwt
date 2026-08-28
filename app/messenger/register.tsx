@@ -20,6 +20,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
+import { usePersistentBottomNavigationInset } from "../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import MessengerRulesModal from "../../features/messenger/MessengerRulesModal";
 import type {
@@ -68,6 +69,7 @@ function extractInviteToken(value: string): string | null {
 
 export default function MessengerRegistrationScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const params = useLocalSearchParams<{
     token?: string;
     sharePending?: string;
@@ -292,13 +294,16 @@ export default function MessengerRegistrationScreen() {
 
   return (
     <>
-      <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+      <SafeAreaView style={styles.safeArea} edges={["top"]}>
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <ScrollView
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[
+              styles.content,
+              { paddingBottom: bottomNavigationInset },
+            ]}
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.header}>

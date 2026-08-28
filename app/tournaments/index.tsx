@@ -21,6 +21,7 @@ import { getGames } from '../../data/gameData';
 import { fetchTournamentConfig, getCachedTournamentConfig } from '../../services/tournamentsApi';
 import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
 import { loadTournamentCatalog } from '../../services/tournamentCatalog';
+import { usePersistentBottomNavigationInset } from '../../components/PersistentBottomNavigation';
 
 // Функция склонения
 export const getDeclension = (number: number, words: string[]): string => {
@@ -75,6 +76,7 @@ const addLogosToTable = async (table: TournamentTable[]): Promise<TournamentTabl
 };
 
 export default function TournamentsScreen() {
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const referenceRevision = useReferenceDataRevision(['teams', 'tournaments']);
   const [activeTab, setActiveTab] = useState<number>(0);
   const [tables, setTables] = useState<{
@@ -287,7 +289,7 @@ export default function TournamentsScreen() {
   }
 
   return (
-    <SafeAreaView style={commonStyles.container}>
+    <SafeAreaView edges={['top']} style={commonStyles.container}>
       {/* Header */}
       <View style={styles.headerContainer}>
         {/* Кнопка "Назад" */}
@@ -322,6 +324,7 @@ export default function TournamentsScreen() {
       </View>
 
       <ScrollView
+        contentContainerStyle={{ paddingBottom: bottomNavigationInset }}
         style={styles.contentContainer}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >

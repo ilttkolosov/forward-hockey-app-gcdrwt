@@ -28,6 +28,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
+import { usePersistentBottomNavigationInset } from "../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
 import {
@@ -158,6 +159,7 @@ function wait(milliseconds: number) {
 export default function MessengerShareScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { status, session } = useMessengerAuth();
   const {
     isReady: shareIntentReady,
@@ -584,7 +586,7 @@ export default function MessengerShareScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -610,7 +612,10 @@ export default function MessengerShareScreen() {
           keyExtractor={(item) => item.key}
           keyboardShouldPersistTaps="handled"
           stickySectionHeadersEnabled={false}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[
+            styles.listContent,
+            { paddingBottom: bottomNavigationInset },
+          ]}
           ListHeaderComponent={
             <>
               <View style={styles.sharedCard}>

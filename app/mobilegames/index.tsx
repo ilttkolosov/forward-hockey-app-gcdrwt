@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Href, useRouter } from 'expo-router';
 import { colors, commonStyles } from '../../styles/commonStyles';
 import Icon from '../../components/Icon';
+import { usePersistentBottomNavigationInset } from '../../components/PersistentBottomNavigation';
 import {
   trackMobileGameAction,
   type MobileGameAnalyticsName,
@@ -61,13 +62,14 @@ const games: MobileGameCard[] = [
 
 export default function MobileGamesScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
 
   const handleBackPress = () => {
     router.back();
   };
 
   return (
-    <SafeAreaView style={commonStyles.container}>
+    <SafeAreaView edges={['top']} style={commonStyles.container}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
@@ -77,7 +79,9 @@ export default function MobileGamesScreen() {
       </View>
 
       {/* Content */}
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: bottomNavigationInset }]}
+      >
         {games.map((game) => (
           <TouchableOpacity
             key={game.id}

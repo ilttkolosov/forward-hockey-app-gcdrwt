@@ -17,6 +17,7 @@ import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { getOrCreateDeviceId } from '../services/analyticsService';
+import { usePersistentBottomNavigationInset } from '../components/PersistentBottomNavigation';
 
 const styles = StyleSheet.create({
   container: {
@@ -76,6 +77,7 @@ const styles = StyleSheet.create({
 
 export default function AboutScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const [licenseText, setLicenseText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -155,7 +157,7 @@ export default function AboutScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
@@ -167,7 +169,10 @@ export default function AboutScreen() {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>О программе</Text>
       </View>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: bottomNavigationInset }]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>О приложении</Text>
           <Text style={styles.text}>Название: ХК Динамо Форвард 2014</Text>
