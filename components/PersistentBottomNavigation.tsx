@@ -61,6 +61,7 @@ interface NavigationSurfaceProps {
 const MORE_MENU_ITEMS: MoreMenuItem[] = [
   { href: '/mobilegames', icon: 'game-controller-outline', label: 'Игры' },
   { href: '/players', icon: 'people-outline', label: 'Игроки' },
+  { href: '/season', icon: 'archive-outline', label: 'Архив матчей' },
   { href: '/settings', icon: 'settings-outline', label: 'Настройки' },
   { href: '/about', icon: 'information-circle-outline', label: 'О программе' },
 ];
@@ -86,6 +87,7 @@ const activeSectionForPath = (pathname: string): NavigationSection | null => {
   if (
     pathname.startsWith('/mobilegames')
     || pathname.startsWith('/players')
+    || pathname.startsWith('/season')
     || pathname.startsWith('/settings')
     || pathname.startsWith('/about')
   ) {
