@@ -5122,7 +5122,10 @@ export default function MessengerRoomScreen() {
             ref={listRef}
             data={visibleMessages}
             keyExtractor={(message) => message.client_message_id}
-            style={styles.messageFeed}
+            style={[
+              styles.messageFeed,
+              !listReady && styles.messageFeedPositioning,
+            ]}
             contentContainerStyle={
               visibleMessages.length ? styles.messageList : styles.emptyList
             }
@@ -5142,8 +5145,12 @@ export default function MessengerRoomScreen() {
                 scrollToLatest(true);
               }
             }}
-            initialNumToRender={18}
-            maxToRenderPerBatch={14}
+            // The SQLite viewport contains up to 20 messages. Rendering only
+            // 18 here made FlatList measure and scroll to the end, append the
+            // final two rows in a second batch, then measure and scroll again.
+            // That second pass was the visible jump during room entry.
+            initialNumToRender={20}
+            maxToRenderPerBatch={20}
             windowSize={9}
             removeClippedSubviews={false}
             keyboardDismissMode={
@@ -6239,6 +6246,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   messageFeed: { flex: 1 },
+  messageFeedPositioning: { opacity: 0 },
   feedPositioning: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
