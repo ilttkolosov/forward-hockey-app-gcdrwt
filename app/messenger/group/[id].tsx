@@ -18,8 +18,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../../components/Icon";
+import { usePersistentBottomNavigationInset } from "../../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
+import LeaveMessengerRoomButton from "../../../features/messenger/LeaveMessengerRoomButton";
 import LocalRoomAvatar from "../../../features/messenger/LocalRoomAvatar";
 import { MESSENGER_PRESET_AVATARS } from "../../../features/messenger/presetAvatars";
 import MessengerAvatarViewer from "../../../features/messenger/MessengerAvatarViewer";
@@ -58,6 +60,7 @@ type GroupParticipant = MessengerRoomMember & { is_admin: boolean };
 
 export default function MessengerGroupSettingsScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const params = useLocalSearchParams<{
     id: string;
     title?: string;
@@ -330,7 +333,7 @@ export default function MessengerGroupSettingsScreen() {
   if (!session) return null;
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -377,7 +380,10 @@ export default function MessengerGroupSettingsScreen() {
           </View>
         ) : (
           <ScrollView
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[
+              styles.content,
+              { paddingBottom: bottomNavigationInset },
+            ]}
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.card}>
@@ -631,6 +637,13 @@ export default function MessengerGroupSettingsScreen() {
                 <Text style={styles.deleteText}>Удалить мини-группу</Text>
               </TouchableOpacity>
             ) : null}
+
+            <LeaveMessengerRoomButton
+              roomId={roomId}
+              roomType={settings.room.room_type}
+              canLeave={settings.room.can_leave}
+              onLeft={() => router.dismissTo("/messenger/rooms")}
+            />
           </ScrollView>
         )}
       </KeyboardAvoidingView>

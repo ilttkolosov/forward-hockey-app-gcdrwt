@@ -22,6 +22,7 @@ import { getPlayers } from '../data/playerData';
 import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Icon from '../components/Icon';
+import { usePersistentBottomNavigationInset } from '../components/PersistentBottomNavigation';
 import { getDeclension } from './tournaments/index'; // ← импортируем склонение
 import { useNetworkStatus } from '../contexts/NetworkStatusContext';
 import { useMessengerAuth } from '../contexts/MessengerAuthContext';
@@ -155,6 +156,7 @@ const warningStyles = StyleSheet.create({
 });
 
 export default function HomeScreen() {
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { isOffline } = useNetworkStatus();
   const { isAuthenticated: isMessengerAuthenticated } = useMessengerAuth();
   const messengerUnread = useMessengerUnreadSnapshot();
@@ -211,8 +213,33 @@ export default function HomeScreen() {
         return now >= rangeStart && now <= rangeEnd;
       });
 
-      // Сортируем по времени (возрастание)
-      currentGames.sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
+      // Завершённые игры прошлых/будущих календарных дней остаются в блоке,
+      // пока попадают в его временное окно, но не должны заслонять актуальные
+      // игры. Завершённая игра за сегодня сохраняет обычную хронологическую
+      // позицию.
+      const todayStart = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+      ).getTime();
+      const isFinishedOutsideToday = (game: Game) => {
+        if (game.status !== 'finished') return false;
+        const gameDate = new Date(game.event_date);
+        const gameDayStart = new Date(
+          gameDate.getFullYear(),
+          gameDate.getMonth(),
+          gameDate.getDate(),
+        ).getTime();
+        return gameDayStart !== todayStart;
+      };
+      currentGames.sort((a, b) => {
+        const aDeferred = isFinishedOutsideToday(a);
+        const bDeferred = isFinishedOutsideToday(b);
+        if (aDeferred !== bDeferred) return aDeferred ? 1 : -1;
+        return (
+          new Date(a.event_date).getTime() - new Date(b.event_date).getTime()
+        );
+      });
 
       setCurrentGames(currentGames);
       setUpcomingGames(upcoming);
@@ -262,7 +289,7 @@ export default function HomeScreen() {
     <SafeAreaView edges={['top']} style={commonStyles.container}>
       <ScrollView
         style={commonStyles.content}
-        contentContainerStyle={{ paddingBottom: 32 }} // ← отступ снизу внутри ScrollView
+        contentContainerStyle={{ paddingBottom: bottomNavigationInset }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >

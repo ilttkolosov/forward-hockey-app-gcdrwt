@@ -76,6 +76,8 @@ import {
   markAppInteractive,
   waitForAppInteractive,
 } from '../services/appInteractive';
+import PersistentBottomNavigation from '../components/PersistentBottomNavigation';
+import { warmMessengerUiAssets } from '../services/messengerUiAssets';
 global.Buffer = Buffer;
 
 Notifications.setNotificationHandler({
@@ -391,6 +393,9 @@ function RootLayoutContent() {
     setDynamicStatus('Подготовка данных...');
     setProgress(0);
     const afterStartupTasks: (() => void)[] = [];
+    // Decode the bundled chat wallpaper while the splash screen is visible.
+    // Opening a room must never be the first consumer of this UI asset.
+    const messengerUiAssetsPromise = warmMessengerUiAssets();
 
     // === Отслеживаем загрузку предстоящих игр ===
     let upcomingGamesPromise: Promise<void> | null = null;
@@ -710,6 +715,8 @@ function RootLayoutContent() {
         initializationLog('Предстоящие игры завершены параллельно; дополнительное ожидание не требуется');
       }
 
+      await messengerUiAssetsPromise;
+
 
       setInitializationMessage('Готово!');
       setProgress(100);
@@ -763,27 +770,37 @@ function RootLayoutContent() {
       <StatusBar style="dark" backgroundColor={colors.background} />
       <MessengerShareIntentBridge />
       <AnalyticsRouteTracker />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="players" />
-        <Stack.Screen name="trainings" />
-        <Stack.Screen name="player/[id]" />
-        <Stack.Screen name="upcoming" />
-        <Stack.Screen name="game/[id]" />
-        <Stack.Screen name="season/[id]" />
-        <Stack.Screen name="tournaments/[id]" />
-        <Stack.Screen name="command/[id]" />
-        <Stack.Screen name="mobilegames/[id]" />
-        <Stack.Screen name="messenger/index" />
-        <Stack.Screen name="messenger/register" />
-        <Stack.Screen name="messenger/change-password" />
-        <Stack.Screen name="messenger/rooms" />
-        <Stack.Screen
-          name="messenger/share"
-          options={{ gestureEnabled: false }}
-        />
-        <Stack.Screen name="messenger/room/[id]" />
-      </Stack>
+      <View style={{ flex: 1 }}>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            animation: 'slide_from_right',
+            gestureDirection: 'horizontal',
+            contentStyle: { backgroundColor: colors.background },
+          }}
+        >
+          <Stack.Screen name="index" options={{ gestureEnabled: false }} />
+          <Stack.Screen name="players" />
+          <Stack.Screen name="trainings" />
+          <Stack.Screen name="player/[id]" />
+          <Stack.Screen name="upcoming" />
+          <Stack.Screen name="game/[id]" />
+          <Stack.Screen name="season/[id]" />
+          <Stack.Screen name="tournaments/[id]" />
+          <Stack.Screen name="command/[id]" />
+          <Stack.Screen name="mobilegames/[id]" />
+          <Stack.Screen name="messenger/index" />
+          <Stack.Screen name="messenger/register" />
+          <Stack.Screen name="messenger/change-password" />
+          <Stack.Screen name="messenger/rooms" />
+          <Stack.Screen
+            name="messenger/share"
+            options={{ gestureEnabled: false }}
+          />
+          <Stack.Screen name="messenger/room/[id]" />
+        </Stack>
+        <PersistentBottomNavigation />
+      </View>
     </GestureHandlerRootView>
   );
 }

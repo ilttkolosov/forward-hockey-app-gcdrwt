@@ -20,14 +20,17 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../../components/Icon";
+import { usePersistentBottomNavigationInset } from "../../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
+import LeaveMessengerRoomButton from "../../../features/messenger/LeaveMessengerRoomButton";
 import MessengerAvatarViewer from "../../../features/messenger/MessengerAvatarViewer";
 import MessengerSafetyActions from "../../../features/messenger/MessengerSafetyActions";
 import type { MessengerContactProfile } from "../../../features/messenger/types";
 import {
   getMessengerRoomMemberProfile,
   getMessengerRoomMembers,
+  getMessengerRooms,
   messengerErrorMessage,
   setMessengerRoomMemberAlias,
 } from "../../../services/messengerApi";
@@ -60,6 +63,7 @@ function lastSeenText(value: string | null): string {
 
 export default function MessengerContactProfileScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const params = useLocalSearchParams<{
     id: string;
     roomId?: string;
@@ -80,6 +84,7 @@ export default function MessengerContactProfileScreen() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [avatarVisible, setAvatarVisible] = useState(false);
+  const [canLeave, setCanLeave] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -108,6 +113,20 @@ export default function MessengerContactProfileScreen() {
       }
       setSaved(false);
       setLoading(false);
+      void getMessengerRooms({ priority: "foreground" })
+        .then((rooms) => {
+          const room = rooms.find((candidate) => candidate.id === roomId);
+          setCanLeave(
+            Boolean(room?.can_leave && room.room_type === "direct"),
+          );
+        })
+        .catch((roomError) =>
+          messengerLog("debug", "contact_profile.room_deferred", {
+            room_id: roomId,
+            message:
+              roomError instanceof Error ? roomError.message : String(roomError),
+          }),
+        );
       const openedAt = Number(params.openedAt);
       messengerLog("info", "contact_profile.ready", {
         room_id: roomId,
@@ -219,7 +238,7 @@ export default function MessengerContactProfileScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.iconButton}
@@ -245,7 +264,10 @@ export default function MessengerContactProfileScreen() {
         ) : profile && session ? (
           <ScrollView
             ref={scrollRef}
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[
+              styles.content,
+              { paddingBottom: bottomNavigationInset },
+            ]}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={
               Platform.OS === "ios" ? "interactive" : "on-drag"
@@ -361,6 +383,13 @@ export default function MessengerContactProfileScreen() {
                 roomId={roomId}
               />
             ) : null}
+
+            <LeaveMessengerRoomButton
+              roomId={roomId}
+              roomType="direct"
+              canLeave={canLeave}
+              onLeft={() => router.dismissTo("/messenger/rooms")}
+            />
           </ScrollView>
         ) : (
           <View style={styles.center}>

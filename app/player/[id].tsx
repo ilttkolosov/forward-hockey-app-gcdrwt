@@ -12,6 +12,7 @@ import ErrorMessage from '../../components/ErrorMessage';
 import { formatPlayerBirthDate, getHandednessText, getCaptainBadgeText } from '../../utils/playerUtils';
 import { Image } from 'expo-image';
 import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
+import { usePersistentBottomNavigationInset } from '../../components/PersistentBottomNavigation';
 
 const styles = StyleSheet.create({
   container: {
@@ -134,6 +135,7 @@ const styles = StyleSheet.create({
 
 export default function PlayerDetailsScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { id } = useLocalSearchParams<{ id: string }>();
   const playersRevision = useReferenceDataRevision('players');
   const [player, setPlayer] = useState<Player | null>(null);
@@ -206,7 +208,7 @@ export default function PlayerDetailsScreen() {
   const fullCaptainText = getCaptainStatusText();
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top']} style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
@@ -219,6 +221,7 @@ export default function PlayerDetailsScreen() {
       </View>
 
       <ScrollView
+        contentContainerStyle={{ paddingBottom: bottomNavigationInset }}
         style={styles.content}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />

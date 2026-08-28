@@ -25,8 +25,10 @@ import Icon from '../components/Icon';
 import { useRouter } from 'expo-router';
 import { searchGames } from '../utils/gameSearch';
 import { RefreshControl } from 'react-native';
+import { usePersistentBottomNavigationInset } from '../components/PersistentBottomNavigation';
 
 export default function TeamGamesScreen() {
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
   const [pastGames, setPastGames] = useState<Game[]>([]);
@@ -182,7 +184,7 @@ export default function TeamGamesScreen() {
   }
 
   return (
-    <SafeAreaView style={commonStyles.container}>
+    <SafeAreaView edges={['top']} style={commonStyles.container}>
       {/* Fixed Header */}
       <View style={{ paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', alignItems: 'center' }}>
         <TouchableOpacity onPress={handleBackPress} style={{ marginRight: 16 }}>
@@ -213,7 +215,7 @@ export default function TeamGamesScreen() {
           data={upcomingGames}
           renderItem={renderGame}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={{ padding: 16, paddingBottom: 64 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: bottomNavigationInset }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={renderEmpty()}
@@ -224,7 +226,7 @@ export default function TeamGamesScreen() {
           data={pastGames}
           renderItem={renderGame}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={{ padding: 16, paddingBottom: 64 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: bottomNavigationInset }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={renderEmpty()}

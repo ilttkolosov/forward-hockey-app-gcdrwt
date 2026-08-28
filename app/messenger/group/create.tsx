@@ -1,4 +1,5 @@
 import { useFocusEffect, useRouter } from "expo-router";
+import { useSQLiteContext } from "expo-sqlite";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -11,8 +12,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../../components/Icon";
+import { usePersistentBottomNavigationInset } from "../../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
+import { cacheMessengerRoomSnapshot } from "../../../features/messenger/repository";
 import type { MessengerContact } from "../../../features/messenger/types";
 import {
   createMessengerPrivateRoom,
@@ -28,7 +31,9 @@ interface TeamOption {
 }
 
 export default function CreateMessengerGroupScreen() {
+  const db = useSQLiteContext();
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { session, isAuthenticated } = useMessengerAuth();
   const [contacts, setContacts] = useState<MessengerContact[]>([]);
   const [teamId, setTeamId] = useState<string | null>(null);
@@ -102,6 +107,9 @@ export default function CreateMessengerGroupScreen() {
         ...selected,
       ]);
       const room = result.room;
+      await cacheMessengerRoomSnapshot(db, room, {
+        preserveUntilRemote: true,
+      });
       trackMessengerAction("private_group_created", {
         member_count: selected.size + 1,
       });
@@ -130,7 +138,7 @@ export default function CreateMessengerGroupScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.iconButton}
@@ -153,7 +161,10 @@ export default function CreateMessengerGroupScreen() {
           data={teamContacts}
           keyExtractor={(contact) => contact.id}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: bottomNavigationInset },
+          ]}
           ListHeaderComponent={
             <View>
               <Text style={styles.label}>Название группы</Text>

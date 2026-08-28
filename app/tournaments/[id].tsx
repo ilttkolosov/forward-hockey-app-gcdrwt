@@ -21,6 +21,7 @@ import GameCardCompact from '../../components/GameCardCompact';
 import { getGames, gameDetailsCache } from '../../data/gameData';
 import type { Game } from '../../types';
 import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
+import { usePersistentBottomNavigationInset } from '../../components/PersistentBottomNavigation';
 import {
   fetchTournamentConfig,
   getCachedTournamentConfig,
@@ -166,6 +167,7 @@ const styles = StyleSheet.create({
 
 export default function TournamentDetailScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { id } = useLocalSearchParams<{ id: string }>();
   const referenceRevision = useReferenceDataRevision([
     'teams',
@@ -451,7 +453,7 @@ export default function TournamentDetailScreen() {
 
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top']} style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
@@ -511,6 +513,7 @@ export default function TournamentDetailScreen() {
             </View>
           )}
           <ScrollView
+            contentContainerStyle={{ paddingBottom: bottomNavigationInset }}
             ref={scrollViewRef}
             style={styles.content}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -539,6 +542,7 @@ export default function TournamentDetailScreen() {
         </View>
       ) : (
         <ScrollView
+          contentContainerStyle={{ paddingBottom: bottomNavigationInset }}
           style={styles.content}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           showsVerticalScrollIndicator={false}

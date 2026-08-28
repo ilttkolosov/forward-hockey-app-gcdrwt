@@ -23,6 +23,7 @@ import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { playerDownloadService } from '../services/playerDataService'; // ← добавили
 import { useReferenceDataRevision } from '../services/referenceDataUpdates';
+import { usePersistentBottomNavigationInset } from '../components/PersistentBottomNavigation';
 
 const styles = StyleSheet.create({
   container: {
@@ -237,6 +238,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onPress }) => {
 
 export default function PlayersScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const playersRevision = useReferenceDataRevision('players');
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
@@ -350,7 +352,7 @@ export default function PlayersScreen() {
   }
 
   return (
-    <SafeAreaView style={commonStyles.container}>
+    <SafeAreaView edges={['top']} style={commonStyles.container}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
@@ -385,7 +387,11 @@ export default function PlayersScreen() {
           <PlayerCard player={item} onPress={handlePlayerPress} />
         )}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={{ paddingVertical: 8, paddingHorizontal: 16 }}
+        contentContainerStyle={{
+          paddingTop: 8,
+          paddingHorizontal: 16,
+          paddingBottom: bottomNavigationInset,
+        }}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <View style={commonStyles.errorContainer}>

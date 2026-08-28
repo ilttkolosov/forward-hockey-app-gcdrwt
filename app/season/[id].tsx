@@ -18,6 +18,7 @@ import { Game } from '../../types';
 import ErrorMessage from '../../components/ErrorMessage';
 import Icon from '../../components/Icon';
 import LoadingSpinner from '../../components/LoadingSpinner';
+import { usePersistentBottomNavigationInset } from '../../components/PersistentBottomNavigation';
 import GameCard from '../../components/GameCard'; // ← ЕДИНЫЙ КОМПОНЕНТ
 import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
 
@@ -29,6 +30,7 @@ const RUSSIAN_MONTHS = [
 
 export default function SeasonGamesScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const referenceRevision = useReferenceDataRevision([
     'teams',
     'venues',
@@ -190,7 +192,7 @@ export default function SeasonGamesScreen() {
   }
 
   return (
-    <SafeAreaView style={commonStyles.container}>
+    <SafeAreaView edges={['top']} style={commonStyles.container}>
       <View style={commonStyles.content}>
         {/* Header */}
         <View style={styles.headerContainer}>
@@ -222,7 +224,10 @@ export default function SeasonGamesScreen() {
             <GameCard game={game} showScore={true} />
           )}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContainer}
+          contentContainerStyle={[
+            styles.listContainer,
+            { paddingBottom: bottomNavigationInset },
+          ]}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={renderEmpty}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}

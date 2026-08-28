@@ -23,6 +23,7 @@ import {
   setTrainingNotificationsEnabled,
 } from '../services/trainingNotificationService';
 import { useMessengerAuth } from '../contexts/MessengerAuthContext';
+import { usePersistentBottomNavigationInset } from '../components/PersistentBottomNavigation';
 import {
   disableMessengerPush,
   enableMessengerPush,
@@ -153,6 +154,7 @@ const errorMessage = (error: unknown, fallback: string): string => (
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { isAuthenticated: isMessengerAuthenticated } = useMessengerAuth();
   const [matchNotificationsEnabled, setMatchNotificationsEnabled] = useState(false);
   const [messengerNotificationsEnabled, setMessengerNotificationsEnabled] = useState(false);
@@ -362,7 +364,10 @@ export default function SettingsScreen() {
         <Text style={styles.headerTitle}>Настройки</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: bottomNavigationInset }]}
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.sectionTitle}>PUSH-уведомления</Text>
         <View style={styles.settingSection}>
           <View style={styles.settingItem}>

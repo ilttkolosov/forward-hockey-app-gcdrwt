@@ -1,4 +1,5 @@
 import { useFocusEffect, useRouter } from "expo-router";
+import { useSQLiteContext } from "expo-sqlite";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -12,8 +13,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
+import { usePersistentBottomNavigationInset } from "../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
+import { cacheMessengerRoomSnapshot } from "../../features/messenger/repository";
 import type { MessengerContact } from "../../features/messenger/types";
 import {
   createMessengerDirectRoom,
@@ -37,7 +40,9 @@ function contactKey(contact: MessengerContact): string {
 }
 
 export default function MessengerContactsScreen() {
+  const db = useSQLiteContext();
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { session, isAuthenticated } = useMessengerAuth();
   const [contacts, setContacts] = useState<MessengerContact[]>([]);
   const [query, setQuery] = useState("");
@@ -95,6 +100,12 @@ export default function MessengerContactsScreen() {
         contact.team_id,
         contact.id,
       );
+      // Persist the room before opening it. The rooms screen remains mounted
+      // underneath this flow and subscribes to cache changes, so it can add
+      // the new card immediately instead of waiting for pull-to-refresh.
+      await cacheMessengerRoomSnapshot(db, result.room, {
+        preserveUntilRemote: true,
+      });
       router.replace({
         pathname: "/messenger/room/[id]",
         params: {
@@ -127,7 +138,7 @@ export default function MessengerContactsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.iconButton}
@@ -181,9 +192,10 @@ export default function MessengerContactsScreen() {
         <FlatList
           data={visibleContacts}
           keyExtractor={contactKey}
-          contentContainerStyle={
-            visibleContacts.length ? styles.list : styles.emptyList
-          }
+          contentContainerStyle={[
+            visibleContacts.length ? styles.list : styles.emptyList,
+            { paddingBottom: bottomNavigationInset },
+          ]}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}

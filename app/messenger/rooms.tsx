@@ -20,12 +20,15 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
+import { usePersistentBottomNavigationInset } from "../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
 import LocalRoomAvatar from "../../features/messenger/LocalRoomAvatar";
 import SavedMessagesAvatar from "../../features/messenger/SavedMessagesAvatar";
 import {
+  cacheMessengerRoomSnapshot,
   cacheMessengerRooms,
+  hasPendingMessengerRoomSnapshots,
   loadCachedMessengerRooms,
   subscribeMessengerRoomCacheChanges,
 } from "../../features/messenger/repository";
@@ -207,6 +210,7 @@ function typingLabel(
 export default function MessengerRoomsScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { status, session, isAuthenticated } = useMessengerAuth();
   const [rooms, setRooms] = useState<MessengerRoom[]>([]);
   const [loading, setLoading] = useState(true);
@@ -442,6 +446,14 @@ export default function MessengerRoomsScreen() {
           if (!active) return;
           setLoading(false);
           setPreparation({ mode: "ready", progress: 100, message: "Готово" });
+          if (hasPendingMessengerRoomSnapshots()) {
+            interactionTask = InteractionManager.runAfterInteractions(() => {
+              refreshTimer = setTimeout(() => {
+                refreshTimer = null;
+                if (active) void loadRooms(false, false, true);
+              }, 150);
+            });
+          }
           return;
         }
 
@@ -759,7 +771,8 @@ export default function MessengerRoomsScreen() {
       );
       setRooms(nextRooms);
       setMessengerMutedRooms(nextRooms);
-      if (nextRooms.length) void cacheMessengerRooms(db, nextRooms);
+      const changedRoom = nextRooms.find((room) => room.id === muteRoom.id);
+      if (changedRoom) void cacheMessengerRoomSnapshot(db, changedRoom);
       trackMessengerAction("notifications_changed", {
         operation: duration === "unmute" ? "enabled" : "muted",
         mute_duration: duration,
@@ -871,9 +884,10 @@ export default function MessengerRoomsScreen() {
             onRefresh={() => void loadRooms(true, false, true)}
           />
         }
-        contentContainerStyle={
-          orderedRooms.length ? styles.list : styles.emptyList
-        }
+        contentContainerStyle={[
+          orderedRooms.length ? styles.list : styles.emptyList,
+          { paddingBottom: bottomNavigationInset },
+        ]}
         renderItem={({ item, index }) => {
           const direct = item.room_type === "direct" || item.kind === "direct";
           const saved = item.room_type === "saved";

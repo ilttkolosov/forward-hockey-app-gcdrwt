@@ -13,6 +13,7 @@ import Icon from '../../components/Icon';
 import { colors, commonStyles } from '../../styles/commonStyles';
 import { getPastGames } from '../../data/gameData';
 import { getGameById } from '../../data/gameData';
+import { usePersistentBottomNavigationInset } from '../../components/PersistentBottomNavigation';
 
 interface SeasonOption {
   id: string;
@@ -68,6 +69,7 @@ const seasonIcons = ['🏆', '📅', '⏳', '🗓️', '📉', '📊', '⚽', '�
 
 export default function SeasonsScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const SEASON_OPTIONS = generateSeasons();
 
   React.useEffect(() => {
@@ -107,7 +109,7 @@ export default function SeasonsScreen() {
   };
 
   return (
-    <SafeAreaView style={commonStyles.container}>
+    <SafeAreaView edges={['top']} style={commonStyles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
           <Icon name="chevron-back" size={24} color={colors.text} />
@@ -118,7 +120,11 @@ export default function SeasonsScreen() {
         </View>
       </View>
 
-      <ScrollView style={styles.seasonsContainer} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: bottomNavigationInset }}
+        style={styles.seasonsContainer}
+        showsVerticalScrollIndicator={false}
+      >
         {SEASON_OPTIONS.map((season, index) => (
           <TouchableOpacity
             key={season.id}

@@ -2,6 +2,7 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -9,6 +10,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
+import { usePersistentBottomNavigationInset } from "../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import SavedMessagesAvatar from "../../features/messenger/SavedMessagesAvatar";
 import {
@@ -23,6 +25,7 @@ import { colors } from "../../styles/commonStyles";
 
 export default function MessengerSavedProfileScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { session, isAuthenticated } = useMessengerAuth();
   const [appearance, setAppearance] =
     useState<MessengerSavedAppearance>(DEFAULT_SAVED_APPEARANCE);
@@ -55,7 +58,7 @@ export default function MessengerSavedProfileScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.back}
@@ -75,46 +78,51 @@ export default function MessengerSavedProfileScreen() {
           <ActivityIndicator color={colors.primary} />
         </View>
       ) : (
-        <View style={styles.card}>
-          <SavedMessagesAvatar size={96} appearance={appearance} />
-          <Text style={styles.sectionTitle}>Символ</Text>
-          <View style={styles.choices}>
-            {SAVED_MESSAGE_ICONS.map((icon) => (
-              <TouchableOpacity
-                key={icon}
-                style={[
-                  styles.iconChoice,
-                  { backgroundColor: appearance.backgroundColor },
-                  appearance.icon === icon && styles.active,
-                ]}
-                onPress={() => persist({ ...appearance, icon })}
-                accessibilityLabel={`Выбрать символ ${icon}`}
-              >
-                <Icon name={icon} size={27} color="#FFFFFF" />
-              </TouchableOpacity>
-            ))}
-          </View>
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: bottomNavigationInset }}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.card}>
+            <SavedMessagesAvatar size={96} appearance={appearance} />
+            <Text style={styles.sectionTitle}>Символ</Text>
+            <View style={styles.choices}>
+              {SAVED_MESSAGE_ICONS.map((icon) => (
+                <TouchableOpacity
+                  key={icon}
+                  style={[
+                    styles.iconChoice,
+                    { backgroundColor: appearance.backgroundColor },
+                    appearance.icon === icon && styles.active,
+                  ]}
+                  onPress={() => persist({ ...appearance, icon })}
+                  accessibilityLabel={`Выбрать символ ${icon}`}
+                >
+                  <Icon name={icon} size={27} color="#FFFFFF" />
+                </TouchableOpacity>
+              ))}
+            </View>
 
-          <Text style={styles.sectionTitle}>Цвет фона</Text>
-          <View style={styles.choices}>
-            {SAVED_MESSAGE_COLORS.map((backgroundColor) => (
-              <TouchableOpacity
-                key={backgroundColor}
-                style={[
-                  styles.colorChoice,
-                  { backgroundColor },
-                  appearance.backgroundColor === backgroundColor &&
-                    styles.active,
-                ]}
-                onPress={() => persist({ ...appearance, backgroundColor })}
-                accessibilityLabel={`Выбрать цвет ${backgroundColor}`}
-              />
-            ))}
+            <Text style={styles.sectionTitle}>Цвет фона</Text>
+            <View style={styles.choices}>
+              {SAVED_MESSAGE_COLORS.map((backgroundColor) => (
+                <TouchableOpacity
+                  key={backgroundColor}
+                  style={[
+                    styles.colorChoice,
+                    { backgroundColor },
+                    appearance.backgroundColor === backgroundColor &&
+                      styles.active,
+                  ]}
+                  onPress={() => persist({ ...appearance, backgroundColor })}
+                  accessibilityLabel={`Выбрать цвет ${backgroundColor}`}
+                />
+              ))}
+            </View>
+            <Text style={styles.hint}>
+              Оформление хранится на этом устройстве и доступно только вам.
+            </Text>
           </View>
-          <Text style={styles.hint}>
-            Оформление хранится на этом устройстве и доступно только вам.
-          </Text>
-        </View>
+        </ScrollView>
       )}
     </SafeAreaView>
   );

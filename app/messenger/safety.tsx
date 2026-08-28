@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
+import { usePersistentBottomNavigationInset } from "../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
 import {
@@ -52,6 +53,7 @@ function blockedAtText(value: string): string {
 
 export default function MessengerSafetyScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { session, isAuthenticated } = useMessengerAuth();
   const [blockedUsers, setBlockedUsers] = useState<MessengerBlockedUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,7 +149,7 @@ export default function MessengerSafetyScreen() {
   if (!session) return null;
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.iconButton}
@@ -165,7 +167,9 @@ export default function MessengerSafetyScreen() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: bottomNavigationInset }]}
+      >
         <View style={styles.card}>
           <View style={styles.cardHeading}>
             <Icon

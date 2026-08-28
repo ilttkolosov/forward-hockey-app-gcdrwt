@@ -15,7 +15,6 @@ import {
   Animated,
   Alert,
   FlatList,
-  ImageBackground,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -122,6 +121,7 @@ import {
   updateMessengerMessage,
 } from "../../../services/messengerApi";
 import { searchMessengerMessagesLocallyFirst } from "../../../services/messengerSearch";
+import { getMessengerChatBackgroundUri } from "../../../services/messengerUiAssets";
 import { queueMessengerReadReceipt } from "../../../services/messengerReadSync";
 import {
   getMessengerRealtimeConnectionState,
@@ -1339,6 +1339,8 @@ export default function MessengerRoomScreen() {
   const editingMessageRef = useRef<MessengerMessage | null>(null);
   const refreshRunning = useRef(false);
   const olderMessagesLoading = useRef(false);
+  const olderPageTriggerArmed = useRef(true);
+  const feedManuallyNavigated = useRef(false);
   const newerCachedMessagesLoading = useRef(false);
   const remoteHasMoreNewerMessages = useRef(true);
   const reactionMutationIds = useRef<Set<string>>(new Set());
@@ -1483,6 +1485,7 @@ export default function MessengerRoomScreen() {
   }, []);
 
   const beginManualFeedNavigation = useCallback(() => {
+    feedManuallyNavigated.current = true;
     nearLatest.current = false;
     keyboardScrollPending.current = false;
     clearPendingLatestScroll();
@@ -2399,6 +2402,18 @@ export default function MessengerRoomScreen() {
     }
   }, []);
 
+  useEffect(
+    () => () => {
+      // Focus effects are recreated when auth/realtime dependencies change,
+      // even while the same room remains visible. Only a real component
+      // unmount may cancel the viewport watchdog.
+      clearInitialPositionTimers();
+      pendingInitialPosition.current = false;
+      initialAnchorSettling.current = false;
+    },
+    [clearInitialPositionTimers],
+  );
+
   const finishInitialPosition = useCallback(() => {
     if (!pendingInitialPosition.current) return;
     pendingInitialPosition.current = false;
@@ -2694,7 +2709,7 @@ export default function MessengerRoomScreen() {
         finishInitialPosition,
         180,
       );
-    }, 4_000);
+    }, 1_500);
     requestAnimationFrame(positionInitialMessages);
   }, [
     clearInitialPositionTimers,
@@ -2830,7 +2845,27 @@ export default function MessengerRoomScreen() {
         feedIsScrolling.current = false;
         setFloatingDate(null);
       }, 1_500);
-      if (!pendingInitialPosition.current && contentOffset.y <= 100) {
+      // Start the next local page about two viewports before the reader reaches
+      // the boundary. This gives FlatList time to measure the new rows offscreen
+      // and removes the visible pause at the exact end of the loaded window.
+      // Programmatic positioning during room entry never enables this path.
+      const olderPagePrefetchOffset = Math.max(
+        600,
+        layoutMeasurement.height * 2,
+      );
+      const olderPageRearmOffset =
+        olderPagePrefetchOffset + layoutMeasurement.height;
+      if (contentOffset.y > olderPageRearmOffset) {
+        olderPageTriggerArmed.current = true;
+      }
+      if (
+        listReady &&
+        feedManuallyNavigated.current &&
+        !pendingInitialPosition.current &&
+        olderPageTriggerArmed.current &&
+        contentOffset.y <= olderPagePrefetchOffset
+      ) {
+        olderPageTriggerArmed.current = false;
         if (authorFilter && filterCursor) {
           void loadFilteredAuthorMessages(authorFilter, filterCursor);
         } else if (!authorFilter) {
@@ -2850,6 +2885,7 @@ export default function MessengerRoomScreen() {
       loadFilteredAuthorMessages,
       loadNewerMessages,
       loadOlderMessages,
+      listReady,
     ],
   );
 
@@ -3225,16 +3261,12 @@ export default function MessengerRoomScreen() {
         }
         setPushReactionAnimation(null);
         messageNavigationTarget.current = null;
-        clearInitialPositionTimers();
-        pendingInitialPosition.current = false;
-        initialAnchorSettling.current = false;
         pendingMessageAction.current = null;
         pendingAttachmentRequest.current = null;
       };
     }, [
       db,
       acknowledgeLatest,
-      clearInitialPositionTimers,
       authStatus,
       isAuthenticated,
       loadMessages,
@@ -4674,7 +4706,9 @@ export default function MessengerRoomScreen() {
         forwardingMessage.id,
         Crypto.randomUUID(),
       );
-      await cacheMessengerRoomSnapshot(db, result.room);
+      await cacheMessengerRoomSnapshot(db, result.room, {
+        preserveUntilRemote: true,
+      });
       if (result.room.id === roomId) await storeSentMessage(result.message);
       setForwardingMessage(null);
       trackMessengerAction("message_saved", {
@@ -5011,17 +5045,23 @@ export default function MessengerRoomScreen() {
           </View>
         )}
 
-        <ImageBackground
-          source={require("../../../assets/messenger/ice-chat-background.jpg")}
-          style={styles.iceBackground}
-          imageStyle={styles.iceBackgroundImage}
-          resizeMode="cover"
-        >
+        <View style={styles.iceBackground}>
+          <Image
+            cachePolicy="memory-disk"
+            contentFit="cover"
+            priority="high"
+            source={getMessengerChatBackgroundUri()}
+            style={styles.iceBackgroundImage}
+            transition={0}
+          />
           <FlatList
             ref={listRef}
             data={visibleMessages}
             keyExtractor={(message) => message.client_message_id}
-            style={styles.messageFeed}
+            style={[
+              styles.messageFeed,
+              !listReady && styles.messageFeedPositioning,
+            ]}
             contentContainerStyle={
               visibleMessages.length ? styles.messageList : styles.emptyList
             }
@@ -5032,9 +5072,16 @@ export default function MessengerRoomScreen() {
                 scrollToLatest(true);
               }
             }}
-            initialNumToRender={18}
-            maxToRenderPerBatch={14}
-            windowSize={9}
+            // The SQLite viewport contains up to 20 messages. Rendering only
+            // 18 here made FlatList measure and scroll to the end, append the
+            // final two rows in a second batch, then measure and scroll again.
+            // That second pass was the visible jump during room entry.
+            initialNumToRender={20}
+            maxToRenderPerBatch={20}
+            // The feed contains variable-height media rows. A larger render
+            // window keeps their measured frames alive while older pages are
+            // prepended, avoiding large spacer re-estimates during scrolling.
+            windowSize={21}
             removeClippedSubviews={false}
             keyboardDismissMode={
               Platform.OS === "ios" ? "interactive" : "on-drag"
@@ -5148,7 +5195,7 @@ export default function MessengerRoomScreen() {
               <Icon name="chevron-down" size={27} color={colors.primary} />
             </TouchableOpacity>
           )}
-        </ImageBackground>
+        </View>
 
         <Modal
           visible={Boolean(actionMessage)}
@@ -6052,7 +6099,10 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.backgroundAlt },
   flex: { flex: 1 },
   iceBackground: { flex: 1 },
-  iceBackgroundImage: { opacity: 0.86 },
+  iceBackgroundImage: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.86,
+  },
   loading: {
     flex: 1,
     alignItems: "center",
@@ -6107,6 +6157,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   messageFeed: { flex: 1 },
+  messageFeedPositioning: { opacity: 0 },
   feedPositioning: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",

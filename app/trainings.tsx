@@ -21,6 +21,7 @@ import {
   synchronizeTrainings,
 } from '../services/trainingService';
 import { useNetworkStatus } from '../contexts/NetworkStatusContext';
+import { usePersistentBottomNavigationInset } from '../components/PersistentBottomNavigation';
 import {
   reportAnalyticsError,
   trackScheduleAction,
@@ -152,6 +153,7 @@ const isCurrentOrFuture = (training: Training, currentTimeMs: number): boolean =
 
 export default function TrainingsScreen() {
   const router = useRouter();
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { isOffline } = useNetworkStatus();
   const [trainings, setTrainings] = useState<Training[]>([]);
   const [loading, setLoading] = useState(true);
@@ -306,7 +308,7 @@ export default function TrainingsScreen() {
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingBottom: bottomNavigationInset }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           showsVerticalScrollIndicator={false}
         >
