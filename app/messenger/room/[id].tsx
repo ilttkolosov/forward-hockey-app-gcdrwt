@@ -1381,6 +1381,10 @@ export default function MessengerRoomScreen() {
   const initialAnchorMode = useRef<InitialAnchorMode>("latest");
   const initialAnchorSettling = useRef(false);
   const initialListContentMeasured = useRef(false);
+  const lastFeedContentWidth = useRef(0);
+  const lastFeedContentHeight = useRef(0);
+  const lastScreenWidth = useRef(0);
+  const lastScreenHeight = useRef(0);
   const initialPositionCompletionSource =
     useRef<InitialPositionCompletionSource>("pending");
   const initialPositionStartedAt = useRef(0);
@@ -1421,9 +1425,70 @@ export default function MessengerRoomScreen() {
     })(),
   ).current;
 
+  const transitionTraceActive = useCallback(
+    () => Date.now() - openedAt <= 8_000,
+    [openedAt],
+  );
+
+  useEffect(() => {
+    messengerLog("info", "room.transition.mounted", {
+      room_id: roomId,
+      elapsed_since_tap_ms: Date.now() - openedAt,
+      route_unread_count: params.unreadCount ?? null,
+      route_latest_sequence: params.latestSequence || null,
+      route_last_read_sequence: params.lastReadSequence || null,
+    });
+    return () => {
+      messengerLog("info", "room.transition.unmounted", {
+        room_id: roomId,
+        lifetime_ms: Date.now() - openedAt,
+      });
+    };
+  }, [
+    openedAt,
+    params.lastReadSequence,
+    params.latestSequence,
+    params.unreadCount,
+    roomId,
+  ]);
+
   useEffect(() => {
     messagesRef.current = messages;
-  }, [messages]);
+    if (!transitionTraceActive()) return;
+    messengerLog("info", "room.transition.messages_committed", {
+      room_id: roomId,
+      elapsed_since_tap_ms: Date.now() - openedAt,
+      message_count: messages.length,
+      media_message_count: messages.filter(
+        (message) =>
+          Boolean(message.media) || Boolean(message.media_items?.length),
+      ).length,
+      pending_message_count: messages.filter((message) => message.pending)
+        .length,
+    });
+  }, [messages, openedAt, roomId, transitionTraceActive]);
+
+  useEffect(() => {
+    if (!transitionTraceActive()) return;
+    messengerLog("info", "room.transition.state_committed", {
+      room_id: roomId,
+      elapsed_since_tap_ms: Date.now() - openedAt,
+      loading,
+      initial_data_ready: initialDataReady,
+      list_ready: listReady,
+      room_details_ready: roomDetailsReady,
+      feed_height: feedHeight,
+    });
+  }, [
+    feedHeight,
+    initialDataReady,
+    listReady,
+    loading,
+    openedAt,
+    roomDetailsReady,
+    roomId,
+    transitionTraceActive,
+  ]);
 
   useEffect(() => {
     editingMessageRef.current = editingMessage;
@@ -2438,6 +2503,19 @@ export default function MessengerRoomScreen() {
     const index = current.findIndex(
       (message) => message.client_message_id === anchorId,
     );
+    messengerLog("info", "room.transition.position_requested", {
+      room_id: roomId,
+      elapsed_since_tap_ms: Date.now() - openedAt,
+      mode: initialAnchorMode.current,
+      message_count: current.length,
+      anchor_index: index,
+      content_measured: initialListContentMeasured.current,
+      settling: initialAnchorSettling.current,
+      attempts: initialPositionAttempts.current,
+      content_width: lastFeedContentWidth.current,
+      content_height: lastFeedContentHeight.current,
+      feed_height: feedHeight,
+    });
     if (index < 0 || !current.length) {
       initialPositionCompletionSource.current = "missing_anchor";
       finishInitialPosition();
@@ -2476,7 +2554,7 @@ export default function MessengerRoomScreen() {
       viewPosition: 0.5,
       viewOffset: 0,
     });
-  }, [finishInitialPosition]);
+  }, [feedHeight, finishInitialPosition, openedAt, roomId]);
 
   const settleInitialPosition = useCallback(() => {
     if (!pendingInitialPosition.current || initialAnchorSettling.current) {
@@ -4910,7 +4988,30 @@ export default function MessengerRoomScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+    <SafeAreaView
+      style={styles.safeArea}
+      edges={["top", "bottom"]}
+      onLayout={(event) => {
+        const width = Math.round(event.nativeEvent.layout.width);
+        const height = Math.round(event.nativeEvent.layout.height);
+        if (
+          width === lastScreenWidth.current &&
+          height === lastScreenHeight.current
+        ) {
+          return;
+        }
+        messengerLog("info", "room.transition.screen_layout", {
+          room_id: roomId,
+          elapsed_since_tap_ms: Date.now() - openedAt,
+          previous_width: lastScreenWidth.current,
+          previous_height: lastScreenHeight.current,
+          width,
+          height,
+        });
+        lastScreenWidth.current = width;
+        lastScreenHeight.current = height;
+      }}
+    >
       <KeyboardAvoidingView
         style={styles.flex}
         // Android is resized by windowSoftInputMode=adjustResize from
@@ -5027,7 +5128,16 @@ export default function MessengerRoomScreen() {
             }
             onLayout={(event) => {
               const height = Math.round(event.nativeEvent.layout.height);
-              if (height !== feedHeight) setFeedHeight(height);
+              if (height !== feedHeight) {
+                messengerLog("info", "room.transition.feed_layout", {
+                  room_id: roomId,
+                  elapsed_since_tap_ms: Date.now() - openedAt,
+                  previous_height: feedHeight,
+                  height,
+                  list_ready: listReady,
+                });
+                setFeedHeight(height);
+              }
               if (keyboardScrollPending.current) {
                 scrollToLatest(true);
               }
@@ -5051,8 +5161,30 @@ export default function MessengerRoomScreen() {
             onScrollToIndexFailed={handleScrollToIndexFailed}
             onViewableItemsChanged={handleViewableItemsChanged}
             viewabilityConfig={initialViewabilityConfig}
-            onContentSizeChange={() => {
+            onContentSizeChange={(width, height) => {
               if (!visibleMessages.length) return;
+              const roundedWidth = Math.round(width);
+              const roundedHeight = Math.round(height);
+              if (
+                roundedWidth !== lastFeedContentWidth.current ||
+                roundedHeight !== lastFeedContentHeight.current
+              ) {
+                messengerLog("info", "room.transition.content_size_changed", {
+                  room_id: roomId,
+                  elapsed_since_tap_ms: Date.now() - openedAt,
+                  previous_width: lastFeedContentWidth.current,
+                  previous_height: lastFeedContentHeight.current,
+                  width: roundedWidth,
+                  height: roundedHeight,
+                  delta_height:
+                    roundedHeight - lastFeedContentHeight.current,
+                  message_count: visibleMessages.length,
+                  list_ready: listReady,
+                  pending_initial_position: pendingInitialPosition.current,
+                });
+                lastFeedContentWidth.current = roundedWidth;
+                lastFeedContentHeight.current = roundedHeight;
+              }
               initialListContentMeasured.current = true;
               if (pendingInitialPosition.current) {
                 positionInitialMessages();
