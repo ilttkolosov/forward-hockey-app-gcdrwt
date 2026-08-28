@@ -33,6 +33,7 @@ import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
 import {
   cacheIncomingMessengerMessage,
+  cacheMessengerRoomSnapshot,
   cacheMessengerRooms,
   loadCachedMessengerRooms,
 } from "../../features/messenger/repository";
@@ -378,7 +379,9 @@ export default function MessengerShareScreen() {
         ? rooms
         : [...rooms, result.room];
       setRooms(nextRooms);
-      await cacheMessengerRooms(db, nextRooms).catch((cacheError) => {
+      await cacheMessengerRoomSnapshot(db, result.room, {
+        preserveUntilRemote: true,
+      }).catch((cacheError) => {
         messengerLog("warn", "share_targets.direct_room_cache_failed", {
           room_id: result.room.id,
           message: messengerErrorMessage(cacheError),

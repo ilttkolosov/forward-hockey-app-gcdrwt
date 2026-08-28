@@ -1,4 +1,5 @@
 import { useFocusEffect, useRouter } from "expo-router";
+import { useSQLiteContext } from "expo-sqlite";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,6 +15,7 @@ import Icon from "../../../components/Icon";
 import { usePersistentBottomNavigationInset } from "../../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
+import { cacheMessengerRoomSnapshot } from "../../../features/messenger/repository";
 import type { MessengerContact } from "../../../features/messenger/types";
 import {
   createMessengerPrivateRoom,
@@ -29,6 +31,7 @@ interface TeamOption {
 }
 
 export default function CreateMessengerGroupScreen() {
+  const db = useSQLiteContext();
   const router = useRouter();
   const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { session, isAuthenticated } = useMessengerAuth();
@@ -104,6 +107,9 @@ export default function CreateMessengerGroupScreen() {
         ...selected,
       ]);
       const room = result.room;
+      await cacheMessengerRoomSnapshot(db, room, {
+        preserveUntilRemote: true,
+      });
       trackMessengerAction("private_group_created", {
         member_count: selected.size + 1,
       });

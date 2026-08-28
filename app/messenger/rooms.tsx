@@ -26,7 +26,9 @@ import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
 import LocalRoomAvatar from "../../features/messenger/LocalRoomAvatar";
 import SavedMessagesAvatar from "../../features/messenger/SavedMessagesAvatar";
 import {
+  cacheMessengerRoomSnapshot,
   cacheMessengerRooms,
+  hasPendingMessengerRoomSnapshots,
   loadCachedMessengerRooms,
   subscribeMessengerRoomCacheChanges,
 } from "../../features/messenger/repository";
@@ -444,6 +446,14 @@ export default function MessengerRoomsScreen() {
           if (!active) return;
           setLoading(false);
           setPreparation({ mode: "ready", progress: 100, message: "Готово" });
+          if (hasPendingMessengerRoomSnapshots()) {
+            interactionTask = InteractionManager.runAfterInteractions(() => {
+              refreshTimer = setTimeout(() => {
+                refreshTimer = null;
+                if (active) void loadRooms(false, false, true);
+              }, 150);
+            });
+          }
           return;
         }
 
@@ -761,7 +771,8 @@ export default function MessengerRoomsScreen() {
       );
       setRooms(nextRooms);
       setMessengerMutedRooms(nextRooms);
-      if (nextRooms.length) void cacheMessengerRooms(db, nextRooms);
+      const changedRoom = nextRooms.find((room) => room.id === muteRoom.id);
+      if (changedRoom) void cacheMessengerRoomSnapshot(db, changedRoom);
       trackMessengerAction("notifications_changed", {
         operation: duration === "unmute" ? "enabled" : "muted",
         mute_duration: duration,

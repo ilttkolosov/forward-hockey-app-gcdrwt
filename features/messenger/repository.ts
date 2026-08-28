@@ -90,6 +90,7 @@ const messengerRoomCacheWrites = new WeakMap<
 >();
 
 const messengerRoomCacheSubscribers = new Set<() => void>();
+const pendingRemoteRoomSnapshots = new Set<string>();
 
 function notifyMessengerRoomCacheChanged(): void {
   messengerRoomCacheSubscribers.forEach((subscriber) => subscriber());
@@ -100,6 +101,10 @@ export function subscribeMessengerRoomCacheChanges(
 ): () => void {
   messengerRoomCacheSubscribers.add(subscriber);
   return () => messengerRoomCacheSubscribers.delete(subscriber);
+}
+
+export function hasPendingMessengerRoomSnapshots(): boolean {
+  return pendingRemoteRoomSnapshots.size > 0;
 }
 
 function enqueueMessengerWrite<T>(
@@ -262,6 +267,7 @@ export function cacheMessengerRooms(
   if (existingWrite) return existingWrite;
   const reconciledRooms: MessengerRoom[] = [];
   const write = enqueueMessengerWrite(db, async () => {
+    const confirmedPendingRoomIds: string[] = [];
     await withMessengerTransaction(db, async (transaction) => {
       const existingRows = await transaction.getAllAsync<
         RoomRow & { id: string }
@@ -285,8 +291,17 @@ export function cacheMessengerRooms(
           (state) => [state.room_id, state.local_read_sequence] as const,
         ),
       );
+      const remoteRoomIds = new Set(rooms.map((room) => room.id));
+      const pendingRoomsMissingFromSnapshot = [...existingById.values()].filter(
+        (room) =>
+          pendingRemoteRoomSnapshots.has(room.id) &&
+          !remoteRoomIds.has(room.id),
+      );
       await transaction.runAsync("DELETE FROM messenger_rooms");
       for (const room of rooms) {
+        if (pendingRemoteRoomSnapshots.has(room.id)) {
+          confirmedPendingRoomIds.push(room.id);
+        }
         const existing = existingById.get(room.id);
         const keepLocalTail = Boolean(
           existing?.last_message &&
@@ -333,7 +348,30 @@ export function cacheMessengerRooms(
           JSON.stringify(nextRoom),
         );
       }
+      // A room created on this device may be absent from a `/chat/rooms`
+      // response which started before its first message was committed. Keep
+      // that local card until a later server snapshot explicitly contains it.
+      for (const room of pendingRoomsMissingFromSnapshot) {
+        reconciledRooms.push(room);
+        await transaction.runAsync(
+          `INSERT INTO messenger_rooms
+          (id, team_id, team_name, kind, title, sort_order, unread_count, updated_at, raw_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          room.id,
+          room.team_id,
+          room.team_name,
+          room.kind,
+          room.title,
+          room.sort_order,
+          room.unread_count,
+          new Date().toISOString(),
+          JSON.stringify(room),
+        );
+      }
     });
+    confirmedPendingRoomIds.forEach((roomId) =>
+      pendingRemoteRoomSnapshots.delete(roomId),
+    );
     notifyMessengerRoomCacheChanged();
     return reconciledRooms;
   });
@@ -357,6 +395,7 @@ export function cacheMessengerRooms(
 export function cacheMessengerRoomSnapshot(
   db: SQLiteDatabase,
   room: MessengerRoom,
+  options: { preserveUntilRemote?: boolean } = {},
 ): Promise<MessengerRoom> {
   return enqueueMessengerWrite(db, async () => {
     const readState = await db.getFirstAsync<
@@ -394,6 +433,9 @@ export function cacheMessengerRoomSnapshot(
       new Date().toISOString(),
       JSON.stringify(nextRoom),
     );
+    if (options.preserveUntilRemote) {
+      pendingRemoteRoomSnapshots.add(nextRoom.id);
+    }
     notifyMessengerRoomCacheChanged();
     return nextRoom;
   });
@@ -419,6 +461,7 @@ export function removeCachedMessengerRoom(
         roomId,
       );
     });
+    pendingRemoteRoomSnapshots.delete(roomId);
     notifyMessengerRoomCacheChanged();
   });
 }

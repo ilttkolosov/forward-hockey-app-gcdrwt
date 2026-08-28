@@ -4706,7 +4706,9 @@ export default function MessengerRoomScreen() {
         forwardingMessage.id,
         Crypto.randomUUID(),
       );
-      await cacheMessengerRoomSnapshot(db, result.room);
+      await cacheMessengerRoomSnapshot(db, result.room, {
+        preserveUntilRemote: true,
+      });
       if (result.room.id === roomId) await storeSentMessage(result.message);
       setForwardingMessage(null);
       trackMessengerAction("message_saved", {

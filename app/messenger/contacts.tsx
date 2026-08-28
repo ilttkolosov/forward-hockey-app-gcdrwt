@@ -103,7 +103,9 @@ export default function MessengerContactsScreen() {
       // Persist the room before opening it. The rooms screen remains mounted
       // underneath this flow and subscribes to cache changes, so it can add
       // the new card immediately instead of waiting for pull-to-refresh.
-      await cacheMessengerRoomSnapshot(db, result.room);
+      await cacheMessengerRoomSnapshot(db, result.room, {
+        preserveUntilRemote: true,
+      });
       router.replace({
         pathname: "/messenger/room/[id]",
         params: {

@@ -78,7 +78,10 @@ export function mergeMessengerRoomSnapshots(
   let changed = visibleRooms.length !== cachedRooms.length;
   const nextRooms = cachedRooms.map((cachedRoom) => {
     const visibleRoom = visibleById.get(cachedRoom.id);
-    if (!visibleRoom) return cachedRoom;
+    if (!visibleRoom) {
+      changed = true;
+      return cachedRoom;
+    }
     const nextRoom = newestRoomSnapshot(visibleRoom, cachedRoom);
     if (JSON.stringify(nextRoom) === JSON.stringify(visibleRoom)) {
       return visibleRoom;
