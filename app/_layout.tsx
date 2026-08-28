@@ -77,6 +77,7 @@ import {
   waitForAppInteractive,
 } from '../services/appInteractive';
 import PersistentBottomNavigation from '../components/PersistentBottomNavigation';
+import { warmMessengerUiAssets } from '../services/messengerUiAssets';
 global.Buffer = Buffer;
 
 Notifications.setNotificationHandler({
@@ -392,6 +393,9 @@ function RootLayoutContent() {
     setDynamicStatus('Подготовка данных...');
     setProgress(0);
     const afterStartupTasks: (() => void)[] = [];
+    // Decode the bundled chat wallpaper while the splash screen is visible.
+    // Opening a room must never be the first consumer of this UI asset.
+    const messengerUiAssetsPromise = warmMessengerUiAssets();
 
     // === Отслеживаем загрузку предстоящих игр ===
     let upcomingGamesPromise: Promise<void> | null = null;
@@ -710,6 +714,8 @@ function RootLayoutContent() {
       } else {
         initializationLog('Предстоящие игры завершены параллельно; дополнительное ожидание не требуется');
       }
+
+      await messengerUiAssetsPromise;
 
 
       setInitializationMessage('Готово!');

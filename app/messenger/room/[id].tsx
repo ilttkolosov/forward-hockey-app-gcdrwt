@@ -15,7 +15,6 @@ import {
   Animated,
   Alert,
   FlatList,
-  ImageBackground,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -122,6 +121,7 @@ import {
   updateMessengerMessage,
 } from "../../../services/messengerApi";
 import { searchMessengerMessagesLocallyFirst } from "../../../services/messengerSearch";
+import { getMessengerChatBackgroundUri } from "../../../services/messengerUiAssets";
 import { queueMessengerReadReceipt } from "../../../services/messengerReadSync";
 import {
   getMessengerRealtimeConnectionState,
@@ -1339,6 +1339,7 @@ export default function MessengerRoomScreen() {
   const editingMessageRef = useRef<MessengerMessage | null>(null);
   const refreshRunning = useRef(false);
   const olderMessagesLoading = useRef(false);
+  const olderPageTriggerArmed = useRef(true);
   const newerCachedMessagesLoading = useRef(false);
   const remoteHasMoreNewerMessages = useRef(true);
   const reactionMutationIds = useRef<Set<string>>(new Set());
@@ -1381,10 +1382,6 @@ export default function MessengerRoomScreen() {
   const initialAnchorMode = useRef<InitialAnchorMode>("latest");
   const initialAnchorSettling = useRef(false);
   const initialListContentMeasured = useRef(false);
-  const lastFeedContentWidth = useRef(0);
-  const lastFeedContentHeight = useRef(0);
-  const lastScreenWidth = useRef(0);
-  const lastScreenHeight = useRef(0);
   const initialPositionCompletionSource =
     useRef<InitialPositionCompletionSource>("pending");
   const initialPositionStartedAt = useRef(0);
@@ -1425,70 +1422,9 @@ export default function MessengerRoomScreen() {
     })(),
   ).current;
 
-  const transitionTraceActive = useCallback(
-    () => Date.now() - openedAt <= 8_000,
-    [openedAt],
-  );
-
-  useEffect(() => {
-    messengerLog("info", "room.transition.mounted", {
-      room_id: roomId,
-      elapsed_since_tap_ms: Date.now() - openedAt,
-      route_unread_count: params.unreadCount ?? null,
-      route_latest_sequence: params.latestSequence || null,
-      route_last_read_sequence: params.lastReadSequence || null,
-    });
-    return () => {
-      messengerLog("info", "room.transition.unmounted", {
-        room_id: roomId,
-        lifetime_ms: Date.now() - openedAt,
-      });
-    };
-  }, [
-    openedAt,
-    params.lastReadSequence,
-    params.latestSequence,
-    params.unreadCount,
-    roomId,
-  ]);
-
   useEffect(() => {
     messagesRef.current = messages;
-    if (!transitionTraceActive()) return;
-    messengerLog("info", "room.transition.messages_committed", {
-      room_id: roomId,
-      elapsed_since_tap_ms: Date.now() - openedAt,
-      message_count: messages.length,
-      media_message_count: messages.filter(
-        (message) =>
-          Boolean(message.media) || Boolean(message.media_items?.length),
-      ).length,
-      pending_message_count: messages.filter((message) => message.pending)
-        .length,
-    });
-  }, [messages, openedAt, roomId, transitionTraceActive]);
-
-  useEffect(() => {
-    if (!transitionTraceActive()) return;
-    messengerLog("info", "room.transition.state_committed", {
-      room_id: roomId,
-      elapsed_since_tap_ms: Date.now() - openedAt,
-      loading,
-      initial_data_ready: initialDataReady,
-      list_ready: listReady,
-      room_details_ready: roomDetailsReady,
-      feed_height: feedHeight,
-    });
-  }, [
-    feedHeight,
-    initialDataReady,
-    listReady,
-    loading,
-    openedAt,
-    roomDetailsReady,
-    roomId,
-    transitionTraceActive,
-  ]);
+  }, [messages]);
 
   useEffect(() => {
     editingMessageRef.current = editingMessage;
@@ -2503,19 +2439,6 @@ export default function MessengerRoomScreen() {
     const index = current.findIndex(
       (message) => message.client_message_id === anchorId,
     );
-    messengerLog("info", "room.transition.position_requested", {
-      room_id: roomId,
-      elapsed_since_tap_ms: Date.now() - openedAt,
-      mode: initialAnchorMode.current,
-      message_count: current.length,
-      anchor_index: index,
-      content_measured: initialListContentMeasured.current,
-      settling: initialAnchorSettling.current,
-      attempts: initialPositionAttempts.current,
-      content_width: lastFeedContentWidth.current,
-      content_height: lastFeedContentHeight.current,
-      feed_height: feedHeight,
-    });
     if (index < 0 || !current.length) {
       initialPositionCompletionSource.current = "missing_anchor";
       finishInitialPosition();
@@ -2554,7 +2477,7 @@ export default function MessengerRoomScreen() {
       viewPosition: 0.5,
       viewOffset: 0,
     });
-  }, [feedHeight, finishInitialPosition, openedAt, roomId]);
+  }, [finishInitialPosition]);
 
   const settleInitialPosition = useCallback(() => {
     if (!pendingInitialPosition.current || initialAnchorSettling.current) {
@@ -2908,7 +2831,18 @@ export default function MessengerRoomScreen() {
         feedIsScrolling.current = false;
         setFloatingDate(null);
       }, 1_500);
-      if (!pendingInitialPosition.current && contentOffset.y <= 100) {
+      // A prepend changes the native offset while FlatList preserves the
+      // visible message. Re-arm only after that adjustment (or after the user
+      // moves away from the top), otherwise several cached pages can be
+      // inserted during one visit to the threshold and make the feed jump.
+      if (contentOffset.y > 240) olderPageTriggerArmed.current = true;
+      if (
+        listReady &&
+        !pendingInitialPosition.current &&
+        olderPageTriggerArmed.current &&
+        contentOffset.y <= 80
+      ) {
+        olderPageTriggerArmed.current = false;
         if (authorFilter && filterCursor) {
           void loadFilteredAuthorMessages(authorFilter, filterCursor);
         } else if (!authorFilter) {
@@ -2928,6 +2862,7 @@ export default function MessengerRoomScreen() {
       loadFilteredAuthorMessages,
       loadNewerMessages,
       loadOlderMessages,
+      listReady,
     ],
   );
 
@@ -4988,30 +4923,7 @@ export default function MessengerRoomScreen() {
   );
 
   return (
-    <SafeAreaView
-      style={styles.safeArea}
-      edges={["top", "bottom"]}
-      onLayout={(event) => {
-        const width = Math.round(event.nativeEvent.layout.width);
-        const height = Math.round(event.nativeEvent.layout.height);
-        if (
-          width === lastScreenWidth.current &&
-          height === lastScreenHeight.current
-        ) {
-          return;
-        }
-        messengerLog("info", "room.transition.screen_layout", {
-          room_id: roomId,
-          elapsed_since_tap_ms: Date.now() - openedAt,
-          previous_width: lastScreenWidth.current,
-          previous_height: lastScreenHeight.current,
-          width,
-          height,
-        });
-        lastScreenWidth.current = width;
-        lastScreenHeight.current = height;
-      }}
-    >
+    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
       <KeyboardAvoidingView
         style={styles.flex}
         // Android is resized by windowSoftInputMode=adjustResize from
@@ -5112,12 +5024,15 @@ export default function MessengerRoomScreen() {
           </View>
         )}
 
-        <ImageBackground
-          source={require("../../../assets/messenger/ice-chat-background.jpg")}
-          style={styles.iceBackground}
-          imageStyle={styles.iceBackgroundImage}
-          resizeMode="cover"
-        >
+        <View style={styles.iceBackground}>
+          <Image
+            cachePolicy="memory-disk"
+            contentFit="cover"
+            priority="high"
+            source={getMessengerChatBackgroundUri()}
+            style={styles.iceBackgroundImage}
+            transition={0}
+          />
           <FlatList
             ref={listRef}
             data={visibleMessages}
@@ -5131,16 +5046,7 @@ export default function MessengerRoomScreen() {
             }
             onLayout={(event) => {
               const height = Math.round(event.nativeEvent.layout.height);
-              if (height !== feedHeight) {
-                messengerLog("info", "room.transition.feed_layout", {
-                  room_id: roomId,
-                  elapsed_since_tap_ms: Date.now() - openedAt,
-                  previous_height: feedHeight,
-                  height,
-                  list_ready: listReady,
-                });
-                setFeedHeight(height);
-              }
+              if (height !== feedHeight) setFeedHeight(height);
               if (keyboardScrollPending.current) {
                 scrollToLatest(true);
               }
@@ -5151,7 +5057,10 @@ export default function MessengerRoomScreen() {
             // That second pass was the visible jump during room entry.
             initialNumToRender={20}
             maxToRenderPerBatch={20}
-            windowSize={9}
+            // The feed contains variable-height media rows. A larger render
+            // window keeps their measured frames alive while older pages are
+            // prepended, avoiding large spacer re-estimates during scrolling.
+            windowSize={21}
             removeClippedSubviews={false}
             keyboardDismissMode={
               Platform.OS === "ios" ? "interactive" : "on-drag"
@@ -5168,30 +5077,8 @@ export default function MessengerRoomScreen() {
             onScrollToIndexFailed={handleScrollToIndexFailed}
             onViewableItemsChanged={handleViewableItemsChanged}
             viewabilityConfig={initialViewabilityConfig}
-            onContentSizeChange={(width, height) => {
+            onContentSizeChange={() => {
               if (!visibleMessages.length) return;
-              const roundedWidth = Math.round(width);
-              const roundedHeight = Math.round(height);
-              if (
-                roundedWidth !== lastFeedContentWidth.current ||
-                roundedHeight !== lastFeedContentHeight.current
-              ) {
-                messengerLog("info", "room.transition.content_size_changed", {
-                  room_id: roomId,
-                  elapsed_since_tap_ms: Date.now() - openedAt,
-                  previous_width: lastFeedContentWidth.current,
-                  previous_height: lastFeedContentHeight.current,
-                  width: roundedWidth,
-                  height: roundedHeight,
-                  delta_height:
-                    roundedHeight - lastFeedContentHeight.current,
-                  message_count: visibleMessages.length,
-                  list_ready: listReady,
-                  pending_initial_position: pendingInitialPosition.current,
-                });
-                lastFeedContentWidth.current = roundedWidth;
-                lastFeedContentHeight.current = roundedHeight;
-              }
               initialListContentMeasured.current = true;
               if (pendingInitialPosition.current) {
                 positionInitialMessages();
@@ -5287,7 +5174,7 @@ export default function MessengerRoomScreen() {
               <Icon name="chevron-down" size={27} color={colors.primary} />
             </TouchableOpacity>
           )}
-        </ImageBackground>
+        </View>
 
         <Modal
           visible={Boolean(actionMessage)}
@@ -6191,7 +6078,10 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.backgroundAlt },
   flex: { flex: 1 },
   iceBackground: { flex: 1 },
-  iceBackgroundImage: { opacity: 0.86 },
+  iceBackgroundImage: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.86,
+  },
   loading: {
     flex: 1,
     alignItems: "center",

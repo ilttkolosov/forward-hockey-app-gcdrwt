@@ -15,7 +15,6 @@ import Svg, { Path } from 'react-native-svg';
 import Icon from './Icon';
 import { useMessengerAuth } from '../contexts/MessengerAuthContext';
 import { useMessengerUnreadSnapshot } from '../services/messengerUnread';
-import { messengerLog } from '../services/messengerLogger';
 import { colors } from '../styles/commonStyles';
 
 const NAVIGATION_RED = '#F2162D';
@@ -227,13 +226,6 @@ export default function PersistentBottomNavigation() {
   useEffect(() => {
     if (navigationHidden) setMoreVisible(false);
   }, [navigationHidden]);
-
-  useEffect(() => {
-    messengerLog('info', 'navigation.visibility.changed', {
-      pathname,
-      hidden: navigationHidden,
-    });
-  }, [navigationHidden, pathname]);
 
   const pushRoute = (href: Href) => {
     setMoreVisible(false);
