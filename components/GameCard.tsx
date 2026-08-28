@@ -214,14 +214,16 @@ export default function GameCard({ game, showScore = true }: GameCardProps) {
         <View style={styles.footer}>
           <View style={styles.gameInfo}>
             {venue && <Text style={commonStyles.textSecondary} numberOfLines={1}>📍 {typeof venue === 'string' ? venue : venue.name}</Text>}
-            <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
-              {(!tournament || tournament.trim() === 'Товарищеский матч') ? '🤝 ' : '🏆 '}{getLeagueDisplayName(tournament)}
-            </Text>
-            {seasonName && (
+            <View style={styles.competitionRow}>
               <Text style={[commonStyles.textSecondary, styles.leagueText]} numberOfLines={1}>
-                📅 {seasonName}
+                {(!tournament || tournament.trim() === 'Товарищеский матч') ? '🤝 ' : '🏆 '}{getLeagueDisplayName(tournament)}
               </Text>
-            )}
+              {seasonName && (
+                <Text style={[commonStyles.textSecondary, styles.seasonText]} numberOfLines={1}>
+                  {seasonName}
+                </Text>
+              )}
+            </View>
           </View>
         </View>
       </View>
@@ -314,8 +316,22 @@ const styles = StyleSheet.create({
   gameInfo: {
     gap: 4,
   },
+  competitionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   leagueText: {
     fontSize: 12,
     fontStyle: 'italic',
+    textAlign: 'left',
+    flex: 1,
+    marginRight: 8,
+  },
+  seasonText: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    textAlign: 'right',
+    flexShrink: 1,
   },
 });
