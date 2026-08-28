@@ -76,6 +76,7 @@ import {
   markAppInteractive,
   waitForAppInteractive,
 } from '../services/appInteractive';
+import PersistentBottomNavigation from '../components/PersistentBottomNavigation';
 global.Buffer = Buffer;
 
 Notifications.setNotificationHandler({
@@ -763,27 +764,29 @@ function RootLayoutContent() {
       <StatusBar style="dark" backgroundColor={colors.background} />
       <MessengerShareIntentBridge />
       <AnalyticsRouteTracker />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="players" />
-        <Stack.Screen name="trainings" />
-        <Stack.Screen name="player/[id]" />
-        <Stack.Screen name="upcoming" />
-        <Stack.Screen name="game/[id]" />
-        <Stack.Screen name="season/[id]" />
-        <Stack.Screen name="tournaments/[id]" />
-        <Stack.Screen name="command/[id]" />
-        <Stack.Screen name="mobilegames/[id]" />
-        <Stack.Screen name="messenger/index" />
-        <Stack.Screen name="messenger/register" />
-        <Stack.Screen name="messenger/change-password" />
-        <Stack.Screen name="messenger/rooms" />
-        <Stack.Screen
-          name="messenger/share"
-          options={{ gestureEnabled: false }}
-        />
-        <Stack.Screen name="messenger/room/[id]" />
-      </Stack>
+      <PersistentBottomNavigation>
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="players" />
+          <Stack.Screen name="trainings" />
+          <Stack.Screen name="player/[id]" />
+          <Stack.Screen name="upcoming" />
+          <Stack.Screen name="game/[id]" />
+          <Stack.Screen name="season/[id]" />
+          <Stack.Screen name="tournaments/[id]" />
+          <Stack.Screen name="command/[id]" />
+          <Stack.Screen name="mobilegames/[id]" />
+          <Stack.Screen name="messenger/index" />
+          <Stack.Screen name="messenger/register" />
+          <Stack.Screen name="messenger/change-password" />
+          <Stack.Screen name="messenger/rooms" />
+          <Stack.Screen
+            name="messenger/share"
+            options={{ gestureEnabled: false }}
+          />
+          <Stack.Screen name="messenger/room/[id]" />
+        </Stack>
+      </PersistentBottomNavigation>
     </GestureHandlerRootView>
   );
 }
