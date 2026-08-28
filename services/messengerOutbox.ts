@@ -1,7 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import type { MessengerMessage, MessengerOutboxItem } from '../features/messenger/types';
 import {
-  cacheMessengerMessages,
+  cacheIncomingMessengerMessage,
   loadMessengerOutbox,
   markMessengerOutboxFailure,
   removeMessengerOutboxItem,
@@ -97,7 +97,14 @@ async function flushPass(db: SQLiteDatabase): Promise<MessengerOutboxPassResult>
         item.reply_to_message_id,
       );
       try {
-        await cacheMessengerMessages(db, [result.message]);
+        // The same atomic write also advances the cached room card. This is
+        // especially important for a just-created direct room: returning to
+        // the list must show it with the sent message without a remote reload.
+        await cacheIncomingMessengerMessage(
+          db,
+          result.message,
+          result.message.author.id,
+        );
       } catch (cacheError) {
         // The server is authoritative and the realtime/room sync path can
         // repair this cache. Never leave an accepted message in the outbox.

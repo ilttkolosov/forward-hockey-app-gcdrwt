@@ -1,4 +1,5 @@
 import { useFocusEffect, useRouter } from "expo-router";
+import { useSQLiteContext } from "expo-sqlite";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -15,6 +16,7 @@ import Icon from "../../components/Icon";
 import { usePersistentBottomNavigationInset } from "../../components/PersistentBottomNavigation";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../features/messenger/AuthenticatedAvatar";
+import { cacheMessengerRoomSnapshot } from "../../features/messenger/repository";
 import type { MessengerContact } from "../../features/messenger/types";
 import {
   createMessengerDirectRoom,
@@ -38,6 +40,7 @@ function contactKey(contact: MessengerContact): string {
 }
 
 export default function MessengerContactsScreen() {
+  const db = useSQLiteContext();
   const router = useRouter();
   const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { session, isAuthenticated } = useMessengerAuth();
@@ -97,6 +100,10 @@ export default function MessengerContactsScreen() {
         contact.team_id,
         contact.id,
       );
+      // Persist the room before opening it. The rooms screen remains mounted
+      // underneath this flow and subscribes to cache changes, so it can add
+      // the new card immediately instead of waiting for pull-to-refresh.
+      await cacheMessengerRoomSnapshot(db, result.room);
       router.replace({
         pathname: "/messenger/room/[id]",
         params: {
