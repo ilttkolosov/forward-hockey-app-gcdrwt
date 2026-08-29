@@ -71,6 +71,7 @@ const formatUnreadCount = (count: number) => (count > 99 ? '99+' : String(count)
 const isNavigationHiddenRoute = (pathname: string) => (
   pathname.startsWith('/mobilegames/')
   || pathname.startsWith('/messenger/room/')
+  || pathname === '/messenger/share'
   || pathname === '/messenger/search'
 );
 

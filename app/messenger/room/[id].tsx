@@ -1305,6 +1305,9 @@ export default function MessengerRoomScreen() {
   const [forwardLoading, setForwardLoading] = useState(false);
   const [forwardBusy, setForwardBusy] = useState<string | null>(null);
   const [forwardError, setForwardError] = useState<string | null>(null);
+  const [forwardSelectedKeys, setForwardSelectedKeys] = useState<Set<string>>(
+    new Set(),
+  );
   const [receiptMessage, setReceiptMessage] = useState<MessengerMessage | null>(
     null,
   );
@@ -4515,6 +4518,7 @@ export default function MessengerRoomScreen() {
     setForwardingMessage(message);
     setForwardLoading(true);
     setForwardError(null);
+    setForwardSelectedKeys(new Set());
     try {
       const [roomsResult, contactsResult] = await Promise.all([
         getMessengerRooms(),
@@ -4666,67 +4670,109 @@ export default function MessengerRoomScreen() {
     [savingMessageId, session?.access_token],
   );
 
-  const forwardTo = useCallback(
-    async (busyKey: string, resolveTarget: () => Promise<MessengerRoom>) => {
-      if (!forwardingMessage || forwardBusy) return;
-      setForwardBusy(busyKey);
-      setForwardError(null);
+  const toggleForwardTarget = useCallback((key: string) => {
+    setForwardSelectedKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    setForwardError(null);
+  }, []);
+
+  const forwardToSelected = useCallback(async () => {
+    if (!forwardingMessage || forwardBusy || forwardSelectedKeys.size === 0) {
+      return;
+    }
+
+    const selectedKeys = [...forwardSelectedKeys];
+    const failedKeys = new Set<string>();
+    let sentCount = 0;
+    setForwardBusy("batch");
+    setForwardError(null);
+
+    for (const key of selectedKeys) {
       try {
-        const target = await resolveTarget();
+        if (key === "saved") {
+          const result = await saveMessengerMessage(
+            forwardingMessage.id,
+            Crypto.randomUUID(),
+          );
+          await cacheMessengerRoomSnapshot(db, result.room, {
+            preserveUntilRemote: true,
+          });
+          if (result.room.id === roomId) await storeSentMessage(result.message);
+          trackMessengerAction("message_saved", {
+            content_type: forwardingMessage.kind,
+            source_room_type: roomType || "unknown",
+          });
+          sentCount += 1;
+          continue;
+        }
+
+        let target: MessengerRoom | undefined;
+        if (key.startsWith("room:")) {
+          target = forwardRooms.find((room) => `room:${room.id}` === key);
+        } else {
+          const contact = forwardContacts.find(
+            (item) => `contact:${item.team_id}:${item.id}` === key,
+          );
+          if (contact) {
+            const result = await createMessengerDirectRoom(
+              contact.team_id,
+              contact.id,
+            );
+            target = result.room;
+            await cacheMessengerRoomSnapshot(db, target, {
+              preserveUntilRemote: true,
+            });
+          }
+        }
+        if (!target) throw new Error("Получатель больше недоступен");
+
         const result = await forwardMessengerMessage(
           forwardingMessage.id,
           target.id,
           Crypto.randomUUID(),
         );
         if (target.id === roomId) await storeSentMessage(result.message);
-        setForwardingMessage(null);
         trackMessengerAction("message_forwarded", {
           content_type: forwardingMessage.kind,
           source_room_type: roomType || "unknown",
           target_room_type: target.room_type,
         });
-        Alert.alert("Сообщение переслано", `Получатель: ${target.title}`);
-      } catch (error) {
-        setForwardError(
-          messengerErrorMessage(error, "Не удалось переслать сообщение"),
-        );
-      } finally {
-        setForwardBusy(null);
+        sentCount += 1;
+      } catch {
+        failedKeys.add(key);
       }
-    },
-    [forwardBusy, forwardingMessage, roomId, roomType, storeSentMessage],
-  );
-
-  const forwardToSaved = useCallback(async () => {
-    if (!forwardingMessage || forwardBusy) return;
-    setForwardBusy("saved");
-    setForwardError(null);
-    try {
-      const result = await saveMessengerMessage(
-        forwardingMessage.id,
-        Crypto.randomUUID(),
-      );
-      await cacheMessengerRoomSnapshot(db, result.room, {
-        preserveUntilRemote: true,
-      });
-      if (result.room.id === roomId) await storeSentMessage(result.message);
-      setForwardingMessage(null);
-      trackMessengerAction("message_saved", {
-        content_type: forwardingMessage.kind,
-        source_room_type: roomType || "unknown",
-      });
-      Alert.alert("Сообщение сохранено", "Оно добавлено в чат «Избранное».");
-    } catch (error) {
-      setForwardError(
-        messengerErrorMessage(error, "Не удалось сохранить сообщение"),
-      );
-    } finally {
-      setForwardBusy(null);
     }
+
+    setForwardBusy(null);
+    if (failedKeys.size === 0) {
+      setForwardSelectedKeys(new Set());
+      setForwardingMessage(null);
+      Alert.alert(
+        "Сообщение переслано",
+        selectedKeys.length === 1
+          ? "Выбранному получателю."
+          : `Получателей: ${selectedKeys.length}.`,
+      );
+      return;
+    }
+
+    setForwardSelectedKeys(failedKeys);
+    setForwardError(
+      sentCount > 0
+        ? `Переслано: ${sentCount}. Не удалось отправить: ${failedKeys.size}. Повторите попытку.`
+        : "Не удалось переслать сообщение. Повторите попытку.",
+    );
   }, [
     db,
     forwardBusy,
     forwardingMessage,
+    forwardContacts,
+    forwardRooms,
+    forwardSelectedKeys,
     roomId,
     roomType,
     storeSentMessage,
@@ -5507,13 +5553,19 @@ export default function MessengerRoomScreen() {
           transparent
           animationType="slide"
           onRequestClose={() => {
-            if (!forwardBusy) setForwardingMessage(null);
+            if (!forwardBusy) {
+              setForwardingMessage(null);
+              setForwardSelectedKeys(new Set());
+            }
           }}
         >
           <Pressable
             style={styles.modalBackdrop}
             onPress={() => {
-              if (!forwardBusy) setForwardingMessage(null);
+              if (!forwardBusy) {
+                setForwardingMessage(null);
+                setForwardSelectedKeys(new Set());
+              }
             }}
           >
             <Pressable
@@ -5524,12 +5576,15 @@ export default function MessengerRoomScreen() {
                 <View>
                   <Text style={styles.forwardTitle}>Переслать сообщение</Text>
                   <Text style={styles.forwardSubtitle}>
-                    Выберите один чат или контакт
+                    Выберите получателей
                   </Text>
                 </View>
                 <TouchableOpacity
                   style={styles.attachmentClose}
-                  onPress={() => setForwardingMessage(null)}
+                  onPress={() => {
+                    setForwardingMessage(null);
+                    setForwardSelectedKeys(new Set());
+                  }}
                   disabled={Boolean(forwardBusy)}
                   accessibilityLabel="Закрыть выбор получателя"
                 >
@@ -5542,11 +5597,12 @@ export default function MessengerRoomScreen() {
                   <ActivityIndicator color={colors.primary} />
                 </View>
               ) : (
-                <ScrollView
-                  style={styles.forwardList}
-                  contentContainerStyle={styles.forwardListContent}
-                  keyboardShouldPersistTaps="handled"
-                >
+                <>
+                  <ScrollView
+                    style={styles.forwardList}
+                    contentContainerStyle={styles.forwardListContent}
+                    keyboardShouldPersistTaps="handled"
+                  >
                   {forwardError ? (
                     <TouchableOpacity
                       style={styles.forwardError}
@@ -5567,9 +5623,17 @@ export default function MessengerRoomScreen() {
 
                   <Text style={styles.forwardSectionTitle}>Личное</Text>
                   <TouchableOpacity
-                    style={styles.forwardTarget}
-                    onPress={() => void forwardToSaved()}
+                    style={[
+                      styles.forwardTarget,
+                      forwardSelectedKeys.has("saved") &&
+                        styles.forwardTargetSelected,
+                    ]}
+                    onPress={() => toggleForwardTarget("saved")}
                     disabled={Boolean(forwardBusy)}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{
+                      checked: forwardSelectedKeys.has("saved"),
+                    }}
                   >
                     <SavedMessagesAvatar size={44} userId={session?.user.id} />
                     <View style={styles.forwardTargetText}>
@@ -5578,15 +5642,17 @@ export default function MessengerRoomScreen() {
                         Сохранить сообщение для себя
                       </Text>
                     </View>
-                    {forwardBusy === "saved" ? (
-                      <ActivityIndicator color={colors.primary} />
-                    ) : (
-                      <Icon
-                        name="chevron-forward"
-                        size={20}
-                        color={colors.textSecondary}
-                      />
-                    )}
+                    <View
+                      style={[
+                        styles.forwardCheckbox,
+                        forwardSelectedKeys.has("saved") &&
+                          styles.forwardCheckboxSelected,
+                      ]}
+                    >
+                      {forwardSelectedKeys.has("saved") ? (
+                        <Icon name="checkmark" size={17} color={colors.white} />
+                      ) : null}
+                    </View>
                   </TouchableOpacity>
 
                   {forwardRooms.length > 0 ? (
@@ -5594,15 +5660,18 @@ export default function MessengerRoomScreen() {
                   ) : null}
                   {forwardRooms.map((target) => {
                     const key = `room:${target.id}`;
-                    const busy = forwardBusy === key;
+                    const selected = forwardSelectedKeys.has(key);
                     return (
                       <TouchableOpacity
                         key={key}
-                        style={styles.forwardTarget}
-                        onPress={() =>
-                          void forwardTo(key, () => Promise.resolve(target))
-                        }
+                        style={[
+                          styles.forwardTarget,
+                          selected && styles.forwardTargetSelected,
+                        ]}
+                        onPress={() => toggleForwardTarget(key)}
                         disabled={Boolean(forwardBusy)}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: selected }}
                       >
                         {target.room_type === "direct" && target.peer ? (
                           <AuthenticatedAvatar
@@ -5638,15 +5707,16 @@ export default function MessengerRoomScreen() {
                             {` · ${target.team_name}`}
                           </Text>
                         </View>
-                        {busy ? (
-                          <ActivityIndicator color={colors.primary} />
-                        ) : (
-                          <Icon
-                            name="chevron-forward"
-                            size={20}
-                            color={colors.textSecondary}
-                          />
-                        )}
+                        <View
+                          style={[
+                            styles.forwardCheckbox,
+                            selected && styles.forwardCheckboxSelected,
+                          ]}
+                        >
+                          {selected ? (
+                            <Icon name="checkmark" size={17} color={colors.white} />
+                          ) : null}
+                        </View>
                       </TouchableOpacity>
                     );
                   })}
@@ -5658,21 +5728,18 @@ export default function MessengerRoomScreen() {
                   ) : null}
                   {newForwardContacts.map((contact) => {
                     const key = `contact:${contact.team_id}:${contact.id}`;
-                    const busy = forwardBusy === key;
+                    const selected = forwardSelectedKeys.has(key);
                     return (
                       <TouchableOpacity
                         key={key}
-                        style={styles.forwardTarget}
-                        onPress={() =>
-                          void forwardTo(key, async () => {
-                            const result = await createMessengerDirectRoom(
-                              contact.team_id,
-                              contact.id,
-                            );
-                            return result.room;
-                          })
-                        }
+                        style={[
+                          styles.forwardTarget,
+                          selected && styles.forwardTargetSelected,
+                        ]}
+                        onPress={() => toggleForwardTarget(key)}
                         disabled={Boolean(forwardBusy)}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: selected }}
                       >
                         <AuthenticatedAvatar
                           displayName={contact.display_name}
@@ -5699,15 +5766,16 @@ export default function MessengerRoomScreen() {
                             {` · ${contact.team_name}`}
                           </Text>
                         </View>
-                        {busy ? (
-                          <ActivityIndicator color={colors.primary} />
-                        ) : (
-                          <Icon
-                            name="person-add-outline"
-                            size={20}
-                            color={colors.primary}
-                          />
-                        )}
+                        <View
+                          style={[
+                            styles.forwardCheckbox,
+                            selected && styles.forwardCheckboxSelected,
+                          ]}
+                        >
+                          {selected ? (
+                            <Icon name="checkmark" size={17} color={colors.white} />
+                          ) : null}
+                        </View>
                       </TouchableOpacity>
                     );
                   })}
@@ -5719,7 +5787,32 @@ export default function MessengerRoomScreen() {
                       Нет доступных получателей
                     </Text>
                   ) : null}
-                </ScrollView>
+                  </ScrollView>
+                  <View style={styles.forwardFooter}>
+                    <TouchableOpacity
+                      style={[
+                        styles.forwardSendButton,
+                        (forwardSelectedKeys.size === 0 || forwardBusy) &&
+                          styles.forwardSendButtonDisabled,
+                      ]}
+                      onPress={() => void forwardToSelected()}
+                      disabled={forwardSelectedKeys.size === 0 || Boolean(forwardBusy)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Переслать выбранным получателям: ${forwardSelectedKeys.size}`}
+                    >
+                      {forwardBusy ? (
+                        <ActivityIndicator color={colors.white} />
+                      ) : (
+                        <Icon name="send" size={20} color={colors.white} />
+                      )}
+                      <Text style={styles.forwardSendButtonText}>
+                        {forwardSelectedKeys.size > 0
+                          ? `Переслать (${forwardSelectedKeys.size})`
+                          : "Переслать"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
               )}
             </Pressable>
           </Pressable>
@@ -6785,6 +6878,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
+  forwardTargetSelected: {
+    backgroundColor: "#EAF3FF",
+  },
   forwardTargetIcon: {
     width: 44,
     height: 44,
@@ -6799,6 +6895,40 @@ const styles = StyleSheet.create({
     marginTop: 3,
     color: colors.textSecondary,
     fontSize: 11,
+  },
+  forwardCheckbox: {
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: colors.border,
+  },
+  forwardCheckboxSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary,
+  },
+  forwardFooter: {
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  forwardSendButton: {
+    minHeight: 50,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: 15,
+    backgroundColor: colors.primary,
+  },
+  forwardSendButtonDisabled: { opacity: 0.42 },
+  forwardSendButtonText: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: "800",
   },
   forwardError: {
     flexDirection: "row",
