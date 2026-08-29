@@ -37,9 +37,7 @@ export default ({ config }) => {
     name: "ForwardHockey14",
     slug: "Forward",
     version: "2.3.16",
-    // Native targets advertise landscape support for the messenger video
-    // viewer. The root layout keeps ordinary application screens portrait.
-    orientation: "default",
+    orientation: "portrait",
     icon: "./assets/icons/myIcon.png",
     userInterfaceStyle: "light",
     newArchEnabled: true,
@@ -95,12 +93,6 @@ export default ({ config }) => {
         },
       ],
       "expo-secure-store",
-      [
-        "expo-video",
-        {
-          supportsPictureInPicture: true,
-        },
-      ],
       [
         "expo-camera",
         {

@@ -887,7 +887,6 @@ interface MessengerMessageListItemProps {
   canWrite: boolean;
   canReact: boolean;
   roomType: MessengerRoom["room_type"] | null;
-  roomTitle: string;
   highlighted: boolean;
   roomScreenActive: boolean;
   viewable: boolean;
@@ -896,8 +895,6 @@ interface MessengerMessageListItemProps {
   reactionAnimationKey: string | null;
   onReply: (message: MessengerMessage) => void;
   onOpenActions: (message: MessengerMessage) => void;
-  onForward: (message: MessengerMessage) => void;
-  onDelete: (message: MessengerMessage) => void;
   onNavigateToReply: (
     reply: Pick<MessengerReply, "id" | "room_id" | "sequence">,
   ) => void;
@@ -967,7 +964,6 @@ const MessengerMessageListItem = React.memo(
     canWrite,
     canReact,
     roomType,
-    roomTitle,
     highlighted,
     roomScreenActive,
     viewable,
@@ -976,8 +972,6 @@ const MessengerMessageListItem = React.memo(
     reactionAnimationKey,
     onReply,
     onOpenActions,
-    onForward,
-    onDelete,
     onNavigateToReply,
     onToggleReaction,
     quickReaction,
@@ -1150,34 +1144,6 @@ const MessengerMessageListItem = React.memo(
                       accessToken={accessToken}
                       deferAutomaticCache={!roomScreenActive || !viewable}
                       playbackEnabled={roomScreenActive && viewable}
-                      viewerTitle={roomTitle}
-                      viewerSubtitle={new Date(item.created_at).toLocaleString(
-                        "ru-RU",
-                        {
-                          day: "2-digit",
-                          month: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        },
-                      )}
-                      onShowInChat={() => onNavigateToReply(item)}
-                      onReply={
-                        canWrite && !item.pending ? () => onReply(item) : undefined
-                      }
-                      onForward={
-                        !item.pending && !item.deleted_at
-                          ? () => onForward(item)
-                          : undefined
-                      }
-                      onDelete={
-                        messageDeletionAvailable(
-                          item,
-                          currentUserId ?? undefined,
-                          roomType,
-                        )
-                          ? () => onDelete(item)
-                          : undefined
-                      }
                     />
                   )}
                 {pendingAttachment ? (
@@ -5044,7 +5010,6 @@ export default function MessengerRoomScreen() {
             canWrite={canWrite}
             canReact={canReact}
             roomType={roomType}
-            roomTitle={roomTitle}
             highlighted={highlightedMessageId === item.id}
             roomScreenActive={roomScreenActive}
             viewable={viewableMessageIds.has(item.client_message_id)}
@@ -5061,8 +5026,6 @@ export default function MessengerRoomScreen() {
             }
             onReply={beginReply}
             onOpenActions={openMessageActions}
-            onForward={(message) => queueMessageAction("forward", message)}
-            onDelete={requestMessageDeletion}
             onNavigateToReply={navigateToRepliedMessage}
             onToggleReaction={toggleReaction}
             quickReaction={quickReaction}
@@ -5077,17 +5040,14 @@ export default function MessengerRoomScreen() {
       highlightedMessageId,
       navigateToRepliedMessage,
       openMessageActions,
-      queueMessageAction,
       pushReactionAnimation,
       reactionBusyIds,
       quickReaction,
       roomScreenActive,
       roomType,
-      roomTitle,
       session?.access_token,
       session?.user.id,
       toggleReaction,
-      requestMessageDeletion,
       unreadMarkerClientId,
       visibleMessages,
       viewableMessageIds,

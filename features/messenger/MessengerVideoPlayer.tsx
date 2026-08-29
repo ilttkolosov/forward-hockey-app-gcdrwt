@@ -21,7 +21,6 @@ interface MessengerVideoPlayerProps {
   muted?: boolean;
   loop?: boolean;
   nativeControls?: boolean;
-  fullscreenEnabled?: boolean;
   initialPositionSeconds?: number;
   previewOnly?: boolean;
   onPositionChange?: (positionSeconds: number) => void;
@@ -37,7 +36,6 @@ export default function MessengerVideoPlayer({
   muted = false,
   loop = false,
   nativeControls = true,
-  fullscreenEnabled = true,
   initialPositionSeconds = 0,
   previewOnly = false,
   onPositionChange,
@@ -111,10 +109,10 @@ export default function MessengerVideoPlayer({
         player={player}
         nativeControls={nativeControls && !playbackError}
         contentFit="contain"
-        fullscreenOptions={{ enable: fullscreenEnabled }}
-        allowsPictureInPicture
+        fullscreenOptions={{ enable: true, orientation: "landscape" }}
+        allowsPictureInPicture={false}
         allowsVideoFrameAnalysis={false}
-        surfaceType="textureView"
+        surfaceType="surfaceView"
         onFirstFrameRender={() => {
           setFirstFrameReady(true);
           if (previewOnly) player.pause();
