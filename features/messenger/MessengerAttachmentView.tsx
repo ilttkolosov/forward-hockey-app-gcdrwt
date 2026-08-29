@@ -24,7 +24,7 @@ import {
   getCachedMessengerMediaUri,
 } from "../../services/messengerMediaCache";
 import { messengerLog } from "../../services/messengerLogger";
-import { tryPreviewMessengerFile } from "../../services/messengerNativeFilePreview";
+import { openMessengerFilePreview } from "../../services/messengerNativeFilePreview";
 import { saveMessengerMediaToDevice } from "../../services/messengerMediaSave";
 import { colors } from "../../styles/commonStyles";
 import { getMessengerFilePresentation } from "./filePresentation";
@@ -229,7 +229,27 @@ function MessengerAttachmentView({
         window.open(uri, "_blank", "noopener,noreferrer");
         return;
       }
-      if (await tryPreviewMessengerFile(uri)) return;
+      if (item.type === "image" || item.type === "video") {
+        try {
+          await openMessengerFilePreview(uri);
+        } catch (previewError) {
+          Alert.alert(
+            "Не удалось открыть",
+            previewError instanceof Error
+              ? previewError.message
+              : "Системный просмотрщик недоступен.",
+          );
+        }
+        return;
+      }
+
+      try {
+        await openMessengerFilePreview(uri);
+        return;
+      } catch {
+        // Documents retain the explicit share/save fallback. Photo and video
+        // attachments never reach this branch.
+      }
 
       if (!(await Sharing.isAvailableAsync())) {
         offerFileSave(item);

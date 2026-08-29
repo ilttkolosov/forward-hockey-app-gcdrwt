@@ -37,7 +37,9 @@ export default ({ config }) => {
     name: "ForwardHockey14",
     slug: "Forward",
     version: "2.3.17",
-    orientation: "portrait",
+    // Keep landscape orientations in the native targets so iOS Quick Look can
+    // rotate video. The application itself is locked to portrait at runtime.
+    orientation: "default",
     icon: "./assets/icons/myIcon.png",
     userInterfaceStyle: "light",
     newArchEnabled: true,
