@@ -1,5 +1,6 @@
 import { Image, type ImageLoadEventData } from "expo-image";
 import * as Sharing from "expo-sharing";
+import * as ScreenOrientation from "expo-screen-orientation";
 import React, {
   useCallback,
   useEffect,
@@ -97,6 +98,8 @@ function MessengerAttachmentView({
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const viewerMedia =
+    viewerIndex === null ? null : (viewerItems[viewerIndex] ?? null);
   const [viewerSession, setViewerSession] = useState(0);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [openingFileId, setOpeningFileId] = useState<string | null>(null);
@@ -202,6 +205,26 @@ function MessengerAttachmentView({
       }
     });
   }, [ensureLocal, viewerIndex, viewerItems]);
+
+  useEffect(() => {
+    if (Platform.OS === "web" || viewerMedia?.type !== "video") return;
+    void ScreenOrientation.lockAsync(
+      ScreenOrientation.OrientationLock.DEFAULT,
+    ).catch((error) =>
+      messengerLog("warn", "media.video.orientation_unlock_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    return () => {
+      void ScreenOrientation.lockAsync(
+        ScreenOrientation.OrientationLock.PORTRAIT_UP,
+      ).catch((error) =>
+        messengerLog("warn", "media.video.orientation_restore_failed", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    };
+  }, [viewerMedia?.type]);
 
   if (location) return <MessengerLocationPreview location={location} />;
   if (!items.length) return null;
@@ -369,8 +392,6 @@ function MessengerAttachmentView({
     single?.type === "file" ? getMessengerFilePresentation(single) : null;
   const singleVideoRemoteUri =
     single?.type === "video" ? messengerMediaUrl(single.url) : null;
-  const viewerMedia =
-    viewerIndex === null ? null : (viewerItems[viewerIndex] ?? null);
   const viewerPageHeight = Math.max(
     1,
     viewerHeight - Math.max(insets.top, 12) - insets.bottom - 56,

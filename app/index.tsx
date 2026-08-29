@@ -41,12 +41,6 @@ const headerStyles = StyleSheet.create({
     color: colors.text,
     textAlign: 'center',
   },
-  cityName: {
-    fontSize: 14,
-    fontWeight: '400',
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -294,7 +288,6 @@ export default function HomeScreen() {
         <View style={headerStyles.headerContainer}>
           <View style={headerStyles.headerRow}>
             <Text style={headerStyles.teamName}>ХК Динамо Форвард 2014</Text>
-            <Text style={headerStyles.cityName}> • Санкт-Петербург</Text>
           </View>
         </View>
 
@@ -320,8 +313,8 @@ export default function HomeScreen() {
                 </View>
               )}
               {gamesTab === 1 && (
-                <Link href="/team-games" asChild>
-                  <TouchableOpacity accessibilityRole="button" style={homeStyles.allGamesButton}>
+                <Link href="/upcoming" asChild>
+                  <TouchableOpacity accessibilityRole="link" style={homeStyles.allGamesLink}>
                     <Text style={homeStyles.allGamesText}>Смотреть все игры</Text>
                   </TouchableOpacity>
                 </Link>
@@ -383,8 +376,8 @@ const homeStyles = StyleSheet.create({
   sectionTitle: { color: colors.text, fontSize: 22, fontWeight: '800', marginBottom: 12 },
   emptyBlock: { minHeight: 80, alignItems: 'center', justifyContent: 'center', borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, padding: 16, marginBottom: 12 },
   emptyText: { color: colors.textSecondary, fontSize: 14, textAlign: 'center' },
-  allGamesButton: { minHeight: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: colors.primary, marginTop: 2 },
-  allGamesText: { color: colors.primary, fontSize: 15, fontWeight: '700' },
+  allGamesLink: { alignSelf: 'flex-end', paddingVertical: 8, paddingLeft: 16, marginTop: -2 },
+  allGamesText: { color: colors.primary, fontSize: 14, fontWeight: '700' },
   moreNewsButton: { minHeight: 48, flexDirection: 'row', gap: 5, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: colors.primary, marginTop: 2 },
   moreNewsButtonDisabled: { opacity: 0.55 },
   moreNewsText: { color: colors.primary, fontSize: 15, fontWeight: '700' },

@@ -37,7 +37,9 @@ export default ({ config }) => {
     name: "ForwardHockey14",
     slug: "Forward",
     version: "2.3.9",
-    orientation: "portrait",
+    // Native targets advertise landscape support for the messenger video
+    // viewer. The root layout keeps ordinary application screens portrait.
+    orientation: "default",
     icon: "./assets/icons/myIcon.png",
     userInterfaceStyle: "light",
     newArchEnabled: true,

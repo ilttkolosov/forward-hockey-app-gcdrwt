@@ -12,6 +12,7 @@ import {
   Linking,
   Animated,
   LayoutChangeEvent,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -29,6 +30,7 @@ import { getPlayerById } from '../../data/playerData';
 import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useStartupFeature } from '../../services/startupConfigRuntime';
+import { usePersistentBottomNavigationInset } from '../../components/PersistentBottomNavigation';
 
 function KeepScreenAwakeForVideo({ tag }: { tag: string }) {
   useKeepAwake(tag);
@@ -646,6 +648,7 @@ export default function GameDetailsScreen() {
 
   const f2fLoadedRef = useRef(false);
   const [videoModalUrl, setVideoModalUrl] = useState<string | null>(null);
+  const bottomNavigationInset = usePersistentBottomNavigationInset();
   const [videoWebViewGeneration, setVideoWebViewGeneration] = useState(0);
   const [videoPlayerState, setVideoPlayerState] = useState<'loading' | 'ready' | 'error'>(
     'loading'
@@ -1124,6 +1127,7 @@ export default function GameDetailsScreen() {
 
       <Animated.ScrollView
         style={styles.content}
+        contentContainerStyle={{ paddingBottom: bottomNavigationInset }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { y: scrollY } } }],
@@ -1446,39 +1450,48 @@ export default function GameDetailsScreen() {
 
       {/* Video Modal */}
       {videoModalUrl && (
-        <View style={styles.videoModalOverlay}>
-          <KeepScreenAwakeForVideo tag="forward-game-video-modal" />
-          <TouchableOpacity style={styles.videoModalCloseButton} onPress={() => setVideoModalUrl(null)}>
-            <Icon name="close" size={32} color="#FFFFFF" />
-          </TouchableOpacity>
-          <View style={styles.videoModalContent}>
-            <WebView
-              source={{ uri: videoModalUrl }}
-              style={styles.videoModalWebView}
-              javaScriptEnabled={true}
-              domStorageEnabled={true}
-              startInLoadingState={true}
-              scalesPageToFit={false}
-              allowsInlineMediaPlayback={true}
-              mediaPlaybackRequiresUserAction={false}
-              mixedContentMode="compatibility"
-              allowsFullscreenVideo={true}
-              scrollEnabled={false}
-              bounces={false}
-              showsHorizontalScrollIndicator={false}
-              showsVerticalScrollIndicator={false}
-              onShouldStartLoadWithRequest={(request) =>
-                shouldAllowVideoNavigation(
-                  videoModalUrl,
-                  request.url,
-                  request.isTopFrame,
-                  request.navigationType
-                )
-              }
-              onFullscreenVideoWillDismiss={() => setVideoModalUrl(null)}
-            />
+        <Modal
+          animationType="fade"
+          navigationBarTranslucent
+          onRequestClose={() => setVideoModalUrl(null)}
+          presentationStyle="fullScreen"
+          statusBarTranslucent
+          visible
+        >
+          <View style={styles.videoModalOverlay}>
+            <KeepScreenAwakeForVideo tag="forward-game-video-modal" />
+            <TouchableOpacity style={styles.videoModalCloseButton} onPress={() => setVideoModalUrl(null)}>
+              <Icon name="close" size={32} color="#FFFFFF" />
+            </TouchableOpacity>
+            <View style={styles.videoModalContent}>
+              <WebView
+                source={{ uri: videoModalUrl }}
+                style={styles.videoModalWebView}
+                javaScriptEnabled={true}
+                domStorageEnabled={true}
+                startInLoadingState={true}
+                scalesPageToFit={false}
+                allowsInlineMediaPlayback={true}
+                mediaPlaybackRequiresUserAction={false}
+                mixedContentMode="compatibility"
+                allowsFullscreenVideo={true}
+                scrollEnabled={false}
+                bounces={false}
+                showsHorizontalScrollIndicator={false}
+                showsVerticalScrollIndicator={false}
+                onShouldStartLoadWithRequest={(request) =>
+                  shouldAllowVideoNavigation(
+                    videoModalUrl,
+                    request.url,
+                    request.isTopFrame,
+                    request.navigationType
+                  )
+                }
+                onFullscreenVideoWillDismiss={() => setVideoModalUrl(null)}
+              />
+            </View>
           </View>
-        </View>
+        </Modal>
       )}
     </SafeAreaView>
   );
@@ -1660,11 +1673,7 @@ const styles = StyleSheet.create({
   statsPlayerPhotoPlaceholder: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.border },
   // Модальное окно видео
   videoModalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
     backgroundColor: 'rgba(0,0,0,0.9)',
     justifyContent: 'center',
     alignItems: 'center',

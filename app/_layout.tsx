@@ -79,6 +79,7 @@ import {
 import PersistentBottomNavigation from '../components/PersistentBottomNavigation';
 import { warmMessengerUiAssets } from '../services/messengerUiAssets';
 import StartupConfigGate from '../components/StartupConfigGate';
+import * as ScreenOrientation from 'expo-screen-orientation';
 global.Buffer = Buffer;
 
 Notifications.setNotificationHandler({
@@ -327,6 +328,12 @@ function RootLayoutContent() {
   const [initializationMessage, setInitializationMessage] = useState('Запуск приложения...');
   const [dynamicStatus, setDynamicStatus] = useState<string>('Подготовка данных...');
   const progressAnimated = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
+      .catch(error => console.warn('[Ориентация] Не удалось зафиксировать портретный режим:', error));
+  }, []);
 
   useEffect(() => {
     const response = lastNotificationResponse;
