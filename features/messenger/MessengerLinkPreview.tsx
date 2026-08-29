@@ -7,6 +7,7 @@ import {
   StyleProp,
   StyleSheet,
   Text,
+  type TextProps,
   TextStyle,
   TouchableOpacity,
   View,
@@ -38,9 +39,13 @@ async function openExternalUrl(url: string): Promise<void> {
 export function MessengerLinkifiedText({
   text,
   style,
+  numberOfLines,
+  onTextLayout,
 }: {
   text: string;
   style?: StyleProp<TextStyle>;
+  numberOfLines?: TextProps["numberOfLines"];
+  onTextLayout?: TextProps["onTextLayout"];
 }) {
   const segments = useMemo(
     () =>
@@ -53,7 +58,7 @@ export function MessengerLinkifiedText({
     [text],
   );
   return (
-    <Text style={style}>
+    <Text style={style} numberOfLines={numberOfLines} onTextLayout={onTextLayout}>
       {segments.map((segment, index) => (
         <Text
           key={`${index}:${segment.text}`}
