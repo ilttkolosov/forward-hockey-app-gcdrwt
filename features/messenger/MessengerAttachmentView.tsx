@@ -10,17 +10,12 @@ import React, {
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
-  Modal,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  useWindowDimensions,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
 import { messengerMediaUrl } from "../../services/messengerApi";
 import {
@@ -29,11 +24,12 @@ import {
   getCachedMessengerMediaUri,
 } from "../../services/messengerMediaCache";
 import { messengerLog } from "../../services/messengerLogger";
-import { tryPreviewMessengerFile } from "../../services/messengerNativeFilePreview";
+import { openMessengerFilePreview } from "../../services/messengerNativeFilePreview";
 import { saveMessengerMediaToDevice } from "../../services/messengerMediaSave";
 import { colors } from "../../styles/commonStyles";
 import { getMessengerFilePresentation } from "./filePresentation";
 import MessengerLocationPreview from "./MessengerLocationPreview";
+import MessengerMediaViewer from "./MessengerMediaViewer";
 import MessengerVideoPlayer from "./MessengerVideoPlayer";
 import type { MessengerLocation, MessengerMedia } from "./types";
 
@@ -44,6 +40,12 @@ interface MessengerAttachmentViewProps {
   accessToken: string;
   deferAutomaticCache?: boolean;
   playbackEnabled?: boolean;
+  viewerTitle?: string;
+  viewerSubtitle?: string;
+  onShowInChat?: () => void;
+  onReply?: () => void;
+  onForward?: () => void;
+  onDelete?: () => void;
 }
 
 const MAX_REMEMBERED_VIDEO_POSITIONS = 100;
@@ -81,9 +83,13 @@ function MessengerAttachmentView({
   accessToken,
   deferAutomaticCache = false,
   playbackEnabled = false,
+  viewerTitle,
+  viewerSubtitle,
+  onShowInChat,
+  onReply,
+  onForward,
+  onDelete,
 }: MessengerAttachmentViewProps) {
-  const insets = useSafeAreaInsets();
-  const { width: viewerWidth, height: viewerHeight } = useWindowDimensions();
   const items = useMemo(
     () => (mediaItems?.length ? mediaItems : media ? [media] : []),
     [media, mediaItems],
@@ -253,7 +259,13 @@ function MessengerAttachmentView({
         window.open(uri, "_blank", "noopener,noreferrer");
         return;
       }
-      if (await tryPreviewMessengerFile(uri)) return;
+      try {
+        await openMessengerFilePreview(uri);
+        return;
+      } catch {
+        // Documents retain the explicit share/save fallback. Photo and video
+        // attachments never reach this branch.
+      }
 
       if (!(await Sharing.isAvailableAsync())) {
         offerFileSave(item);
@@ -280,17 +292,16 @@ function MessengerAttachmentView({
       await openFile(item);
       return;
     }
+    const index = viewerItems.findIndex(
+      (candidate) => candidate.id === item.id,
+    );
+    if (index < 0) return;
+    setViewerSession((current) => current + 1);
+    setViewerIndex(index);
     try {
       await ensureLocal(item);
-      const index = viewerItems.findIndex(
-        (candidate) => candidate.id === item.id,
-      );
-      if (index >= 0) {
-        setViewerSession((current) => current + 1);
-        setViewerIndex(index);
-      }
     } catch {
-      // The tile keeps a visible retry state.
+      // The fullscreen viewer keeps a visible retry state.
     }
   };
 
@@ -369,13 +380,6 @@ function MessengerAttachmentView({
     single?.type === "file" ? getMessengerFilePresentation(single) : null;
   const singleVideoRemoteUri =
     single?.type === "video" ? messengerMediaUrl(single.url) : null;
-  const viewerMedia =
-    viewerIndex === null ? null : (viewerItems[viewerIndex] ?? null);
-  const viewerPageHeight = Math.max(
-    1,
-    viewerHeight - Math.max(insets.top, 12) - insets.bottom - 56,
-  );
-
   return (
     <>
       {items.length > 1 ? (
@@ -401,7 +405,7 @@ function MessengerAttachmentView({
             </View>
           )}
         </TouchableOpacity>
-      ) : single.type === "video" && playbackEnabled && viewerIndex === null ? (
+      ) : single.type === "video" && playbackEnabled ? (
         <View style={styles.inlineVideoCard}>
           <View style={styles.inlineVideoStage}>
             {singleLocalUri ? (
@@ -421,16 +425,6 @@ function MessengerAttachmentView({
                   }
                   style={styles.inlineVideo}
                   onFallback={() => void openFile(single)}
-                />
-                <TouchableOpacity
-                  style={styles.inlineVideoTap}
-                  activeOpacity={1}
-                  onPress={() => {
-                    setViewerSession((current) => current + 1);
-                    setViewerIndex(0);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Открыть видео на весь экран"
                 />
               </>
             ) : singleVideoRemoteUri ? (
@@ -463,6 +457,13 @@ function MessengerAttachmentView({
                 </Text>
               </View>
             )}
+            <TouchableOpacity
+              style={styles.inlineVideoTap}
+              activeOpacity={1}
+              onPress={() => void openItem(single)}
+              accessibilityRole="button"
+              accessibilityLabel="Открыть видео на весь экран"
+            />
           </View>
           <View style={styles.inlineVideoFooter}>
             <View style={styles.inlineVideoText}>
@@ -541,169 +542,25 @@ function MessengerAttachmentView({
         </TouchableOpacity>
       )}
 
-      <Modal
-        visible={viewerIndex !== null}
-        animationType="fade"
-        presentationStyle="fullScreen"
-        statusBarTranslucent={false}
-        onRequestClose={() => setViewerIndex(null)}
-      >
-        <View
-          style={[
-            styles.viewer,
-            {
-              paddingTop: Math.max(insets.top, 12),
-              paddingBottom: insets.bottom,
-            },
-          ]}
-        >
-          <View style={styles.viewerHeader}>
-            <Text style={styles.viewerTitle} numberOfLines={1}>
-              {viewerMedia?.original_name ||
-                (viewerMedia?.type === "image" ? "Фотография" : "Видео")}
-            </Text>
-            {viewerIndex !== null && viewerItems.length > 1 && (
-              <Text style={styles.viewerCounter}>
-                {viewerIndex + 1} из {viewerItems.length}
-              </Text>
-            )}
-            {viewerMedia && (
-              <TouchableOpacity
-                style={styles.viewerActionButton}
-                onPress={() => void saveToDevice(viewerMedia)}
-                disabled={Boolean(savingId)}
-                accessibilityLabel="Сохранить вложение"
-              >
-                {savingId === viewerMedia.id ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Icon
-                    name="download-outline"
-                    size={24}
-                    color={colors.white}
-                  />
-                )}
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              style={[
-                styles.closeButton,
-                { marginRight: Math.max(insets.right, 8) },
-              ]}
-              onPress={() => setViewerIndex(null)}
-              hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
-              accessibilityLabel="Закрыть просмотр"
-            >
-              <Icon name="close" size={28} color={colors.white} />
-            </TouchableOpacity>
-          </View>
-          {viewerIndex !== null && (
-            <FlatList
-              key={`attachment-viewer-${viewerSession}-${viewerWidth}-${viewerPageHeight}`}
-              style={styles.viewerPager}
-              data={viewerItems}
-              keyExtractor={(item) => item.id}
-              horizontal
-              pagingEnabled
-              bounces={false}
-              showsHorizontalScrollIndicator={false}
-              removeClippedSubviews={false}
-              initialScrollIndex={viewerIndex}
-              getItemLayout={(_data, index) => ({
-                length: viewerWidth,
-                offset: viewerWidth * index,
-                index,
-              })}
-              onMomentumScrollEnd={(event) => {
-                const nextIndex = Math.round(
-                  event.nativeEvent.contentOffset.x / viewerWidth,
-                );
-                if (viewerItems[nextIndex]) setViewerIndex(nextIndex);
-              }}
-              renderItem={({ item, index }) => {
-                const localUri = localUris[item.id];
-                const loading = loadingIds.has(item.id);
-                const error = errors[item.id];
-                return (
-                  <View
-                    style={[
-                      styles.viewerPage,
-                      { width: viewerWidth, height: viewerPageHeight },
-                    ]}
-                  >
-                    {localUri && item.type === "image" && (
-                      <ScrollView
-                        key={`${viewerSession}:${item.id}:${viewerWidth}:${viewerPageHeight}`}
-                        style={[
-                          styles.zoomContainer,
-                          { width: viewerWidth, height: viewerPageHeight },
-                        ]}
-                        contentContainerStyle={[
-                          styles.zoomContent,
-                          { width: viewerWidth, height: viewerPageHeight },
-                        ]}
-                        minimumZoomScale={1}
-                        maximumZoomScale={4}
-                        zoomScale={1}
-                        centerContent
-                        bouncesZoom
-                        contentOffset={{ x: 0, y: 0 }}
-                      >
-                        <Image
-                          source={localUri}
-                          style={{
-                            width: viewerWidth,
-                            height: viewerPageHeight,
-                          }}
-                          contentFit="contain"
-                          onLoadStart={() => handleImageLoadStart(item.id)}
-                          onLoad={(event) => handleImageLoad(item, event)}
-                        />
-                      </ScrollView>
-                    )}
-                    {localUri && item.type === "video" && (
-                      <MessengerVideoPlayer
-                        uri={localUri}
-                        style={styles.fullVideo}
-                        active={playbackEnabled && index === viewerIndex}
-                        autoPlay
-                        onFallback={() => void openFile(item)}
-                      />
-                    )}
-                    {!localUri && (
-                      <TouchableOpacity
-                        style={styles.viewerLoading}
-                        onPress={() =>
-                          void ensureLocal(item).catch(() => undefined)
-                        }
-                        disabled={loading}
-                      >
-                        {loading ? (
-                          <ActivityIndicator
-                            color={colors.white}
-                            size="large"
-                          />
-                        ) : (
-                          <>
-                            <Icon
-                              name="refresh-outline"
-                              size={34}
-                              color={colors.white}
-                            />
-                            <Text style={styles.viewerErrorText}>
-                              {error || "Нажмите, чтобы загрузить"}
-                            </Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                );
-              }}
-            />
-          )}
-        </View>
-      </Modal>
+      <MessengerMediaViewer
+        items={viewerItems}
+        index={viewerIndex}
+        session={viewerSession}
+        localUris={localUris}
+        loadingIds={loadingIds}
+        errors={errors}
+        savingId={savingId}
+        title={viewerTitle}
+        subtitle={viewerSubtitle}
+        onIndexChange={setViewerIndex}
+        onClose={() => setViewerIndex(null)}
+        onEnsureLocal={ensureLocal}
+        onSave={saveToDevice}
+        onShowInChat={onShowInChat}
+        onReply={onReply}
+        onForward={onForward}
+        onDelete={onDelete}
+      />
     </>
   );
 }
@@ -854,53 +711,4 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
   },
-  viewer: { flex: 1, backgroundColor: "#08121E" },
-  viewerHeader: {
-    minHeight: 56,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingLeft: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(255,255,255,0.2)",
-  },
-  viewerTitle: { flex: 1, color: colors.white, fontWeight: "700" },
-  viewerCounter: {
-    marginHorizontal: 8,
-    color: "rgba(255,255,255,0.72)",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  viewerActionButton: {
-    width: 48,
-    height: 48,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 24,
-  },
-  closeButton: {
-    width: 48,
-    height: 48,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 24,
-    backgroundColor: "rgba(255,255,255,0.12)",
-  },
-  viewerPager: { flex: 1 },
-  viewerPage: { flex: 1, alignItems: "center", justifyContent: "center" },
-  viewerLoading: {
-    flex: 1,
-    width: "100%",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
-    paddingHorizontal: 28,
-  },
-  viewerErrorText: {
-    color: colors.white,
-    fontSize: 13,
-    textAlign: "center",
-  },
-  zoomContainer: { width: "100%", height: "100%" },
-  zoomContent: { flexGrow: 1, alignItems: "center", justifyContent: "center" },
-  fullVideo: { width: "100%", height: "100%" },
 });

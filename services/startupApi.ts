@@ -56,7 +56,8 @@ export interface StartupConfigResult {
 
 const STARTUP_CONFIG_CACHE_KEY = '@offline/startup-config/v1';
 const STARTUP_CONFIG_URL = 'https://www.hc-forward.com/wp-content/themes/marquee/inc/MobileAppConfig.txt';
-const REQUEST_TIMEOUT_MS = 8_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
+let startupRequestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS;
 
 const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
 
@@ -68,6 +69,10 @@ const validateStartupConfig = (value: unknown): StartupConfig => {
   }
   if (typeof config.teams_version !== 'number' || typeof config.players_version !== 'number') {
     throw new Error('Некорректные версии данных в стартовой конфигурации');
+  }
+  const configuredTimeout = Number(config.api?.request_timeout_seconds);
+  if (Number.isFinite(configuredTimeout) && configuredTimeout > 0) {
+    startupRequestTimeoutMs = Math.min(120, Math.max(3, configuredTimeout)) * 1_000;
   }
   return config as StartupConfig;
 };
@@ -142,7 +147,7 @@ export const fetchStartupConfig = async (): Promise<StartupConfig> => {
   let lastError: unknown;
   for (let attempt = 1; attempt <= 2; attempt++) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), startupRequestTimeoutMs);
     try {
       const response = await fetch(`${STARTUP_CONFIG_URL}?_t=${Date.now()}`, {
         method: 'GET',

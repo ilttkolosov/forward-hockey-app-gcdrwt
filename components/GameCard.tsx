@@ -11,6 +11,7 @@ import { Game } from '../types';
 import { colors, commonStyles } from '../styles/commonStyles';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { primeGameDetailsCache } from '../data/gameData';
 
 interface GameCardProps {
   game: Game;
@@ -40,6 +41,7 @@ const formatDateWithWeekday = (dateString: string, timeString?: string): string 
 export default function GameCard({ game, showScore = true }: GameCardProps) {
   const router = useRouter();
   const handlePress = () => {
+    primeGameDetailsCache(game);
     router.push(`/game/${game.id}`);
   };
 

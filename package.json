@@ -1,6 +1,6 @@
 {
   "name": "Natively",
-  "version": "2.3.0",
+  "version": "2.3.20",
   "main": "index.ts",
   "scripts": {
     "dev": "EXPO_NO_TELEMETRY=1 expo start --tunnel",
@@ -22,8 +22,9 @@
     "version:patch": "node scripts/bump-app-version.mjs patch",
     "version:minor": "node scripts/bump-app-version.mjs minor",
     "check:messenger-unread": "node --no-warnings --experimental-strip-types checks/messenger-unread-policy.mjs",
+    "check:startup-config": "node --no-warnings --experimental-strip-types checks/startup-config-policy.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "npm run photos:generate && npm run logos:generate && npm run seed:verify && npm run generate:route-types && npm run check:messenger-unread && npm run typecheck && npm run lint",
+    "check": "npm run photos:generate && npm run logos:generate && npm run seed:verify && npm run generate:route-types && npm run check:messenger-unread && npm run check:startup-config && npm run typecheck && npm run lint",
     "prebuild": "expo prebuild",
     "eas-build": "npx --yes eas-cli@21.7.0 build"
   },
@@ -41,6 +42,7 @@
     "expo": "~54.0.31",
     "expo-asset": "~12.0.13",
     "expo-av": "~16.0.8",
+    "expo-blur": "~15.0.8",
     "expo-camera": "~17.0.10",
     "expo-clipboard": "~8.0.8",
     "expo-constants": "~18.0.13",
@@ -59,6 +61,7 @@
     "expo-media-library": "~18.2.1",
     "expo-notifications": "~0.32.17",
     "expo-router": "~6.0.24",
+    "expo-screen-orientation": "~9.0.9",
     "expo-secure-store": "~15.0.8",
     "expo-share-intent": "5.1.1",
     "expo-sharing": "~14.0.8",

@@ -1050,6 +1050,9 @@ type MessengerMediaUploadFile = {
   size_bytes?: number | null;
 };
 
+const encodedMessengerOriginalNames = (files: MessengerMediaUploadFile[]): string =>
+  Buffer.from(JSON.stringify(files.map(file => file.name)), 'utf8').toString('base64');
+
 class MeasuredExpoUploadFile extends ExpoFile {
   constructor(
     uri: string,
@@ -1240,6 +1243,7 @@ async function sendBufferedMessengerMedia(
   if (files.length === 1 && files[0]) {
     form.append("original_name", files[0].name);
   }
+  form.append("original_names_base64", encodedMessengerOriginalNames(files));
   if (caption?.trim()) form.append("caption", caption.trim());
   if (replyToMessageId) form.append("reply_to_message_id", replyToMessageId);
   files.forEach((file, index) => {
@@ -1408,6 +1412,7 @@ async function sendSingleMessengerMedia(
   const parameters: Record<string, string> = {
     client_message_id: clientMessageId,
     original_name: file.name,
+    original_names_base64: encodedMessengerOriginalNames([file]),
   };
   if (caption?.trim()) parameters.caption = caption.trim();
   if (replyToMessageId) parameters.reply_to_message_id = replyToMessageId;

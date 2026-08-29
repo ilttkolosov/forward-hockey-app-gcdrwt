@@ -204,7 +204,7 @@ export default function TeamGamesScreen() {
           onChange={(event) => handleTabChange(event.nativeEvent.selectedSegmentIndex)}
           tintColor={colors.primary}
           fontStyle={{ fontSize: 14, fontWeight: '600' }}
-          activeFontStyle={{ fontWeight: '700' }}
+          activeFontStyle={{ fontWeight: '700', color: colors.background }}
         />
       </View>
 

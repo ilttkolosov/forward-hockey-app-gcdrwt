@@ -36,8 +36,10 @@ export default ({ config }) => {
     // to users is restored per platform by withAppDisplayName below.
     name: "ForwardHockey14",
     slug: "Forward",
-    version: "2.3.0",
-    orientation: "portrait",
+    version: "2.3.20",
+    // Keep landscape orientations in the native targets so iOS Quick Look can
+    // rotate video. The application itself is locked to portrait at runtime.
+    orientation: "default",
     icon: "./assets/icons/myIcon.png",
     userInterfaceStyle: "light",
     newArchEnabled: true,
@@ -48,7 +50,8 @@ export default ({ config }) => {
     },
     ios: {
       supportsTablet: true,
-      buildNumber: "132",
+      requireFullScreen: true,
+      buildNumber: "152",
       bundleIdentifier: "com.aleksandrkolosov.forward2014",
       infoPlist: {
         CFBundleDisplayName: "ХК Форвард 14",
@@ -56,10 +59,22 @@ export default ({ config }) => {
         CFBundleLocalizations: ["ru"],
         CFBundleAllowMixedLocalizations: true,
         ITSAppUsesNonExemptEncryption: false,
+        UISupportedInterfaceOrientations: [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationPortraitUpsideDown",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight",
+        ],
+        "UISupportedInterfaceOrientations~ipad": [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationPortraitUpsideDown",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight",
+        ],
       },
     },
     android: {
-      versionCode: 132,
+      versionCode: 152,
       adaptiveIcon: {
         foregroundImage: "./assets/icons/myIcon.png",
         backgroundColor: "#ffffff",

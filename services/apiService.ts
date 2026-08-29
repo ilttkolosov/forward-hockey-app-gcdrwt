@@ -69,6 +69,16 @@ interface ApiErrorResponse {
 class ApiService {
   private baseUrl = "https://www.hc-forward.com/wp-json/app/v1";
 
+  configure(baseUrl: string): void {
+    const normalized = baseUrl.trim().replace(/\/+$/, '');
+    if (/^https:\/\//i.test(normalized) || (__DEV__ && /^http:\/\//i.test(normalized))) {
+      this.baseUrl = normalized;
+      console.log('API Service: применён base_url из стартовой конфигурации');
+    } else {
+      console.warn('API Service: небезопасный base_url проигнорирован');
+    }
+  }
+
   // Кэши для данных, чтобы избежать повторных запросов
   private teamCache: { [key: string]: ApiTeam } = {};
   private leagueCache: { [key: string]: ApiLeague } = {};
