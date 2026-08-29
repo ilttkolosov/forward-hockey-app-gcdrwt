@@ -53,6 +53,21 @@ export interface StoredTournamentConfig<TConfig> {
   version: number;
 }
 
+export interface NewsArticleRecord {
+  id: number;
+  published_at: string;
+  modified_at: string;
+  title: string;
+  excerpt: string;
+  link: string;
+  featured_media_id: number;
+  image_url: string | null;
+  image_alt: string | null;
+  content_text: string;
+  content_html: string;
+  content_loaded: number;
+}
+
 let databasePromise: Promise<SQLiteDatabase> | null = null;
 
 const withExclusiveDatabaseWrite = (
@@ -73,6 +88,116 @@ export const getDatabase = async (): Promise<SQLiteDatabase> => {
 
 const parseRows = <T>(rows: RawJsonRow[]): T[] => rows.map(row => JSON.parse(row.raw_json) as T);
 const nowIso = () => new Date().toISOString();
+
+export const loadNewsPageFromDatabase = async (
+  offset: number,
+  limit: number,
+): Promise<NewsArticleRecord[]> => {
+  const db = await getDatabase();
+  return db.getAllAsync<NewsArticleRecord>(
+    `SELECT id, published_at, modified_at, title, excerpt, link, featured_media_id,
+            image_url, image_alt, content_text, content_html, content_loaded
+       FROM news_articles
+      ORDER BY published_at DESC, id DESC
+      LIMIT ? OFFSET ?`,
+    limit,
+    offset,
+  );
+};
+
+export const loadNewsArticlesByIds = async (ids: number[]): Promise<NewsArticleRecord[]> => {
+  if (ids.length === 0) return [];
+  const db = await getDatabase();
+  const placeholders = ids.map(() => '?').join(',');
+  return db.getAllAsync<NewsArticleRecord>(
+    `SELECT id, published_at, modified_at, title, excerpt, link, featured_media_id,
+            image_url, image_alt, content_text, content_html, content_loaded
+       FROM news_articles WHERE id IN (${placeholders})`,
+    ...ids,
+  );
+};
+
+export const loadNewsArticleFromDatabase = async (id: number): Promise<NewsArticleRecord | null> => {
+  const rows = await loadNewsArticlesByIds([id]);
+  return rows[0] || null;
+};
+
+export const upsertNewsIndexes = async (records: NewsArticleRecord[]): Promise<void> => {
+  if (records.length === 0) return;
+  const db = await getDatabase();
+  await withExclusiveDatabaseWrite(db, async tx => {
+    for (const record of records) {
+      await tx.runAsync(
+        `INSERT INTO news_articles (
+           id, published_at, modified_at, title, excerpt, link, featured_media_id,
+           image_url, image_alt, content_text, content_html, content_loaded, indexed_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           published_at = excluded.published_at,
+           title = excluded.title,
+           excerpt = excluded.excerpt,
+           link = excluded.link,
+           featured_media_id = excluded.featured_media_id,
+           image_url = excluded.image_url,
+           image_alt = excluded.image_alt,
+           content_text = CASE WHEN news_articles.modified_at <> excluded.modified_at THEN '' ELSE news_articles.content_text END,
+           content_html = CASE WHEN news_articles.modified_at <> excluded.modified_at THEN '' ELSE news_articles.content_html END,
+           content_loaded = CASE WHEN news_articles.modified_at <> excluded.modified_at THEN 0 ELSE news_articles.content_loaded END,
+           modified_at = excluded.modified_at,
+           indexed_at = excluded.indexed_at`,
+        record.id,
+        record.published_at,
+        record.modified_at,
+        record.title,
+        record.excerpt,
+        record.link,
+        record.featured_media_id,
+        record.image_url,
+        record.image_alt,
+        nowIso(),
+      );
+    }
+  });
+};
+
+export const saveNewsArticleContent = async (record: NewsArticleRecord): Promise<void> => {
+  const db = await getDatabase();
+  await withExclusiveDatabaseWrite(db, async tx => {
+    await tx.runAsync(
+      `INSERT INTO news_articles (
+         id, published_at, modified_at, title, excerpt, link, featured_media_id,
+         image_url, image_alt, content_text, content_html, content_loaded, indexed_at, content_synced_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         published_at = excluded.published_at,
+         modified_at = excluded.modified_at,
+         title = excluded.title,
+         excerpt = CASE WHEN excluded.excerpt <> '' THEN excluded.excerpt ELSE news_articles.excerpt END,
+         link = excluded.link,
+         featured_media_id = excluded.featured_media_id,
+         image_url = excluded.image_url,
+         image_alt = excluded.image_alt,
+         content_text = excluded.content_text,
+         content_html = excluded.content_html,
+         content_loaded = 1,
+         indexed_at = excluded.indexed_at,
+         content_synced_at = excluded.content_synced_at`,
+      record.id,
+      record.published_at,
+      record.modified_at,
+      record.title,
+      record.excerpt,
+      record.link,
+      record.featured_media_id,
+      record.image_url,
+      record.image_alt,
+      record.content_text,
+      record.content_html,
+      nowIso(),
+      nowIso(),
+    );
+  });
+};
 
 export const getMetadata = async (key: string): Promise<string | null> => {
   const db = await getDatabase();

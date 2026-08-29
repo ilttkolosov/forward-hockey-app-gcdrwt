@@ -6,7 +6,11 @@ import { WebView } from 'react-native-webview';
 import Icon from '../../components/Icon';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
-import { getNewsArticle, type NewsArticle } from '../../services/newsService';
+import {
+  getStoredNewsArticle,
+  refreshNewsArticle,
+  type NewsArticle,
+} from '../../services/newsService';
 import { getConfiguredSiteOrigin } from '../../services/startupConfigRuntime';
 import { colors, commonStyles } from '../../styles/commonStyles';
 
@@ -38,6 +42,12 @@ img{max-width:100%;height:auto}figure{max-width:100%;margin:18px 0}.wp-block-gal
 table{border-collapse:collapse;width:100%;min-width:680px;font-size:13px}th,td{padding:9px 7px;border-right:1px solid #c9ced5;border-bottom:1px solid #d7dbe0;text-align:center;white-space:nowrap}
 th{background:#eef0f2;font-weight:800}th.data-name,td.data-name{text-align:left;min-width:210px}tbody tr:nth-child(odd){background:#f4f5f6}tbody tr.highlighted td{background:#fff0f1;font-weight:800;color:#b41427}
 .team-logo{display:inline-flex;vertical-align:middle;margin-right:7px}.team-logo img{width:24px!important;height:24px!important;object-fit:contain}.sp-paginated-table tbody tr{display:table-row!important}
+.foogallery-carousel{width:calc(100% + 36px);margin:22px -18px;overflow:hidden}.fg-carousel-prev,.fg-carousel-next,.fg-carousel-center,.fg-carousel-bottom,.fg-carousel-progress,.fg-loader{display:none!important}
+.fg-carousel-inner{display:flex!important;gap:10px;overflow-x:auto!important;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;padding:0 18px 10px}
+.fg-carousel-inner .fg-item{display:block!important;position:relative!important;flex:0 0 82%;width:82%!important;transform:none!important;opacity:1!important;scroll-snap-align:center}
+.fg-carousel-inner figure,.fg-carousel-inner .fg-item-inner{margin:0!important;width:100%;height:auto!important}.fg-carousel-inner .fg-thumb,.fg-carousel-inner .fg-image-wrap{display:block;width:100%}
+.fg-carousel-inner .fg-image{display:block!important;width:100%!important;height:auto!important;min-height:190px;max-height:420px;object-fit:cover;border-radius:14px;background:#eef0f2}
+.fg-caption{display:none}.foogallery-album-gallery-list{display:grid;grid-template-columns:1fr;gap:12px;padding:0;list-style:none}.foogallery-pile img{display:block;width:100%;border-radius:12px}.foogallery-pile h3{font-size:15px;margin:7px 0 18px}.foogallery-pile h3 span{color:#6b7280;font-weight:400}
 </style></head><body><p class="date">${escapeHtml(date)}</p><h1>${escapeHtml(article.title)}</h1>${image}<main>${content}</main></body></html>`;
 };
 
@@ -52,7 +62,16 @@ export default function NewsArticleScreen() {
     if (!id) return;
     try {
       setError(null);
-      setArticle(await getNewsArticle(id));
+      const stored = await getStoredNewsArticle(id);
+      if (stored) {
+        setArticle(stored);
+        setLoading(false);
+        void refreshNewsArticle(id)
+          .then(setArticle)
+          .catch(error => console.warn('[Новости] Фоновая проверка статьи не выполнена:', error));
+        return;
+      }
+      setArticle(await refreshNewsArticle(id));
     } catch {
       setError('Не удалось загрузить новость.');
     } finally {

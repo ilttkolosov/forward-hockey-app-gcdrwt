@@ -189,6 +189,18 @@ export default function HomeScreen() {
       setNews(firstPage.articles);
       setNewsPage(1);
       setNewsTotalPages(firstPage.totalPages);
+      if (firstPage.backgroundRefresh) {
+        void firstPage.backgroundRefresh.then(freshPage => {
+          setNews(current => {
+            const merged = new Map(current.map(article => [article.id, article]));
+            freshPage.articles.forEach(article => merged.set(article.id, article));
+            return [...merged.values()].sort(
+              (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+            );
+          });
+          setNewsTotalPages(freshPage.totalPages);
+        });
+      }
     } catch (error) {
       console.warn('[Главный экран] Новости временно недоступны:', error);
       setNews([]);
@@ -231,6 +243,18 @@ export default function HomeScreen() {
       });
       setNewsPage(nextPage.page);
       setNewsTotalPages(nextPage.totalPages);
+      if (nextPage.backgroundRefresh) {
+        void nextPage.backgroundRefresh.then(freshPage => {
+          setNews(current => {
+            const merged = new Map(current.map(article => [article.id, article]));
+            freshPage.articles.forEach(article => merged.set(article.id, article));
+            return [...merged.values()].sort(
+              (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+            );
+          });
+          setNewsTotalPages(freshPage.totalPages);
+        });
+      }
     } catch (error) {
       console.warn('[Главный экран] Следующая страница новостей не загружена:', error);
     } finally {

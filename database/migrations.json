@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 11,
+  "schemaVersion": 12,
   "migrations": [
     {
       "version": 1,
@@ -55,6 +55,11 @@
       "version": 11,
       "name": "tournament_catalog",
       "sql": "CREATE TABLE IF NOT EXISTS tournament_catalog (tournament_id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL CHECK(category IN ('current', 'past')), display_order INTEGER NOT NULL DEFAULT 0, config_revision INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);\nCREATE INDEX IF NOT EXISTS idx_tournament_catalog_category_order ON tournament_catalog(category, display_order);\nINSERT INTO metadata (key, value) VALUES ('schema_version', '11') ON CONFLICT(key) DO UPDATE SET value = excluded.value;"
+    },
+    {
+      "version": 12,
+      "name": "news_article_cache",
+      "sql": "CREATE TABLE IF NOT EXISTS news_articles (id INTEGER PRIMARY KEY NOT NULL, published_at TEXT NOT NULL, modified_at TEXT NOT NULL, title TEXT NOT NULL, excerpt TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '', featured_media_id INTEGER NOT NULL DEFAULT 0, image_url TEXT, image_alt TEXT, content_text TEXT NOT NULL DEFAULT '', content_html TEXT NOT NULL DEFAULT '', content_loaded INTEGER NOT NULL DEFAULT 0, indexed_at TEXT NOT NULL, content_synced_at TEXT);\nCREATE INDEX IF NOT EXISTS idx_news_articles_published ON news_articles(published_at DESC, id DESC);\nINSERT INTO metadata (key, value) VALUES ('news_total_pages', '1') ON CONFLICT(key) DO NOTHING;\nINSERT INTO metadata (key, value) VALUES ('schema_version', '12') ON CONFLICT(key) DO UPDATE SET value = excluded.value;"
     }
   ]
 }

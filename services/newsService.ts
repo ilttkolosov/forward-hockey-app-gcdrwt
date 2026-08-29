@@ -1,15 +1,26 @@
 import { fetchWithTimeout } from './httpClient';
-import { readPersistentCache, writePersistentCache } from './persistentCache';
+import {
+  getMetadata,
+  loadNewsArticleFromDatabase,
+  loadNewsArticlesByIds,
+  loadNewsPageFromDatabase,
+  saveNewsArticleContent,
+  setMetadata,
+  upsertNewsIndexes,
+  type NewsArticleRecord,
+} from '../database/repository';
 import { getConfiguredSiteOrigin } from './startupConfigRuntime';
 
 export interface NewsArticle {
   id: number;
   date: string;
+  modified: string;
   title: string;
   excerpt: string;
   content: string;
   htmlContent: string;
   link: string;
+  featuredMediaId: number;
   imageUrl?: string;
   imageAlt?: string;
 }
@@ -18,11 +29,13 @@ export interface NewsPage {
   articles: NewsArticle[];
   page: number;
   totalPages: number;
+  backgroundRefresh?: Promise<NewsPage>;
 }
 
 interface WordPressPost {
   id: number;
   date: string;
+  modified: string;
   link: string;
   featured_media?: number;
   title?: { rendered?: string };
@@ -36,13 +49,7 @@ interface WordPressMedia {
   media_details?: { sizes?: Record<string, { source_url?: string }> };
 }
 
-interface NewsCache {
-  articles: NewsArticle[];
-  totalPages: number;
-}
-
-const NEWS_CACHE_KEY = '@offline/home-news/v2';
-const NEWS_CACHE_TTL_MS = 10 * 60 * 1_000;
+const NEWS_INDEX_TTL_MS = 10 * 60 * 1_000;
 
 const decodeHtmlEntities = (value: string): string => value
   .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
@@ -70,7 +77,19 @@ export const wordpressHtmlToText = (html = ''): string => decodeHtmlEntities(
   .replace(/\n{3,}/g, '\n\n')
   .trim();
 
-export const sanitizeWordPressHtml = (html = ''): string => html
+const activateFooGalleryImages = (html: string): string => html.replace(
+  /<img([^>]*?)data-src-fg="([^"]+)"([^>]*?)>/gi,
+  (_match, before: string, lazyUrl: string, after: string) => {
+    const responsiveUrl = lazyUrl.replace(/\/w_\d+(?:,h_\d+)?\//i, '/w_720,h_480/');
+    const attributes = `${before} ${after}`
+      .replace(/\sdata-src-fg="[^"]*"/gi, '')
+      .replace(/\ssrc="[^"]*"/gi, '')
+      .replace(/\sloading="[^"]*"/gi, '');
+    return `<img${attributes} src="${responsiveUrl}" loading="lazy">`;
+  },
+);
+
+export const sanitizeWordPressHtml = (html = ''): string => activateFooGalleryImages(html)
   .replace(/<script[\s\S]*?<\/script>/gi, '')
   .replace(/<style[\s\S]*?<\/style>/gi, '')
   .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
@@ -104,70 +123,118 @@ const loadMedia = async (mediaId?: number): Promise<{ imageUrl?: string; imageAl
   }
 };
 
-const normalizePost = async (post: WordPressPost): Promise<NewsArticle> => ({
-  id: Number(post.id),
-  date: post.date || '',
-  link: post.link || '',
-  title: wordpressHtmlToText(post.title?.rendered),
-  excerpt: wordpressHtmlToText(post.excerpt?.rendered),
-  content: wordpressHtmlToText(post.content?.rendered),
-  htmlContent: sanitizeWordPressHtml(post.content?.rendered),
-  ...(await loadMedia(post.featured_media)),
+const recordToArticle = (record: NewsArticleRecord): NewsArticle => ({
+  id: record.id,
+  date: record.published_at,
+  modified: record.modified_at,
+  title: record.title,
+  excerpt: record.excerpt,
+  content: record.content_text,
+  htmlContent: record.content_html,
+  link: record.link,
+  featuredMediaId: record.featured_media_id,
+  imageUrl: record.image_url || undefined,
+  imageAlt: record.image_alt || undefined,
 });
 
-const mergeArticles = (current: NewsArticle[], incoming: NewsArticle[]): NewsArticle[] => {
-  const merged = new Map(current.map(article => [article.id, article]));
-  incoming.forEach(article => merged.set(article.id, { ...merged.get(article.id), ...article }));
-  return [...merged.values()].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+const postToIndexRecord = async (
+  post: WordPressPost,
+  existing?: NewsArticleRecord,
+): Promise<NewsArticleRecord> => {
+  const mediaId = Number(post.featured_media || 0);
+  const canReuseImage = existing?.featured_media_id === mediaId && Boolean(existing.image_url);
+  const media = canReuseImage
+    ? { imageUrl: existing?.image_url || undefined, imageAlt: existing?.image_alt || undefined }
+    : await loadMedia(mediaId);
+  return {
+    id: Number(post.id),
+    published_at: post.date || '',
+    modified_at: post.modified || post.date || '',
+    title: wordpressHtmlToText(post.title?.rendered),
+    excerpt: wordpressHtmlToText(post.excerpt?.rendered),
+    link: post.link || '',
+    featured_media_id: mediaId,
+    image_url: media.imageUrl || null,
+    image_alt: media.imageAlt || null,
+    content_text: existing?.content_text || '',
+    content_html: existing?.content_html || '',
+    content_loaded: existing?.content_loaded || 0,
+  };
+};
+
+const refreshNewsPage = async (page: number, perPage: number): Promise<NewsPage> => {
+  const fields = 'id,date,modified,link,title,excerpt,featured_media';
+  const { data, response } = await requestJson<WordPressPost[]>(
+    `/wp-json/wp/v2/posts?per_page=${perPage}&page=${page}&_fields=${fields}`,
+  );
+  if (!Array.isArray(data)) throw new Error('Некорректный список новостей');
+  const existingRows = await loadNewsArticlesByIds(data.map(post => Number(post.id)));
+  const existing = new Map(existingRows.map(row => [row.id, row]));
+  const records = await Promise.all(data.map(post => postToIndexRecord(post, existing.get(Number(post.id)))));
+  await upsertNewsIndexes(records);
+  const totalPages = Math.max(1, Number(response.headers.get('X-WP-TotalPages')) || page);
+  await Promise.all([
+    setMetadata('news_total_pages', String(totalPages)),
+    setMetadata(`news_page_${page}_checked_at`, String(Date.now())),
+  ]);
+  const stored = await loadNewsPageFromDatabase((page - 1) * perPage, perPage);
+  return { articles: stored.map(recordToArticle), page, totalPages };
 };
 
 export const getNewsPage = async (page = 1, perPage = 3, force = false): Promise<NewsPage> => {
   const requestedPage = Math.max(1, page);
-  const cached = await readPersistentCache<NewsCache>(NEWS_CACHE_KEY);
-  const start = (requestedPage - 1) * perPage;
-  const cachedPage = cached?.data.articles.slice(start, start + perPage) || [];
-  if (!force && cached && Date.now() - cached.savedAt < NEWS_CACHE_TTL_MS && cachedPage.length === perPage) {
-    return { articles: cachedPage, page: requestedPage, totalPages: cached.data.totalPages };
+  const localRows = await loadNewsPageFromDatabase((requestedPage - 1) * perPage, perPage);
+  const totalPages = Math.max(1, Number(await getMetadata('news_total_pages')) || requestedPage);
+  const checkedAt = Number(await getMetadata(`news_page_${requestedPage}_checked_at`)) || 0;
+  if (localRows.length > 0 && !force) {
+    const result: NewsPage = { articles: localRows.map(recordToArticle), page: requestedPage, totalPages };
+    if (Date.now() - checkedAt >= NEWS_INDEX_TTL_MS) {
+      result.backgroundRefresh = refreshNewsPage(requestedPage, perPage).catch(error => {
+        console.warn(`[Новости] Страница ${requestedPage} не обновлена:`, error);
+        return result;
+      });
+    }
+    return result;
   }
   try {
-    const fields = 'id,date,link,title,excerpt,featured_media';
-    const { data, response } = await requestJson<WordPressPost[]>(
-      `/wp-json/wp/v2/posts?per_page=${perPage}&page=${requestedPage}&_fields=${fields}`,
-    );
-    if (!Array.isArray(data)) throw new Error('Некорректный список новостей');
-    const articles = (await Promise.all(data.map(normalizePost))).filter(article => article.id && article.title);
-    const totalPages = Math.max(1, Number(response.headers.get('X-WP-TotalPages')) || requestedPage);
-    await writePersistentCache(NEWS_CACHE_KEY, {
-      articles: mergeArticles(cached?.data.articles || [], articles),
-      totalPages,
-    });
-    return { articles, page: requestedPage, totalPages };
+    return await refreshNewsPage(requestedPage, perPage);
   } catch (error) {
-    if (cachedPage.length > 0) {
-      console.warn('[Новости] Сайт недоступен, используется сохранённая страница:', error);
-      return { articles: cachedPage, page: requestedPage, totalPages: cached?.data.totalPages || requestedPage };
+    if (localRows.length > 0) {
+      console.warn(`[Новости] Страница ${requestedPage} открыта из SQLite:`, error);
+      return { articles: localRows.map(recordToArticle), page: requestedPage, totalPages };
     }
     throw error;
   }
 };
 
-export const getNewsArticle = async (id: string): Promise<NewsArticle> => {
-  const cached = await readPersistentCache<NewsCache>(NEWS_CACHE_KEY);
-  const cachedArticle = cached?.data.articles.find(article => String(article.id) === id);
-  try {
-    const fields = 'id,date,link,title,content,featured_media';
-    const { data } = await requestJson<WordPressPost>(
+export const getStoredNewsArticle = async (id: string): Promise<NewsArticle | null> => {
+  const row = await loadNewsArticleFromDatabase(Number(id));
+  return row?.content_loaded ? recordToArticle(row) : null;
+};
+
+export const refreshNewsArticle = async (id: string): Promise<NewsArticle> => {
+  const numericId = Number(id);
+  const existing = await loadNewsArticleFromDatabase(numericId);
+  if (existing?.content_loaded) {
+    const fields = 'id,modified';
+    const { data: revision } = await requestJson<WordPressPost>(
       `/wp-json/wp/v2/posts/${encodeURIComponent(id)}?_fields=${fields}`,
-      30_000,
     );
-    const article = await normalizePost(data);
-    await writePersistentCache(NEWS_CACHE_KEY, {
-      articles: mergeArticles(cached?.data.articles || [], [article]),
-      totalPages: cached?.data.totalPages || 1,
-    });
-    return article;
-  } catch (error) {
-    if (cachedArticle) return cachedArticle;
-    throw error;
+    if ((revision.modified || '') === existing.modified_at) return recordToArticle(existing);
   }
+
+  const fields = 'id,date,modified,link,title,excerpt,content,featured_media';
+  const { data } = await requestJson<WordPressPost>(
+    `/wp-json/wp/v2/posts/${encodeURIComponent(id)}?_fields=${fields}`,
+    30_000,
+  );
+  const indexRecord = await postToIndexRecord(data, existing || undefined);
+  const contentRecord: NewsArticleRecord = {
+    ...indexRecord,
+    content_text: wordpressHtmlToText(data.content?.rendered),
+    content_html: sanitizeWordPressHtml(data.content?.rendered),
+    content_loaded: 1,
+  };
+  await saveNewsArticleContent(contentRecord);
+  return recordToArticle(contentRecord);
 };
