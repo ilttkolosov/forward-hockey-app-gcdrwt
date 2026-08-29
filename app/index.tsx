@@ -294,7 +294,7 @@ export default function HomeScreen() {
         {homeGamesEnabled && (
           <View style={homeStyles.gamesSection}>
             <SegmentedControl
-              values={[`Текущие игры [${currentGames.length}]`, 'Прошедшие игры']}
+              values={[`Текущие игры (${currentGames.length})`, 'Прошедшие игры']}
               selectedIndex={gamesTab}
               onChange={event => setGamesTab(event.nativeEvent.selectedSegmentIndex)}
               tintColor={colors.primary}
