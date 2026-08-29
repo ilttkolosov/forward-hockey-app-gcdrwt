@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { BlurView } from 'expo-blur';
 import {
   BackHandler,
   Image,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -366,6 +368,15 @@ export default function PersistentBottomNavigation() {
               { bottom: Math.max(insets.bottom, 6) + 17.5 },
             ]}
           >
+            <View pointerEvents="none" style={styles.homeButtonBlurMask}>
+              <BlurView
+                blurReductionFactor={2}
+                experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : 'none'}
+                intensity={100}
+                style={StyleSheet.absoluteFill}
+                tint="light"
+              />
+            </View>
             <View style={styles.homeButton}>
               <Image
                 resizeMode="contain"
@@ -443,6 +454,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 40,
+  },
+  homeButtonBlurMask: {
+    position: 'absolute',
+    width: CENTER_BUTTON_SIZE + NAVIGATION_CRADLE_GAP * 2,
+    height: CENTER_BUTTON_SIZE + NAVIGATION_CRADLE_GAP * 2,
+    borderRadius: CENTER_BUTTON_RADIUS + NAVIGATION_CRADLE_GAP,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
   homeButton: {
     width: CENTER_BUTTON_SIZE,
