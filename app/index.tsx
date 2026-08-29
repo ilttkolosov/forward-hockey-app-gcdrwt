@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ScrollView,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,9 +25,10 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { usePersistentBottomNavigationInset } from '../components/PersistentBottomNavigation';
 import { useNetworkStatus } from '../contexts/NetworkStatusContext';
 import { useReferenceDataRevision } from '../services/referenceDataUpdates';
-import { getLatestNews, type NewsArticle } from '../services/newsService';
+import { getNewsPage, type NewsArticle } from '../services/newsService';
 import NewsCard from '../components/NewsCard';
 import { useStartupFeature } from '../services/startupConfigRuntime';
+import Icon from '../components/Icon';
 
 const headerStyles = StyleSheet.create({
   headerContainer: {
@@ -92,6 +94,10 @@ export default function HomeScreen() {
   const [currentGames, setCurrentGames] = useState<Game[]>([]);
   const [pastGames, setPastGames] = useState<Game[]>([]);
   const [news, setNews] = useState<NewsArticle[]>([]);
+  const [newsPage, setNewsPage] = useState(1);
+  const [newsTotalPages, setNewsTotalPages] = useState(1);
+  const [newsLoadingMore, setNewsLoadingMore] = useState(false);
+  const [newsLoading, setNewsLoading] = useState(true);
   const [gamesTab, setGamesTab] = useState(0);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,16 +109,10 @@ export default function HomeScreen() {
     try {
       setError(null);
       if (!force && showLoading) setLoading(true);
-      const [allUpcoming, upcoming, teamPastGames, latestNews] = await Promise.all([
+      const [allUpcoming, upcoming, teamPastGames] = await Promise.all([
         getUpcomingGamesMasterData(force), // ← получаем ВСЕ игры
         getFutureGames(force),
         homeGamesEnabled ? getPastGamesForTeam74(force) : Promise.resolve([]),
-        homeNewsEnabled
-          ? getLatestNews(force, 3).catch(error => {
-            console.warn('[Главный экран] Новости временно недоступны:', error);
-            return [];
-          })
-          : Promise.resolve([]),
       ]);
 
       // Фильтруем "текущие" игры по тому же критерию, что и в getCurrentGame
@@ -167,7 +167,6 @@ export default function HomeScreen() {
         ))
         .sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime())
         .slice(0, 3));
-      setNews(latestNews);
       setUpcomingGames(upcoming);
     } catch (err) {
       console.error('Error loading home screen data:', err);
@@ -176,11 +175,35 @@ export default function HomeScreen() {
       if (!force) setLoading(false);
       setRefreshing(false);
     }
-  }, [homeGamesEnabled, homeNewsEnabled, referenceRevision]);
+  }, [homeGamesEnabled, referenceRevision]);
+
+  const loadInitialNews = useCallback(async (force = false) => {
+    if (!homeNewsEnabled) {
+      setNews([]);
+      setNewsLoading(false);
+      return;
+    }
+    setNewsLoading(true);
+    try {
+      const firstPage = await getNewsPage(1, 3, force);
+      setNews(firstPage.articles);
+      setNewsPage(1);
+      setNewsTotalPages(firstPage.totalPages);
+    } catch (error) {
+      console.warn('[Главный экран] Новости временно недоступны:', error);
+      setNews([]);
+    } finally {
+      setNewsLoading(false);
+    }
+  }, [homeNewsEnabled]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    void loadInitialNews();
+  }, [loadInitialNews]);
 
   useEffect(() => subscribeUpcomingGamesUpdates(games => {
     console.log(
@@ -193,6 +216,26 @@ export default function HomeScreen() {
   const onRefresh = () => {
     setRefreshing(true);
     loadData(true);
+    void loadInitialNews(true);
+  };
+
+  const loadMoreNews = async () => {
+    if (newsLoadingMore || newsPage >= newsTotalPages) return;
+    setNewsLoadingMore(true);
+    try {
+      const nextPage = await getNewsPage(newsPage + 1, 3);
+      setNews(current => {
+        const merged = new Map(current.map(article => [article.id, article]));
+        nextPage.articles.forEach(article => merged.set(article.id, article));
+        return [...merged.values()];
+      });
+      setNewsPage(nextPage.page);
+      setNewsTotalPages(nextPage.totalPages);
+    } catch (error) {
+      console.warn('[Главный экран] Следующая страница новостей не загружена:', error);
+    } finally {
+      setNewsLoadingMore(false);
+    }
   };
 
   const warningMessage = isOffline
@@ -266,9 +309,22 @@ export default function HomeScreen() {
         {homeNewsEnabled && (
           <View style={homeStyles.newsSection}>
             <Text style={homeStyles.sectionTitle}>Новости</Text>
+            {newsLoading && <ActivityIndicator color={colors.primary} style={homeStyles.newsLoader} />}
             {news.map(article => <NewsCard article={article} key={article.id} />)}
-            {news.length === 0 && (
+            {!newsLoading && news.length === 0 && (
               <View style={homeStyles.emptyBlock}><Text style={homeStyles.emptyText}>Новостей пока нет.</Text></View>
+            )}
+            {newsPage < newsTotalPages && (
+              <TouchableOpacity
+                accessibilityLabel="Загрузить ещё три новости"
+                accessibilityRole="button"
+                disabled={newsLoadingMore}
+                onPress={() => void loadMoreNews()}
+                style={[homeStyles.moreNewsButton, newsLoadingMore && homeStyles.moreNewsButtonDisabled]}
+              >
+                <Text style={homeStyles.moreNewsText}>{newsLoadingMore ? 'Загрузка…' : 'Ещё'}</Text>
+                {!newsLoadingMore && <Icon color={colors.primary} name="chevron-down" size={20} />}
+              </TouchableOpacity>
             )}
           </View>
         )}
@@ -305,4 +361,8 @@ const homeStyles = StyleSheet.create({
   emptyText: { color: colors.textSecondary, fontSize: 14, textAlign: 'center' },
   allGamesButton: { minHeight: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: colors.primary, marginTop: 2 },
   allGamesText: { color: colors.primary, fontSize: 15, fontWeight: '700' },
+  moreNewsButton: { minHeight: 48, flexDirection: 'row', gap: 5, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: colors.primary, marginTop: 2 },
+  moreNewsButtonDisabled: { opacity: 0.55 },
+  moreNewsText: { color: colors.primary, fontSize: 15, fontWeight: '700' },
+  newsLoader: { marginVertical: 28 },
 });
