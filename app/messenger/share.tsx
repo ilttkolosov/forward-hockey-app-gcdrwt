@@ -176,7 +176,7 @@ export default function MessengerShareScreen() {
     [shareIntent.files],
   );
   const hasFiles = sharedFiles.length > 0;
-  const textLimit = hasFiles ? 1000 : 4000;
+  const textLimit = 5000;
   const shareSignature = useMemo(
     () =>
       JSON.stringify({
@@ -212,7 +212,7 @@ export default function MessengerShareScreen() {
       shareIntent.text,
       shareIntent.webUrl,
     );
-    setMessage(initial.slice(0, hasFiles ? 1000 : 4000));
+    setMessage(initial.slice(0, 5000));
     setSelectedKeys(new Set());
     uploadedMessage.current = null;
     deliveredRoomIds.current = new Set();
