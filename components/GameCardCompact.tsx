@@ -11,6 +11,7 @@ import { Game } from '../types';
 import { colors, commonStyles } from '../styles/commonStyles';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { primeGameDetailsCache } from '../data/gameData';
 
 interface GameCardCompactProps {
   game: Game;
@@ -40,6 +41,7 @@ const hasValidOutcome = (outcome: string | undefined): boolean => {
 export default function GameCardCompact({ game, showScore = true, onPress }: GameCardCompactProps) {
   const router = useRouter();
   const handlePress = () => {
+    primeGameDetailsCache(game);
     if (onPress) {
       onPress();
     } else {

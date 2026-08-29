@@ -290,6 +290,8 @@ export default function MessengerContactProfileScreen() {
                   displayName={profile.display_name}
                   avatarUrl={profile.avatar_url}
                   accessToken={session.access_token}
+                  identityKey={profile.id}
+                  roles={profile.roles}
                   size={132}
                 />
               </TouchableOpacity>

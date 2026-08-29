@@ -38,10 +38,12 @@ import {
 } from "../../features/messenger/repository";
 import type {
   MessengerContact,
+  MessengerMessage,
   MessengerRoom,
 } from "../../features/messenger/types";
 import {
   createMessengerDirectRoom,
+  forwardMessengerMessage,
   getMessengerContacts,
   getMessengerRooms,
   isMessengerConnectionError,
@@ -76,6 +78,7 @@ type ShareTarget =
       title: string;
       subtitle: string;
       avatarUrl: string | null;
+      identityKey: string;
       room: MessengerRoom;
     }
   | {
@@ -84,6 +87,7 @@ type ShareTarget =
       title: string;
       subtitle: string;
       avatarUrl: string | null;
+      identityKey: string;
       contact: MessengerContact;
     };
 
@@ -188,11 +192,13 @@ export default function MessengerShareScreen() {
   const [loadingTargets, setLoadingTargets] = useState(true);
   const [targetsError, setTargetsError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [sendPhase, setSendPhase] = useState<SendPhase>("idle");
   const [progress, setProgress] = useState<number | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const closingShare = useRef(false);
+  const uploadedMessage = useRef<MessengerMessage | null>(null);
+  const deliveredRoomIds = useRef<Set<string>>(new Set());
   // Keep the controls locked after the server response too. Without this the
   // short success confirmation window allowed a second tap to start a second
   // message before the share flow was closed.
@@ -207,7 +213,9 @@ export default function MessengerShareScreen() {
       shareIntent.webUrl,
     );
     setMessage(initial.slice(0, hasFiles ? 1000 : 4000));
-    setSelectedKey(null);
+    setSelectedKeys(new Set());
+    uploadedMessage.current = null;
+    deliveredRoomIds.current = new Set();
     setSendError(null);
     setSendPhase("idle");
     setProgress(null);
@@ -268,8 +276,7 @@ export default function MessengerShareScreen() {
     });
   }, [router, status]);
 
-  const sections = useMemo<TargetSection[]>(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase("ru");
+  const availableTargets = useMemo<ShareTarget[]>(() => {
     const writableRooms = rooms
       .filter(
         (room) =>
@@ -284,9 +291,10 @@ export default function MessengerShareScreen() {
           room.room_type === "direct"
             ? room.peer?.avatar_url || room.avatar_url
             : room.avatar_url,
+        identityKey:
+          room.room_type === "direct" && room.peer ? room.peer.id : room.id,
         room,
-      }))
-      .filter((target) => targetMatches(target, normalizedQuery));
+      }));
 
     const representedPeople = new Set(
       rooms
@@ -304,9 +312,24 @@ export default function MessengerShareScreen() {
         title: contact.display_name,
         subtitle: contact.team_name || "Личное сообщение",
         avatarUrl: contact.avatar_url,
+        identityKey: contact.id,
         contact,
-      }))
-      .filter((target) => targetMatches(target, normalizedQuery));
+      }));
+
+    return [...writableRooms, ...availableContacts];
+  }, [contacts, hasFiles, rooms]);
+
+  const sections = useMemo<TargetSection[]>(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase("ru");
+    const filteredTargets = availableTargets.filter((target) =>
+      targetMatches(target, normalizedQuery),
+    );
+    const writableRooms = filteredTargets.filter(
+      (target) => target.kind === "room",
+    );
+    const availableContacts = filteredTargets.filter(
+      (target) => target.kind === "contact",
+    );
 
     const next: TargetSection[] = [];
     if (writableRooms.length) next.push({ title: "Чаты", data: writableRooms });
@@ -314,15 +337,22 @@ export default function MessengerShareScreen() {
       next.push({ title: "Новый личный чат", data: availableContacts });
     }
     return next;
-  }, [contacts, hasFiles, query, rooms]);
+  }, [availableTargets, query]);
 
-  const selectedTarget = useMemo(
-    () =>
-      sections
-        .flatMap((section) => section.data)
-        .find((target) => target.key === selectedKey) || null,
-    [sections, selectedKey],
+  const selectedTargets = useMemo(
+    () => availableTargets.filter((target) => selectedKeys.has(target.key)),
+    [availableTargets, selectedKeys],
   );
+
+  const toggleTarget = useCallback((key: string) => {
+    setSelectedKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    setSendError(null);
+  }, []);
 
   const finishShare = useCallback(async () => {
     if (closingShare.current) return;
@@ -391,7 +421,7 @@ export default function MessengerShareScreen() {
   );
 
   const send = useCallback(async () => {
-    if (!selectedTarget || !session || sending) return;
+    if (selectedTargets.length === 0 || !session || sending) return;
     const body = message.trim();
     if (!hasFiles && !body) {
       setSendError("Нет текста или вложения для отправки");
@@ -407,103 +437,190 @@ export default function MessengerShareScreen() {
     setSendError(null);
     setProgress(null);
     prioritizeMessengerForegroundTransport();
-    const clientMessageId = Crypto.randomUUID();
+    const failedKeys = new Set<string>();
+    const resolvedTargets: {
+      key: string;
+      room: MessengerRoom | { id: string };
+    }[] = [];
+    let successfulRecipients = 0;
+
     try {
-      const targetRoom = await resolveRoom(selectedTarget);
-      const roomId = targetRoom.id;
+      for (const target of selectedTargets) {
+        try {
+          const room = await resolveRoom(target);
+          if (deliveredRoomIds.current.has(room.id)) {
+            successfulRecipients += 1;
+          } else if (!resolvedTargets.some((item) => item.room.id === room.id)) {
+            resolvedTargets.push({
+              key: target.kind === "contact" ? `room:${room.id}` : target.key,
+              room,
+            });
+          }
+        } catch {
+          failedKeys.add(target.key);
+        }
+      }
+
+      if (resolvedTargets.length === 0 && successfulRecipients === 0) {
+        throw new Error("Не удалось открыть выбранные чаты");
+      }
+
+      const sourceClientMessageId = Crypto.randomUUID();
       messengerLog("info", "share_send.started", {
-        room_id: roomId,
-        client_message_id: clientMessageId,
+        recipient_count: selectedTargets.length,
+        client_message_id: sourceClientMessageId,
         content_type: shareIntent.type,
         file_count: sharedFiles.length,
         has_text: Boolean(body),
       });
 
-      let sentMessage;
       if (hasFiles) {
-        beginLocalMessengerMediaUpload(clientMessageId);
-        try {
-          setSendPhase("preparing");
-          const files = await prepareMessengerSharedFiles(
-            sharedFiles.map(shareFileToMessengerFile),
-            ({ item, total, percent }) => {
-              const completed = (item - 1 + percent / 100) / total;
-              setProgress(Math.round(completed * 100));
-            },
-          );
-          await warmMessengerBufferedUploadFiles(files);
-          setSendPhase("uploading");
-          setProgress(0);
-          const result = await runManagedMessengerMediaUpload({
-            roomId,
-            clientMessageId,
-            run: (signal) =>
-              sendMessengerMedia(
-                roomId,
-                clientMessageId,
-                files,
-                body || undefined,
-                null,
-                ({ percent }) => setProgress(percent),
-                signal,
-              ),
-          });
-          sentMessage = result.message;
-          const confirmedMedia = sentMessage.media_items?.length
-            ? sentMessage.media_items
-            : sentMessage.media
-              ? [sentMessage.media]
-              : [];
-          for (const [index, media] of confirmedMedia.entries()) {
-            const source = files[index];
-            if (!source) continue;
-            await seedMessengerMediaCache(media, source.uri).catch(
-              (cacheError) => {
-                messengerLog("warn", "share_send.media_cache_seed_failed", {
-                  asset_id: media.id,
-                  message: messengerErrorMessage(cacheError),
-                });
+        if (!uploadedMessage.current) {
+          const sourceTarget = resolvedTargets.shift();
+          if (!sourceTarget) throw new Error("Нет доступного чата для загрузки");
+          const roomId = sourceTarget.room.id;
+          beginLocalMessengerMediaUpload(sourceClientMessageId);
+          try {
+            setSendPhase("preparing");
+            const files = await prepareMessengerSharedFiles(
+              sharedFiles.map(shareFileToMessengerFile),
+              ({ item, total, percent }) => {
+                const completed = (item - 1 + percent / 100) / total;
+                setProgress(Math.round(completed * 100));
               },
             );
+            await warmMessengerBufferedUploadFiles(files);
+            setSendPhase("uploading");
+            setProgress(0);
+            const result = await runManagedMessengerMediaUpload({
+              roomId,
+              clientMessageId: sourceClientMessageId,
+              run: (signal) =>
+                sendMessengerMedia(
+                  roomId,
+                  sourceClientMessageId,
+                  files,
+                  body || undefined,
+                  null,
+                  ({ percent }) => setProgress(percent),
+                  signal,
+                ),
+            });
+            uploadedMessage.current = result.message;
+            deliveredRoomIds.current.add(roomId);
+            successfulRecipients += 1;
+            await cacheIncomingMessengerMessage(
+              db,
+              result.message,
+              session.user.id,
+            ).catch((cacheError) => {
+              messengerLog("warn", "share_send.cache_failed", {
+                room_id: roomId,
+                message: messengerErrorMessage(cacheError),
+              });
+            });
+
+            const confirmedMedia = result.message.media_items?.length
+              ? result.message.media_items
+              : result.message.media
+                ? [result.message.media]
+                : [];
+            for (const [index, media] of confirmedMedia.entries()) {
+              const source = files[index];
+              if (!source) continue;
+              await seedMessengerMediaCache(media, source.uri).catch(
+                (cacheError) => {
+                  messengerLog("warn", "share_send.media_cache_seed_failed", {
+                    asset_id: media.id,
+                    message: messengerErrorMessage(cacheError),
+                  });
+                },
+              );
+            }
+          } catch (error) {
+            failedKeys.add(sourceTarget.key);
+            throw error;
+          } finally {
+            endLocalMessengerMediaUpload(sourceClientMessageId);
           }
-        } finally {
-          endLocalMessengerMediaUpload(clientMessageId);
+        }
+
+        setSendPhase("uploading");
+        setProgress(100);
+        for (const { key, room } of resolvedTargets) {
+          if (!uploadedMessage.current) break;
+          try {
+            const result = await forwardMessengerMessage(
+              uploadedMessage.current.id,
+              room.id,
+              Crypto.randomUUID(),
+            );
+            deliveredRoomIds.current.add(room.id);
+            successfulRecipients += 1;
+            await cacheIncomingMessengerMessage(
+              db,
+              result.message,
+              session.user.id,
+            ).catch((cacheError) => {
+              messengerLog("warn", "share_send.cache_failed", {
+                room_id: room.id,
+                message: messengerErrorMessage(cacheError),
+              });
+            });
+          } catch {
+            failedKeys.add(key);
+          }
         }
       } else {
         setSendPhase("uploading");
-        const result = await sendMessengerText(
-          roomId,
-          clientMessageId,
-          body,
-        );
-        sentMessage = result.message;
+        for (const { key, room } of resolvedTargets) {
+          try {
+            const result = await sendMessengerText(
+              room.id,
+              Crypto.randomUUID(),
+              body,
+            );
+            deliveredRoomIds.current.add(room.id);
+            successfulRecipients += 1;
+            await cacheIncomingMessengerMessage(
+              db,
+              result.message,
+              session.user.id,
+            ).catch((cacheError) => {
+              messengerLog("warn", "share_send.cache_failed", {
+                room_id: room.id,
+                message: messengerErrorMessage(cacheError),
+              });
+            });
+          } catch {
+            failedKeys.add(key);
+          }
+        }
       }
 
-      await cacheIncomingMessengerMessage(
-        db,
-        sentMessage,
-        session.user.id,
-      ).catch((cacheError) => {
-        messengerLog("warn", "share_send.cache_failed", {
-          room_id: roomId,
-          message: messengerErrorMessage(cacheError),
-        });
-      });
+      if (failedKeys.size > 0) {
+        setSelectedKeys(failedKeys);
+        setSendPhase("idle");
+        setProgress(null);
+        setSendError(
+          successfulRecipients > 0
+            ? `Отправлено: ${successfulRecipients}. Не удалось отправить: ${failedKeys.size}. Повторите попытку.`
+            : "Не удалось отправить выбранный материал",
+        );
+        return;
+      }
+
       setSendPhase("sent");
       setProgress(100);
       messengerLog("info", "share_send.completed", {
-        room_id: roomId,
-        client_message_id: clientMessageId,
-        message_id: sentMessage.id,
+        recipient_count: selectedTargets.length,
+        media_uploaded_once: hasFiles,
       });
       trackMessengerAction("share_sheet_sent", {
-        content_type: sentMessage.kind,
+        content_type: hasFiles ? "media" : "text",
         attachment_count: sharedFiles.length,
         has_text: Boolean(body),
-        room_type:
-          selectedTarget.kind === "room"
-            ? selectedTarget.room.room_type
-            : "direct",
+        recipient_count: selectedTargets.length,
       });
       await wait(500);
       await finishShare();
@@ -527,7 +644,7 @@ export default function MessengerShareScreen() {
     hasFiles,
     message,
     resolveRoom,
-    selectedTarget,
+    selectedTargets,
     sending,
     session,
     shareIntent.type,
@@ -545,7 +662,7 @@ export default function MessengerShareScreen() {
       ? "Материал для отправки больше недоступен"
       : null);
   const sendDisabled =
-    !selectedTarget ||
+    selectedKeys.size === 0 ||
     sending ||
     !hasShareIntent ||
     Boolean(contentError) ||
@@ -728,19 +845,20 @@ export default function MessengerShareScreen() {
             <Text style={styles.sectionTitle}>{section.title}</Text>
           )}
           renderItem={({ item }) => {
-            const selected = item.key === selectedKey;
+            const selected = selectedKeys.has(item.key);
             return (
               <TouchableOpacity
                 style={[styles.targetRow, selected && styles.targetRowSelected]}
-                onPress={() => setSelectedKey(item.key)}
+                onPress={() => toggleTarget(item.key)}
                 disabled={sending}
-                accessibilityRole="radio"
-                accessibilityState={{ selected }}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: selected }}
               >
                 <AuthenticatedAvatar
                   displayName={item.title}
                   avatarUrl={item.avatarUrl}
                   accessToken={session.access_token}
+                  identityKey={item.identityKey}
                   size={50}
                 />
                 <View style={styles.targetText}>
@@ -816,7 +934,11 @@ export default function MessengerShareScreen() {
             disabled={sendDisabled}
           >
             <Icon name="send" size={21} color={colors.white} />
-            <Text style={styles.sendButtonText}>Отправить</Text>
+            <Text style={styles.sendButtonText}>
+              {selectedKeys.size > 0
+                ? `Отправить (${selectedKeys.size})`
+                : "Отправить"}
+            </Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>

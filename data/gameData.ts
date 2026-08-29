@@ -15,6 +15,7 @@ import {
   loadTeamsFromDatabase,
   loadVenuesFromDatabase,
   queryEvents,
+  upsertEvents,
 } from '../database/repository';
 // --- Локальное хранилище и флаги обновления ---
 
@@ -520,6 +521,9 @@ const fetchAndCacheGames = async (
     if (canUseNetwork) {
       try {
         remoteEvents = (await apiService.fetchEvents(apiParams)).data;
+        if (remoteEvents.length > 0) {
+          await upsertEvents(remoteEvents);
+        }
         dataAvailability.markNetworkSuccess();
       } catch (error) {
         if (localEvents.length === 0) throw error;
@@ -659,15 +663,6 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
   const now = Date.now();
   console.log(`🔍 getGameById called for ID ${id}, useCache=${useCache}`);
 
-  const localEvent = await getEventFromDatabase(id);
-  if (localEvent) {
-    await Promise.all([loadLeagues(), loadSeasons(), loadVenues(), loadTeams()]);
-    const localGame = await convertApiEventToGame(localEvent);
-    gameDetailsCache[id] = { data: localGame, timestamp: now };
-    console.log(`✅ Game ID ${id} loaded from SQLite`);
-    return localGame;
-  }
-
   // 🔥 Если useCache = false — пропускаем ВСЕ кэши и идём сразу в API
   if (!useCache) {
     console.log(`🚀 Bypassing all caches for ID ${id} (force refresh)`);
@@ -681,15 +676,8 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
       }
     }
 
-    const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
-    if (persistent) {
-      const hydratedGame = await hydrateGameReferences(persistent.data);
-      gameDetailsCache[id] = { data: hydratedGame, timestamp: persistent.savedAt };
-      dataAvailability.markCachedDataUsed();
-      return hydratedGame;
-    }
-
-    // 2. Ищем игру в ОБЩЕМ кэше игр (gamesCache)
+    // 2. Ищем игру в ОБЩЕМ кэше игр (gamesCache). Списки матчей могут
+    // содержать более свежий счёт и протокол, чем ранее записанный снимок БД.
     for (const cacheKey in gamesCache) {
       const entry = gamesCache[cacheKey];
       if (entry && now - entry.timestamp < GAMES_CACHE_DURATION) {
@@ -711,9 +699,28 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
         return found;
       }
     }
+
+    // 4. SQLite — основной офлайн-источник, если экран-источник не передал
+    // более свежий снимок игры через память.
+    const localEvent = await getEventFromDatabase(id);
+    if (localEvent) {
+      await Promise.all([loadLeagues(), loadSeasons(), loadVenues(), loadTeams()]);
+      const localGame = await convertApiEventToGame(localEvent);
+      gameDetailsCache[id] = { data: localGame, timestamp: now };
+      console.log(`✅ Game ID ${id} loaded from SQLite`);
+      return localGame;
+    }
+
+    const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
+    if (persistent) {
+      const hydratedGame = await hydrateGameReferences(persistent.data);
+      gameDetailsCache[id] = { data: hydratedGame, timestamp: persistent.savedAt };
+      dataAvailability.markCachedDataUsed();
+      return hydratedGame;
+    }
   }
 
-  // 4. Загружаем из API (либо потому что useCache=false, либо потому что не нашли в кэшах)
+  // 5. Загружаем из API (либо потому что useCache=false, либо потому что не нашли в кэшах)
   try {
     await loadLeagues();
     await loadSeasons();
@@ -725,6 +732,7 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
       const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
       return persistent ? await hydrateGameReferences(persistent.data) : null;
     }
+    await upsertEvents([apiGameDetails]);
     const game = await convertApiEventToGame(apiGameDetails);
 
     // Сохраняем в кэш только если useCache !== false
@@ -738,6 +746,13 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
     return game;
   } catch (error) {
     console.error(`❌ Failed to get game by ID ${id} from API:`, error);
+    const localEvent = await getEventFromDatabase(id);
+    if (localEvent) {
+      await Promise.all([loadLeagues(), loadSeasons(), loadVenues(), loadTeams()]);
+      const localGame = await convertApiEventToGame(localEvent);
+      dataAvailability.markCachedDataUsed('Не удалось обновить данные матча');
+      return localGame;
+    }
     const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
     if (persistent) {
       dataAvailability.markCachedDataUsed('Не удалось обновить данные матча');
@@ -745,6 +760,15 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
     }
     throw error;
   }
+};
+
+/**
+ * Передаёт странице матча тот же снимок, который пользователь уже видит в
+ * карточке. Это исключает откат к более старой записи SQLite между нажатием и
+ * открытием экрана, пока фоновая синхронизация ещё дописывает матч.
+ */
+export const primeGameDetailsCache = (game: Game): void => {
+  gameDetailsCache[game.id] = { data: game, timestamp: Date.now() };
 };
 
 // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
