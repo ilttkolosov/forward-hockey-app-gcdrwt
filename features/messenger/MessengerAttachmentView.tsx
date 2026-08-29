@@ -15,7 +15,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -37,6 +36,7 @@ import { colors } from "../../styles/commonStyles";
 import { getMessengerFilePresentation } from "./filePresentation";
 import MessengerLocationPreview from "./MessengerLocationPreview";
 import MessengerVideoPlayer from "./MessengerVideoPlayer";
+import MessengerZoomableMedia from "./MessengerZoomableMedia";
 import type { MessengerLocation, MessengerMedia } from "./types";
 
 interface MessengerAttachmentViewProps {
@@ -115,6 +115,7 @@ function MessengerAttachmentView({
     viewerIndex === null ? null : (viewerItems[viewerIndex] ?? null);
   const [viewerSession, setViewerSession] = useState(0);
   const [viewerMenuVisible, setViewerMenuVisible] = useState(false);
+  const [viewerZoomed, setViewerZoomed] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [openingFileId, setOpeningFileId] = useState<string | null>(null);
   const openingFileRef = useRef<string | null>(null);
@@ -128,6 +129,7 @@ function MessengerAttachmentView({
     setErrors({});
     setViewerIndex(null);
     setViewerMenuVisible(false);
+    setViewerZoomed(false);
   }, [itemIdentity]);
 
   useEffect(() => {
@@ -223,12 +225,31 @@ function MessengerAttachmentView({
 
   useEffect(() => {
     if (Platform.OS === "web" || viewerMedia?.type !== "video") return;
-    void ScreenOrientation.unlockAsync().catch((error) =>
-      messengerLog("warn", "media.video.orientation_unlock_failed", {
-        error: error instanceof Error ? error.message : String(error),
-      }),
-    );
+    let active = true;
+    const requestedLock =
+      Platform.OS === "android"
+        ? ScreenOrientation.OrientationLock.ALL
+        : ScreenOrientation.OrientationLock.DEFAULT;
+    void ScreenOrientation.supportsOrientationLockAsync(requestedLock)
+      .then((supported) => {
+        if (!active) return;
+        return ScreenOrientation.lockAsync(
+          supported ? requestedLock : ScreenOrientation.OrientationLock.DEFAULT,
+        );
+      })
+      .then(() =>
+        messengerLog("info", "media.video.orientation_enabled", {
+          platform: Platform.OS,
+          requested_lock: requestedLock,
+        }),
+      )
+      .catch((error) =>
+        messengerLog("warn", "media.video.orientation_unlock_failed", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
     return () => {
+      active = false;
       void ScreenOrientation.lockAsync(
         ScreenOrientation.OrientationLock.PORTRAIT_UP,
       ).catch((error) =>
@@ -332,6 +353,7 @@ function MessengerAttachmentView({
 
   const closeViewer = () => {
     setViewerMenuVisible(false);
+    setViewerZoomed(false);
     setViewerIndex(null);
   };
 
@@ -416,10 +438,7 @@ function MessengerAttachmentView({
     single?.type === "file" ? getMessengerFilePresentation(single) : null;
   const singleVideoRemoteUri =
     single?.type === "video" ? messengerMediaUrl(single.url) : null;
-  const viewerPageHeight = Math.max(
-    1,
-    viewerHeight - Math.max(insets.top, 12) - insets.bottom - 56,
-  );
+  const viewerPageHeight = Math.max(1, viewerHeight);
 
   return (
     <>
@@ -585,21 +604,23 @@ function MessengerAttachmentView({
 
       <Modal
         visible={viewerIndex !== null}
-        animationType="fade"
+        animationType="none"
         presentationStyle="fullScreen"
-        statusBarTranslucent={false}
+        statusBarTranslucent
+        navigationBarTranslucent
         onRequestClose={closeViewer}
       >
-        <View
-          style={[
-            styles.viewer,
-            {
-              paddingTop: Math.max(insets.top, 12),
-              paddingBottom: insets.bottom,
-            },
-          ]}
-        >
-          <View style={styles.viewerHeader}>
+        <View style={styles.viewer}>
+          <View
+            style={[
+              styles.viewerHeader,
+              {
+                top: Math.max(insets.top, 8),
+                left: Math.max(insets.left, 8),
+                right: Math.max(insets.right, 8),
+              },
+            ]}
+          >
             <TouchableOpacity
               style={styles.closeButton}
               onPress={closeViewer}
@@ -720,12 +741,13 @@ function MessengerAttachmentView({
           )}
           {viewerIndex !== null && (
             <FlatList
-              key={`attachment-viewer-${viewerSession}-${viewerWidth}-${viewerPageHeight}`}
+              key={`attachment-viewer-${viewerSession}`}
               style={styles.viewerPager}
               data={viewerItems}
               keyExtractor={(item) => item.id}
               horizontal
               pagingEnabled
+              scrollEnabled={!viewerZoomed}
               bounces={false}
               showsHorizontalScrollIndicator={false}
               removeClippedSubviews={false}
@@ -740,6 +762,7 @@ function MessengerAttachmentView({
                   event.nativeEvent.contentOffset.x / viewerWidth,
                 );
                 if (viewerItems[nextIndex]) setViewerIndex(nextIndex);
+                setViewerZoomed(false);
               }}
               renderItem={({ item, index }) => {
                 const localUri = localUris[item.id];
@@ -753,22 +776,11 @@ function MessengerAttachmentView({
                     ]}
                   >
                     {localUri && item.type === "image" && (
-                      <ScrollView
-                        key={`${viewerSession}:${item.id}:${viewerWidth}:${viewerPageHeight}`}
-                        style={[
-                          styles.zoomContainer,
-                          { width: viewerWidth, height: viewerPageHeight },
-                        ]}
-                        contentContainerStyle={[
-                          styles.zoomContent,
-                          { width: viewerWidth, height: viewerPageHeight },
-                        ]}
-                        minimumZoomScale={1}
-                        maximumZoomScale={4}
-                        zoomScale={1}
-                        centerContent
-                        bouncesZoom
-                        contentOffset={{ x: 0, y: 0 }}
+                      <MessengerZoomableMedia
+                        width={viewerWidth}
+                        height={viewerPageHeight}
+                        resetKey={`${viewerSession}:${item.id}`}
+                        onZoomChange={setViewerZoomed}
                       >
                         <Image
                           source={localUri}
@@ -780,16 +792,24 @@ function MessengerAttachmentView({
                           onLoadStart={() => handleImageLoadStart(item.id)}
                           onLoad={(event) => handleImageLoad(item, event)}
                         />
-                      </ScrollView>
+                      </MessengerZoomableMedia>
                     )}
                     {localUri && item.type === "video" && (
-                      <MessengerVideoPlayer
-                        uri={localUri}
-                        style={styles.fullVideo}
-                        active={playbackEnabled && index === viewerIndex}
-                        autoPlay
-                        onFallback={() => void openFile(item)}
-                      />
+                      <MessengerZoomableMedia
+                        width={viewerWidth}
+                        height={viewerPageHeight}
+                        resetKey={`${viewerSession}:${item.id}`}
+                        onZoomChange={setViewerZoomed}
+                      >
+                        <MessengerVideoPlayer
+                          uri={localUri}
+                          style={styles.fullVideo}
+                          active={playbackEnabled && index === viewerIndex}
+                          autoPlay
+                          fullscreenEnabled={false}
+                          onFallback={() => void openFile(item)}
+                        />
+                      </MessengerZoomableMedia>
                     )}
                     {!localUri && (
                       <TouchableOpacity
@@ -977,13 +997,17 @@ const styles = StyleSheet.create({
   },
   viewer: { flex: 1, backgroundColor: "#08121E" },
   viewerHeader: {
+    position: "absolute",
+    zIndex: 10,
     minHeight: 56,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     paddingLeft: 8,
+    borderRadius: 28,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(8,18,30,0.72)",
   },
   viewerHeading: { flex: 1, minWidth: 0, alignItems: "center" },
   viewerTitle: {
@@ -1060,7 +1084,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: "center",
   },
-  zoomContainer: { width: "100%", height: "100%" },
-  zoomContent: { flexGrow: 1, alignItems: "center", justifyContent: "center" },
   fullVideo: { width: "100%", height: "100%" },
 });
