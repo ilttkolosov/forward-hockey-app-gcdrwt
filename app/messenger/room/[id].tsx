@@ -197,6 +197,9 @@ interface MediaUploadRequest extends AttachmentDraft {
 }
 
 const MESSAGE_MUTATION_WINDOW_MS = 3 * 60 * 1000;
+const MAX_MESSAGE_LENGTH = 5_000;
+const COLLAPSED_MESSAGE_LINES = 10;
+const COLLAPSED_MESSAGE_ESTIMATED_CHARACTERS = 360;
 const WEB_COMPOSER_EMOJIS = [
   "😀",
   "😂",
@@ -899,6 +902,54 @@ interface MessengerMessageListItemProps {
   quickReaction: string;
 }
 
+function messageProbablyNeedsCollapse(text: string): boolean {
+  return (
+    stripMessengerTextFormatting(text).length > COLLAPSED_MESSAGE_ESTIMATED_CHARACTERS ||
+    text.split("\n").length > COLLAPSED_MESSAGE_LINES
+  );
+}
+
+function ExpandableMessengerMessageText({
+  text,
+  style,
+}: {
+  text: string;
+  style: React.ComponentProps<typeof Text>["style"];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [longMessage, setLongMessage] = useState(() => messageProbablyNeedsCollapse(text));
+
+  useEffect(() => {
+    setExpanded(false);
+    setLongMessage(messageProbablyNeedsCollapse(text));
+  }, [text]);
+
+  return (
+    <View>
+      <MessengerLinkifiedText
+        text={text}
+        style={style}
+        numberOfLines={longMessage && !expanded ? COLLAPSED_MESSAGE_LINES : undefined}
+        onTextLayout={(event) => {
+          if (!longMessage && event.nativeEvent.lines.length > COLLAPSED_MESSAGE_LINES) {
+            setLongMessage(true);
+          }
+        }}
+      />
+      {longMessage ? (
+        <Pressable
+          onPress={() => setExpanded((current) => !current)}
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? "Свернуть сообщение" : "Показать сообщение полностью"}
+          hitSlop={6}
+        >
+          <Text style={styles.messageExpandLink}>{expanded ? "Свернуть" : "… Далее"}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 /**
  * One isolated feed row. Existing message objects retain their identity when
  * a new optimistic message is appended, so React.memo can keep every old
@@ -1102,7 +1153,7 @@ const MessengerMessageListItem = React.memo(
                   />
                 ) : null}
                 {body ? (
-                  <MessengerLinkifiedText
+                  <ExpandableMessengerMessageText
                     text={body}
                     style={[
                       styles.messageText,
@@ -3287,6 +3338,13 @@ export default function MessengerRoomScreen() {
   const sendText = () => {
     const body = text.trim();
     if (!body || !roomId || !session) return;
+    if (body.length > MAX_MESSAGE_LENGTH) {
+      Alert.alert(
+        "Сообщение слишком длинное",
+        `Максимальная длина — ${MAX_MESSAGE_LENGTH} символов.`,
+      );
+      return;
+    }
     const tappedAt = Date.now();
     prioritizeMessengerForegroundTransport();
     const clientMessageId = Crypto.randomUUID();
@@ -4355,6 +4413,13 @@ export default function MessengerRoomScreen() {
     if (!target || messageMutationBusyId) return;
     const nextText = text.trim();
     if (target.kind === "text" && !nextText) return;
+    if (nextText.length > MAX_MESSAGE_LENGTH) {
+      Alert.alert(
+        "Сообщение слишком длинное",
+        `Максимальная длина — ${MAX_MESSAGE_LENGTH} символов.`,
+      );
+      return;
+    }
     if (nextText === target.text.trim()) {
       cancelEditing();
       return;
@@ -6126,15 +6191,7 @@ export default function MessengerRoomScreen() {
                       ? "Подпись"
                       : "Сообщение"
                 }
-                maxLength={
-                  editingMessage
-                    ? editingMessage.kind === "text"
-                      ? 4000
-                      : 1000
-                    : attachmentDraft
-                      ? 1000
-                      : 4000
-                }
+                maxLength={MAX_MESSAGE_LENGTH}
                 pasteAttachmentsEnabled={
                   canMedia &&
                   !attachmentDraft &&
@@ -6504,6 +6561,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   messageText: { color: colors.text, fontSize: 15, lineHeight: 20 },
+  messageExpandLink: {
+    alignSelf: "flex-start",
+    marginTop: 2,
+    color: "#075FA8",
+    fontSize: 14,
+    fontWeight: "700",
+    textDecorationLine: "underline",
+  },
   emojiOnlyText: {
     fontSize: 38,
     lineHeight: 46,
