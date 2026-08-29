@@ -8,104 +8,25 @@ import {
   ScrollView,
   RefreshControl,
 } from 'react-native';
+import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
 import { commonStyles, colors } from '../styles/commonStyles';
 import { Game } from '../types';
 import {
   getFutureGames,
-  getUpcomingGamesCount,
   getUpcomingGamesMasterData,
+  getPastGamesForTeam74,
   subscribeUpcomingGamesUpdates,
 } from '../data/gameData';
-import { getPlayers } from '../data/playerData';
 import GameCard from '../components/GameCard';
 import LoadingSpinner from '../components/LoadingSpinner';
-import Icon from '../components/Icon';
 import { usePersistentBottomNavigationInset } from '../components/PersistentBottomNavigation';
-import { getDeclension } from './tournaments/index'; // ← импортируем склонение
 import { useNetworkStatus } from '../contexts/NetworkStatusContext';
-import { useMessengerAuth } from '../contexts/MessengerAuthContext';
-import { useMessengerUnreadSnapshot } from '../services/messengerUnread';
 import { useReferenceDataRevision } from '../services/referenceDataUpdates';
-import { loadTournamentCatalog } from '../services/tournamentCatalog';
-
-const quickNavStyles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginVertical: 24,
-  },
-  item: {
-    position: 'relative',
-    width: '48%',
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginBottom: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  icon: {
-    marginBottom: 6,
-  },
-  title: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-    textAlign: 'center',
-    marginBottom: 2,
-  },
-  subtitle: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
-  unreadBadge: {
-    position: 'absolute',
-    top: 6,
-    right: 8,
-    minWidth: 26,
-    height: 26,
-    paddingHorizontal: 7,
-    borderRadius: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.accent,
-    borderWidth: 2,
-    borderColor: colors.surface,
-  },
-  unreadBadgeText: {
-    color: colors.white,
-    fontSize: 12,
-    fontWeight: '800',
-    lineHeight: 15,
-  },
-});
-
-const footerLinkStyles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginVertical: 24,
-    paddingHorizontal: 16,
-  },
-  button: {
-    width: '46%',
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  text: {
-    fontSize: 14,
-  },
-});
+import { getLatestNews, type NewsArticle } from '../services/newsService';
+import NewsCard from '../components/NewsCard';
+import { useStartupFeature } from '../services/startupConfigRuntime';
 
 const headerStyles = StyleSheet.create({
   headerContainer: {
@@ -158,9 +79,8 @@ const warningStyles = StyleSheet.create({
 export default function HomeScreen() {
   const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { isOffline } = useNetworkStatus();
-  const { isAuthenticated: isMessengerAuthenticated } = useMessengerAuth();
-  const messengerUnread = useMessengerUnreadSnapshot();
-  const messengerUnreadCount = messengerUnread.count;
+  const homeGamesEnabled = useStartupFeature('home_games');
+  const homeNewsEnabled = useStartupFeature('home_news');
   const referenceRevision = useReferenceDataRevision([
     'teams',
     'venues',
@@ -170,34 +90,29 @@ export default function HomeScreen() {
     'tournaments',
   ]);
   const [currentGames, setCurrentGames] = useState<Game[]>([]);
+  const [pastGames, setPastGames] = useState<Game[]>([]);
+  const [news, setNews] = useState<NewsArticle[]>([]);
+  const [gamesTab, setGamesTab] = useState(0);
   const [upcomingGames, setUpcomingGames] = useState<Game[]>([]);
-  const [upcomingCount, setUpcomingCount] = useState<number>(0);
-  const [playersCount, setPlayersCount] = useState<number>(0);
-  const [tournamentsCount, setTournamentsCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-
-  const loadTournamentsCount = useCallback(async () => {
-    try {
-      const catalog = await loadTournamentCatalog();
-      setTournamentsCount(catalog.current.length);
-    } catch (err) {
-      console.warn('Failed to load tournaments count');
-      setTournamentsCount(0);
-    }
-  }, []);
 
   const loadData = useCallback(async (force = false, showLoading = true) => {
     void referenceRevision;
     try {
       setError(null);
       if (!force && showLoading) setLoading(true);
-      const [allUpcoming, upcoming, upcomingCount, players] = await Promise.all([
+      const [allUpcoming, upcoming, teamPastGames, latestNews] = await Promise.all([
         getUpcomingGamesMasterData(force), // ← получаем ВСЕ игры
         getFutureGames(force),
-        getUpcomingGamesCount(),
-        getPlayers(),
+        homeGamesEnabled ? getPastGamesForTeam74(force) : Promise.resolve([]),
+        homeNewsEnabled
+          ? getLatestNews(force, 3).catch(error => {
+            console.warn('[Главный экран] Новости временно недоступны:', error);
+            return [];
+          })
+          : Promise.resolve([]),
       ]);
 
       // Фильтруем "текущие" игры по тому же критерию, что и в getCurrentGame
@@ -242,9 +157,18 @@ export default function HomeScreen() {
       });
 
       setCurrentGames(currentGames);
+      setPastGames(teamPastGames
+        .filter(game => (
+          (String(game.homeTeamId) === '74' || String(game.awayTeamId) === '74')
+          && (
+            game.status === 'finished'
+            || new Date(game.event_date).getTime() + 100 * 60 * 1_000 < Date.now()
+          )
+        ))
+        .sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime())
+        .slice(0, 3));
+      setNews(latestNews);
       setUpcomingGames(upcoming);
-      setUpcomingCount(upcomingCount);
-      setPlayersCount(players.length);
     } catch (err) {
       console.error('Error loading home screen data:', err);
       setError('Не удалось обновить данные с сервера.');
@@ -252,12 +176,11 @@ export default function HomeScreen() {
       if (!force) setLoading(false);
       setRefreshing(false);
     }
-  }, [referenceRevision]);
+  }, [homeGamesEnabled, homeNewsEnabled, referenceRevision]);
 
   useEffect(() => {
     loadData();
-    loadTournamentsCount();
-  }, [loadData, loadTournamentsCount]);
+  }, [loadData]);
 
   useEffect(() => subscribeUpcomingGamesUpdates(games => {
     console.log(
@@ -270,7 +193,6 @@ export default function HomeScreen() {
   const onRefresh = () => {
     setRefreshing(true);
     loadData(true);
-    loadTournamentsCount();
   };
 
   const warningMessage = isOffline
@@ -309,89 +231,47 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Current Game */}
-        {currentGames.length > 0 && (
-          <View style={{ marginBottom: 0 }}>
-            <Text style={[commonStyles.subtitle, { marginBottom: 12 }]}>
-              {currentGames.length === 1 ? 'Текущая игра' : 'Текущие игры'}
-            </Text>
-            {currentGames.map((game) => (
-              <GameCard key={game.id} game={game} showScore={true} />
-            ))}
-          </View>
-        )}
-
-        {/* Quick Navigation */}
-        <View style={quickNavStyles.container}>
-          {/* Тренировки */}
-          <Link href="/trainings" asChild>
-            <TouchableOpacity style={quickNavStyles.item}>
-              <Icon name="calendar" size={24} color={colors.primary} style={quickNavStyles.icon} />
-              <Text style={quickNavStyles.title}>Тренировки</Text>
-              <Text style={quickNavStyles.subtitle}>Недельное расписание</Text>
-            </TouchableOpacity>
-          </Link>
-
-          {/* Общение */}
-          <Link
-            href={isMessengerAuthenticated ? "/messenger/rooms" : "/messenger/register"}
-            asChild
-          >
-            <TouchableOpacity style={quickNavStyles.item}>
-              {isMessengerAuthenticated && messengerUnread.ready && messengerUnreadCount > 0 && (
-                <View style={quickNavStyles.unreadBadge}>
-                  <Text style={quickNavStyles.unreadBadgeText}>
-                    {messengerUnreadCount > 99 ? '99+' : messengerUnreadCount}
+        {homeGamesEnabled && (
+          <View style={homeStyles.gamesSection}>
+            <SegmentedControl
+              values={[`Текущие игры [${currentGames.length}]`, 'Прошедшие игры']}
+              selectedIndex={gamesTab}
+              onChange={event => setGamesTab(event.nativeEvent.selectedSegmentIndex)}
+              tintColor={colors.primary}
+              fontStyle={homeStyles.segmentFont}
+              activeFontStyle={homeStyles.activeSegmentFont}
+            />
+            <View style={homeStyles.gameList}>
+              {(gamesTab === 0 ? currentGames : pastGames).map(game => (
+                <GameCard key={game.id} game={game} showScore />
+              ))}
+              {(gamesTab === 0 ? currentGames : pastGames).length === 0 && (
+                <View style={homeStyles.emptyBlock}>
+                  <Text style={homeStyles.emptyText}>
+                    {gamesTab === 0 ? 'Сейчас текущих игр нет.' : 'Прошедшие игры не найдены.'}
                   </Text>
                 </View>
               )}
-              <Icon name="chatbubbles" size={24} color={colors.primary} style={quickNavStyles.icon} />
-              <Text style={quickNavStyles.title}>Общение</Text>
-              <Text style={quickNavStyles.subtitle}>
-                {isMessengerAuthenticated ? 'Чаты команды' : 'Вход по приглашению'}
-              </Text>
-            </TouchableOpacity>
-          </Link>
+              {gamesTab === 1 && (
+                <Link href="/team-games" asChild>
+                  <TouchableOpacity accessibilityRole="button" style={homeStyles.allGamesButton}>
+                    <Text style={homeStyles.allGamesText}>Смотреть все игры</Text>
+                  </TouchableOpacity>
+                </Link>
+              )}
+            </View>
+          </View>
+        )}
 
-          {/* Турниры */}
-          <Link href="/tournaments" asChild>
-            <TouchableOpacity style={quickNavStyles.item}>
-              <Icon name="trophy" size={24} color={colors.primary} style={quickNavStyles.icon} />
-              <Text style={quickNavStyles.title}>Турниры</Text>
-              <Text style={quickNavStyles.subtitle}>
-                {getDeclension(tournamentsCount, ['текущий', 'текущих', 'текущих'])}
-              </Text>
-            </TouchableOpacity>
-          </Link>
-
-          {/* Архив матчей */}
-          <Link href="/season" asChild>
-            <TouchableOpacity style={quickNavStyles.item}>
-              <Icon name="archive" size={24} color={colors.primary} style={quickNavStyles.icon} />
-              <Text style={quickNavStyles.title}>Архив матчей</Text>
-              <Text style={quickNavStyles.subtitle}>История матчей</Text>
-            </TouchableOpacity>
-          </Link>
-
-          {/* Мобильные игры */}
-          <Link href="/mobilegames" asChild>
-            <TouchableOpacity style={quickNavStyles.item}>
-              <Icon name="game-controller" size={24} color={colors.primary} style={quickNavStyles.icon} />
-              <Text style={quickNavStyles.title}>Мобильные игры</Text>
-            </TouchableOpacity>
-          </Link>
-
-          {/* Игроки */}
-          <Link href="/players" asChild>
-            <TouchableOpacity style={quickNavStyles.item}>
-              <Icon name="people" size={24} color={colors.primary} style={quickNavStyles.icon} />
-              <Text style={quickNavStyles.title}>Игроки</Text>
-              <Text style={quickNavStyles.subtitle}>
-                {playersCount > 0 ? `${playersCount} игроков` : 'Состав команды'}
-              </Text>
-            </TouchableOpacity>
-          </Link>
-        </View>
+        {homeNewsEnabled && (
+          <View style={homeStyles.newsSection}>
+            <Text style={homeStyles.sectionTitle}>Новости</Text>
+            {news.map(article => <NewsCard article={article} key={article.id} />)}
+            {news.length === 0 && (
+              <View style={homeStyles.emptyBlock}><Text style={homeStyles.emptyText}>Новостей пока нет.</Text></View>
+            )}
+          </View>
+        )}
 
         {/* Upcoming Games */}
         {upcomingGames.length > 0 && (
@@ -409,34 +289,20 @@ export default function HomeScreen() {
             ))}
           </View>
         )}
-        {/* Ссылки "Настройки" и "О программе" в одной строке */}
-        <View style={footerLinkStyles.row}>
-          <Link href="/settings" asChild>
-            <TouchableOpacity
-              style={footerLinkStyles.button}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Открыть настройки"
-            >
-              <Text style={[commonStyles.textSecondary, footerLinkStyles.text]}>
-                Настройки
-              </Text>
-            </TouchableOpacity>
-          </Link>
-          <Link href="/about" asChild>
-            <TouchableOpacity
-              style={footerLinkStyles.button}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Открыть информацию о программе"
-            >
-              <Text style={[commonStyles.textSecondary, footerLinkStyles.text]}>
-                О программе
-              </Text>
-            </TouchableOpacity>
-          </Link>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
+
+const homeStyles = StyleSheet.create({
+  gamesSection: { marginBottom: 24 },
+  gameList: { marginTop: 14 },
+  segmentFont: { fontSize: 13, fontWeight: '600' },
+  activeSegmentFont: { color: colors.background, fontWeight: '700' },
+  newsSection: { marginBottom: 24 },
+  sectionTitle: { color: colors.text, fontSize: 22, fontWeight: '800', marginBottom: 12 },
+  emptyBlock: { minHeight: 80, alignItems: 'center', justifyContent: 'center', borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, padding: 16, marginBottom: 12 },
+  emptyText: { color: colors.textSecondary, fontSize: 14, textAlign: 'center' },
+  allGamesButton: { minHeight: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: colors.primary, marginTop: 2 },
+  allGamesText: { color: colors.primary, fontSize: 15, fontWeight: '700' },
+});

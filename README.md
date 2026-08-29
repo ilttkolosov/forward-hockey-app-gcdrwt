@@ -247,6 +247,9 @@ docs/                      Baseline и сценарии ручной прове�
 - `components/StartupConfigGate.tsx` — обслуживание, обновления и объявления с приоритетами.
 - `services/startupConfigRuntime.ts` — применение API-настроек и feature flags в текущем сеансе.
 - `services/startupConfigPolicy.ts` — сравнение версий и выбор платформенной ссылки.
+- `services/newsService.ts` — WordPress REST API и офлайн-кэш новостей.
+- `app/news/[id].tsx` — полная новость внутри приложения.
+- `app/team-games.tsx` — все завершённые игры «Динамо-Форвард» (team ID `74`).
 - `services/persistentCache.ts` — типизированная оболочка постоянного кэша.
 - `services/dataAvailability.ts` — состояние использования сохранённых данных.
 - `contexts/NetworkStatusContext.tsx` — подписка на состояние сети.

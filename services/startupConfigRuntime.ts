@@ -5,7 +5,13 @@ import { setDefaultRequestTimeout } from './httpClient';
 import { playerDownloadService } from './playerDataService';
 import { configureTournamentApi } from './tournamentsApi';
 
-type FeatureName = 'push_notifications' | 'live_scores' | 'f2f' | 'mobile_games';
+type FeatureName =
+  | 'push_notifications'
+  | 'live_scores'
+  | 'f2f'
+  | 'mobile_games'
+  | 'home_games'
+  | 'home_news';
 
 let activeConfig: StartupConfig | null = null;
 const listeners = new Set<() => void>();
@@ -37,6 +43,14 @@ export const getActiveStartupConfig = (): StartupConfig | null => activeConfig;
 export const getConfiguredApiUrl = (path: string): string => {
   const baseUrl = safeApiBaseUrl(activeConfig?.api?.base_url);
   return `${baseUrl}/${path.replace(/^\/+/, '')}`;
+};
+
+export const getConfiguredSiteOrigin = (): string => {
+  try {
+    return new URL(safeApiBaseUrl(activeConfig?.api?.base_url)).origin;
+  } catch {
+    return 'https://www.hc-forward.com';
+  }
 };
 
 export const isStartupFeatureEnabled = (name: FeatureName): boolean => (

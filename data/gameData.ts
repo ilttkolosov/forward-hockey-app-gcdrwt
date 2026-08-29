@@ -610,11 +610,11 @@ let pastGamesForTeam74Cache: { data: Game[]; timestamp: number } | null = null;
 /**
  * Получает прошедшие игры ТОЛЬКО для команды 74 (Динамо-Форвард) за последние 3 года
  */
-export async function getPastGamesForTeam74(): Promise<Game[]> {
+export async function getPastGamesForTeam74(force = false): Promise<Game[]> {
   const now = Date.now();
 
   // Проверяем кэш
-  if (pastGamesForTeam74Cache && now - pastGamesForTeam74Cache.timestamp < PAST_GAMES_CACHE_DURATION) {
+  if (!force && pastGamesForTeam74Cache && now - pastGamesForTeam74Cache.timestamp < PAST_GAMES_CACHE_DURATION) {
     console.log('✅ Returning past games for team 74 from dedicated cache');
     return pastGamesForTeam74Cache.data;
   }
@@ -632,7 +632,7 @@ export async function getPastGamesForTeam74(): Promise<Game[]> {
       date_from: pastDateString,
       date_to: todayString,
       teams: '74',
-      useCache: true,
+      useCache: !force,
     });
 
     // Сортируем по убыванию даты (сначала самые свежие)

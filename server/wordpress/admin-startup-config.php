@@ -60,6 +60,8 @@ function app_startup_config_defaults() {
             'live_scores' => true,
             'f2f' => true,
             'mobile_games' => true,
+            'home_games' => true,
+            'home_news' => true,
         ],
         'maintenance' => [
             'enabled' => false,
@@ -435,6 +437,8 @@ function app_admin_startup_config_save() {
             'live_scores' => !empty($_POST['feature_live_scores']),
             'f2f' => !empty($_POST['feature_f2f']),
             'mobile_games' => !empty($_POST['feature_mobile_games']),
+            'home_games' => !empty($_POST['feature_home_games']),
+            'home_news' => !empty($_POST['feature_home_news']),
         ],
         'maintenance' => [
             'enabled' => !empty($_POST['maintenance_enabled']),
@@ -617,7 +621,7 @@ function app_admin_startup_config_page() {
             <h2>Функции и служебные режимы</h2>
             <table class="form-table">
                 <tr><th scope="row">Доступные функции</th><td>
-                    <?php foreach (['push_notifications' => 'Push', 'live_scores' => 'Live-счёт', 'f2f' => 'F2F', 'mobile_games' => 'Мобильные игры'] as $key => $label): ?>
+                    <?php foreach (['push_notifications' => 'Push', 'live_scores' => 'Live-счёт', 'f2f' => 'F2F', 'mobile_games' => 'Мобильные игры', 'home_games' => 'Текущие и прошедшие игры на главной', 'home_news' => 'Новости на главной'] as $key => $label): ?>
                         <label style="display:block;"><input type="checkbox" name="feature_<?php echo esc_attr($key); ?>" value="1" <?php checked(!empty($config['features'][$key])); ?>> <?php echo esc_html($label); ?></label>
                     <?php endforeach; ?>
                 </td></tr>

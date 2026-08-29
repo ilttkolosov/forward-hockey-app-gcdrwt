@@ -790,6 +790,8 @@ function RootLayoutContent() {
           <Stack.Screen name="player/[id]" />
           <Stack.Screen name="upcoming" />
           <Stack.Screen name="game/[id]" />
+          <Stack.Screen name="team-games" />
+          <Stack.Screen name="news/[id]" />
           <Stack.Screen name="season/[id]" />
           <Stack.Screen name="tournaments/[id]" />
           <Stack.Screen name="command/[id]" />
