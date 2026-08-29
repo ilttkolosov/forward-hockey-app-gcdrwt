@@ -29,6 +29,7 @@ import { saveMessengerMediaToDevice } from "../../services/messengerMediaSave";
 import { colors } from "../../styles/commonStyles";
 import { getMessengerFilePresentation } from "./filePresentation";
 import MessengerLocationPreview from "./MessengerLocationPreview";
+import MessengerMediaViewer from "./MessengerMediaViewer";
 import MessengerVideoPlayer from "./MessengerVideoPlayer";
 import type { MessengerLocation, MessengerMedia } from "./types";
 
@@ -39,6 +40,12 @@ interface MessengerAttachmentViewProps {
   accessToken: string;
   deferAutomaticCache?: boolean;
   playbackEnabled?: boolean;
+  viewerTitle?: string;
+  viewerSubtitle?: string;
+  onShowInChat?: () => void;
+  onReply?: () => void;
+  onForward?: () => void;
+  onDelete?: () => void;
 }
 
 const MAX_REMEMBERED_VIDEO_POSITIONS = 100;
@@ -76,15 +83,27 @@ function MessengerAttachmentView({
   accessToken,
   deferAutomaticCache = false,
   playbackEnabled = false,
+  viewerTitle,
+  viewerSubtitle,
+  onShowInChat,
+  onReply,
+  onForward,
+  onDelete,
 }: MessengerAttachmentViewProps) {
   const items = useMemo(
     () => (mediaItems?.length ? mediaItems : media ? [media] : []),
     [media, mediaItems],
   );
+  const viewerItems = useMemo(
+    () => items.filter((item) => item.type !== "file"),
+    [items],
+  );
   const itemIdentity = items.map((item) => item.id).join(":");
   const [localUris, setLocalUris] = useState<Record<string, string>>({});
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [viewerSession, setViewerSession] = useState(0);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [openingFileId, setOpeningFileId] = useState<string | null>(null);
   const openingFileRef = useRef<string | null>(null);
@@ -96,6 +115,7 @@ function MessengerAttachmentView({
     setLocalUris({});
     setLoadingIds(new Set());
     setErrors({});
+    setViewerIndex(null);
   }, [itemIdentity]);
 
   useEffect(() => {
@@ -179,6 +199,16 @@ function MessengerAttachmentView({
       .forEach((item) => void ensureLocal(item).catch(() => undefined));
   }, [deferAutomaticCache, ensureLocal, itemIdentity, items]);
 
+  useEffect(() => {
+    if (viewerIndex === null) return;
+    [viewerIndex - 1, viewerIndex, viewerIndex + 1].forEach((index) => {
+      const item = viewerItems[index];
+      if (item && (index === viewerIndex || item.type === "image")) {
+        void ensureLocal(item).catch(() => undefined);
+      }
+    });
+  }, [ensureLocal, viewerIndex, viewerItems]);
+
   if (location) return <MessengerLocationPreview location={location} />;
   if (!items.length) return null;
 
@@ -229,20 +259,6 @@ function MessengerAttachmentView({
         window.open(uri, "_blank", "noopener,noreferrer");
         return;
       }
-      if (item.type === "image" || item.type === "video") {
-        try {
-          await openMessengerFilePreview(uri);
-        } catch (previewError) {
-          Alert.alert(
-            "Не удалось открыть",
-            previewError instanceof Error
-              ? previewError.message
-              : "Системный просмотрщик недоступен.",
-          );
-        }
-        return;
-      }
-
       try {
         await openMessengerFilePreview(uri);
         return;
@@ -272,7 +288,21 @@ function MessengerAttachmentView({
   };
 
   const openItem = async (item: MessengerMedia) => {
-    await openFile(item);
+    if (item.type === "file") {
+      await openFile(item);
+      return;
+    }
+    const index = viewerItems.findIndex(
+      (candidate) => candidate.id === item.id,
+    );
+    if (index < 0) return;
+    setViewerSession((current) => current + 1);
+    setViewerIndex(index);
+    try {
+      await ensureLocal(item);
+    } catch {
+      // The fullscreen viewer keeps a visible retry state.
+    }
   };
 
   const renderAlbum = () => {
@@ -511,6 +541,26 @@ function MessengerAttachmentView({
           <Text style={styles.errorText}>Не удалось загрузить · повторить</Text>
         </TouchableOpacity>
       )}
+
+      <MessengerMediaViewer
+        items={viewerItems}
+        index={viewerIndex}
+        session={viewerSession}
+        localUris={localUris}
+        loadingIds={loadingIds}
+        errors={errors}
+        savingId={savingId}
+        title={viewerTitle}
+        subtitle={viewerSubtitle}
+        onIndexChange={setViewerIndex}
+        onClose={() => setViewerIndex(null)}
+        onEnsureLocal={ensureLocal}
+        onSave={saveToDevice}
+        onShowInChat={onShowInChat}
+        onReply={onReply}
+        onForward={onForward}
+        onDelete={onDelete}
+      />
     </>
   );
 }
