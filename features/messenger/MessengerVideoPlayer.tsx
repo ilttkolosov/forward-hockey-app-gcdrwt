@@ -109,10 +109,10 @@ export default function MessengerVideoPlayer({
         player={player}
         nativeControls={nativeControls && !playbackError}
         contentFit="contain"
-        fullscreenOptions={{ enable: true, orientation: "landscape" }}
-        allowsPictureInPicture={false}
+        fullscreenOptions={{ enable: true }}
+        allowsPictureInPicture
         allowsVideoFrameAnalysis={false}
-        surfaceType="surfaceView"
+        surfaceType="textureView"
         onFirstFrameRender={() => {
           setFirstFrameReady(true);
           if (previewOnly) player.pause();

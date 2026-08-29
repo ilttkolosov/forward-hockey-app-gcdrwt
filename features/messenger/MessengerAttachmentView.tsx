@@ -14,6 +14,7 @@ import {
   FlatList,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -45,6 +46,12 @@ interface MessengerAttachmentViewProps {
   accessToken: string;
   deferAutomaticCache?: boolean;
   playbackEnabled?: boolean;
+  viewerTitle?: string;
+  viewerSubtitle?: string;
+  onShowInChat?: () => void;
+  onReply?: () => void;
+  onForward?: () => void;
+  onDelete?: () => void;
 }
 
 const MAX_REMEMBERED_VIDEO_POSITIONS = 100;
@@ -82,6 +89,12 @@ function MessengerAttachmentView({
   accessToken,
   deferAutomaticCache = false,
   playbackEnabled = false,
+  viewerTitle,
+  viewerSubtitle,
+  onShowInChat,
+  onReply,
+  onForward,
+  onDelete,
 }: MessengerAttachmentViewProps) {
   const insets = useSafeAreaInsets();
   const { width: viewerWidth, height: viewerHeight } = useWindowDimensions();
@@ -101,6 +114,7 @@ function MessengerAttachmentView({
   const viewerMedia =
     viewerIndex === null ? null : (viewerItems[viewerIndex] ?? null);
   const [viewerSession, setViewerSession] = useState(0);
+  const [viewerMenuVisible, setViewerMenuVisible] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [openingFileId, setOpeningFileId] = useState<string | null>(null);
   const openingFileRef = useRef<string | null>(null);
@@ -113,6 +127,7 @@ function MessengerAttachmentView({
     setLoadingIds(new Set());
     setErrors({});
     setViewerIndex(null);
+    setViewerMenuVisible(false);
   }, [itemIdentity]);
 
   useEffect(() => {
@@ -208,9 +223,7 @@ function MessengerAttachmentView({
 
   useEffect(() => {
     if (Platform.OS === "web" || viewerMedia?.type !== "video") return;
-    void ScreenOrientation.lockAsync(
-      ScreenOrientation.OrientationLock.DEFAULT,
-    ).catch((error) =>
+    void ScreenOrientation.unlockAsync().catch((error) =>
       messengerLog("warn", "media.video.orientation_unlock_failed", {
         error: error instanceof Error ? error.message : String(error),
       }),
@@ -303,18 +316,29 @@ function MessengerAttachmentView({
       await openFile(item);
       return;
     }
+    const index = viewerItems.findIndex(
+      (candidate) => candidate.id === item.id,
+    );
+    if (index >= 0) {
+      setViewerSession((current) => current + 1);
+      setViewerIndex(index);
+    }
     try {
       await ensureLocal(item);
-      const index = viewerItems.findIndex(
-        (candidate) => candidate.id === item.id,
-      );
-      if (index >= 0) {
-        setViewerSession((current) => current + 1);
-        setViewerIndex(index);
-      }
     } catch {
-      // The tile keeps a visible retry state.
+      // The fullscreen viewer keeps a visible retry state.
     }
+  };
+
+  const closeViewer = () => {
+    setViewerMenuVisible(false);
+    setViewerIndex(null);
+  };
+
+  const runViewerMessageAction = (action?: () => void) => {
+    closeViewer();
+    if (!action) return;
+    setTimeout(action, Platform.OS === "ios" ? 420 : 120);
   };
 
   const renderAlbum = () => {
@@ -443,16 +467,6 @@ function MessengerAttachmentView({
                   style={styles.inlineVideo}
                   onFallback={() => void openFile(single)}
                 />
-                <TouchableOpacity
-                  style={styles.inlineVideoTap}
-                  activeOpacity={1}
-                  onPress={() => {
-                    setViewerSession((current) => current + 1);
-                    setViewerIndex(0);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Открыть видео на весь экран"
-                />
               </>
             ) : singleVideoRemoteUri ? (
               <MessengerVideoPlayer
@@ -484,6 +498,13 @@ function MessengerAttachmentView({
                 </Text>
               </View>
             )}
+            <TouchableOpacity
+              style={styles.inlineVideoTap}
+              activeOpacity={1}
+              onPress={() => void openItem(single)}
+              accessibilityRole="button"
+              accessibilityLabel="Открыть видео на весь экран"
+            />
           </View>
           <View style={styles.inlineVideoFooter}>
             <View style={styles.inlineVideoText}>
@@ -567,7 +588,7 @@ function MessengerAttachmentView({
         animationType="fade"
         presentationStyle="fullScreen"
         statusBarTranslucent={false}
-        onRequestClose={() => setViewerIndex(null)}
+        onRequestClose={closeViewer}
       >
         <View
           style={[
@@ -579,45 +600,124 @@ function MessengerAttachmentView({
           ]}
         >
           <View style={styles.viewerHeader}>
-            <Text style={styles.viewerTitle} numberOfLines={1}>
-              {viewerMedia?.original_name ||
-                (viewerMedia?.type === "image" ? "Фотография" : "Видео")}
-            </Text>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={closeViewer}
+              hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+              accessibilityLabel="Закрыть просмотр"
+            >
+              <Icon name="chevron-back" size={30} color={colors.white} />
+            </TouchableOpacity>
+            <View style={styles.viewerHeading}>
+              <Text style={styles.viewerTitle} numberOfLines={1}>
+                {viewerTitle ||
+                  viewerMedia?.original_name ||
+                  (viewerMedia?.type === "image" ? "Фотография" : "Видео")}
+              </Text>
+              {(viewerSubtitle || (viewerTitle && viewerMedia)) && (
+                <Text style={styles.viewerSubtitle} numberOfLines={1}>
+                  {viewerSubtitle || viewerMedia?.original_name}
+                </Text>
+              )}
+            </View>
             {viewerIndex !== null && viewerItems.length > 1 && (
               <Text style={styles.viewerCounter}>
                 {viewerIndex + 1} из {viewerItems.length}
               </Text>
             )}
-            {viewerMedia && (
-              <TouchableOpacity
-                style={styles.viewerActionButton}
-                onPress={() => void saveToDevice(viewerMedia)}
-                disabled={Boolean(savingId)}
-                accessibilityLabel="Сохранить вложение"
-              >
-                {savingId === viewerMedia.id ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Icon
-                    name="download-outline"
-                    size={24}
-                    color={colors.white}
-                  />
-                )}
-              </TouchableOpacity>
-            )}
             <TouchableOpacity
               style={[
-                styles.closeButton,
+                styles.viewerActionButton,
                 { marginRight: Math.max(insets.right, 8) },
               ]}
-              onPress={() => setViewerIndex(null)}
+              onPress={() => setViewerMenuVisible((current) => !current)}
               hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
-              accessibilityLabel="Закрыть просмотр"
+              accessibilityLabel="Действия с видео"
             >
-              <Icon name="close" size={28} color={colors.white} />
+              <Icon name="ellipsis-horizontal" size={28} color={colors.white} />
             </TouchableOpacity>
           </View>
+          {viewerMenuVisible && viewerMedia && (
+            <Pressable
+              style={styles.viewerMenuBackdrop}
+              onPress={() => setViewerMenuVisible(false)}
+            >
+              <Pressable
+                style={[
+                  styles.viewerMenu,
+                  {
+                    top: Math.max(insets.top, 12) + 58,
+                    right: Math.max(insets.right, 14),
+                  },
+                ]}
+                onPress={(event) => event.stopPropagation()}
+              >
+                <TouchableOpacity
+                  style={styles.viewerMenuAction}
+                  onPress={() => void saveToDevice(viewerMedia)}
+                  disabled={savingId === viewerMedia.id}
+                >
+                  {savingId === viewerMedia.id ? (
+                    <ActivityIndicator color={colors.white} />
+                  ) : (
+                    <Icon
+                      name="download-outline"
+                      size={23}
+                      color={colors.white}
+                    />
+                  )}
+                  <Text style={styles.viewerMenuText}>Сохранить в галерею</Text>
+                </TouchableOpacity>
+                {onShowInChat && (
+                  <TouchableOpacity
+                    style={styles.viewerMenuAction}
+                    onPress={() => runViewerMessageAction(onShowInChat)}
+                  >
+                    <Icon
+                      name="return-down-back-outline"
+                      size={23}
+                      color={colors.white}
+                    />
+                    <Text style={styles.viewerMenuText}>Показать в чате</Text>
+                  </TouchableOpacity>
+                )}
+                {onReply && (
+                  <TouchableOpacity
+                    style={styles.viewerMenuAction}
+                    onPress={() => runViewerMessageAction(onReply)}
+                  >
+                    <Icon name="arrow-undo" size={23} color={colors.white} />
+                    <Text style={styles.viewerMenuText}>Ответить</Text>
+                  </TouchableOpacity>
+                )}
+                {onForward && (
+                  <TouchableOpacity
+                    style={styles.viewerMenuAction}
+                    onPress={() => runViewerMessageAction(onForward)}
+                  >
+                    <Icon name="arrow-redo" size={23} color={colors.white} />
+                    <Text style={styles.viewerMenuText}>Переслать</Text>
+                  </TouchableOpacity>
+                )}
+                {onDelete && (
+                  <TouchableOpacity
+                    style={[styles.viewerMenuAction, styles.viewerMenuDanger]}
+                    onPress={() => runViewerMessageAction(onDelete)}
+                  >
+                    <Icon name="trash-outline" size={23} color="#FF5D5D" />
+                    <Text
+                      style={[
+                        styles.viewerMenuText,
+                        styles.viewerMenuDangerText,
+                      ]}
+                    >
+                      Удалить
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </Pressable>
+            </Pressable>
+          )}
           {viewerIndex !== null && (
             <FlatList
               key={`attachment-viewer-${viewerSession}-${viewerWidth}-${viewerPageHeight}`}
@@ -880,11 +980,24 @@ const styles = StyleSheet.create({
     minHeight: 56,
     flexDirection: "row",
     alignItems: "center",
-    paddingLeft: 16,
+    gap: 8,
+    paddingLeft: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "rgba(255,255,255,0.2)",
   },
-  viewerTitle: { flex: 1, color: colors.white, fontWeight: "700" },
+  viewerHeading: { flex: 1, minWidth: 0, alignItems: "center" },
+  viewerTitle: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  viewerSubtitle: {
+    marginTop: 2,
+    color: "rgba(255,255,255,0.58)",
+    fontSize: 11,
+    textAlign: "center",
+  },
   viewerCounter: {
     marginHorizontal: 8,
     color: "rgba(255,255,255,0.72)",
@@ -906,6 +1019,32 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: "rgba(255,255,255,0.12)",
   },
+  viewerMenuBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
+    backgroundColor: "rgba(0,0,0,0.08)",
+  },
+  viewerMenu: {
+    position: "absolute",
+    width: 270,
+    overflow: "hidden",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.18)",
+    borderRadius: 22,
+    backgroundColor: "rgba(24,24,25,0.96)",
+  },
+  viewerMenuAction: {
+    minHeight: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.14)",
+  },
+  viewerMenuDanger: { borderBottomWidth: 0 },
+  viewerMenuText: { color: colors.white, fontSize: 16, fontWeight: "500" },
+  viewerMenuDangerText: { color: "#FF5D5D" },
   viewerPager: { flex: 1 },
   viewerPage: { flex: 1, alignItems: "center", justifyContent: "center" },
   viewerLoading: {

@@ -96,6 +96,12 @@ export default ({ config }) => {
       ],
       "expo-secure-store",
       [
+        "expo-video",
+        {
+          supportsPictureInPicture: true,
+        },
+      ],
+      [
         "expo-camera",
         {
           cameraPermission:
