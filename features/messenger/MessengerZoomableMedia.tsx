@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
 import { StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
@@ -40,11 +40,8 @@ export default function MessengerZoomableMedia({
   const translateY = useSharedValue(0);
   const startTranslateX = useSharedValue(0);
   const startTranslateY = useSharedValue(0);
-  const [zoomed, setZoomed] = useState(false);
-
   const notifyZoom = useCallback(
     (nextZoomed: boolean) => {
-      setZoomed(nextZoomed);
       onZoomChange?.(nextZoomed);
     },
     [onZoomChange],
@@ -122,7 +119,11 @@ export default function MessengerZoomableMedia({
       });
 
     const pan = Gesture.Pan()
-      .enabled(zoomed)
+      .manualActivation(true)
+      .onTouchesMove((_event, stateManager) => {
+        if (scale.value > 1.01) stateManager.activate();
+        else stateManager.fail();
+      })
       .onBegin(() => {
         startTranslateX.value = translateX.value;
         startTranslateY.value = translateY.value;
@@ -195,7 +196,6 @@ export default function MessengerZoomableMedia({
     translateX,
     translateY,
     width,
-    zoomed,
   ]);
 
   const animatedStyle = useAnimatedStyle(() => ({

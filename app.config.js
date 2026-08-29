@@ -50,6 +50,7 @@ export default ({ config }) => {
     },
     ios: {
       supportsTablet: true,
+      requireFullScreen: true,
       buildNumber: "151",
       bundleIdentifier: "com.aleksandrkolosov.forward2014",
       infoPlist: {
@@ -58,6 +59,18 @@ export default ({ config }) => {
         CFBundleLocalizations: ["ru"],
         CFBundleAllowMixedLocalizations: true,
         ITSAppUsesNonExemptEncryption: false,
+        UISupportedInterfaceOrientations: [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationPortraitUpsideDown",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight",
+        ],
+        "UISupportedInterfaceOrientations~ipad": [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationPortraitUpsideDown",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight",
+        ],
       },
     },
     android: {

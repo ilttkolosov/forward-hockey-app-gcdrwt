@@ -68,15 +68,31 @@ export default function MessengerMediaViewer({
   const [zoomed, setZoomed] = useState(false);
   const visible = index !== null;
   const media = index === null ? null : (items[index] ?? null);
+  const headerTop = Math.max(insets.top, 8);
+  const videoTop = headerTop + 66;
+  const videoBottom = Math.max(insets.bottom, 8);
+  const videoHeight = Math.max(1, height - videoTop - videoBottom);
 
   useEffect(() => {
     if (!visible || Platform.OS === "web") return;
     let active = true;
-    void ScreenOrientation.unlockAsync()
-      .then(() => {
+    const requestedLock = ScreenOrientation.OrientationLock.ALL;
+    void ScreenOrientation.supportsOrientationLockAsync(requestedLock)
+      .then((supported) =>
+        ScreenOrientation.lockAsync(
+          supported
+            ? requestedLock
+            : ScreenOrientation.OrientationLock.DEFAULT,
+        ).then(() => supported),
+      )
+      .then(async (supported) => {
         if (!active) return;
+        const appliedLock = await ScreenOrientation.getOrientationLockAsync();
         messengerLog("info", "media.viewer.orientation_unlocked", {
+          applied_lock: appliedLock,
           platform: Platform.OS,
+          requested_lock: requestedLock,
+          supported,
         });
       })
       .catch((error) =>
@@ -139,22 +155,29 @@ export default function MessengerMediaViewer({
           </MessengerZoomableMedia>
         )}
         {localUri && item.type === "video" && (
-          <MessengerZoomableMedia
-            width={width}
-            height={height}
-            resetKey={`${session}:${item.id}`}
-            nativeChild
-            onZoomChange={setZoomed}
+          <View
+            style={[
+              styles.videoStage,
+              { top: videoTop, width, height: videoHeight },
+            ]}
           >
-            <MessengerVideoPlayer
-              uri={localUri}
-              style={{ width, height }}
-              active={visible && itemIndex === index}
-              autoPlay
-              fullscreenEnabled={false}
-              onFallback={() => void onEnsureLocal(item)}
-            />
-          </MessengerZoomableMedia>
+            <MessengerZoomableMedia
+              width={width}
+              height={videoHeight}
+              resetKey={`${session}:${item.id}`}
+              nativeChild
+              onZoomChange={setZoomed}
+            >
+              <MessengerVideoPlayer
+                uri={localUri}
+                style={{ width, height: videoHeight }}
+                active={visible && itemIndex === index}
+                autoPlay
+                fullscreenEnabled={false}
+                onFallback={() => void onEnsureLocal(item)}
+              />
+            </MessengerZoomableMedia>
+          </View>
         )}
         {!localUri && (
           <TouchableOpacity
@@ -227,7 +250,7 @@ export default function MessengerMediaViewer({
           style={[
             styles.header,
             {
-              top: Math.max(insets.top, 8),
+              top: headerTop,
               left: Math.max(insets.left, 8),
               right: Math.max(insets.right, 8),
             },
@@ -355,6 +378,12 @@ const styles = StyleSheet.create({
   page: {
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "#000000",
+  },
+  videoStage: {
+    position: "absolute",
+    left: 0,
+    overflow: "hidden",
     backgroundColor: "#000000",
   },
   loading: {
