@@ -36,7 +36,7 @@ export default ({ config }) => {
     // to users is restored per platform by withAppDisplayName below.
     name: "ForwardHockey14",
     slug: "Forward",
-    version: "2.3.10",
+    version: "2.3.11",
     // Native targets advertise landscape support for the messenger video
     // viewer. The root layout keeps ordinary application screens portrait.
     orientation: "default",
@@ -50,7 +50,7 @@ export default ({ config }) => {
     },
     ios: {
       supportsTablet: true,
-      buildNumber: "142",
+      buildNumber: "143",
       bundleIdentifier: "com.aleksandrkolosov.forward2014",
       infoPlist: {
         CFBundleDisplayName: "ХК Форвард 14",
@@ -61,7 +61,7 @@ export default ({ config }) => {
       },
     },
     android: {
-      versionCode: 142,
+      versionCode: 143,
       adaptiveIcon: {
         foregroundImage: "./assets/icons/myIcon.png",
         backgroundColor: "#ffffff",
