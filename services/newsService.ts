@@ -80,7 +80,10 @@ export const wordpressHtmlToText = (html = ''): string => decodeHtmlEntities(
 const activateFooGalleryImages = (html: string): string => html.replace(
   /<img([^>]*?)data-src-fg="([^"]+)"([^>]*?)>/gi,
   (_match, before: string, lazyUrl: string, after: string) => {
-    const responsiveUrl = lazyUrl.replace(/\/w_\d+(?:,h_\d+)?\//i, '/w_720,h_480/');
+    const responsiveUrl = lazyUrl.replace(
+      /\/w_\d+(?:,h_\d+)?(?=[,/])/i,
+      '/w_720,h_480',
+    );
     const attributes = `${before} ${after}`
       .replace(/\sdata-src-fg="[^"]*"/gi, '')
       .replace(/\ssrc="[^"]*"/gi, '')
