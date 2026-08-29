@@ -22,8 +22,9 @@
     "version:patch": "node scripts/bump-app-version.mjs patch",
     "version:minor": "node scripts/bump-app-version.mjs minor",
     "check:messenger-unread": "node --no-warnings --experimental-strip-types checks/messenger-unread-policy.mjs",
+    "check:startup-config": "node --no-warnings --experimental-strip-types checks/startup-config-policy.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "npm run photos:generate && npm run logos:generate && npm run seed:verify && npm run generate:route-types && npm run check:messenger-unread && npm run typecheck && npm run lint",
+    "check": "npm run photos:generate && npm run logos:generate && npm run seed:verify && npm run generate:route-types && npm run check:messenger-unread && npm run check:startup-config && npm run typecheck && npm run lint",
     "prebuild": "expo prebuild",
     "eas-build": "npx --yes eas-cli@21.7.0 build"
   },

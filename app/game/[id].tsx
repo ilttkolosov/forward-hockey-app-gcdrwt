@@ -28,6 +28,7 @@ import ProtocolEventCard from '../../components/ProtocolEventCard';
 import { getPlayerById } from '../../data/playerData';
 import { useReferenceDataRevision } from '../../services/referenceDataUpdates';
 import { useKeepAwake } from 'expo-keep-awake';
+import { useStartupFeature } from '../../services/startupConfigRuntime';
 
 function KeepScreenAwakeForVideo({ tag }: { tag: string }) {
   useKeepAwake(tag);
@@ -596,6 +597,8 @@ const renderPlayerStatsTable = (
 export default function GameDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const f2fEnabled = useStartupFeature('f2f');
+  const liveScoresEnabled = useStartupFeature('live_scores');
   const referenceRevision = useReferenceDataRevision([
     'teams',
     'venues',
@@ -625,7 +628,7 @@ export default function GameDetailsScreen() {
     visibleTabs.push('Статистика');
   }
   visibleTabs.push('Арена');
-  visibleTabs.push('F2F');
+  if (f2fEnabled) visibleTabs.push('F2F');
 
   const tabs = visibleTabs;
   //////////
@@ -898,10 +901,10 @@ export default function GameDetailsScreen() {
 
 
   useEffect(() => {
-    if (gameDetails && !f2fLoadedRef.current) {
+    if (f2fEnabled && gameDetails && !f2fLoadedRef.current) {
       loadF2fGames(gameDetails);
     }
-  }, [gameDetails, loadF2fGames]);
+  }, [f2fEnabled, gameDetails, loadF2fGames]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -915,7 +918,7 @@ export default function GameDetailsScreen() {
   const liveGameDate = gameDetails?.event_date;
 
   useEffect(() => {
-    if (!liveGameId || !liveGameDate) return;
+    if (!liveScoresEnabled || !liveGameId || !liveGameDate) return;
 
     // Функция обновления счёта
     const updateLiveScore = async () => {
@@ -979,7 +982,7 @@ export default function GameDetailsScreen() {
 
     // Очистка при размонтировании
     return () => clearInterval(intervalId);
-  }, [isGameStarted, liveGameDate, liveGameId]);
+  }, [isGameStarted, liveGameDate, liveGameId, liveScoresEnabled]);
 
 
   // === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ОТОБРАЖЕНИЯ ===

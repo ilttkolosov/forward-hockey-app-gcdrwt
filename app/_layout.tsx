@@ -55,7 +55,7 @@ import {
   type ReferenceDataLocalState,
 } from '../services/referenceDataService';
 import { syncCompletedHistoricalGames } from '../services/historicalSync';
-import { showAppUpdateNotice } from '../services/appUpdateService';
+import { applyStartupConfig, getConfiguredApiUrl } from '../services/startupConfigRuntime';
 import { synchronizeTrainings } from '../services/trainingService';
 import { startTrainingNotificationCleanup } from '../services/trainingNotificationService';
 import {
@@ -78,6 +78,7 @@ import {
 } from '../services/appInteractive';
 import PersistentBottomNavigation from '../components/PersistentBottomNavigation';
 import { warmMessengerUiAssets } from '../services/messengerUiAssets';
+import StartupConfigGate from '../components/StartupConfigGate';
 global.Buffer = Buffer;
 
 Notifications.setNotificationHandler({
@@ -292,7 +293,7 @@ const syncPushSubscriptionStatus = async () => {
     const token = await getProjectExpoPushToken();
 
     // Отправляем запрос на проверку подписки
-    const response = await fetch('https://www.hc-forward.com/wp-json/app/v1/push-subscription', {
+    const response = await fetch(getConfiguredApiUrl('/push-subscription'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token }),
@@ -322,6 +323,7 @@ function RootLayoutContent() {
   const handledNotificationId = useRef<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [initializationError, setInitializationError] = useState<string | null>(null);
+  const [startupConfig, setStartupConfig] = useState<StartupConfig | null>(null);
   const [initializationMessage, setInitializationMessage] = useState('Запуск приложения...');
   const [dynamicStatus, setDynamicStatus] = useState<string>('Подготовка данных...');
   const progressAnimated = useRef(new Animated.Value(0)).current;
@@ -459,23 +461,25 @@ function RootLayoutContent() {
         );
       });
 
-      // Нативные push API и сеть не должны конкурировать с первым кадром.
-      afterStartupTasks.push(() => {
-        void syncPushSubscriptionStatus();
-      });
-
       // === 1. Конфигурация ===
       setInitializationMessage('Получение конфигурации...');
       setProgress(5);
       const configStartedAt = Date.now();
       const configResult = await loadStartupConfig();
       const config = configResult.data;
+      applyStartupConfig(config);
+      setStartupConfig(config);
       initializationLog(
         `Конфигурация получена из ${configResult.source === 'network' ? 'сети' : 'кэша'} `
         + `за ${elapsedMilliseconds(configStartedAt)} мс; ревизия=${config.config_revision ?? 'не указана'}`
       );
+      // Push is controlled remotely as well as by the user's local preference.
       afterStartupTasks.push(() => {
-        void showAppUpdateNotice(config);
+        if (config.features?.push_notifications === false) {
+          void AsyncStorage.setItem('push_notifications_enabled', 'false');
+          return;
+        }
+        void syncPushSubscriptionStatus();
       });
       const backgroundConfigStartedAt = Date.now();
       const effectiveConfigPromise: Promise<StartupConfig> = configResult.backgroundRefresh
@@ -491,7 +495,8 @@ function RootLayoutContent() {
             `Фоновая конфигурация получена за ${elapsedMilliseconds(backgroundConfigStartedAt)} мс; `
             + `ревизия=${latestConfig.config_revision ?? 'не указана'}`
           );
-          void showAppUpdateNotice(latestConfig);
+          applyStartupConfig(latestConfig);
+          setStartupConfig(latestConfig);
           if (latestConfig.config_revision !== config.config_revision) {
             initializationLog('Новая ревизия конфигурации будет применена в текущем сеансе');
           }
@@ -800,6 +805,13 @@ function RootLayoutContent() {
           <Stack.Screen name="messenger/room/[id]" />
         </Stack>
         <PersistentBottomNavigation />
+        <StartupConfigGate
+          config={startupConfig}
+          onConfigRefresh={latestConfig => {
+            applyStartupConfig(latestConfig);
+            setStartupConfig(latestConfig);
+          }}
+        />
       </View>
     </GestureHandlerRootView>
   );

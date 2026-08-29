@@ -244,7 +244,9 @@ docs/                      Baseline и сценарии ручной прове�
 - `services/startupApi.ts` — стартовая конфигурация, timeout/retry и fallback.
 - `services/referenceDataService.ts` — обновление только изменившихся версионированных справочников.
 - `services/historicalSync.ts` — инкрементальное пополнение завершённых матчей.
-- `services/appUpdateService.ts` — рекомендуемое и обязательное обновление версии приложения.
+- `components/StartupConfigGate.tsx` — обслуживание, обновления и объявления с приоритетами.
+- `services/startupConfigRuntime.ts` — применение API-настроек и feature flags в текущем сеансе.
+- `services/startupConfigPolicy.ts` — сравнение версий и выбор платформенной ссылки.
 - `services/persistentCache.ts` — типизированная оболочка постоянного кэша.
 - `services/dataAvailability.ts` — состояние использования сохранённых данных.
 - `contexts/NetworkStatusContext.tsx` — подписка на состояние сети.
@@ -258,6 +260,7 @@ docs/                      Baseline и сценарии ручной прове�
 - `services/messengerAttachmentPicker.ts` — единая подготовка, сжатие и проверка выбранных и системно переданных вложений.
 - `server/wordpress/` — генератор SportPress, standalone-выдача JSON и инструкция установки.
 - `server/wordpress/forward-training-schedule.php` — импорт The Events Calendar и API тренировок.
+- `server/wordpress/admin-startup-config.php` — WordPress-админка и атомарная генерация `MobileAppConfig.txt`.
 
 ## Локальная установка
 

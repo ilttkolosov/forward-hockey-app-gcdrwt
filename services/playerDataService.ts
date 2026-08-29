@@ -49,6 +49,10 @@ export class PlayerDownloadSystem {
   private baseUrl = 'https://www.hc-forward.com/wp-json/app/v1';
   private bundledPhotoUris = new Map<string, string>();
 
+  configure(baseUrl: string): void {
+    this.baseUrl = baseUrl.replace(/\/+$/, '');
+  }
+
   async isDataLoaded(): Promise<boolean> {
     const loaded = await AsyncStorage.getItem(PLAYERS_DATA_LOADED_KEY);
     return loaded === 'true';

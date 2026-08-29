@@ -18,6 +18,7 @@ import Icon from './Icon';
 import { useMessengerAuth } from '../contexts/MessengerAuthContext';
 import { useMessengerUnreadSnapshot } from '../services/messengerUnread';
 import { colors } from '../styles/commonStyles';
+import { useStartupFeature } from '../services/startupConfigRuntime';
 
 const NAVIGATION_RED = '#F2162D';
 const NAVIGATION_HEIGHT = 70;
@@ -217,6 +218,13 @@ export default function PersistentBottomNavigation() {
   const { isAuthenticated } = useMessengerAuth();
   const unread = useMessengerUnreadSnapshot();
   const [moreVisible, setMoreVisible] = useState(false);
+  const mobileGamesEnabled = useStartupFeature('mobile_games');
+  const moreMenuItems = useMemo(
+    () => mobileGamesEnabled
+      ? MORE_MENU_ITEMS
+      : MORE_MENU_ITEMS.filter(item => item.href !== '/mobilegames'),
+    [mobileGamesEnabled],
+  );
 
   const messengerHref: Href = isAuthenticated
     ? '/messenger/rooms'
@@ -290,7 +298,7 @@ export default function PersistentBottomNavigation() {
                 ]}
               >
                 <View style={styles.sheetHandle} />
-                {MORE_MENU_ITEMS.map((item, index) => (
+                {moreMenuItems.map((item, index) => (
                   <TouchableOpacity
                     accessibilityLabel={`Открыть раздел «${item.label}»`}
                     accessibilityRole="button"
@@ -299,7 +307,7 @@ export default function PersistentBottomNavigation() {
                     onPress={() => pushRoute(item.href)}
                     style={[
                       styles.moreMenuItem,
-                      index < MORE_MENU_ITEMS.length - 1 && styles.moreMenuItemBorder,
+                      index < moreMenuItems.length - 1 && styles.moreMenuItemBorder,
                     ]}
                   >
                     <Icon name={item.icon} size={29} color={colors.text} />

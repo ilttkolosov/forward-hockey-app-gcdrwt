@@ -1,9 +1,13 @@
-const DEFAULT_TIMEOUT_MS = 12_000;
+let defaultTimeoutMs = 12_000;
+
+export const setDefaultRequestTimeout = (timeoutMs: number): void => {
+  if (Number.isFinite(timeoutMs) && timeoutMs >= 1_000) defaultTimeoutMs = timeoutMs;
+};
 
 export async function fetchWithTimeout(
   input: Parameters<typeof fetch>[0],
   init: Parameters<typeof fetch>[1] = {},
-  timeoutMs = DEFAULT_TIMEOUT_MS
+  timeoutMs = defaultTimeoutMs
 ): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);

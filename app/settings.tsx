@@ -34,6 +34,7 @@ import {
   REMOTE_PUSH_UNAVAILABLE_MESSAGE,
   remotePushNotificationsSupported,
 } from '../services/runtimeEnvironment';
+import { getConfiguredApiUrl, useStartupFeature } from '../services/startupConfigRuntime';
 
 const PUSH_ENABLED_KEY = 'push_notifications_enabled';
 const OPERATION_TIMEOUT_MS = 6_000;
@@ -56,7 +57,7 @@ const sendTokenToYourServer = async (token: string) => {
     const appVersion = Constants.expoConfig?.version || '1.0.0';
     const deviceInfo = `${Platform.OS} ${osVersion}, ${deviceModel}, v${appVersion}`;
 
-    const response = await fetch('https://www.hc-forward.com/wp-json/app/v1/push-token', {
+    const response = await fetch(getConfiguredApiUrl('/push-token'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -84,7 +85,7 @@ const deleteTokenFromServer = async (token: string) => {
   const timeoutId = setTimeout(() => controller.abort(), OPERATION_TIMEOUT_MS);
 
   try {
-    const response = await fetch('https://www.hc-forward.com/wp-json/app/v1/push-token', {
+    const response = await fetch(getConfiguredApiUrl('/push-token'), {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token }),
@@ -130,7 +131,7 @@ const getMatchPushSubscriptionStatus = async (): Promise<boolean> => {
   try {
     const token = await getProjectExpoPushToken();
     const response = await fetch(
-      'https://www.hc-forward.com/wp-json/app/v1/push-subscription',
+      getConfiguredApiUrl('/push-subscription'),
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -156,6 +157,7 @@ export default function SettingsScreen() {
   const router = useRouter();
   const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { isAuthenticated: isMessengerAuthenticated } = useMessengerAuth();
+  const pushFeatureEnabled = useStartupFeature('push_notifications');
   const [matchNotificationsEnabled, setMatchNotificationsEnabled] = useState(false);
   const [messengerNotificationsEnabled, setMessengerNotificationsEnabled] = useState(false);
   const [messengerPermissionGranted, setMessengerPermissionGranted] = useState(false);
@@ -179,7 +181,7 @@ export default function SettingsScreen() {
         ]);
         if (!active) return;
         setMatchNotificationsEnabled(
-          remotePushNotificationsSupported && pushValue === 'true',
+          pushFeatureEnabled && remotePushNotificationsSupported && pushValue === 'true',
         );
         setTrainingNotificationsState(trainingSettings.enabled);
         setTrainingLeadState(trainingSettings.leadMinutes);
@@ -198,6 +200,12 @@ export default function SettingsScreen() {
     // The page is rendered from local state immediately. Network checks then
     // reconcile the switches without delaying navigation to Settings.
     void loadLocalSettings();
+    if (!pushFeatureEnabled) {
+      setMessengerNotificationsEnabled(false);
+      setMessengerChecking(false);
+      void AsyncStorage.setItem(PUSH_ENABLED_KEY, 'false');
+      return () => { active = false; };
+    }
     void messengerPushStatus()
       .then((state) => {
         if (active) {
@@ -222,7 +230,7 @@ export default function SettingsScreen() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [pushFeatureEnabled]);
 
   const showOperation = (message: string) => {
     setModalMessage(message);
@@ -238,7 +246,7 @@ export default function SettingsScreen() {
   };
 
   const toggleMatchNotifications = async (value: boolean) => {
-    if (!remotePushNotificationsSupported) {
+    if (!pushFeatureEnabled || !remotePushNotificationsSupported) {
       setMatchNotificationsEnabled(false);
       await AsyncStorage.setItem(PUSH_ENABLED_KEY, 'false');
       return;
@@ -276,7 +284,7 @@ export default function SettingsScreen() {
   };
 
   const toggleMessengerNotifications = async (value: boolean) => {
-    if (!remotePushNotificationsSupported) {
+    if (!pushFeatureEnabled || !remotePushNotificationsSupported) {
       setMessengerNotificationsEnabled(false);
       return;
     }
@@ -374,7 +382,9 @@ export default function SettingsScreen() {
             <View style={styles.settingText}>
               <Text style={styles.settingTitle}>Сообщения команды</Text>
               <Text style={styles.settingSubtitle}>
-                {!remotePushNotificationsSupported
+                {!pushFeatureEnabled
+                  ? 'Временно отключены стартовой конфигурацией'
+                  : !remotePushNotificationsSupported
                   ? 'Недоступны в Expo Go — используйте development или preview-сборку'
                   : messengerNotificationsEnabled && !messengerPermissionGranted
                   ? 'Включены в учётной записи, но запрещены в настройках этого устройства'
@@ -393,7 +403,8 @@ export default function SettingsScreen() {
                 thumbColor={messengerNotificationsEnabled ? colors.white : colors.textSecondary}
                 ios_backgroundColor={colors.border}
                 disabled={
-                  !remotePushNotificationsSupported
+                  !pushFeatureEnabled
+                  || !remotePushNotificationsSupported
                   || !isMessengerAuthenticated
                   || messengerOperation
                   || modalVisible
@@ -408,7 +419,9 @@ export default function SettingsScreen() {
             <View style={styles.settingText}>
               <Text style={styles.settingTitle}>Уведомления о матчах</Text>
               <Text style={styles.settingSubtitle}>
-                {remotePushNotificationsSupported
+                {!pushFeatureEnabled
+                  ? 'Временно отключены стартовой конфигурацией'
+                  : remotePushNotificationsSupported
                   ? 'Получать серверные уведомления о предстоящих и текущих играх команды'
                   : 'Недоступны в Expo Go — используйте development или preview-сборку'}
               </Text>
@@ -422,7 +435,7 @@ export default function SettingsScreen() {
                 trackColor={{ false: colors.border, true: colors.primary }}
                 thumbColor={matchNotificationsEnabled ? colors.white : colors.textSecondary}
                 ios_backgroundColor={colors.border}
-                disabled={!remotePushNotificationsSupported || modalVisible}
+                disabled={!pushFeatureEnabled || !remotePushNotificationsSupported || modalVisible}
               />
             )}
           </View>

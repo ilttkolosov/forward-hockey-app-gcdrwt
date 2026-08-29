@@ -48,7 +48,10 @@ export interface TournamentSynchronizationResult {
   skipped: boolean;
 }
 
-const API_URL = 'https://www.hc-forward.com/wp-json/app/v1/get-table';
+let apiUrl = 'https://www.hc-forward.com/wp-json/app/v1/get-table';
+export const configureTournamentApi = (baseUrl: string): void => {
+  apiUrl = `${baseUrl.replace(/\/+$/, '')}/get-table`;
+};
 const CURRENT_TOURNAMENT_DATA_KEY = 'current_tournament_data';
 const CURRENT_TOURNAMENT_CONFIG_KEY = 'current_tournament_config';
 
@@ -156,7 +159,7 @@ export const fetchTournamentConfig = async (
   targetVersion = 0
 ): Promise<TournamentConfig> => {
   const startedAt = Date.now();
-  const url = `${API_URL}/${encodeURIComponent(tournamentId)}?version=${Math.max(0, targetVersion)}`;
+  const url = `${apiUrl}/${encodeURIComponent(tournamentId)}?version=${Math.max(0, targetVersion)}`;
   console.log(`[Турниры] Запрос таблицы ${tournamentId}, целевая версия ${targetVersion}`);
 
   const response = await fetchWithTimeout(url);

@@ -16,6 +16,7 @@ import {
   trackMobileGameAction,
   type MobileGameAnalyticsName,
 } from '../../services/analyticsService';
+import { useStartupFeature } from '../../services/startupConfigRuntime';
 
 interface MobileGameCard {
   id: string;
@@ -63,10 +64,29 @@ const games: MobileGameCard[] = [
 export default function MobileGamesScreen() {
   const router = useRouter();
   const bottomNavigationInset = usePersistentBottomNavigationInset();
+  const mobileGamesEnabled = useStartupFeature('mobile_games');
 
   const handleBackPress = () => {
     router.back();
   };
+
+  if (!mobileGamesEnabled) {
+    return (
+      <SafeAreaView style={commonStyles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
+            <Icon name="chevron-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+          <Text style={commonStyles.title}>Мини-игры</Text>
+        </View>
+        <View style={styles.unavailable}>
+          <Icon name="game-controller-outline" size={46} color={colors.textSecondary} />
+          <Text style={styles.unavailableTitle}>Раздел временно недоступен</Text>
+          <Text style={styles.gameDesc}>Доступ управляется стартовой конфигурацией приложения.</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView edges={['top']} style={commonStyles.container}>
@@ -177,4 +197,6 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 0.6,
   },
+  unavailable: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
+  unavailableTitle: { color: colors.text, fontSize: 19, fontWeight: '700', textAlign: 'center' },
 });
