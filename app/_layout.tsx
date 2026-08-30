@@ -20,6 +20,7 @@ import PlayerDataLoadingScreen from '../components/PlayerDataLoadingScreen';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getUpcomingGamesMasterData,
+  refreshUpcomingGamesMasterDataIfStale,
   restoreUpcomingGamesMasterData,
 } from '../data/gameData';
 //import SplashScreen from '../components/SplashScreen';
@@ -482,7 +483,7 @@ function RootLayoutContent() {
           initializationLog('Предстоящие игры: сетевое обновление отложено до готовности интерфейса');
           upcomingGamesRefreshPromise = waitForAppInteractive()
             .then(() => pause(1_400))
-            .then(() => getUpcomingGamesMasterData(true))
+            .then(() => refreshUpcomingGamesMasterDataIfStale())
             .then(games => {
               initializationLog(
                 `Предстоящие игры: цикл сетевого обновления завершён; доступно ${games.length}, `

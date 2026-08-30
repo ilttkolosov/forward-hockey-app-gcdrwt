@@ -176,6 +176,7 @@ export default function TournamentDetailScreen() {
     'seasons',
     'tournaments',
   ]);
+  const observedReferenceRevision = useRef(referenceRevision);
 
   // Состояния
   const [tournamentInfo, setTournamentInfo] = useState<any | null>(null);
@@ -343,7 +344,9 @@ export default function TournamentDetailScreen() {
   }, [activeTab, tournamentTable, tableLoading, loadTournamentTable]);
 
   useEffect(() => {
-    if (referenceRevision === 0 || !tournamentConfig) return;
+    if (referenceRevision === observedReferenceRevision.current) return;
+    observedReferenceRevision.current = referenceRevision;
+    if (!tournamentConfig) return;
     void loadTournamentGames(true);
     setTournamentTable(null);
   }, [loadTournamentGames, referenceRevision, tournamentConfig]);

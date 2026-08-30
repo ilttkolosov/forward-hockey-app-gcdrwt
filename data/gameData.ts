@@ -935,6 +935,20 @@ export async function getUpcomingGamesMasterData(forceRefresh = false): Promise<
 
   return await masterDataLoadPromise;
 }
+
+/**
+ * Обновляет мастер-снимок только если после восстановления локального кэша
+ * другой потребитель ещё не успел получить свежий ответ API. В отличие от
+ * обычного фонового чтения эта функция ожидает начатый сетевой запрос, поэтому
+ * стартовая предзагрузка турнира может безопасно продолжить работу после него.
+ */
+export async function refreshUpcomingGamesMasterDataIfStale(): Promise<Game[]> {
+  if (isCacheValid(upcomingGamesMasterCache)) {
+    console.log('[Предстоящие игры] Свежий сетевой снимок уже получен; повторный запрос пропущен');
+    return upcomingGamesMasterCache!.data;
+  }
+  return getUpcomingGamesMasterData(true);
+}
 // --- КОНЕЦ МАСТЕР-ФУНКЦИИ ---
 
 // --- ЭКСПОРТИРУЕМЫЕ ФУНКЦИИ ---

@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Href, usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Defs, FeGaussianBlur, Filter, Path } from 'react-native-svg';
 import Icon from './Icon';
 import { useMessengerAuth } from '../contexts/MessengerAuthContext';
 import { useMessengerUnreadSnapshot } from '../services/messengerUnread';
@@ -142,27 +142,22 @@ function NavigationSurface({ safeAreaBottom, width }: NavigationSurfaceProps) {
       style={styles.navigationSurface}
       width={width}
     >
+      <Defs>
+        <Filter
+          id="navigationShadow"
+          x="-8%"
+          y="-35%"
+          width="116%"
+          height="170%"
+        >
+          <FeGaussianBlur stdDeviation={8.5} />
+        </Filter>
+      </Defs>
       <Path
         d={surfacePath}
         fill="#7C8490"
-        fillOpacity={0.02}
-        stroke="#7C8490"
-        strokeOpacity={0.025}
-        strokeWidth={27}
-      />
-      <Path
-        d={surfacePath}
-        fill="none"
-        stroke="#7C8490"
-        strokeOpacity={0.035}
-        strokeWidth={16.5}
-      />
-      <Path
-        d={surfacePath}
-        fill="none"
-        stroke="#7C8490"
-        strokeOpacity={0.05}
-        strokeWidth={7.5}
+        fillOpacity={0.17}
+        filter="url(#navigationShadow)"
       />
       <Path
         d={surfacePath}
