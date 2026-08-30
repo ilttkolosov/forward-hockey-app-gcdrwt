@@ -182,7 +182,7 @@ async function main() {
   db.run('BEGIN TRANSACTION;');
 
   try {
-    insertRows(db, 'INSERT INTO metadata (key, value) VALUES (?, ?)', [
+    insertRows(db, 'INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)', [
       ['schema_version', String(migrationConfig.schemaVersion)],
       ['seed_generated_at', generatedAt],
       ['events_from', options.from],
@@ -315,7 +315,7 @@ async function main() {
       'INSERT OR IGNORE INTO seasons (id, name, slug, raw_json) VALUES (?, ?, ?, ?)',
       [...missingSeasons].map(id => [id, `Сезон ${id}`, '', json({ id, historical_placeholder: true }, {})])
     );
-    db.run('INSERT INTO metadata (key, value) VALUES (?, ?)', [
+    db.run('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)', [
       'historical_placeholders',
       JSON.stringify({
         teams: missingTeams.size,

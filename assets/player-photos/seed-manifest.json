@@ -1,5 +1,5 @@
 {
-  "version": 24,
+  "version": 28,
   "photos": [
     {
       "id": "1570",
@@ -180,6 +180,18 @@
     {
       "id": "5796",
       "filename": "player_5796.jpg"
+    },
+    {
+      "id": "5982",
+      "filename": "player_5982.jpg"
+    },
+    {
+      "id": "5983",
+      "filename": "player_5983.jpg"
+    },
+    {
+      "id": "5984",
+      "filename": "player_5984.jpg"
     },
     {
       "id": "75",

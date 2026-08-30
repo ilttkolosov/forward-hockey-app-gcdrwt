@@ -8,7 +8,7 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const logoDir = path.join(projectRoot, 'assets', 'logo');
 const manifestPath = path.join(logoDir, 'seed-manifest.json');
 const concurrency = 8;
-const requestTimeoutMs = 30_000;
+const requestTimeoutMs = 90_000;
 
 const detectExtension = buffer => {
   if (buffer.length >= 8
@@ -80,7 +80,7 @@ async function main() {
   console.log(`[Логотипы] Получение списка команд: ${API_URL}`);
   const response = await fetch(API_URL, {
     headers: { 'User-Agent': 'Forward-Hockey-App-Asset-Sync/1.0' },
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(requestTimeoutMs),
   });
   if (!response.ok) throw new Error(`API команд вернул HTTP ${response.status}`);
   const payload = await response.json();
@@ -105,8 +105,23 @@ async function main() {
         downloaded.push(item);
         console.log(`[Логотипы] ${index + 1}/${teamsWithLogos.length}: ${team.name} (${team.id})`);
       } catch (error) {
-        failures.push({ id: String(team.id), name: team.name, error: String(error) });
-        console.warn(`[Логотипы] Не скачан ${team.name} (${team.id}):`, error);
+        const retainedFilename = (await fs.readdir(logoDir))
+          .find(name => new RegExp(`^team_${team.id}\\.(png|jpe?g|webp|gif)$`, 'i').test(name));
+        if (retainedFilename) {
+          const stat = await fs.stat(path.join(logoDir, retainedFilename));
+          downloaded.push({
+            id: String(team.id),
+            name: team.name,
+            logo_url: team.logo_url,
+            filename: retainedFilename,
+            bytes: stat.size,
+            retained: true,
+          });
+          console.warn(`[Логотипы] Сохранён встроенный файл ${team.name} (${team.id}):`, error);
+        } else {
+          failures.push({ id: String(team.id), name: team.name, error: String(error) });
+          console.warn(`[Логотипы] Не скачан ${team.name} (${team.id}):`, error);
+        }
       }
     }
   };

@@ -1,6 +1,6 @@
 {
   "api_url": "https://www.hc-forward.com/wp-json/app/v1/get-team",
-  "downloaded_at": "2026-08-08T09:41:46.907Z",
+  "downloaded_at": "2026-08-30T20:28:43.561Z",
   "teams": [
     {
       "id": "73",
@@ -33,23 +33,24 @@
     {
       "id": "150",
       "name": "СКА Петергоф 14",
-      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska_petergof_200.png",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska_petergof-1.png",
       "filename": "team_150.png",
-      "bytes": 14863
+      "bytes": 12585
     },
     {
       "id": "160",
       "name": "СКА 14",
-      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska_200-1.png",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska-1.png",
       "filename": "team_160.png",
-      "bytes": 23846
+      "bytes": 13998
     },
     {
       "id": "163",
       "name": "СШОР №1",
       "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/sshor-№1_200.png",
       "filename": "team_163.png",
-      "bytes": 17233
+      "bytes": 17233,
+      "retained": true
     },
     {
       "id": "194",
@@ -68,16 +69,16 @@
     {
       "id": "200",
       "name": "СКА Серебряные львы 14",
-      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska_serebryannyelvy_200.png",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska_lvy.png",
       "filename": "team_200.png",
-      "bytes": 20456
+      "bytes": 10374
     },
     {
       "id": "203",
       "name": "СКА Звезда 14",
-      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska_zvezda_200.png",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska_zvezda-1.png",
       "filename": "team_203.png",
-      "bytes": 10407
+      "bytes": 12693
     },
     {
       "id": "206",
@@ -103,9 +104,9 @@
     {
       "id": "246",
       "name": "СКА ХКД 14",
-      "logo_url": "http://www.hc-forward.com/wp-content/uploads/2023/09/ska_hkd.png",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/sk_hkd.png",
       "filename": "team_246.png",
-      "bytes": 21788
+      "bytes": 12173
     },
     {
       "id": "249",
@@ -138,9 +139,9 @@
     {
       "id": "260",
       "name": "СКА Стрельна",
-      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska_strelna_200.png",
+      "logo_url": "https://www.hc-forward.com/wp-content/uploads/2023/09/ska_strelna.png",
       "filename": "team_260.png",
-      "bytes": 14720
+      "bytes": 11773
     },
     {
       "id": "263",
