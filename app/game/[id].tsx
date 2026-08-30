@@ -13,6 +13,7 @@ import {
   Animated,
   LayoutChangeEvent,
   Modal,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -1088,6 +1089,22 @@ export default function GameDetailsScreen() {
   const homeOutcomeText = extractOutcome(homeOutcome);
   const awayOutcomeText = extractOutcome(awayOutcome);
   const venueData = venueId ? getVenueById(venueId) : null;
+  const gameVideoUrl = sp_video?.trim() || '';
+  const shareGameVideo = async () => {
+    if (!gameVideoUrl) return;
+    const description = (
+      `Прямая ссылка на видео игры ${homeTeamName} VS ${awayTeamName}, `
+      + `${formattedDate}, ${formattedTime}`
+    );
+    try {
+      await Share.share({
+        title: description,
+        message: `${description}\n${gameVideoUrl}`,
+      });
+    } catch (shareError) {
+      console.warn('[GameVideo] Не удалось открыть системное меню «Поделиться»:', shareError);
+    }
+  };
 
   // Анимированные стили для прозрачности и отображения компактного счёта
   const gameInfoOpacity = scrollY.interpolate({
@@ -1194,13 +1211,13 @@ export default function GameDetailsScreen() {
         </Animated.View>
 
         {/* Video */}
-        {sp_video && (
+        {gameVideoUrl && (
           <View style={styles.videoContainer}>
             <KeepScreenAwakeForVideo tag="forward-game-video" />
             <View style={styles.videoFrame}>
               <WebView
                 key={`game-video-${id}-${videoWebViewGeneration}`}
-                source={{ uri: getVKEmbedUrl(sp_video, !isGameFinished(gameDetails)) }}
+                source={{ uri: getVKEmbedUrl(gameVideoUrl, !isGameFinished(gameDetails)) }}
                 style={[
                   styles.webview,
                   videoPlayerState !== 'ready' && styles.webviewHidden,
@@ -1220,7 +1237,7 @@ export default function GameDetailsScreen() {
                 showsVerticalScrollIndicator={false}
                 onShouldStartLoadWithRequest={(request) => {
                   const allowed = shouldAllowVideoNavigation(
-                    sp_video,
+                    gameVideoUrl,
                     request.url,
                     request.isTopFrame,
                     request.navigationType
@@ -1237,7 +1254,7 @@ export default function GameDetailsScreen() {
                 onLoadStart={({ nativeEvent }) => {
                   videoLoadStartedAtRef.current.set(videoWebViewGeneration, Date.now());
                   if (
-                    parseVKVideoUrl(sp_video) !== null &&
+                    parseVKVideoUrl(gameVideoUrl) !== null &&
                     !isAllowedVKEmbedNavigation(nativeEvent.url)
                   ) {
                     setVideoPlayerState('loading');
@@ -1258,7 +1275,7 @@ export default function GameDetailsScreen() {
                     ...getVideoLogContext(nativeEvent.url),
                   });
 
-                  const isVKSource = parseVKVideoUrl(sp_video) !== null;
+                  const isVKSource = parseVKVideoUrl(gameVideoUrl) !== null;
                   if (!isVKSource || isAllowedVKEmbedNavigation(nativeEvent.url)) {
                     if (
                       videoGenerationStatusRef.current.get(videoWebViewGeneration) !==
@@ -1331,6 +1348,18 @@ export default function GameDetailsScreen() {
                 </View>
               )}
             </View>
+            <TouchableOpacity
+              accessibilityLabel="Поделиться прямой ссылкой на видео игры"
+              accessibilityRole="button"
+              activeOpacity={0.68}
+              onPress={() => void shareGameVideo()}
+              style={styles.videoShareButton}
+            >
+              <Text style={styles.videoShareText}>
+                Поделиться прямой ссылкой на видео игры
+              </Text>
+              <Icon name="share-social-outline" size={22} color={colors.primary} />
+            </TouchableOpacity>
           </View>
         )}
 
@@ -1527,6 +1556,21 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     elevation: 4,
+  },
+  videoShareButton: {
+    minHeight: 44,
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  videoShareText: {
+    flexShrink: 1,
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'right',
   },
   webview: { flex: 1, backgroundColor: '#000', borderRadius: 12 },
   webviewHidden: { opacity: 0 },
