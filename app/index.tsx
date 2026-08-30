@@ -326,17 +326,17 @@ export default function HomeScreen() {
         {/* Upcoming Games */}
         {upcomingGames.length > 0 && (
           <View style={{ marginBottom: 24 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <View style={{ marginBottom: 12 }}>
               <Text style={commonStyles.subtitle}>Ближайшие игры</Text>
-              <Link href="/upcoming" asChild>
-                <TouchableOpacity>
-                  <Text style={[commonStyles.subtitle, { fontSize: 14 }]}>Все игры</Text>
-                </TouchableOpacity>
-              </Link>
             </View>
             {upcomingGames.slice(0, 3).map((game) => (
               <GameCard key={game.id} game={game} showScore={false} />
             ))}
+            <Link href="/upcoming" asChild>
+              <TouchableOpacity accessibilityRole="link" style={homeStyles.allGamesLink}>
+                <Text style={homeStyles.allGamesText}>Все игры</Text>
+              </TouchableOpacity>
+            </Link>
           </View>
         )}
 
