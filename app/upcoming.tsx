@@ -203,7 +203,7 @@ export default function TeamGamesScreen() {
           selectedIndex={activeTab === 'upcoming' ? 0 : 1}
           onChange={(event) => handleTabChange(event.nativeEvent.selectedSegmentIndex)}
           tintColor={colors.primary}
-          fontStyle={{ fontSize: 14, fontWeight: '600' }}
+          fontStyle={{ color: colors.text, fontSize: 14, fontWeight: '600' }}
           activeFontStyle={{ fontWeight: '700', color: colors.background }}
         />
       </View>

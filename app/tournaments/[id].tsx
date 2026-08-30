@@ -479,7 +479,7 @@ export default function TournamentDetailScreen() {
           selectedIndex={activeTab}
           onChange={(e) => setActiveTab(e.nativeEvent.selectedSegmentIndex)}
           tintColor={colors.primary}
-          fontStyle={{ fontSize: 14, fontWeight: '600' }}
+          fontStyle={{ color: colors.text, fontSize: 14, fontWeight: '600' }}
           activeFontStyle={{ 
             fontWeight: '700',
             color: colors.background, // ← Контрастный цвет для активной вкладки (например, белый)
@@ -504,7 +504,7 @@ export default function TournamentDetailScreen() {
                 }
                 onChange={(e) => handleFilterChange(e.nativeEvent.selectedSegmentIndex)}
                 tintColor={colors.primary}
-                fontStyle={{ fontSize: 13, fontWeight: '500' }}
+                fontStyle={{ color: colors.text, fontSize: 13, fontWeight: '500' }}
                 activeFontStyle={{ 
                   fontWeight: '700',
                   color: colors.background, // ← Контрастный цвет для активной вкладки (например, белый)

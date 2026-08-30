@@ -370,7 +370,7 @@ export default function HomeScreen() {
 const homeStyles = StyleSheet.create({
   gamesSection: { marginBottom: 24 },
   gameList: { marginTop: 14 },
-  segmentFont: { fontSize: 13, fontWeight: '600' },
+  segmentFont: { color: colors.text, fontSize: 13, fontWeight: '600' },
   activeSegmentFont: { color: colors.background, fontWeight: '700' },
   newsSection: { marginBottom: 24 },
   sectionTitle: { color: colors.text, fontSize: 22, fontWeight: '800', marginBottom: 12 },
