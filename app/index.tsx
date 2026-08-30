@@ -349,7 +349,9 @@ export default function HomeScreen() {
 
         {homeNewsEnabled && (
           <View style={homeStyles.newsSection}>
-            <Text style={homeStyles.sectionTitle}>Новости</Text>
+            <View style={homeStyles.sectionHeader}>
+              <Text style={commonStyles.subtitle}>Новости</Text>
+            </View>
             {newsLoading && <ActivityIndicator color={colors.primary} style={homeStyles.newsLoader} />}
             {news.map(article => <NewsCard article={article} key={article.id} />)}
             {!newsLoading && news.length === 0 && (
@@ -380,7 +382,7 @@ const homeStyles = StyleSheet.create({
   segmentFont: { color: colors.text, fontSize: 13, fontWeight: '600' },
   activeSegmentFont: { color: colors.background, fontWeight: '700' },
   newsSection: { marginBottom: 24 },
-  sectionTitle: { color: colors.text, fontSize: 22, fontWeight: '800', marginBottom: 12 },
+  sectionHeader: { marginBottom: 12 },
   emptyBlock: { minHeight: 80, alignItems: 'center', justifyContent: 'center', borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, padding: 16, marginBottom: 12 },
   emptyText: { color: colors.textSecondary, fontSize: 14, textAlign: 'center' },
   allGamesLink: { alignSelf: 'flex-end', paddingVertical: 8, paddingLeft: 16, marginTop: -2 },
