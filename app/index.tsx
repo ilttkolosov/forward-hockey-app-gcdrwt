@@ -323,6 +323,23 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {/* Upcoming Games */}
+        {upcomingGames.length > 0 && (
+          <View style={{ marginBottom: 24 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={commonStyles.subtitle}>Ближайшие игры</Text>
+              <Link href="/upcoming" asChild>
+                <TouchableOpacity>
+                  <Text style={[commonStyles.subtitle, { fontSize: 14 }]}>Все игры</Text>
+                </TouchableOpacity>
+              </Link>
+            </View>
+            {upcomingGames.slice(0, 3).map((game) => (
+              <GameCard key={game.id} game={game} showScore={false} />
+            ))}
+          </View>
+        )}
+
         {homeNewsEnabled && (
           <View style={homeStyles.newsSection}>
             <Text style={homeStyles.sectionTitle}>Новости</Text>
@@ -343,23 +360,6 @@ export default function HomeScreen() {
                 {!newsLoadingMore && <Icon color={colors.primary} name="chevron-down" size={20} />}
               </TouchableOpacity>
             )}
-          </View>
-        )}
-
-        {/* Upcoming Games */}
-        {upcomingGames.length > 0 && (
-          <View style={{ marginBottom: 24 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <Text style={commonStyles.subtitle}>Ближайшие игры</Text>
-              <Link href="/upcoming" asChild>
-                <TouchableOpacity>
-                  <Text style={[commonStyles.subtitle, { fontSize: 14 }]}>Все игры</Text>
-                </TouchableOpacity>
-              </Link>
-            </View>
-            {upcomingGames.slice(0, 3).map((game) => (
-              <GameCard key={game.id} game={game} showScore={false} />
-            ))}
           </View>
         )}
       </ScrollView>
