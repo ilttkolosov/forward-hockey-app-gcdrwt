@@ -170,7 +170,7 @@ const initializeTournamentsInBackground = async (
         !currentTournamentConfig
         || (
           targetVersion > 0
-          && (currentTournamentConfig.version ?? 0) !== targetVersion
+          && (currentTournamentConfig.version ?? 0) < targetVersion
         )
       )
     );

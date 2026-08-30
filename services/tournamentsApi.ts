@@ -181,7 +181,7 @@ export const fetchTournamentConfig = async (
     storedVersion = previous.version;
     config.version = storedVersion;
   }
-  if (targetVersion > 0 && storedVersion !== targetVersion) {
+  if (targetVersion > 0 && storedVersion < targetVersion) {
     throw new Error(
       `Сервер вернул устаревшую таблицу ${tournamentId}: версия ${storedVersion}, ожидалась ${targetVersion}`
     );
@@ -285,12 +285,12 @@ export const synchronizeTournamentConfigs = async (
     const item = cached[index];
     return !item || (
       normalizedTargetVersion > 0
-      && (item.version ?? 0) !== normalizedTargetVersion
+      && (item.version ?? 0) < normalizedTargetVersion
     );
   });
 
   if (staleIds.length === 0) {
-    if (normalizedTargetVersion > 0 && localVersion !== normalizedTargetVersion) {
+    if (normalizedTargetVersion > 0 && localVersion < normalizedTargetVersion) {
       await markTournamentConfigsSynchronized(normalizedTargetVersion);
     }
     console.log(
