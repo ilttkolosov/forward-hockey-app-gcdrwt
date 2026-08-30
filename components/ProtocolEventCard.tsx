@@ -87,6 +87,23 @@ const ProtocolEventCard: React.FC<ProtocolEventCardProps> = ({
     return null;
   };
 
+  const videoUrl = typeof event.url === 'string' ? event.url.trim() : '';
+
+  const renderVideoButton = () => {
+    if (!videoUrl) return null;
+
+    return (
+      <TouchableOpacity
+        accessibilityLabel="Воспроизвести видеомомент"
+        accessibilityRole="button"
+        onPress={() => onVideoPress(videoUrl)}
+        style={styles.videoButton}
+      >
+        <Icon name="videocam" size={30} color={colors.primary} />
+      </TouchableOpacity>
+    );
+  };
+
   const renderScore = () => {
     const homeScore = score.home;
     const awayScore = score.away;
@@ -98,11 +115,7 @@ const ProtocolEventCard: React.FC<ProtocolEventCardProps> = ({
         <Text style={[styles.scoreText, !isHomeTeam && styles.scoreTextBold]}>{awayScore}</Text>
         {/* <Image source={{ uri: awayTeamLogo }} style={styles.scoreLogo} /> */}
 
-        {event.url?.trim() && (
-            <TouchableOpacity onPress={() => onVideoPress(event.url.trim())} style={styles.videoButton}>
-                <Icon name="videocam" size={30} color={colors.primary} />
-            </TouchableOpacity>
-        )}
+        {renderVideoButton()}
 
       </View>
     );
@@ -163,6 +176,10 @@ const ProtocolEventCard: React.FC<ProtocolEventCardProps> = ({
         )}
         {/* Комментарий */}
         {event.comment && renderComment(event.comment)}
+        {/* Видеомомент удаления выводится отдельной строкой под его описанием */}
+        {event.type === 'p' && videoUrl && (
+          <View style={styles.penaltyVideoRow}>{renderVideoButton()}</View>
+        )}
         {/* Счет (только для голов) */}
         {event.type === 'g' && renderScore()}
 
@@ -286,8 +303,11 @@ const styles = StyleSheet.create({
     borderRadius: 34,
     paddingRight: 6
   },
-    videoButton: {
+  videoButton: {
     padding: 4,
+  },
+  penaltyVideoRow: {
+    alignItems: 'flex-start',
   },
 });
 
