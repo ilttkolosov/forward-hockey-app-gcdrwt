@@ -1,6 +1,7 @@
 // Сгенерировано scripts/generate-player-photo-assets.mjs. Не редактировать вручную.
 export const PLAYER_PHOTO_ASSETS: Record<string, number> = {
   '1570': require('./source/player_1570.jpg'),
+  '2514': require('./source/player_2514.png'),
   '2704': require('./source/player_2704.png'),
   '2706': require('./source/player_2706.png'),
   '2708': require('./source/player_2708.png'),
@@ -52,8 +53,13 @@ export const PLAYER_PHOTO_ASSETS: Record<string, number> = {
   '751': require('./source/player_751.jpg'),
   '76': require('./source/player_76.jpg'),
   '77': require('./source/player_77.jpg'),
-  '831': require('./source/player_831.jpg'),
+  '831': require('./source/player_831.png'),
+  '833': require('./source/player_833.png'),
+  '834': require('./source/player_834.png'),
   '836': require('./source/player_836.jpg'),
+  '838': require('./source/player_838.png'),
+  '844': require('./source/player_844.jpg'),
   '845': require('./source/player_845.jpg'),
+  '846': require('./source/player_846.jpg'),
   '847': require('./source/player_847.jpg'),
 };

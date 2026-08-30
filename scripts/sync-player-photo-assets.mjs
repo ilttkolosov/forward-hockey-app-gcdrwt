@@ -1,85 +1,113 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { unzipSync } from 'fflate';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const sourceDir = path.join(projectRoot, 'assets/player-photos/source');
-const apiUrl = 'https://www.hc-forward.com/wp-json/app/v1/get-players-full';
+const photosDir = path.join(projectRoot, 'assets', 'player-photos');
+const sourceDir = path.join(photosDir, 'source');
 const configUrl = 'https://www.hc-forward.com/wp-content/themes/marquee/inc/MobileAppConfig.txt';
-const timeoutMs = 90_000;
-const concurrency = 6;
+const archiveBaseUrl = 'https://www.hc-forward.com/wp-content/uploads/app/player_photos_v';
+const filenamePattern = /^player_(\d+)\.(jpe?g|png|webp)$/i;
+const timeoutMs = 120_000;
+const localArchivePath = process.argv[2] ? path.resolve(process.cwd(), process.argv[2]) : null;
 
-function extension(buffer) {
-  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'png';
-  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'jpg';
-  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return 'webp';
-  throw new Error('ответ не является PNG, JPEG или WEBP');
+function validateImage(filename, data) {
+  const extension = path.extname(filename).slice(1).toLowerCase();
+  const isJpeg = data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
+  const isPng = data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47;
+  const isWebp = Buffer.from(data.subarray(0, 4)).toString('ascii') === 'RIFF'
+    && Buffer.from(data.subarray(8, 12)).toString('ascii') === 'WEBP';
+  if ((extension === 'jpg' || extension === 'jpeg') && isJpeg) return;
+  if (extension === 'png' && isPng) return;
+  if (extension === 'webp' && isWebp) return;
+  throw new Error(`Содержимое ${filename} не соответствует расширению файла`);
 }
 
-function candidates(rawUrl) {
-  const original = new URL(rawUrl);
-  const secure = new URL(original);
-  secure.protocol = 'https:';
-  const cdn = new URL(`https://i0.wp.com/${original.hostname}${original.pathname}`);
-  cdn.searchParams.set('w', '600');
-  return [...new Set([cdn.toString(), secure.toString(), original.toString()])];
-}
-
-async function download(player) {
-  let lastError;
-  for (const url of candidates(player.photo_url)) {
-    try {
-      const response = await fetch(url, {
-        redirect: 'follow',
-        headers: { 'User-Agent': 'Forward-Hockey-App-Asset-Sync/1.0' },
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const buffer = Buffer.from(await response.arrayBuffer());
-      const ext = extension(buffer);
-      const destination = path.join(sourceDir, `player_${player.id}.${ext}`);
-      const temporary = `${destination}.tmp-${process.pid}`;
-      await fs.writeFile(temporary, buffer);
-      await fs.rename(temporary, destination);
-      await Promise.all(['jpg', 'jpeg', 'png', 'webp']
-        .filter(candidate => candidate !== ext)
-        .map(candidate => fs.rm(path.join(sourceDir, `player_${player.id}.${candidate}`), { force: true })));
-      return buffer.length;
-    } catch (error) {
-      lastError = error;
-    }
+async function readPlayersVersion() {
+  const response = await fetch(`${configUrl}?_t=${Date.now()}`, {
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!response.ok) throw new Error(`Startup-config вернул HTTP ${response.status}`);
+  const payload = await response.json();
+  const version = Number(payload.data?.data_versions?.players ?? payload.data?.players_version ?? 0);
+  if (!Number.isInteger(version) || version < 1) {
+    throw new Error(`Некорректная версия игроков: ${version}`);
   }
-  throw lastError || new Error('не удалось скачать фотографию');
+  return version;
 }
 
-await fs.mkdir(sourceDir, { recursive: true });
-const [playersResponse, configResponse] = await Promise.all([
-  fetch(apiUrl, { signal: AbortSignal.timeout(timeoutMs) }),
-  fetch(`${configUrl}?_t=${Date.now()}`, { signal: AbortSignal.timeout(timeoutMs) }),
-]);
-if (!playersResponse.ok || !configResponse.ok) throw new Error('Не удалось получить API игроков или startup-config');
-const playersPayload = await playersResponse.json();
-const configPayload = await configResponse.json();
-const players = (playersPayload.data || []).filter(player => String(player.photo_url || '').trim());
-const version = Number(configPayload.data?.data_versions?.players ?? configPayload.data?.players_version ?? 0);
-if (!Number.isInteger(version) || version < 1) throw new Error(`Некорректная версия игроков: ${version}`);
-
-let cursor = 0;
-let bytes = 0;
-const failures = [];
-const worker = async () => {
-  while (cursor < players.length) {
-    const index = cursor++;
-    const player = players[index];
-    try {
-      bytes += await download(player);
-      console.log(`[Photos] ${index + 1}/${players.length}: ${player.name} (${player.id})`);
-    } catch (error) {
-      failures.push({ id: String(player.id), name: player.name, error: String(error) });
-    }
+async function loadArchive(version) {
+  if (localArchivePath) {
+    return {
+      archiveSource: localArchivePath,
+      bytes: new Uint8Array(await fs.readFile(localArchivePath)),
+    };
   }
-};
-await Promise.all(Array.from({ length: Math.min(concurrency, players.length || 1) }, () => worker()));
-if (failures.length) throw new Error(`Не скачано фотографий: ${JSON.stringify(failures)}`);
-await fs.writeFile(path.join(sourceDir, 'version.txt'), `${version}\n`);
-console.log('[Photos] Синхронизация завершена:', { players: playersPayload.data.length, photos: players.length, version, bytes });
+  const archiveUrl = `${archiveBaseUrl}${version}.zip`;
+  const response = await fetch(archiveUrl, {
+    redirect: 'follow',
+    headers: { 'User-Agent': 'Forward-Hockey-App-Asset-Sync/1.0' },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!response.ok) throw new Error(`Архив фотографий вернул HTTP ${response.status}`);
+  return { archiveSource: archiveUrl, bytes: new Uint8Array(await response.arrayBuffer()) };
+}
+
+async function replaceSourceDirectory(version, archiveBytes) {
+  const entries = unzipSync(archiveBytes);
+  const photos = new Map();
+  for (const [archiveName, data] of Object.entries(entries)) {
+    if (archiveName.endsWith('/')) continue;
+    const filename = path.posix.basename(archiveName);
+    const match = filenamePattern.exec(filename);
+    if (!match) throw new Error(`Архив содержит неожиданный файл: ${archiveName}`);
+    if (photos.has(match[1])) throw new Error(`Архив содержит несколько фотографий игрока ${match[1]}`);
+    validateImage(filename, data);
+    photos.set(match[1], { filename, data });
+  }
+  if (photos.size === 0) throw new Error('Архив фотографий игроков пуст');
+
+  const stagingDir = path.join(photosDir, `source-staging-${process.pid}`);
+  const backupDir = path.join(photosDir, `source-backup-${process.pid}`);
+  await fs.rm(stagingDir, { recursive: true, force: true });
+  await fs.rm(backupDir, { recursive: true, force: true });
+  await fs.mkdir(stagingDir, { recursive: true });
+
+  try {
+    const readmePath = path.join(sourceDir, 'README.md');
+    try {
+      await fs.copyFile(readmePath, path.join(stagingDir, 'README.md'));
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    for (const { filename, data } of photos.values()) {
+      await fs.writeFile(path.join(stagingDir, filename), data);
+    }
+    await fs.writeFile(path.join(stagingDir, 'version.txt'), `${version}\n`);
+
+    await fs.rename(sourceDir, backupDir);
+    try {
+      await fs.rename(stagingDir, sourceDir);
+    } catch (error) {
+      await fs.rename(backupDir, sourceDir);
+      throw error;
+    }
+    await fs.rm(backupDir, { recursive: true, force: true });
+  } catch (error) {
+    await fs.rm(stagingDir, { recursive: true, force: true });
+    throw error;
+  }
+
+  return photos.size;
+}
+
+const version = await readPlayersVersion();
+const { archiveSource, bytes } = await loadArchive(version);
+const photos = await replaceSourceDirectory(version, bytes);
+console.log('[Photos] Синхронизация из архива завершена:', {
+  archiveSource,
+  version,
+  photos,
+  archiveBytes: bytes.length,
+});
