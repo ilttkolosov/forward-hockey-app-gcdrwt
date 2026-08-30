@@ -80,6 +80,7 @@ import PersistentBottomNavigation from '../components/PersistentBottomNavigation
 import { warmMessengerUiAssets } from '../services/messengerUiAssets';
 import StartupConfigGate from '../components/StartupConfigGate';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import { refreshCurrentTournamentTable } from '../services/primaryDataRefresh';
 global.Buffer = Buffer;
 
 Notifications.setNotificationHandler({
@@ -157,11 +158,61 @@ const initializeTournamentsInBackground = async (
       targetVersion,
     );
 
+    const currentTournamentId = String(
+      config.tournamentsNow?.[0]?.tournament_ID || ''
+    ).trim();
+    const currentTournamentConfig = /^\d+$/.test(currentTournamentId)
+      ? await getCachedTournamentConfig(currentTournamentId)
+      : null;
+    const currentTournamentNeedsVersionSync = Boolean(
+      currentTournamentId
+      && (
+        !currentTournamentConfig
+        || (
+          targetVersion > 0
+          && (currentTournamentConfig.version ?? 0) !== targetVersion
+        )
+      )
+    );
+
     const result = await synchronizeTournamentConfigs(
       allTournaments.map(tournament => tournament.tournament_ID),
       targetVersion,
       canUseNetwork
     );
+    let currentTournamentUpdated = Boolean(
+      currentTournamentNeedsVersionSync
+      && canUseNetwork
+      && !result.failed.includes(currentTournamentId)
+    );
+
+    // При совпадающей версии общая синхронизация намеренно не обращается к
+    // серверу. Для первого текущего турнира выполняем один контрольный запрос,
+    // чтобы изменения строк таблицы не ждали увеличения общей версии.
+    if (currentTournamentId && canUseNetwork && !currentTournamentNeedsVersionSync) {
+      const refresh = refreshCurrentTournamentTable(config, 'startup');
+      if (refresh) {
+        try {
+          await refresh;
+          currentTournamentUpdated = true;
+          initializationLog(
+            `Таблица текущего турнира ${currentTournamentId} проверена одним сетевым запросом`
+          );
+        } catch (error) {
+          console.warn(
+            `[Инициализация] Контрольное обновление таблицы текущего турнира `
+            + `${currentTournamentId} не выполнено:`,
+            error
+          );
+        }
+      }
+    }
+    if (currentTournamentUpdated) {
+      publishReferenceDataUpdate(
+        ['tournaments'],
+        { tournaments: targetVersion },
+      );
+    }
     initializationLog(
       `Турнирные таблицы проверены за ${elapsedMilliseconds(startedAt)} мс: `
       + `запрошено=${result.requested}, обновлено=${result.updated}, ошибок=${result.failed.length}`

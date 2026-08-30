@@ -1,5 +1,5 @@
 // app/index.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -29,6 +29,7 @@ import { getNewsPage, type NewsArticle } from '../services/newsService';
 import NewsCard from '../components/NewsCard';
 import { useStartupFeature } from '../services/startupConfigRuntime';
 import Icon from '../components/Icon';
+import { subscribeHomeScrollToTop } from '../services/primaryDataRefresh';
 
 const headerStyles = StyleSheet.create({
   headerContainer: {
@@ -73,6 +74,7 @@ const warningStyles = StyleSheet.create({
 });
 
 export default function HomeScreen() {
+  const scrollViewRef = useRef<ScrollView>(null);
   const bottomNavigationInset = usePersistentBottomNavigationInset();
   const { isOffline } = useNetworkStatus();
   const homeGamesEnabled = useStartupFeature('home_games');
@@ -218,6 +220,10 @@ export default function HomeScreen() {
     void loadData(false, false);
   }), [loadData]);
 
+  useEffect(() => subscribeHomeScrollToTop(() => {
+    scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+  }), []);
+
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -271,6 +277,7 @@ export default function HomeScreen() {
   return (
     <SafeAreaView edges={['top']} style={commonStyles.container}>
       <ScrollView
+        ref={scrollViewRef}
         style={commonStyles.content}
         contentContainerStyle={{ paddingBottom: bottomNavigationInset }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}

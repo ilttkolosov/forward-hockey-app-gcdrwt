@@ -19,6 +19,10 @@ import { useMessengerAuth } from '../contexts/MessengerAuthContext';
 import { useMessengerUnreadSnapshot } from '../services/messengerUnread';
 import { colors } from '../styles/commonStyles';
 import { useStartupFeature } from '../services/startupConfigRuntime';
+import {
+  refreshPrimaryDataInBackground,
+  requestHomeScrollToTop,
+} from '../services/primaryDataRefresh';
 
 const NAVIGATION_RED = '#F2162D';
 const NAVIGATION_HEIGHT = 70;
@@ -255,11 +259,16 @@ export default function PersistentBottomNavigation() {
 
   const openHome = () => {
     setMoreVisible(false);
+    void refreshPrimaryDataInBackground();
+    if (pathname === '/') {
+      requestHomeScrollToTop();
+      return;
+    }
     if (router.canDismiss()) {
       router.dismissAll();
       return;
     }
-    if (pathname !== '/') router.replace('/');
+    router.replace('/');
   };
 
   if (navigationHidden) return null;
@@ -365,7 +374,7 @@ export default function PersistentBottomNavigation() {
           </View>
 
           <TouchableOpacity
-            accessibilityLabel="Открыть главную страницу"
+            accessibilityLabel="Открыть главную страницу и обновить данные"
             accessibilityRole="button"
             accessibilityState={{ selected: activeSection === 'home' }}
             activeOpacity={0.78}
