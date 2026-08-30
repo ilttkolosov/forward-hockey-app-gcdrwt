@@ -291,7 +291,7 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {homeGamesEnabled && (
+        {homeGamesEnabled && currentGames.length > 0 && (
           <View style={homeStyles.gamesSection}>
             <SegmentedControl
               values={[`Текущие игры (${currentGames.length})`, 'Прошедшие игры']}
