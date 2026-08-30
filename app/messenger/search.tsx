@@ -264,6 +264,7 @@ export default function MessengerSearchScreen() {
         <View style={styles.searchRow}>
           <Icon name="search" size={20} color="#758596" />
           <TextInput
+            autoFocus
             style={styles.input}
             value={query}
             onChangeText={setQuery}
