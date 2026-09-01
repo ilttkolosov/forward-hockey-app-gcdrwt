@@ -113,8 +113,17 @@ function getNativeComponent(): NativeComponent | null {
   if (cachedNativeComponent !== undefined) return cachedNativeComponent;
   if (
     Platform.OS === "web" ||
+    Platform.OS === "android" ||
     Constants.executionEnvironment === ExecutionEnvironment.StoreClient
   ) {
+    // Android deliberately uses React Native's stock TextInput. The custom
+    // Spannable editor serializes the entire attributed string on every IME
+    // mutation and feeds it back through a controlled native prop. Gboard and
+    // other Android IMEs maintain composing spans while typing/autocorrecting;
+    // that round-trip can invalidate composition, cause visual artifacts and
+    // make backspace noticeably lag. Keep the custom rich-text view on iOS,
+    // where it is stable, while Android retains the standard selection,
+    // copy/paste and keyboard behavior without our formatting submenu.
     cachedNativeComponent = null;
     return cachedNativeComponent;
   }
