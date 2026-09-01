@@ -54,4 +54,22 @@ assert.ok(
   "the exact cached player photo path must be preferred over version-derived paths",
 );
 
+const sessionSource = readFileSync(
+  new URL("../services/messengerSession.ts", import.meta.url),
+  "utf8",
+);
+assert.match(sessionSource, /schedulePlayerAvatarReconciliation\(parsed\)/);
+assert.match(sessionSource, /schedulePlayerAvatarReconciliation\(session\)/);
+assert.match(sessionSource, /import\(\s*"\.\/messengerPlayerAvatarReconciliation"\s*\)/);
+
+const reconciliationSource = readFileSync(
+  new URL("../services/messengerPlayerAvatarReconciliation.ts", import.meta.url),
+  "utf8",
+);
+assert.match(reconciliationSource, /new ExpoFile\(candidate\.uri\)/);
+assert.match(reconciliationSource, /local\?\.photo_url\?\.trim\(\)/);
+assert.match(reconciliationSource, /downloadAsync\(photoUrl, uri\)/);
+assert.match(reconciliationSource, /expoFetch\(`\$\{MESSENGER_API_BASE_URL\}\/users\/me\/avatar`/);
+assert.match(reconciliationSource, /avatar_url:\s*uploaded\.url/);
+
 console.log("Messenger automatic player avatar checks passed.");

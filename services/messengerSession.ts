@@ -9,11 +9,60 @@ import type {
 const SESSION_KEY = "forward_messenger_session_v1";
 const PASSWORD_CHANGE_KEY = "forward_messenger_password_change_v1";
 const DEVICE_ID_KEY = "forward_messenger_device_id_v1";
+// Give the original registration callback time to finish before the recovery
+// pass publishes a newer session, preventing an older avatar-less state from
+// winning a React state race.
+const PLAYER_AVATAR_RECONCILIATION_DELAY_MS = 1_500;
 
 let memorySession: MessengerSession | null | undefined;
 let memoryPasswordChange: MessengerPasswordChangeRequired | null | undefined;
 let sessionReadPromise: Promise<MessengerSession | null> | null = null;
+let playerAvatarReconciliationGeneration = 0;
+let playerAvatarReconciliationModule:
+  | Promise<typeof import("./messengerPlayerAvatarReconciliation")>
+  | null = null;
 const listeners = new Set<(session: MessengerSession | null) => void>();
+
+function loadPlayerAvatarReconciliationModule() {
+  if (!playerAvatarReconciliationModule) {
+    playerAvatarReconciliationModule = import(
+      "./messengerPlayerAvatarReconciliation"
+    ).catch((error) => {
+      playerAvatarReconciliationModule = null;
+      throw error;
+    });
+  }
+  return playerAvatarReconciliationModule;
+}
+
+function schedulePlayerAvatarReconciliation(
+  session: MessengerSession | null,
+): void {
+  const generation = ++playerAvatarReconciliationGeneration;
+  const playerId = session?.user.player_id;
+  if (
+    !session ||
+    session.user.avatar_url ||
+    typeof playerId !== "number" ||
+    !Number.isSafeInteger(playerId) ||
+    playerId <= 0
+  ) {
+    return;
+  }
+  setTimeout(() => {
+    if (generation !== playerAvatarReconciliationGeneration) return;
+    void loadPlayerAvatarReconciliationModule()
+      .then(({ reconcileMessengerPlayerAvatar }) =>
+        reconcileMessengerPlayerAvatar(session.user.id),
+      )
+      .catch((error) =>
+        console.warn(
+          "[Messenger] Автоматическая установка фотографии игрока отложена:",
+          error,
+        ),
+      );
+  }, PLAYER_AVATAR_RECONCILIATION_DELAY_MS);
+}
 
 async function secureStoreAvailable(): Promise<boolean> {
   try {
@@ -64,6 +113,7 @@ export async function loadMessengerSession(): Promise<MessengerSession | null> {
 
       const parsed = JSON.parse(stored) as MessengerSession;
       memorySession = parsed;
+      schedulePlayerAvatarReconciliation(parsed);
       try {
         // Re-save sessions written by older builds with the background-safe
         // accessibility level. This is a storage migration, not a rotation.
@@ -94,6 +144,7 @@ export async function saveMessengerSession(
   await writeValue(SESSION_KEY, JSON.stringify(session));
   memorySession = session;
   listeners.forEach((listener) => listener(session));
+  schedulePlayerAvatarReconciliation(session);
   console.log("[Messenger] Сессия сохранена в защищённом хранилище");
 }
 
@@ -102,6 +153,7 @@ export async function clearMessengerSession(): Promise<void> {
     await writeValue(SESSION_KEY, null);
   } finally {
     memorySession = null;
+    schedulePlayerAvatarReconciliation(null);
     listeners.forEach((listener) => listener(null));
     console.log("[Messenger] Локальная сессия удалена");
   }
