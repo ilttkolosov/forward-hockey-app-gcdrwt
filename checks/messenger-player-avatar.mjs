@@ -6,8 +6,8 @@ assert.equal(automaticMessengerAvatarPlayerId({ avatar_url: null }), null);
 assert.equal(automaticMessengerAvatarPlayerId({ player_id: null, avatar_url: null }), null);
 assert.equal(automaticMessengerAvatarPlayerId({ player_id: 0, avatar_url: null }), null);
 assert.equal(
-  automaticMessengerAvatarPlayerId({ player_id: 76, avatar_url: "/api/v1/media/existing" }),
-  null,
+  automaticMessengerAvatarPlayerId({ player_id: 76, avatar_url: "/api/v1/media/preset" }),
+  76,
 );
 
 console.log("Messenger automatic player avatar checks passed.");
