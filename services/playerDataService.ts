@@ -35,6 +35,12 @@ const PHOTO_ARCHIVE_BASE_URL = 'https://www.hc-forward.com/wp-content/uploads/ap
 const BUNDLED_PHOTOS_VERSION_KEY = 'bundledPlayerPhotosVersion';
 const PLAYER_PHOTO_FILENAME_PATTERN = /^player_(\d+)\.(jpe?g|png|webp)$/i;
 
+export interface MessengerPlayerAvatarUpload {
+  uri: string;
+  name: string;
+  type: string;
+}
+
 interface PlayerFullApiResponse extends DatabasePlayer {
   id: number;
   name: string;
@@ -119,6 +125,59 @@ export class PlayerDownloadSystem {
     if (version === playerPhotoSeed.version) return false;
     const photoUris = await this.getVersionedPhotoUris(version);
     return photoUris.size === 0;
+  }
+
+  async getLocalPlayerPhotoUpload(
+    playerId: number
+  ): Promise<MessengerPlayerAvatarUpload | null> {
+    if (!Number.isSafeInteger(playerId) || playerId <= 0) return null;
+    const id = String(playerId);
+    const localPlayers = await loadPlayersFromDatabase();
+    const player = localPlayers.find(item => String(item.id) === id);
+    if (!player) return null;
+
+    const localVersion = await getReferenceVersion('players');
+    if (localVersion > 0) {
+      const versionedPhoto = (await this.getVersionedPhotoUris(localVersion)).get(id);
+      if (versionedPhoto) return this.toMessengerAvatarUpload(id, versionedPhoto);
+    }
+
+    const bundledModule = PLAYER_PHOTO_ASSETS[id];
+    if (bundledModule) {
+      const asset = Asset.fromModule(bundledModule);
+      await asset.downloadAsync();
+      const uri = asset.localUri || asset.uri;
+      if (uri) {
+        return this.toMessengerAvatarUpload(id, uri, asset.type || undefined);
+      }
+    }
+
+    const extension = this.getExtensionFromUrl(player.photo_url);
+    const legacyUri = `${PLAYERS_DIRECTORY}player_${id}.${extension}`;
+    const legacyInfo = await getInfoAsync(legacyUri);
+    return legacyInfo.exists
+      ? this.toMessengerAvatarUpload(id, legacyUri, extension)
+      : null;
+  }
+
+  private toMessengerAvatarUpload(
+    playerId: string,
+    uri: string,
+    extensionHint?: string
+  ): MessengerPlayerAvatarUpload {
+    const uriExtension = uri.match(/\.([a-zA-Z0-9]+)(?:[?#]|$)/)?.[1];
+    const rawExtension = (extensionHint || uriExtension || 'jpg').toLowerCase();
+    const extension = rawExtension === 'jpeg' ? 'jpg' : rawExtension;
+    const type = extension === 'png'
+      ? 'image/png'
+      : extension === 'webp'
+        ? 'image/webp'
+        : 'image/jpeg';
+    return {
+      uri,
+      name: `player_${playerId}.${extension}`,
+      type,
+    };
   }
 
   private toPlayer(

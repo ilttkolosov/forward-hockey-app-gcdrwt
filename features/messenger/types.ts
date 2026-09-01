@@ -80,6 +80,7 @@ export interface MessengerLocation {
 
 export interface InvitationPreview {
   id: string;
+  player_id?: number | null;
   status: "active" | "revoked" | "expired" | "consumed";
   can_register: boolean;
   display_name: string | null;
