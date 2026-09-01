@@ -107,6 +107,11 @@ type NativeComponent = React.ComponentType<
   }
 >;
 
+interface PendingNativeEcho {
+  emittedValue: string;
+  previousControlledValue: string;
+}
+
 let cachedNativeComponent: NativeComponent | null | undefined;
 
 function getNativeComponent(): NativeComponent | null {
@@ -169,6 +174,11 @@ export const ForwardRichTextInput = forwardRef<
   const nativeRef = useRef<NativeForwardRichTextInputRef>(null);
   const fallbackRef = useRef<TextInput>(null);
   const NativeView = useMemo(getNativeComponent, []);
+  const latestControlledValueRef = useRef(value);
+  const acceptedControlledValueRef = useRef(value);
+  const nativePropValueRef = useRef(value);
+  const pendingNativeEchoRef = useRef<PendingNativeEcho | null>(null);
+  latestControlledValueRef.current = value;
 
   useImperativeHandle(
     forwardedRef,
@@ -187,7 +197,14 @@ export const ForwardRichTextInput = forwardRef<
 
   const handleNativeChange = useCallback(
     (event: NativeSyntheticEvent<NativeValueChangeEvent>) => {
-      onChangeText(event.nativeEvent.value);
+      const nextValue = event.nativeEvent.value;
+      if (Platform.OS === "ios") {
+        pendingNativeEchoRef.current = {
+          emittedValue: nextValue,
+          previousControlledValue: latestControlledValueRef.current,
+        };
+      }
+      onChangeText(nextValue);
     },
     [onChangeText],
   );
@@ -236,11 +253,36 @@ export const ForwardRichTextInput = forwardRef<
     return <TextInput ref={fallbackRef} {...fallbackProps} />;
   }
 
+  let nativeValue = value;
+  if (Platform.OS === "ios") {
+    const pendingEcho = pendingNativeEchoRef.current;
+    if (pendingEcho) {
+      if (value === pendingEcho.emittedValue) {
+        // React accepted the native edit. Keep the native prop stable so the
+        // Swift view never needs to re-serialize the same attributed text just
+        // to discover that nothing changed.
+        acceptedControlledValueRef.current = value;
+        pendingNativeEchoRef.current = null;
+      } else if (value !== pendingEcho.previousControlledValue) {
+        // A genuinely external update won the race with the native edit.
+        acceptedControlledValueRef.current = value;
+        nativePropValueRef.current = value;
+        pendingNativeEchoRef.current = null;
+      }
+    } else if (value !== acceptedControlledValueRef.current) {
+      // Programmatic changes such as clearing after send or loading text for
+      // editing must still reach the native UITextView.
+      acceptedControlledValueRef.current = value;
+      nativePropValueRef.current = value;
+    }
+    nativeValue = nativePropValueRef.current;
+  }
+
   return (
     <NativeView
       ref={nativeRef}
       style={style}
-      value={value}
+      value={nativeValue}
       placeholder={placeholder}
       maxLength={maxLength}
       editable={editable}
