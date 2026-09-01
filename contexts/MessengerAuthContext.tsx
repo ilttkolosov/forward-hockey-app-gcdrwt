@@ -30,6 +30,7 @@ import {
   loginToMessenger,
   logoutFromMessenger,
   registerInMessenger,
+  uploadMessengerAvatar,
 } from "../services/messengerApi";
 import {
   clearMessengerPasswordChange,
@@ -56,6 +57,8 @@ import {
   trackMessengerAction,
 } from "../services/analyticsService";
 import { waitForAppInteractive } from "../services/appInteractive";
+import { playerDownloadService } from "../services/playerDataService";
+import { automaticMessengerAvatarPlayerId } from "../features/messenger/playerAvatarPolicy";
 
 type MessengerAuthStatus =
   "loading" | "authenticated" | "unauthenticated" | "password_change_required";
@@ -444,7 +447,27 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       setStatus("loading");
       try {
         clearMessengerAliases();
-        const authenticated = await registerInMessenger(payload);
+        let authenticated = await registerInMessenger(payload);
+        const playerId = automaticMessengerAvatarPlayerId(authenticated.user);
+        if (playerId !== null) {
+          try {
+            const localPhoto =
+              await playerDownloadService.getLocalPlayerPhotoUpload(playerId);
+            if (localPhoto) {
+              const uploaded = await uploadMessengerAvatar(localPhoto);
+              authenticated = {
+                ...authenticated,
+                user: { ...authenticated.user, avatar_url: uploaded.url },
+              };
+              await saveMessengerSession(authenticated);
+            }
+          } catch (avatarError) {
+            console.warn(
+              "[Messenger] Не удалось автоматически установить фото игрока:",
+              avatarError,
+            );
+          }
+        }
         await prepareMessengerAliases(authenticated.user.id);
         setSession(authenticated);
         setPasswordChange(null);
