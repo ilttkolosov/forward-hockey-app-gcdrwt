@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { MessengerContactAlias } from "./types";
+import { formatMessengerPlayerDisplayName } from "./playerIdentity";
 
 const STORAGE_PREFIX = "messenger_contact_aliases:";
 
@@ -103,7 +104,10 @@ function transformedIdentity(
       : null;
   return {
     ...value,
-    display_name: personalAlias ?? original,
+    display_name: formatMessengerPlayerDisplayName(
+      personalAlias ?? original,
+      value.player_id,
+    ),
     original_display_name: original,
     ...(hasExplicitAlias ? { alias: personalAlias } : {}),
   };

@@ -28,6 +28,7 @@ export interface MessengerPermission {
 
 export interface MessengerUser {
   id: string;
+  player_id?: number | null;
   username: string;
   display_name: string;
   avatar_url: string | null;
@@ -101,6 +102,7 @@ export interface MessengerRoom {
   muted_until: string | null;
   peer: null | {
     id: string;
+    player_id?: number | null;
     display_name: string;
     original_display_name?: string;
     avatar_url: string | null;
@@ -128,6 +130,7 @@ export interface MessengerRoom {
     location: MessengerLocation | null;
     author: {
       id: string;
+      player_id?: number | null;
       display_name: string;
       original_display_name?: string;
       avatar_url: string | null;
@@ -137,6 +140,7 @@ export interface MessengerRoom {
 
 export interface MessengerPrivateRoomMember {
   id: string;
+  player_id?: number | null;
   username: string;
   display_name: string;
   original_display_name?: string;
@@ -149,6 +153,7 @@ export interface MessengerPrivateRoomMember {
 
 export interface MessengerRoomMember {
   id: string;
+  player_id?: number | null;
   username: string;
   display_name: string;
   original_display_name?: string;
@@ -166,6 +171,7 @@ export interface MessengerRoomSettings {
 
 export interface MessengerContact {
   id: string;
+  player_id?: number | null;
   username: string;
   display_name: string;
   original_display_name?: string;
@@ -206,6 +212,7 @@ export interface MessengerReply {
   deleted_at: string | null;
   author: {
     id: string;
+    player_id?: number | null;
     display_name: string;
     original_display_name?: string;
   };
@@ -215,6 +222,7 @@ export interface MessengerForward {
   message_id: string;
   author: {
     id: string;
+    player_id?: number | null;
     display_name: string;
     original_display_name?: string;
   };
@@ -255,6 +263,7 @@ export interface MessengerMessage {
   deleted_at: string | null;
   author: {
     id: string;
+    player_id?: number | null;
     username: string;
     display_name: string;
     original_display_name?: string;
@@ -286,6 +295,7 @@ export interface MessengerOutboxItem {
 
 export interface MessengerMessageReceipt {
   user_id: string;
+  player_id?: number | null;
   display_name: string;
   original_display_name?: string;
   avatar_url: string | null;
@@ -302,6 +312,7 @@ export interface MessengerContactAlias {
 
 export interface MessengerContactProfile {
   id: string;
+  player_id?: number | null;
   username: string;
   display_name: string;
   original_display_name: string;
