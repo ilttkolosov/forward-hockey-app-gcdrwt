@@ -37,6 +37,7 @@ import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 import java.io.File
+import java.util.ArrayDeque
 import java.util.UUID
 
 private class ForwardRichEditText(context: Context) : EditText(context) {
@@ -98,7 +99,7 @@ class ForwardRichTextInputView(
   private var suppressEvents = false
   private var maximumLength = 4000
   private var lastContentHeight = -1
-  private var lastEmittedEncodedValue: String? = null
+  private val recentlyEmittedEncodedValues = ArrayDeque<String>()
 
   private val formatMenuIds = mapOf(
     ForwardTextFormat.BOLD to 0x464F0101,
@@ -172,25 +173,22 @@ class ForwardRichTextInputView(
   }
 
   fun setEncodedValue(value: String) {
-    // The overwhelmingly common path while typing is the value that this
-    // EditText has just emitted travelling through React state and coming back
-    // as a prop. Never touch the Editable in that case: replacing it would
-    // destroy or disturb the IME composing region used by Gboard and other
-    // Android keyboards.
-    if (lastEmittedEncodedValue == value) return
+    // Native input can run ahead of React during rapid IME operations such as
+    // long-press Backspace. React may then deliver several older values after
+    // the EditText has already advanced. Any value recently emitted by this
+    // editor is an echo and must never replace the live Editable/composing
+    // state, even when it arrives out of order.
+    if (consumeRecentNativeEcho(value)) return
 
     // Programmatic callers can also provide a value that is already visible.
     // This slower comparison is intentionally outside the keystroke echo path.
-    if (encodeAttributedText() == value) {
-      lastEmittedEncodedValue = value
-      return
-    }
+    if (encodeAttributedText() == value) return
 
     suppressEvents = true
     editor.setText(decodeAttributedText(value), TextView.BufferType.SPANNABLE)
     editor.setSelection(editor.text.length)
     suppressEvents = false
-    lastEmittedEncodedValue = value
+    clearRecentNativeEchoes()
     emitContentHeight()
   }
 
@@ -516,8 +514,30 @@ class ForwardRichTextInputView(
 
   private fun emitEncodedValueChange() {
     val encoded = encodeAttributedText()
-    lastEmittedEncodedValue = encoded
+    rememberNativeEmission(encoded)
     onValueChange(mapOf("value" to encoded))
+  }
+
+  private fun rememberNativeEmission(value: String) {
+    recentlyEmittedEncodedValues.addLast(value)
+    while (recentlyEmittedEncodedValues.size > MAX_RECENT_NATIVE_ECHOES) {
+      recentlyEmittedEncodedValues.removeFirst()
+    }
+  }
+
+  private fun consumeRecentNativeEcho(value: String): Boolean {
+    val iterator = recentlyEmittedEncodedValues.iterator()
+    while (iterator.hasNext()) {
+      if (iterator.next() == value) {
+        iterator.remove()
+        return true
+      }
+    }
+    return false
+  }
+
+  private fun clearRecentNativeEchoes() {
+    recentlyEmittedEncodedValues.clear()
   }
 
   private fun encodeAttributedText(): String {
@@ -579,5 +599,6 @@ class ForwardRichTextInputView(
 
   companion object {
     private const val FORMAT_MENU_ID = 0x464F0100
+    private const val MAX_RECENT_NATIVE_ECHOES = 96
   }
 }
