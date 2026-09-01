@@ -1,16 +1,15 @@
 interface MessengerAvatarCandidate {
   player_id?: number | null;
-  avatar_url?: string | null;
 }
 
 /**
- * Returns a validated player ID only for a newly registered account that does
- * not already have an avatar. Missing fields keep older servers compatible.
+ * Returns a validated player ID for the account created in the current
+ * registration flow. A server-assigned preset avatar must be replaced by the
+ * player's local photo. Missing fields keep older servers compatible.
  */
 export function automaticMessengerAvatarPlayerId(
   user: MessengerAvatarCandidate,
 ): number | null {
-  if (user.avatar_url) return null;
   return typeof user.player_id === "number" &&
     Number.isSafeInteger(user.player_id) &&
     user.player_id > 0
