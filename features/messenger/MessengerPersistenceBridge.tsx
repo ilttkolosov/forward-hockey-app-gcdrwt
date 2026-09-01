@@ -5,6 +5,8 @@ import * as Notifications from "expo-notifications";
 import NetInfo from "@react-native-community/netinfo";
 import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import { replaceMessengerAliases } from "./aliases";
+import { replaceMessengerPlayerNumbers } from "./playerIdentity";
+import { loadPlayersFromDatabase } from "../../database/repository";
 import { compareMessengerSequence } from "./feed";
 import {
   cacheIncomingMessengerMessage,
@@ -86,6 +88,16 @@ export default function MessengerPersistenceBridge() {
     const unreadRecoveryTimers = new Set<ReturnType<typeof setTimeout>>();
     let lastRoomsSyncStartedAt = 0;
     let lastAliasesSyncStartedAt = 0;
+    const synchronizePlayerNumbers = async () => {
+      try {
+        replaceMessengerPlayerNumbers(await loadPlayersFromDatabase());
+      } catch (error) {
+        messengerLog("debug", "player_numbers.local_sync.deferred", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+    const playerNumbersReady = synchronizePlayerNumbers();
     const recoverUnreadFromDevice = async (reason: string) => {
       const results = await Promise.allSettled([
         hydrateMessengerUnreadSession(userId),
@@ -168,6 +180,7 @@ export default function MessengerPersistenceBridge() {
       roomsSyncRunning = true;
       lastRoomsSyncStartedAt = Date.now();
       try {
+        await playerNumbersReady;
         const rooms = await getMessengerRooms({
           priority: startupUnreadPriority ? "foreground" : "background",
           force: forceNetwork,
@@ -431,7 +444,9 @@ export default function MessengerPersistenceBridge() {
           void warmMessengerMediaFileReader();
           void flushMessengerReadReceipts(db);
           requestUnreadRecovery("app-active");
-          scheduleRoomsSynchronization(true);
+          void synchronizePlayerNumbers().then(() =>
+            scheduleRoomsSynchronization(true),
+          );
           if (remotePushNotificationsSupported) {
             void syncMessengerPushRegistration().catch(() => undefined);
           }

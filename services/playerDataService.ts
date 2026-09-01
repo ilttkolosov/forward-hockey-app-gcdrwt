@@ -25,6 +25,7 @@ import {
   replacePlayers,
   type DatabasePlayer,
 } from '../database/repository';
+import { replaceMessengerPlayerNumbers } from '../features/messenger/playerIdentity';
 
 const PLAYERS_DATA_LOADED_KEY = 'playersDataLoaded';
 const PLAYERS_STORAGE_KEY = 'localPlayersData';
@@ -238,6 +239,7 @@ export class PlayerDownloadSystem {
   ): Promise<Player[]> {
     const localVersion = await getReferenceVersion('players');
     const localPlayers = await loadPlayersFromDatabase();
+    replaceMessengerPlayerNumbers(localPlayers);
     if (canUseNetwork && targetVersion !== localVersion) {
       console.log(`[Database] players: обновление ${localVersion} → ${targetVersion}`);
       return this.refreshPlayersData(targetVersion, onProgress);
@@ -341,6 +343,7 @@ export class PlayerDownloadSystem {
 
     players.sort((a, b) => a.number - b.number);
     await replacePlayers(fullPlayers, version);
+    replaceMessengerPlayerNumbers(fullPlayers);
     await this.savePlayersToStorage(players);
     await this.setDataLoaded(true);
     await this.setPhotosDownloadedFlag(true);
