@@ -5,6 +5,7 @@ assert.equal(automaticMessengerAvatarPlayerId({ player_id: 76, avatar_url: null 
 assert.equal(automaticMessengerAvatarPlayerId({ avatar_url: null }), null);
 assert.equal(automaticMessengerAvatarPlayerId({ player_id: null, avatar_url: null }), null);
 assert.equal(automaticMessengerAvatarPlayerId({ player_id: 0, avatar_url: null }), null);
+assert.equal(automaticMessengerAvatarPlayerId({ player_id: 7.6, avatar_url: null }), null);
 assert.equal(
   automaticMessengerAvatarPlayerId({ player_id: 76, avatar_url: "/api/v1/media/preset" }),
   76,
