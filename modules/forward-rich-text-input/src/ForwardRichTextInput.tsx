@@ -170,6 +170,25 @@ export const ForwardRichTextInput = forwardRef<
   const fallbackRef = useRef<TextInput>(null);
   const NativeView = useMemo(getNativeComponent, []);
 
+  // Android IMEs (especially Gboard) keep temporary composing spans while the
+  // user types. Feeding every native keystroke through React state and straight
+  // back into the native EditText makes that composing state vulnerable to a
+  // value-prop round trip. Keep the Android editor authoritative for changes it
+  // originated, and only push a new value into native when JS changed it for a
+  // different reason (clear after send, load message for editing, etc.).
+  const lastAndroidNativeValueRef = useRef(value);
+  const lastAndroidPushedValueRef = useRef(value);
+
+  if (
+    Platform.OS === "android" &&
+    value !== lastAndroidNativeValueRef.current
+  ) {
+    lastAndroidPushedValueRef.current = value;
+  }
+
+  const nativeValue =
+    Platform.OS === "android" ? lastAndroidPushedValueRef.current : value;
+
   useImperativeHandle(
     forwardedRef,
     () => ({
@@ -187,7 +206,11 @@ export const ForwardRichTextInput = forwardRef<
 
   const handleNativeChange = useCallback(
     (event: NativeSyntheticEvent<NativeValueChangeEvent>) => {
-      onChangeText(event.nativeEvent.value);
+      const nextValue = event.nativeEvent.value;
+      if (Platform.OS === "android") {
+        lastAndroidNativeValueRef.current = nextValue;
+      }
+      onChangeText(nextValue);
     },
     [onChangeText],
   );
@@ -240,7 +263,7 @@ export const ForwardRichTextInput = forwardRef<
     <NativeView
       ref={nativeRef}
       style={style}
-      value={value}
+      value={nativeValue}
       placeholder={placeholder}
       maxLength={maxLength}
       editable={editable}
