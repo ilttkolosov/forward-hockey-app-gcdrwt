@@ -78,6 +78,7 @@ interface MessengerAuthContextValue {
     password: string;
     display_name?: string;
     email?: string;
+    expected_player_id?: number | string | null;
   }): Promise<void>;
   completePasswordChange(
     password: string,
@@ -447,8 +448,15 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
       setStatus("loading");
       try {
         clearMessengerAliases();
-        let authenticated = await registerInMessenger(payload);
-        const playerId = automaticMessengerAvatarPlayerId(authenticated.user);
+        const {
+          expected_player_id: expectedPlayerId,
+          ...registrationPayload
+        } = payload;
+        let authenticated = await registerInMessenger(registrationPayload);
+        const playerId = automaticMessengerAvatarPlayerId(
+          authenticated.user,
+          { player_id: expectedPlayerId },
+        );
         if (playerId !== null) {
           try {
             const localPhoto =
@@ -457,9 +465,20 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
               const uploaded = await uploadMessengerAvatar(localPhoto);
               authenticated = {
                 ...authenticated,
-                user: { ...authenticated.user, avatar_url: uploaded.url },
+                user: {
+                  ...authenticated.user,
+                  player_id: playerId,
+                  avatar_url: uploaded.url,
+                },
               };
               await saveMessengerSession(authenticated);
+              console.log(
+                `[Messenger] Фото игрока ${playerId} автоматически установлено как аватар`,
+              );
+            } else {
+              console.warn(
+                `[Messenger] Для игрока ${playerId} не найден локальный файл аватара`,
+              );
             }
           } catch (avatarError) {
             console.warn(

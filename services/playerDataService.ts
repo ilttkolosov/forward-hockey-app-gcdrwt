@@ -121,6 +121,41 @@ export class PlayerDownloadSystem {
     return photoUris;
   }
 
+  private async existingLocalPhotoUpload(
+    playerId: string,
+    uri: unknown,
+    extensionHint?: string
+  ): Promise<MessengerPlayerAvatarUpload | null> {
+    if (typeof uri !== 'string') return null;
+    const normalizedUri = uri.trim();
+    if (!normalizedUri || /^https?:\/\//i.test(normalizedUri)) return null;
+    try {
+      const info = await getInfoAsync(normalizedUri);
+      if (!info.exists || info.isDirectory) return null;
+      return this.toMessengerAvatarUpload(playerId, normalizedUri, extensionHint);
+    } catch {
+      return null;
+    }
+  }
+
+  private async findPlayerPhotoInDirectory(
+    directory: string,
+    playerId: string
+  ): Promise<string | null> {
+    try {
+      const info = await getInfoAsync(directory);
+      if (!info.exists || !info.isDirectory) return null;
+      const filenames = await readDirectoryAsync(directory);
+      for (const filename of filenames) {
+        const match = PLAYER_PHOTO_FILENAME_PATTERN.exec(filename);
+        if (match?.[1] === playerId) return `${directory}${filename}`;
+      }
+    } catch (error) {
+      console.warn(`[Игроки] Не удалось проверить каталог фото ${directory}:`, error);
+    }
+    return null;
+  }
+
   async needsPhotoArchiveRefresh(version: number): Promise<boolean> {
     if (version === playerPhotoSeed.version) return false;
     const photoUris = await this.getVersionedPhotoUris(version);
@@ -132,14 +167,34 @@ export class PlayerDownloadSystem {
   ): Promise<MessengerPlayerAvatarUpload | null> {
     if (!Number.isSafeInteger(playerId) || playerId <= 0) return null;
     const id = String(playerId);
+
+    const cachedPlayers = await this.getPlayersFromStorage().catch(error => {
+      console.warn('[Messenger] Не удалось прочитать кэш карточек игроков:', error);
+      return [];
+    });
+    const cachedPlayer = cachedPlayers.find(item => String(item.id) === id);
+    const cachedPhotoCandidates = [
+      cachedPlayer?.photoPath,
+      typeof cachedPlayer?.photo === 'string' ? cachedPlayer.photo : null,
+    ];
+    for (const candidate of cachedPhotoCandidates) {
+      const cachedUpload = await this.existingLocalPhotoUpload(id, candidate);
+      if (cachedUpload) {
+        console.log(`[Messenger] Локальное фото игрока ${id} найдено по сохранённому пути`);
+        return cachedUpload;
+      }
+    }
+
     const localPlayers = await loadPlayersFromDatabase();
     const player = localPlayers.find(item => String(item.id) === id);
-    if (!player) return null;
 
     const localVersion = await getReferenceVersion('players');
     if (localVersion > 0) {
       const versionedPhoto = (await this.getVersionedPhotoUris(localVersion)).get(id);
-      if (versionedPhoto) return this.toMessengerAvatarUpload(id, versionedPhoto);
+      if (versionedPhoto) {
+        console.log(`[Messenger] Локальное фото игрока ${id} найдено в архиве версии ${localVersion}`);
+        return this.toMessengerAvatarUpload(id, versionedPhoto);
+      }
     }
 
     const bundledModule = PLAYER_PHOTO_ASSETS[id];
@@ -148,16 +203,26 @@ export class PlayerDownloadSystem {
       await asset.downloadAsync();
       const uri = asset.localUri || asset.uri;
       if (uri) {
+        console.log(`[Messenger] Локальное фото игрока ${id} найдено во встроенном архиве`);
         return this.toMessengerAvatarUpload(id, uri, asset.type || undefined);
       }
     }
 
-    const extension = this.getExtensionFromUrl(player.photo_url);
-    const legacyUri = `${PLAYERS_DIRECTORY}player_${id}.${extension}`;
-    const legacyInfo = await getInfoAsync(legacyUri);
-    return legacyInfo.exists
-      ? this.toMessengerAvatarUpload(id, legacyUri, extension)
-      : null;
+    const legacyPhoto = await this.findPlayerPhotoInDirectory(PLAYERS_DIRECTORY, id);
+    if (legacyPhoto) {
+      console.log(`[Messenger] Локальное фото игрока ${id} найдено в прежнем каталоге`);
+      return this.toMessengerAvatarUpload(id, legacyPhoto);
+    }
+
+    if (player) {
+      const extension = this.getExtensionFromUrl(player.photo_url);
+      const legacyUri = `${PLAYERS_DIRECTORY}player_${id}.${extension}`;
+      const legacyUpload = await this.existingLocalPhotoUpload(id, legacyUri, extension);
+      if (legacyUpload) return legacyUpload;
+    }
+
+    console.warn(`[Messenger] Локальное фото игрока ${id} не найдено`);
+    return null;
   }
 
   private toMessengerAvatarUpload(
@@ -167,7 +232,10 @@ export class PlayerDownloadSystem {
   ): MessengerPlayerAvatarUpload {
     const uriExtension = uri.match(/\.([a-zA-Z0-9]+)(?:[?#]|$)/)?.[1];
     const rawExtension = (extensionHint || uriExtension || 'jpg').toLowerCase();
-    const extension = rawExtension === 'jpeg' ? 'jpg' : rawExtension;
+    const normalizedExtension = rawExtension === 'jpeg' ? 'jpg' : rawExtension;
+    const extension = ['jpg', 'png', 'webp'].includes(normalizedExtension)
+      ? normalizedExtension
+      : 'jpg';
     const type = extension === 'png'
       ? 'image/png'
       : extension === 'webp'

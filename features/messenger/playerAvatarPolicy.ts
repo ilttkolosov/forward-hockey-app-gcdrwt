@@ -1,18 +1,28 @@
 interface MessengerAvatarCandidate {
-  player_id?: number | null;
+  player_id?: unknown;
+}
+
+function normalizePlayerId(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  }
+  if (typeof value !== "string" || !/^\d+$/.test(value.trim())) return null;
+  const normalized = Number(value.trim());
+  return Number.isSafeInteger(normalized) && normalized > 0 ? normalized : null;
 }
 
 /**
- * Returns a validated player ID for the account created in the current
- * registration flow. A server-assigned preset avatar must be replaced by the
- * player's local photo. Missing fields keep older servers compatible.
+ * Returns the first validated player ID available during registration.
+ * The authenticated user is the primary source; the invitation preview is a
+ * fallback for older server responses. A preset avatar must never block the
+ * player's local photo from replacing it.
  */
 export function automaticMessengerAvatarPlayerId(
-  user: MessengerAvatarCandidate,
+  ...candidates: readonly MessengerAvatarCandidate[]
 ): number | null {
-  return typeof user.player_id === "number" &&
-    Number.isSafeInteger(user.player_id) &&
-    user.player_id > 0
-    ? user.player_id
-    : null;
+  for (const candidate of candidates) {
+    const playerId = normalizePlayerId(candidate.player_id);
+    if (playerId !== null) return playerId;
+  }
+  return null;
 }

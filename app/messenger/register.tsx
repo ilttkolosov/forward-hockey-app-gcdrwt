@@ -208,6 +208,7 @@ export default function MessengerRegistrationScreen() {
         password,
         display_name: displayName.trim() || undefined,
         email: email.trim() || undefined,
+        expected_player_id: preview?.player_id,
       });
       await acceptMessengerRules({
         version: rules.version,
