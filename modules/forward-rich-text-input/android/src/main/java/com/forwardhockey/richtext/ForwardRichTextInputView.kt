@@ -98,6 +98,7 @@ class ForwardRichTextInputView(
   private var suppressEvents = false
   private var maximumLength = 4000
   private var lastContentHeight = -1
+  private var lastEmittedEncodedValue: String? = null
 
   private val formatMenuIds = mapOf(
     ForwardTextFormat.BOLD to 0x464F0101,
@@ -160,7 +161,7 @@ class ForwardRichTextInputView(
 
       override fun afterTextChanged(value: Editable?) {
         if (!suppressEvents) {
-          onValueChange(mapOf("value" to encodeAttributedText()))
+          emitEncodedValueChange()
         }
         emitContentHeight()
       }
@@ -171,12 +172,25 @@ class ForwardRichTextInputView(
   }
 
   fun setEncodedValue(value: String) {
-    if (encodeAttributedText() == value) return
+    // The overwhelmingly common path while typing is the value that this
+    // EditText has just emitted travelling through React state and coming back
+    // as a prop. Never touch the Editable in that case: replacing it would
+    // destroy or disturb the IME composing region used by Gboard and other
+    // Android keyboards.
+    if (lastEmittedEncodedValue == value) return
+
+    // Programmatic callers can also provide a value that is already visible.
+    // This slower comparison is intentionally outside the keystroke echo path.
+    if (encodeAttributedText() == value) {
+      lastEmittedEncodedValue = value
+      return
+    }
 
     suppressEvents = true
     editor.setText(decodeAttributedText(value), TextView.BufferType.SPANNABLE)
     editor.setSelection(editor.text.length)
     suppressEvents = false
+    lastEmittedEncodedValue = value
     emitContentHeight()
   }
 
@@ -378,7 +392,7 @@ class ForwardRichTextInputView(
     rebuildFormattingSpans(value, state)
     editor.setSelection(start, end)
     editor.requestFocus()
-    onValueChange(mapOf("value" to encodeAttributedText()))
+    emitEncodedValueChange()
     emitContentHeight()
   }
 
@@ -398,6 +412,7 @@ class ForwardRichTextInputView(
     )
 
     value.getSpans(0, length, StyleSpan::class.java).forEach { span ->
+      if (isImeComposingSpan(value, span)) return@forEach
       val start = value.getSpanStart(span).coerceIn(0, length)
       val end = value.getSpanEnd(span).coerceIn(start, length)
       val isBold = span.style == Typeface.BOLD || span.style == Typeface.BOLD_ITALIC
@@ -417,10 +432,14 @@ class ForwardRichTextInputView(
   }
 
   private fun markRange(value: Spannable, span: Any, target: BooleanArray) {
+    if (isImeComposingSpan(value, span)) return
     val start = value.getSpanStart(span).coerceIn(0, target.size)
     val end = value.getSpanEnd(span).coerceIn(start, target.size)
     for (index in start until end) target[index] = true
   }
+
+  private fun isImeComposingSpan(value: Spannable, span: Any): Boolean =
+    value.getSpanFlags(span) and Spannable.SPAN_COMPOSING != 0
 
   private fun rebuildFormattingSpans(value: Spannable, state: FormatState) {
     value.getSpans(0, value.length, StyleSpan::class.java).forEach(value::removeSpan)
@@ -495,9 +514,21 @@ class ForwardRichTextInputView(
     return closing >= 0 && value.substring(contentStart, closing).isNotBlank()
   }
 
+  private fun emitEncodedValueChange() {
+    val encoded = encodeAttributedText()
+    lastEmittedEncodedValue = encoded
+    onValueChange(mapOf("value" to encoded))
+  }
+
   private fun encodeAttributedText(): String {
     val visible = editor.text.toString()
     if (visible.isEmpty()) return ""
+
+    // Plain typing is by far the hottest path. Avoid allocating four
+    // BooleanArrays and walking the full string when the user has not applied
+    // any Forward formatting at all.
+    if (!hasSupportedFormatting(editor.text)) return visible
+
     val state = captureFormatState(editor.text)
     val result = StringBuilder(visible.length + 32)
 
@@ -517,6 +548,15 @@ class ForwardRichTextInputView(
       if (index < visible.length) result.append(visible[index])
     }
     return result.toString()
+  }
+
+  private fun hasSupportedFormatting(value: Spannable): Boolean {
+    if (value.getSpans(0, value.length, StyleSpan::class.java)
+        .any { !isImeComposingSpan(value, it) }) return true
+    if (value.getSpans(0, value.length, UnderlineSpan::class.java)
+        .any { !isImeComposingSpan(value, it) }) return true
+    return value.getSpans(0, value.length, StrikethroughSpan::class.java)
+      .any { !isImeComposingSpan(value, it) }
   }
 
   private fun emitContentHeight() {
