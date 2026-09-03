@@ -1,0 +1,158 @@
+name: One-time resilient iOS registration patch v6
+
+on:
+  push:
+    branches:
+      - fix/minor-fixes-batch
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, '[ios-registration-patch-v6]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/minor-fixes-batch
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply resilient registration implementation
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/patch-ios-registration-v3.yml')
+          lines = workflow.read_text(encoding='utf-8').splitlines()
+
+          cat_start = next(
+              index for index, line in enumerate(lines)
+              if line.strip() == "cat > features/messenger/MessengerRulesModal.tsx <<'EOF'"
+          ) + 1
+          cat_end = next(
+              index for index in range(cat_start, len(lines))
+              if lines[index].strip() == 'EOF'
+          )
+          modal_lines = [
+              line[10:] if line.startswith('          ') else line
+              for line in lines[cat_start:cat_end]
+          ]
+          Path('features/messenger/MessengerRulesModal.tsx').write_text(
+              '\n'.join(modal_lines) + '\n',
+              encoding='utf-8',
+          )
+
+          python_start = next(
+              index for index, line in enumerate(lines)
+              if index > cat_end and line.strip() == "python3 <<'PY'"
+          ) + 1
+          python_end = next(
+              index for index in range(python_start, len(lines))
+              if lines[index].strip() == 'PY'
+          )
+          script = '\n'.join(
+              line[10:] if line.startswith('          ') else line
+              for line in lines[python_start:python_end]
+          ) + '\n'
+
+          barcode_start = script.index("old_barcode = '''  const handleBarcode")
+          barcode_end = script.index('registration_flow_pattern = re.compile(', barcode_start)
+          robust_barcode_lines = [
+              "barcode_pattern = re.compile(",
+              "    r'  const handleBarcode = \\(\\{ data \\}: BarcodeScanningResult\\) => \\{\\n'",
+              "    r'.*?\\n  \\};',",
+              "    re.S,",
+              ")",
+              "if not barcode_pattern.search(screen):",
+              "    raise SystemExit('Registration barcode callback not found')",
+              "replacement_barcode = '\\n'.join([",
+              "    '  const handleBarcode = ({ data }: BarcodeScanningResult) => {',",
+              "    '    if (scannerLockedRef.current) return;',",
+              "    '    scannerLockedRef.current = true;',",
+              "    '    setScannerVisible(false);',",
+              "    '    setInviteValue(data);',",
+              "    '    void checkInvitation(data);',",
+              "    '  };',",
+              "])",
+              "screen = barcode_pattern.sub(replacement_barcode, screen, count=1)",
+              "",
+          ]
+          script = (
+              script[:barcode_start]
+              + '\n'.join(robust_barcode_lines)
+              + '\n'
+              + script[barcode_end:]
+          )
+
+          button_start = script.index("check_button_old = '''")
+          button_end = script.index('modal_pattern = re.compile(', button_start)
+          robust_button_lines = [
+              "check_button_pattern = re.compile(",
+              "    r'(onPress=\\{\\(\\) => void checkInvitation\\(inviteValue\\)\\}\\n\\s*)'",
+              "    r'disabled=\\{busy\\}'",
+              "    r'(\\n\\s*>\\n\\s*)\\{busy \\? \\('",
+              ")",
+              "if not check_button_pattern.search(screen):",
+              "    raise SystemExit('Invitation check button block not found')",
+              "screen = check_button_pattern.sub(",
+              "    lambda match: (",
+              "        match.group(1)",
+              "        + 'disabled={invitationBusy}'",
+              "        + match.group(2)",
+              "        + '{invitationBusy ? ('",
+              "    ),",
+              "    screen,",
+              "    count=1,",
+              ")",
+              "submit_press_pattern = re.compile(r'onPress=\\{submitRegistration\\}')",
+              "if not submit_press_pattern.search(screen):",
+              "    raise SystemExit('Registration submit button handler not found')",
+              "screen = submit_press_pattern.sub(",
+              "    'onPress={() => void submitRegistration()}',",
+              "    screen,",
+              "    count=1,",
+              ")",
+              "",
+          ]
+          script = (
+              script[:button_start]
+              + '\n'.join(robust_button_lines)
+              + '\n'
+              + script[button_end:]
+          )
+
+          Path('/tmp/apply-ios-registration.py').write_text(script, encoding='utf-8')
+          PY
+          python3 /tmp/apply-ios-registration.py
+          rm -f .github/workflows/patch-ios-registration-v4.yml
+          rm -f .github/workflows/patch-ios-registration-v5.yml
+          rm -f .github/workflows/patch-ios-registration-v6.yml
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Format and validate
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          npx prettier --write features/messenger/MessengerRulesModal.tsx app/messenger/register.tsx contexts/MessengerAuthContext.tsx services/messengerApi.ts checks/messenger-ios-registration.mjs package.json
+          npm run check:messenger-ios-registration
+          npm run typecheck
+          npx eslint features/messenger/MessengerRulesModal.tsx app/messenger/register.tsx contexts/MessengerAuthContext.tsx services/messengerApi.ts checks/messenger-ios-registration.mjs
+          npx expo export --platform ios --output-dir /tmp/forward-hockey-ios-registration-export
+
+      - name: Commit client changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: make rules registration resilient on iOS"
+          git push origin HEAD:fix/minor-fixes-batch
