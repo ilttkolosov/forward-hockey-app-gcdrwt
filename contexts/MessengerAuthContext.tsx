@@ -29,8 +29,7 @@ import {
   isMessengerAccessTokenUsable,
   loginToMessenger,
   logoutFromMessenger,
-  registerInMessenger,
-  uploadMessengerAvatar,
+  registerInMessengerWithRules,
 } from "../services/messengerApi";
 import {
   clearMessengerPasswordChange,
@@ -57,7 +56,6 @@ import {
   trackMessengerAction,
 } from "../services/analyticsService";
 import { waitForAppInteractive } from "../services/appInteractive";
-import { playerDownloadService } from "../services/playerDataService";
 import { automaticMessengerAvatarPlayerId } from "../features/messenger/playerAvatarPolicy";
 
 type MessengerAuthStatus =
@@ -79,6 +77,13 @@ interface MessengerAuthContextValue {
     display_name?: string;
     email?: string;
     expected_player_id?: number | string | null;
+    rules: {
+      version: string;
+      sha256: string;
+      confirmation_method: "registration_checkbox";
+      app_version: string;
+      app_build?: string;
+    };
   }): Promise<void>;
   completePasswordChange(
     password: string,
@@ -450,43 +455,29 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
         clearMessengerAliases();
         const {
           expected_player_id: expectedPlayerId,
+          rules,
           ...registrationPayload
         } = payload;
-        let authenticated = await registerInMessenger(registrationPayload);
-        const playerId = automaticMessengerAvatarPlayerId(
-          authenticated.user,
-          { player_id: expectedPlayerId },
+        let authenticated = await registerInMessengerWithRules(
+          registrationPayload,
+          rules,
         );
-        if (playerId !== null) {
-          try {
-            const localPhoto =
-              await playerDownloadService.getLocalPlayerPhotoUpload(playerId);
-            if (localPhoto) {
-              const uploaded = await uploadMessengerAvatar(localPhoto);
-              authenticated = {
-                ...authenticated,
-                user: {
-                  ...authenticated.user,
-                  player_id: playerId,
-                  avatar_url: uploaded.url,
-                },
-              };
-              await saveMessengerSession(authenticated);
-              console.log(
-                `[Messenger] Фото игрока ${playerId} автоматически установлено как аватар`,
-              );
-            } else {
-              console.warn(
-                `[Messenger] Для игрока ${playerId} не найден локальный файл аватара`,
-              );
-            }
-          } catch (avatarError) {
-            console.warn(
-              "[Messenger] Не удалось автоматически установить фото игрока:",
-              avatarError,
-            );
-          }
+        const playerId = automaticMessengerAvatarPlayerId(authenticated.user, {
+          player_id: expectedPlayerId,
+        });
+        if (playerId !== null && authenticated.user.player_id !== playerId) {
+          authenticated = {
+            ...authenticated,
+            user: {
+              ...authenticated.user,
+              player_id: playerId,
+            },
+          };
+          await saveMessengerSession(authenticated);
         }
+        // The saved accepted session schedules the existing deferred
+        // player-avatar reconciliation. File I/O must not block legal
+        // acceptance or make registration appear unresponsive.
         await prepareMessengerAliases(authenticated.user.id);
         setSession(authenticated);
         setPasswordChange(null);
@@ -494,7 +485,9 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
         setAnalyticsMessengerRole(
           authenticated.user.roles.map((role) => role.code),
         );
-        trackMessengerAction("auth_completed", { method: "registration" });
+        trackMessengerAction("auth_completed", {
+          method: "registration",
+        });
       } catch (error) {
         setStatus("unauthenticated");
         throw error;

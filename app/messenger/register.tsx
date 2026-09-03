@@ -5,10 +5,11 @@ import {
   type BarcodeScanningResult,
 } from "expo-camera";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -28,7 +29,6 @@ import type {
   MessengerRulesVersion,
 } from "../../features/messenger/types";
 import {
-  acceptMessengerRules,
   previewMessengerInvitation,
   rejectMessengerInvitationRules,
 } from "../../services/messengerApi";
@@ -37,6 +37,7 @@ import {
   markMessengerPushOffered,
   shouldOfferMessengerPush,
 } from "../../services/messengerPush";
+import { messengerLog } from "../../services/messengerLogger";
 import { loadMessengerSession } from "../../services/messengerSession";
 import { colors } from "../../styles/commonStyles";
 
@@ -67,6 +68,42 @@ function extractInviteToken(value: string): string | null {
   return trimmed.length >= 32 && trimmed.length <= 256 ? trimmed : null;
 }
 
+async function dismissKeyboardBeforeRules(): Promise<void> {
+  const keyboard = Keyboard as typeof Keyboard & {
+    isVisible?: () => boolean;
+  };
+  const metrics = Keyboard.metrics();
+  const wasVisible =
+    Platform.OS === "ios" &&
+    (keyboard.isVisible?.() === true || Boolean(metrics?.height));
+  Keyboard.dismiss();
+  if (Platform.OS !== "ios") {
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
+    return;
+  }
+  if (!wasVisible) {
+    // iOS can keep the former UITextInput session alive briefly even
+    // after the keyboard is no longer visible on screen.
+    await new Promise<void>((resolve) => setTimeout(resolve, 120));
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const subscription = Keyboard.addListener("keyboardDidHide", finish);
+    function finish() {
+      if (settled) return;
+      settled = true;
+      subscription.remove();
+      if (timeout) clearTimeout(timeout);
+      requestAnimationFrame(() => resolve());
+    }
+    timeout = setTimeout(finish, 480);
+  });
+}
+
 export default function MessengerRegistrationScreen() {
   const router = useRouter();
   const bottomNavigationInset = usePersistentBottomNavigationInset();
@@ -90,18 +127,129 @@ export default function MessengerRegistrationScreen() {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
+  const [invitationBusy, setInvitationBusy] = useState(false);
   const [registeringNewAccount, setRegisteringNewAccount] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rulesVisible, setRulesVisible] = useState(false);
+  const invitationCheckRef = useRef<{
+    token: string;
+    generation: number;
+    promise: Promise<void>;
+  } | null>(null);
+  const invitationGenerationRef = useRef(0);
+  const scannerLockedRef = useRef(false);
+  const rulesOpeningRef = useRef(false);
+  const rulesDismissActionRef = useRef<(() => void | Promise<void>) | null>(
+    null,
+  );
+  const rulesDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
+  const runRulesDismissAction = useCallback(() => {
+    if (rulesDismissTimerRef.current) {
+      clearTimeout(rulesDismissTimerRef.current);
+      rulesDismissTimerRef.current = null;
+    }
+    const action = rulesDismissActionRef.current;
+    rulesDismissActionRef.current = null;
+    if (!action) return;
+    void Promise.resolve(action()).catch((reason) =>
+      messengerLog("warn", "rules.dismiss_action.failed", {
+        message: reason instanceof Error ? reason.message : "unknown error",
+      }),
+    );
+  }, []);
+
+  const closeRulesThen = useCallback(
+    (action: () => void | Promise<void>) => {
+      rulesDismissActionRef.current = action;
+      setRulesVisible(false);
+      if (rulesDismissTimerRef.current) {
+        clearTimeout(rulesDismissTimerRef.current);
+      }
+      // iOS calls Modal.onDismiss after the native animation. The timer
+      // is only a guarded fallback for interrupted transitions and Android.
+      rulesDismissTimerRef.current = setTimeout(
+        runRulesDismissAction,
+        Platform.OS === "ios" ? 900 : 500,
+      );
+    },
+    [runRulesDismissAction],
+  );
+
+  const finishRegistration = useCallback(async () => {
+    const navigate = () => {
+      setRegisteringNewAccount(false);
+      if (params.sharePending === "1") {
+        router.replace("/messenger/share");
+      } else {
+        router.replace({
+          pathname: "/messenger/profile",
+          params: { firstRun: "1" },
+        });
+      }
+    };
+    try {
+      const activatedSession = await loadMessengerSession();
+      if (
+        activatedSession &&
+        (await shouldOfferMessengerPush(activatedSession.user.id))
+      ) {
+        await markMessengerPushOffered(activatedSession.user.id);
+        Alert.alert(
+          "Уведомления о сообщениях",
+          "Разрешить PUSH-уведомления мессенджера, системный звук и бейдж непрочитанных сообщений?",
+          [
+            { text: "Позже", style: "cancel", onPress: navigate },
+            {
+              text: "Разрешить",
+              onPress: () => {
+                void enableMessengerPush(true)
+                  .then(navigate)
+                  .catch((pushError) => {
+                    Alert.alert(
+                      "Уведомления не включены",
+                      pushError instanceof Error
+                        ? pushError.message
+                        : "Разрешение можно выдать позже в настройках.",
+                      [{ text: "OK", onPress: navigate }],
+                    );
+                  });
+              },
+            },
+          ],
+          { cancelable: false },
+        );
+        return;
+      }
+    } catch (reason) {
+      messengerLog("warn", "registration.push_offer.failed", {
+        message: reason instanceof Error ? reason.message : "unknown error",
+      });
+    }
+    navigate();
+  }, [params.sharePending, router]);
+
+  useEffect(
+    () => () => {
+      if (rulesDismissTimerRef.current) {
+        clearTimeout(rulesDismissTimerRef.current);
+      }
+      invitationGenerationRef.current += 1;
+    },
+    [],
+  );
 
   useEffect(() => {
-    if (isAuthenticated && !registeringNewAccount)
+    if (isAuthenticated && !registeringNewAccount && !rulesVisible)
       router.replace(authenticatedDestination);
   }, [
     authenticatedDestination,
     isAuthenticated,
     registeringNewAccount,
     router,
+    rulesVisible,
   ]);
 
   useEffect(() => {
@@ -113,35 +261,54 @@ export default function MessengerRegistrationScreen() {
     }
   }, [params.sharePending, passwordChange, router]);
 
-  const checkInvitation = useCallback(async (value: string) => {
+  const checkInvitation = useCallback((value: string): Promise<void> => {
     const token = extractInviteToken(value);
     if (!token) {
       setError("Вставьте полную пригласительную ссылку или корректный токен.");
-      return;
+      return Promise.resolve();
     }
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await previewMessengerInvitation(token);
-      if (!result.can_register) {
-        setError("Это приглашение уже использовано, отозвано или просрочено.");
-        return;
+    const active = invitationCheckRef.current;
+    if (active?.token === token) return active.promise;
+
+    const generation = ++invitationGenerationRef.current;
+    const task = (async () => {
+      setInvitationBusy(true);
+      setError(null);
+      try {
+        const result = await previewMessengerInvitation(token);
+        if (generation !== invitationGenerationRef.current) return;
+        if (!result.can_register) {
+          setError(
+            "Это приглашение уже использовано, отозвано или просрочено.",
+          );
+          return;
+        }
+        setInviteToken(token);
+        setPreview(result);
+        setDisplayName(result.display_name || "");
+        setInviteValue(value);
+        setScannerVisible(false);
+        console.log(`[Messenger] Приглашение ${result.id} успешно проверено`);
+      } catch (checkError) {
+        if (generation !== invitationGenerationRef.current) return;
+        setError(
+          checkError instanceof Error
+            ? checkError.message
+            : "Приглашение не найдено",
+        );
+      } finally {
+        if (generation === invitationGenerationRef.current) {
+          setInvitationBusy(false);
+        }
       }
-      setInviteToken(token);
-      setPreview(result);
-      setDisplayName(result.display_name || "");
-      setInviteValue(value);
-      setScannerVisible(false);
-      console.log(`[Messenger] Приглашение ${result.id} успешно проверено`);
-    } catch (checkError) {
-      setError(
-        checkError instanceof Error
-          ? checkError.message
-          : "Приглашение не найдено",
-      );
-    } finally {
-      setBusy(false);
-    }
+    })();
+    invitationCheckRef.current = { token, generation, promise: task };
+    void task.finally(() => {
+      if (invitationCheckRef.current?.promise === task) {
+        invitationCheckRef.current = null;
+      }
+    });
+    return task;
   }, []);
 
   useEffect(() => {
@@ -167,19 +334,27 @@ export default function MessengerRegistrationScreen() {
       );
       return;
     }
+    scannerLockedRef.current = false;
     setScannerVisible(true);
     setError(null);
   };
 
   const handleBarcode = ({ data }: BarcodeScanningResult) => {
-    if (busy) return;
+    if (scannerLockedRef.current) return;
+    scannerLockedRef.current = true;
     setScannerVisible(false);
     setInviteValue(data);
     void checkInvitation(data);
   };
 
-  const submitRegistration = () => {
-    if (!inviteToken || !preview) return;
+  const submitRegistration = async () => {
+    if (rulesOpeningRef.current || busy) return;
+    if (!inviteToken || !preview) {
+      setError(
+        "Данные приглашения были потеряны. Повторно откройте приглашение.",
+      );
+      return;
+    }
     if (password.length < 6) {
       setError("Пароль должен содержать не менее 6 символов.");
       return;
@@ -188,8 +363,17 @@ export default function MessengerRegistrationScreen() {
       setError("Введённые пароли не совпадают.");
       return;
     }
+    rulesOpeningRef.current = true;
     setError(null);
-    setRulesVisible(true);
+    messengerLog("info", "rules.registration.modal_requested", {
+      platform: Platform.OS,
+    });
+    try {
+      await dismissKeyboardBeforeRules();
+      setRulesVisible(true);
+    } finally {
+      rulesOpeningRef.current = false;
+    }
   };
 
   const completeRegistration = async (
@@ -197,10 +381,18 @@ export default function MessengerRegistrationScreen() {
     appVersion: string,
     appBuild?: string,
   ) => {
-    if (!inviteToken) return;
+    if (!inviteToken || !preview) {
+      throw new Error(
+        "Данные приглашения были потеряны. Закройте окно и повторно откройте приглашение.",
+      );
+    }
     setRegisteringNewAccount(true);
     setBusy(true);
     setError(null);
+    const startedAt = Date.now();
+    messengerLog("info", "auth.registration.started", {
+      platform: Platform.OS,
+    });
     try {
       await register({
         invite_token: inviteToken,
@@ -208,63 +400,31 @@ export default function MessengerRegistrationScreen() {
         password,
         display_name: displayName.trim() || undefined,
         email: email.trim() || undefined,
-        expected_player_id: preview?.player_id,
+        expected_player_id: preview.player_id,
+        rules: {
+          version: rules.version,
+          sha256: rules.sha256,
+          confirmation_method: "registration_checkbox",
+          app_version: appVersion,
+          app_build: appBuild,
+        },
       });
-      await acceptMessengerRules({
-        version: rules.version,
-        sha256: rules.sha256,
-        confirmation_method: "registration_checkbox",
-        app_version: appVersion,
-        app_build: appBuild,
+      messengerLog("info", "auth.registration.succeeded", {
+        platform: Platform.OS,
+        duration_ms: Date.now() - startedAt,
       });
-      setRulesVisible(false);
-      const finish = () =>
-        params.sharePending === "1"
-          ? router.replace("/messenger/share")
-          : router.replace({
-              pathname: "/messenger/profile",
-              params: { firstRun: "1" },
-            });
-      const activatedSession = await loadMessengerSession();
-      if (
-        activatedSession &&
-        (await shouldOfferMessengerPush(activatedSession.user.id))
-      ) {
-        await markMessengerPushOffered(activatedSession.user.id);
-        Alert.alert(
-          "Уведомления о сообщениях",
-          "Разрешить PUSH-уведомления мессенджера, системный звук и бейдж непрочитанных сообщений?",
-          [
-            { text: "Позже", style: "cancel", onPress: finish },
-            {
-              text: "Разрешить",
-              onPress: () => {
-                void enableMessengerPush(true)
-                  .then(finish)
-                  .catch((pushError) => {
-                    Alert.alert(
-                      "Уведомления не включены",
-                      pushError instanceof Error
-                        ? pushError.message
-                        : "Разрешение можно выдать позже в настройках.",
-                      [{ text: "OK", onPress: finish }],
-                    );
-                  });
-              },
-            },
-          ],
-          { cancelable: false },
-        );
-      } else {
-        finish();
-      }
+      closeRulesThen(finishRegistration);
     } catch (registrationError) {
       setRegisteringNewAccount(false);
-      setError(
-        registrationError instanceof Error
-          ? registrationError.message
-          : "Не удалось зарегистрироваться",
-      );
+      messengerLog("warn", "auth.registration.failed", {
+        platform: Platform.OS,
+        duration_ms: Date.now() - startedAt,
+        message:
+          registrationError instanceof Error
+            ? registrationError.message
+            : "unknown error",
+      });
+      throw registrationError;
     } finally {
       setBusy(false);
     }
@@ -397,9 +557,9 @@ export default function MessengerRegistrationScreen() {
                 <TouchableOpacity
                   style={styles.primaryButton}
                   onPress={() => void checkInvitation(inviteValue)}
-                  disabled={busy}
+                  disabled={invitationBusy}
                 >
-                  {busy ? (
+                  {invitationBusy ? (
                     <ActivityIndicator color={colors.white} />
                   ) : (
                     <Text style={styles.primaryButtonText}>
@@ -490,7 +650,7 @@ export default function MessengerRegistrationScreen() {
                 />
                 <TouchableOpacity
                   style={styles.primaryButton}
-                  onPress={submitRegistration}
+                  onPress={() => void submitRegistration()}
                   disabled={busy}
                 >
                   {busy ? (
@@ -555,26 +715,29 @@ export default function MessengerRegistrationScreen() {
       <MessengerRulesModal
         visible={rulesVisible}
         busy={busy}
+        flow="registration"
         onAccept={completeRegistration}
+        onDismiss={runRulesDismissAction}
         onCancel={async () => {
-          if (!inviteToken || busy) return;
+          if (!inviteToken) {
+            throw new Error(
+              "Данные приглашения были потеряны. Повторно откройте приглашение.",
+            );
+          }
           setBusy(true);
           try {
             const result = await rejectMessengerInvitationRules(inviteToken);
-            setRulesVisible(false);
-            if (result.invitation_revoked) {
-              Alert.alert(
-                "Приглашение аннулировано",
-                "Правила не были приняты три раза.",
-              );
-            }
-            router.back();
-          } catch (cancelError) {
-            setError(
-              cancelError instanceof Error
-                ? cancelError.message
-                : "Не удалось отменить регистрацию",
-            );
+            closeRulesThen(() => {
+              if (result.invitation_revoked) {
+                Alert.alert(
+                  "Приглашение аннулировано",
+                  "Правила не были приняты три раза.",
+                  [{ text: "OK", onPress: () => router.back() }],
+                );
+              } else {
+                router.back();
+              }
+            });
           } finally {
             setBusy(false);
           }

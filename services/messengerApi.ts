@@ -457,20 +457,147 @@ export async function loginToMessenger(username: string, password: string) {
   return result;
 }
 
-export async function registerInMessenger(payload: {
+export interface MessengerRegistrationPayload {
   invite_token: string;
   username: string;
   password: string;
   display_name?: string;
   email?: string;
-}) {
-  const result = await messengerRequest<MessengerSession>("/auth/register", {
+}
+
+export interface MessengerRegistrationRulesPayload {
+  version: string;
+  sha256: string;
+  confirmation_method: "registration_checkbox";
+  app_version: string;
+  app_build?: string;
+}
+
+let pendingLegacyRegistration: {
+  key: string;
+  session: MessengerSession;
+} | null = null;
+
+function legacyRegistrationKey(payload: MessengerRegistrationPayload): string {
+  return `${payload.invite_token} ${payload.username.trim().toLowerCase()}`;
+}
+
+async function requestMessengerRegistration(
+  path: "/auth/register" | "/auth/register-with-rules",
+  payload: MessengerRegistrationPayload,
+  context: Awaited<ReturnType<typeof sessionContext>>,
+  rules?: MessengerRegistrationRulesPayload,
+): Promise<MessengerSession> {
+  return messengerRequest<MessengerSession>(path, {
     public: true,
     method: "POST",
-    body: JSON.stringify({ ...payload, ...(await sessionContext()) }),
+    body: JSON.stringify({
+      ...payload,
+      ...context,
+      ...(rules
+        ? {
+            rules_version: rules.version,
+            rules_sha256: rules.sha256,
+            rules_confirmation_method: rules.confirmation_method,
+            app_version: rules.app_version,
+            app_build: rules.app_build,
+          }
+        : {}),
+    }),
   });
+}
+
+async function acceptRulesForUnpublishedSession(
+  session: MessengerSession,
+  rules: MessengerRegistrationRulesPayload,
+  context: Awaited<ReturnType<typeof sessionContext>>,
+): Promise<void> {
+  await messengerRequest("/rules/accept", {
+    public: true,
+    method: "POST",
+    headers: { Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({
+      ...rules,
+      device_id: context.device_id,
+      platform: context.platform,
+    }),
+  });
+}
+
+export async function registerInMessenger(
+  payload: MessengerRegistrationPayload,
+) {
+  const result = await requestMessengerRegistration(
+    "/auth/register",
+    payload,
+    await sessionContext(),
+  );
   await clearMessengerPasswordChange();
   await saveMessengerSession(result);
+  return result;
+}
+
+/**
+ * New clients use the additive atomic endpoint. A narrowly scoped
+ * 404/405 fallback permits server-first and staged deployments while
+ * retaining the legacy routes for already released applications.
+ * The fallback session is deliberately not published until the rules
+ * request succeeds, and a retry cannot register the account twice.
+ */
+export async function registerInMessengerWithRules(
+  payload: MessengerRegistrationPayload,
+  rules: MessengerRegistrationRulesPayload,
+): Promise<MessengerSession> {
+  const startedAt = Date.now();
+  const context = await sessionContext();
+  messengerLog("info", "auth.registration.atomic_started", {
+    platform: context.platform,
+  });
+  let result: MessengerSession;
+  try {
+    result = await requestMessengerRegistration(
+      "/auth/register-with-rules",
+      payload,
+      context,
+      rules,
+    );
+    pendingLegacyRegistration = null;
+  } catch (error) {
+    const endpointUnavailable =
+      error instanceof MessengerApiError &&
+      (error.status === 404 || error.status === 405);
+    if (!endpointUnavailable) throw error;
+
+    messengerLog("warn", "auth.registration.atomic_unavailable", {
+      status: error.status,
+      fallback: "legacy_two_step",
+    });
+    const key = legacyRegistrationKey(payload);
+    if (pendingLegacyRegistration?.key !== key) {
+      pendingLegacyRegistration = {
+        key,
+        session: await requestMessengerRegistration(
+          "/auth/register",
+          payload,
+          context,
+        ),
+      };
+    }
+    await acceptRulesForUnpublishedSession(
+      pendingLegacyRegistration.session,
+      rules,
+      context,
+    );
+    result = pendingLegacyRegistration.session;
+    pendingLegacyRegistration = null;
+  }
+
+  await clearMessengerPasswordChange();
+  await saveMessengerSession(result);
+  messengerLog("info", "auth.registration.atomic_completed", {
+    platform: context.platform,
+    duration_ms: Date.now() - startedAt,
+  });
   return result;
 }
 
@@ -652,20 +779,14 @@ async function uploadMessengerAvatarFile(
       signal: controller.signal,
     });
     const body = await response.text();
-    const serverRequestId =
-      response.headers.get("x-request-id") || requestId;
-    messengerLog(
-      response.ok ? "info" : "warn",
-      "api.avatar_upload.response",
-      {
-        request_id: serverRequestId,
-        client_request_id:
-          serverRequestId !== requestId ? requestId : undefined,
-        scope,
-        status: response.status,
-        duration_ms: Date.now() - startedAt,
-      },
-    );
+    const serverRequestId = response.headers.get("x-request-id") || requestId;
+    messengerLog(response.ok ? "info" : "warn", "api.avatar_upload.response", {
+      request_id: serverRequestId,
+      client_request_id: serverRequestId !== requestId ? requestId : undefined,
+      scope,
+      status: response.status,
+      duration_ms: Date.now() - startedAt,
+    });
     if (
       response.status === 401 &&
       !noRefresh &&
@@ -742,7 +863,10 @@ let messengerRoomsRequest: {
   priority: MessengerTransportPriority;
   promise: Promise<MessengerRoom[]>;
 } | null = null;
-let messengerRoomsSnapshot: { rooms: MessengerRoom[]; receivedAt: number } | null = null;
+let messengerRoomsSnapshot: {
+  rooms: MessengerRoom[];
+  receivedAt: number;
+} | null = null;
 let messengerRoomsRequestId = 0;
 // Realtime events keep the local cards current between full snapshots. A
 // background owner therefore does not need to repeat a successful foreground
@@ -1182,8 +1306,12 @@ type MessengerMediaUploadFile = {
   size_bytes?: number | null;
 };
 
-const encodedMessengerOriginalNames = (files: MessengerMediaUploadFile[]): string =>
-  Buffer.from(JSON.stringify(files.map(file => file.name)), 'utf8').toString('base64');
+const encodedMessengerOriginalNames = (
+  files: MessengerMediaUploadFile[],
+): string =>
+  Buffer.from(JSON.stringify(files.map((file) => file.name)), "utf8").toString(
+    "base64",
+  );
 
 class MeasuredExpoUploadFile extends ExpoFile {
   constructor(
@@ -1960,7 +2088,9 @@ export function markMessengerDelivered(
     state.requestedSequence = sequence;
   }
   if (state.running) return state.running;
-  if (compareAckSequence(state.requestedSequence, state.confirmedSequence) <= 0) {
+  if (
+    compareAckSequence(state.requestedSequence, state.confirmedSequence) <= 0
+  ) {
     return Promise.resolve({ acknowledged: true });
   }
 
