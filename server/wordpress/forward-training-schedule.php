@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Forward — расписание тренировок
  * Description: Безопасный импорт JSON/XML в The Events Calendar и API для мобильного приложения.
- * Version: 1.1.0
+ * Version: 1.1.1
  * Author: HC Forward
  *
  * Рекомендуемое размещение:
@@ -353,6 +353,8 @@ function forward_training_find_event_by_uid($uid) {
         'post_status' => array('publish', 'future', 'draft', 'pending', 'private', 'trash'),
         'fields' => 'ids',
         'posts_per_page' => 1,
+        'orderby' => 'ID',
+        'order' => 'DESC',
         'meta_key' => '_forward_training_uid',
         'meta_value' => $uid,
         'no_found_rows' => true,
@@ -470,7 +472,7 @@ function forward_training_upsert_event(array $event, $dry_run = false) {
     );
 }
 
-function forward_training_replace_range(array $schedule, array $retained_uids, $dry_run = false) {
+function forward_training_replace_range(array $schedule, array $retained_event_ids, $dry_run = false) {
     if (!$schedule['range_from'] || !$schedule['range_to']) {
         return array();
     }
@@ -498,7 +500,8 @@ function forward_training_replace_range(array $schedule, array $retained_uids, $
     $removed = array();
     foreach ($ids as $event_id) {
         $uid = (string) get_post_meta($event_id, '_forward_training_uid', true);
-        if (isset($retained_uids[$uid])) {
+        if (isset($retained_event_ids[$uid])
+            && (int) $retained_event_ids[$uid] === (int) $event_id) {
             continue;
         }
         $removed[] = array('event_id' => (int) $event_id, 'uid' => $uid);
@@ -511,18 +514,18 @@ function forward_training_replace_range(array $schedule, array $retained_uids, $
 
 function forward_training_import_schedule(array $schedule, $dry_run = false, $replace_override = false) {
     $results = array();
-    $retained_uids = array();
+    $retained_event_ids = array();
     foreach ($schedule['events'] as $event) {
         $result = forward_training_upsert_event($event, $dry_run);
         if (is_wp_error($result)) {
             return $result;
         }
         $results[] = $result;
-        $retained_uids[$event['uid']] = true;
+        $retained_event_ids[$event['uid']] = (int) $result['event_id'];
     }
     $replace = $replace_override || $schedule['replace_range'];
     $removed = $replace
-        ? forward_training_replace_range($schedule, $retained_uids, $dry_run)
+        ? forward_training_replace_range($schedule, $retained_event_ids, $dry_run)
         : array();
     return array(
         'dry_run' => $dry_run,
@@ -597,14 +600,15 @@ function forward_training_rest_get_schedule(WP_REST_Request $request) {
         ),
     ));
 
-    $items = array();
+    $items_by_uid = array();
     foreach ($query->posts as $post) {
         $event_id = (int) $post->ID;
         $timezone = (string) get_post_meta($event_id, '_EventTimezone', true);
         if ($timezone === '') $timezone = forward_training_default_timezone();
-        $items[] = array(
+        $uid = (string) get_post_meta($event_id, '_forward_training_uid', true);
+        $item = array(
             'id' => (string) $event_id,
-            'uid' => (string) get_post_meta($event_id, '_forward_training_uid', true),
+            'uid' => $uid,
             'type' => (string) get_post_meta($event_id, '_forward_training_type', true),
             'title' => get_the_title($event_id),
             'start_at' => forward_training_event_iso(get_post_meta($event_id, '_EventStartDate', true), $timezone),
@@ -618,8 +622,18 @@ function forward_training_rest_get_schedule(WP_REST_Request $request) {
             ),
             'updated_at' => get_post_modified_time(DateTimeInterface::ATOM, true, $post),
         );
+        $identity = $uid !== '' ? $uid : 'event-' . $event_id;
+        if (!isset($items_by_uid[$identity])
+            || $event_id > (int) $items_by_uid[$identity]['id']) {
+            $items_by_uid[$identity] = $item;
+        }
     }
     wp_reset_postdata();
+    $items = array_values($items_by_uid);
+    usort($items, function ($left, $right) {
+        $by_start = strcmp($left['start_at'], $right['start_at']);
+        return $by_start !== 0 ? $by_start : ((int) $left['id'] <=> (int) $right['id']);
+    });
 
     $payload = array(
         'status' => 'success',
