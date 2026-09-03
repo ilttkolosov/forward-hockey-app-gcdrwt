@@ -6276,7 +6276,12 @@ export default function MessengerRoomScreen() {
                       : "Сообщение"
                 }
                 maxLength={MAX_MESSAGE_LENGTH}
+                // Android OEM keyboards can treat a custom commitContent
+                // InputConnection as a separate editor and lose language-subtype
+                // switching. Keep the normal IME connection on Android; users
+                // still retain text formatting and the attachment picker.
                 pasteAttachmentsEnabled={
+                  Platform.OS !== "android" &&
                   canMedia &&
                   !attachmentDraft &&
                   !editingMessage &&

@@ -557,17 +557,150 @@ export function updateMessengerProfile(displayName: string) {
   });
 }
 
-export function uploadMessengerAvatar(file: {
+interface MessengerAvatarUploadFile {
   uri: string;
   name: string;
   type: string;
-}) {
+}
+
+interface MessengerAvatarUploadResult {
+  asset_id: string;
+  url: string;
+}
+
+const MESSENGER_AVATAR_UPLOAD_TIMEOUT_MS = 90_000;
+
+function uploadMessengerAvatarLegacy(
+  path: string,
+  file: MessengerAvatarUploadFile,
+): Promise<MessengerAvatarUploadResult> {
   const form = new FormData();
   form.append("file", file as unknown as Blob);
-  return messengerRequest<{ asset_id: string; url: string }>(
-    "/users/me/avatar",
-    { method: "PUT", body: form },
-  );
+  return messengerRequest<MessengerAvatarUploadResult>(path, {
+    method: "PUT",
+    body: form,
+  });
+}
+
+async function uploadMessengerAvatarFile(
+  path: string,
+  file: MessengerAvatarUploadFile,
+  scope: "user" | "room",
+  noRefresh = false,
+): Promise<MessengerAvatarUploadResult> {
+  const startedAt = Date.now();
+  const requestId = messengerRequestId();
+  let session = await loadMessengerSession();
+  if (
+    session?.refresh_token &&
+    !isMessengerAccessTokenUsable(
+      session.access_token,
+      ACCESS_TOKEN_MIN_VALIDITY_MS,
+    )
+  ) {
+    session = await ensureFreshMessengerSession();
+  }
+  if (!session?.access_token) {
+    throw new MessengerApiError(
+      "Необходим вход",
+      401,
+      "authentication_required",
+    );
+  }
+
+  let uploadFile: ExpoFile;
+  try {
+    uploadFile = new ExpoFile(file.uri);
+  } catch (error) {
+    throw new Error(
+      "Выбранное изображение недоступно для загрузки. Выберите фотографию заново",
+      { cause: error },
+    );
+  }
+  if (!uploadFile.exists || Number(uploadFile.size) < 1) {
+    throw new Error(
+      "Выбранное изображение недоступно для загрузки. Выберите фотографию заново",
+    );
+  }
+
+  const form = new FormData();
+  form.append("file", uploadFile as unknown as Blob, file.name);
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, MESSENGER_AVATAR_UPLOAD_TIMEOUT_MS);
+
+  messengerLog("info", "api.avatar_upload.started", {
+    request_id: requestId,
+    scope,
+    file_size_bytes: Number(uploadFile.size),
+    file_type: file.type,
+    timeout_ms: MESSENGER_AVATAR_UPLOAD_TIMEOUT_MS,
+  });
+
+  try {
+    const response = await expoFetch(`${MESSENGER_API_BASE_URL}${path}`, {
+      method: "PUT",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+        "x-request-id": requestId,
+      },
+      body: form,
+      signal: controller.signal,
+    });
+    const body = await response.text();
+    const serverRequestId =
+      response.headers.get("x-request-id") || requestId;
+    messengerLog(
+      response.ok ? "info" : "warn",
+      "api.avatar_upload.response",
+      {
+        request_id: serverRequestId,
+        client_request_id:
+          serverRequestId !== requestId ? requestId : undefined,
+        scope,
+        status: response.status,
+        duration_ms: Date.now() - startedAt,
+      },
+    );
+    if (
+      response.status === 401 &&
+      !noRefresh &&
+      Boolean(session.refresh_token)
+    ) {
+      await ensureFreshMessengerSession({ force: true });
+      return uploadMessengerAvatarFile(path, file, scope, true);
+    }
+    return parseUploadResponse<MessengerAvatarUploadResult>(
+      response.status,
+      body,
+    );
+  } catch (error) {
+    const normalized = timedOut
+      ? new Error("Загрузка аватара превысила 90 секунд", {
+          cause: error,
+        })
+      : error;
+    messengerLog("warn", "api.avatar_upload.failure", {
+      request_id: requestId,
+      scope,
+      duration_ms: Date.now() - startedAt,
+      message: messengerErrorMessage(normalized),
+    });
+    throw normalized;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export function uploadMessengerAvatar(file: MessengerAvatarUploadFile) {
+  if (Platform.OS === "web") {
+    return uploadMessengerAvatarLegacy("/users/me/avatar", file);
+  }
+  return uploadMessengerAvatarFile("/users/me/avatar", file, "user");
 }
 
 export function removeMessengerAvatar() {
@@ -812,14 +945,13 @@ export function updateMessengerRoomProfile(roomId: string, title: string) {
 
 export function uploadMessengerRoomAvatar(
   roomId: string,
-  file: { uri: string; name: string; type: string },
+  file: MessengerAvatarUploadFile,
 ) {
-  const form = new FormData();
-  form.append("file", file as unknown as Blob);
-  return messengerRequest<{ asset_id: string; url: string }>(
-    `/chat/rooms/${roomId}/avatar`,
-    { method: "PUT", body: form },
-  );
+  const path = `/chat/rooms/${roomId}/avatar`;
+  if (Platform.OS === "web") {
+    return uploadMessengerAvatarLegacy(path, file);
+  }
+  return uploadMessengerAvatarFile(path, file, "room");
 }
 
 export function removeMessengerRoomAvatar(roomId: string) {

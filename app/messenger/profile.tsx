@@ -40,6 +40,7 @@ import {
   uploadMessengerAvatar,
 } from "../../services/messengerApi";
 import { messengerLog } from "../../services/messengerLogger";
+import { prepareMessengerAvatarUpload } from "../../services/messengerAvatarPreparation";
 import {
   DEFAULT_MESSENGER_QUICK_REACTION,
   getMessengerQuickReaction,
@@ -207,16 +208,26 @@ export default function MessengerProfileScreen() {
       first_run: params.firstRun === "1",
     });
     try {
+      const preparedAvatar = selectedAsset
+        ? Platform.OS === "web"
+          ? {
+              uri: selectedAsset.uri,
+              name:
+                selectedAsset.fileName || `avatar-${Date.now()}.jpg`,
+              type: selectedAsset.mimeType || "image/jpeg",
+            }
+          : await prepareMessengerAvatarUpload({
+              uri: selectedAsset.uri,
+              width: selectedAsset.width,
+              height: selectedAsset.height,
+            })
+        : null;
       await updateMessengerProfile(name);
-      if (selectedAsset) {
-        await uploadMessengerAvatar({
-          uri: selectedAsset.uri,
-          name: selectedAsset.fileName || `avatar-${Date.now()}.jpg`,
-          type: selectedAsset.mimeType || "image/jpeg",
-        });
+      if (preparedAvatar) {
+        await uploadMessengerAvatar(preparedAvatar);
       }
       await refreshUser();
-      setSelectedAsset(null);
+          setSelectedAsset(null);
       console.log("[Messenger profile] Профиль пользователя сохранён");
       messengerLog("info", "profile.save.completed", {
         avatar_uploaded: Boolean(selectedAsset),
