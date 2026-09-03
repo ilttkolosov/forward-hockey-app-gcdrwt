@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Forward — расписание тренировок
  * Description: Безопасный импорт JSON/XML в The Events Calendar и API для мобильного приложения.
- * Version: 1.1.2
+ * Version: 1.1.3
  * Author: HC Forward
  *
  * Рекомендуемое размещение:
