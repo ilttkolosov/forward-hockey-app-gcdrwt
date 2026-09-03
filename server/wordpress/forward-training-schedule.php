@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Forward — расписание тренировок
  * Description: Безопасный импорт JSON/XML в The Events Calendar и API для мобильного приложения.
- * Version: 1.1.4
+ * Version: 1.1.5
  * Author: HC Forward
  *
  * Рекомендуемое размещение:
@@ -508,9 +508,9 @@ function forward_training_upsert_event(array $event, $dry_run = false) {
         $action = 'update';
     } else {
         $created = tribe_events()->set_args(array(
-            'title' => $event['title'],
-            'description' => $description,
-            'status' => 'publish',
+            'post_title' => $event['title'],
+            'post_content' => $description,
+            'post_status' => 'publish',
             'start_date' => $event['start']->format('Y-m-d H:i:s'),
             'end_date' => $event['end']->format('Y-m-d H:i:s'),
             'timezone' => $event['timezone'],
@@ -521,6 +521,15 @@ function forward_training_upsert_event(array $event, $dry_run = false) {
             $event_id = (int) $created;
         } else {
             return new WP_Error('tec_create_failed', 'The Events Calendar не создал событие.');
+        }
+        if (get_post_status($event_id) !== 'publish') {
+            wp_publish_post($event_id);
+        }
+        if (get_post_status($event_id) !== 'publish') {
+            return new WP_Error(
+                'tec_publish_failed',
+                'The Events Calendar создал событие ' . $event_id . ', но WordPress не опубликовал его.'
+            );
         }
         $action = 'create';
     }
