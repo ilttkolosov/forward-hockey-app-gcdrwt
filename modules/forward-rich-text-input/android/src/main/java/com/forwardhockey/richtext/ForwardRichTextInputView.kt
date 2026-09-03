@@ -1,8 +1,10 @@
 package com.forwardhockey.richtext
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.ClipDescription
 import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Build
@@ -22,6 +24,7 @@ import android.view.Gravity
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -39,6 +42,12 @@ import kotlin.math.min
 import java.io.File
 import java.util.ArrayDeque
 import java.util.UUID
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+  is Activity -> this
+  is ContextWrapper -> baseContext.findActivity()
+  else -> null
+}
 
 private class ForwardRichEditText(context: Context) : EditText(context) {
   var richContentEnabled = false
@@ -101,6 +110,15 @@ class ForwardRichTextInputView(
   private var lastContentHeight = -1
   private val recentlyEmittedEncodedValues = ArrayDeque<String>()
 
+  private fun enforceImeResize() {
+    val window = context.findActivity()?.window ?: return
+    val currentMode = window.attributes.softInputMode
+    val nextMode =
+      (currentMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST.inv()) or
+        WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+    if (nextMode != currentMode) window.setSoftInputMode(nextMode)
+  }
+
   private val formatMenuIds = mapOf(
     ForwardTextFormat.BOLD to 0x464F0101,
     ForwardTextFormat.ITALIC to 0x464F0102,
@@ -153,7 +171,12 @@ class ForwardRichTextInputView(
     editor.setCustomSelectionActionModeCallback(selectionActionModeCallback)
     editor.onRichContent = ::acceptRichContent
     editor.setOnFocusChangeListener { _, hasFocus ->
-      if (hasFocus) onFocus(Unit) else onBlur(Unit)
+      if (hasFocus) {
+        enforceImeResize()
+        onFocus(Unit)
+      } else {
+        onBlur(Unit)
+      }
     }
     editor.addTextChangedListener(object : TextWatcher {
       override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -239,6 +262,7 @@ class ForwardRichTextInputView(
 
   fun focusEditor() {
     editor.post {
+      enforceImeResize()
       editor.requestFocus()
       val inputMethod = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
       inputMethod?.showSoftInput(editor, InputMethodManager.SHOW_IMPLICIT)

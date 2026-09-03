@@ -61,6 +61,7 @@ import MessengerLinkPreview, {
 } from "../../../features/messenger/MessengerLinkPreview";
 import SavedMessagesAvatar from "../../../features/messenger/SavedMessagesAvatar";
 import { useTypingDots } from "../../../features/messenger/useTypingDots";
+import { useAndroidKeyboardAvoidance } from "../../../features/messenger/useAndroidKeyboardAvoidance";
 import {
   ForwardRichTextInput,
   type ForwardRichTextInputHandle,
@@ -1399,6 +1400,12 @@ export default function MessengerRoomScreen() {
   const [feedHeight, setFeedHeight] = useState(0);
   const listRef = useRef<FlatList<MessengerMessage>>(null);
   const inputRef = useRef<ForwardRichTextInputHandle>(null);
+  const composerShellRef = useRef<View>(null);
+  const {
+    bottomInset: androidKeyboardInset,
+    onTargetLayout: handleComposerShellLayout,
+    refresh: refreshAndroidKeyboardAvoidance,
+  } = useAndroidKeyboardAvoidance(composerShellRef);
   const messagesRef = useRef<MessengerMessage[]>([]);
   const roomTypeRef = useRef(roomType);
   const viewableServerMessageIds = useRef<string[]>([]);
@@ -1492,6 +1499,14 @@ export default function MessengerRoomScreen() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || androidKeyboardInset <= 0) return;
+    messengerLog("info", "room.keyboard.overlay_compensated", {
+      room_id: roomId,
+      bottom_inset: androidKeyboardInset,
+    });
+  }, [androidKeyboardInset, roomId]);
 
   useEffect(() => {
     editingMessageRef.current = editingMessage;
@@ -6040,7 +6055,17 @@ export default function MessengerRoomScreen() {
         </Modal>
 
         {canWrite ? (
-          <View style={styles.composerShell}>
+          <View
+            ref={composerShellRef}
+            collapsable={false}
+            onLayout={handleComposerShellLayout}
+            style={[
+              styles.composerShell,
+              Platform.OS === "android" && androidKeyboardInset > 0
+                ? { marginBottom: androidKeyboardInset }
+                : null,
+            ]}
+          >
             {attachmentPreparationLabel && (
               <View style={styles.attachmentPreparation}>
                 <ActivityIndicator size="small" color={colors.primary} />
@@ -6266,6 +6291,9 @@ export default function MessengerRoomScreen() {
                 }}
                 onFocus={() => {
                   setComposerFocused(true);
+                  if (Platform.OS === "android") {
+                    refreshAndroidKeyboardAvoidance();
+                  }
                   if (!nearLatest.current) return;
                   keyboardScrollPending.current = true;
                   scrollToLatest(true);
