@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Forward — расписание тренировок
  * Description: Безопасный импорт JSON/XML в The Events Calendar и API для мобильного приложения.
- * Version: 1.1.3
+ * Version: 1.1.4
  * Author: HC Forward
  *
  * Рекомендуемое размещение:
@@ -411,7 +411,9 @@ function forward_training_normalize_payload(array $payload) {
 function forward_training_find_event_by_uid($uid) {
     $ids = get_posts(array(
         'post_type' => 'tribe_events',
-        'post_status' => array('publish', 'future', 'draft', 'pending', 'private', 'trash'),
+        // A trashed event must never be reused: some WordPress/The Events Calendar
+        // combinations report a successful update without making it visible again.
+        'post_status' => array('publish', 'future', 'draft', 'pending', 'private'),
         'fields' => 'ids',
         'posts_per_page' => 1,
         'orderby' => 'ID',
@@ -600,13 +602,86 @@ function forward_training_import_schedule(array $schedule, $dry_run = false, $re
     );
 }
 
+function forward_training_verify_import(array $schedule, array $result, $dry_run = false) {
+    if ($dry_run) {
+        return true;
+    }
+    if (!isset($result['events']) || !is_array($result['events'])
+        || count($result['events']) !== count($schedule['events'])) {
+        return new WP_Error('import_verification_failed', 'Количество сохранённых событий не совпало с расписанием.');
+    }
+
+    $saved_by_uid = array();
+    foreach ($result['events'] as $saved) {
+        if (is_array($saved) && !empty($saved['uid']) && !empty($saved['event_id'])) {
+            $saved_by_uid[(string) $saved['uid']] = (int) $saved['event_id'];
+        }
+    }
+
+    foreach ($schedule['events'] as $event) {
+        $uid = (string) $event['uid'];
+        $event_id = isset($saved_by_uid[$uid]) ? $saved_by_uid[$uid] : 0;
+        if (!$event_id || get_post_status($event_id) !== 'publish') {
+            return new WP_Error(
+                'import_verification_failed',
+                'Событие «' . $event['title'] . '» не появилось в опубликованном расписании.'
+            );
+        }
+        $expected = array(
+            '_forward_training_uid' => $uid,
+            '_forward_training_type' => $event['type'],
+            '_forward_training_team_id' => $event['team_id'],
+            '_EventStartDate' => $event['start']->format('Y-m-d H:i:s'),
+            '_EventEndDate' => $event['end']->format('Y-m-d H:i:s'),
+            '_forward_training_location' => $event['location'],
+            '_forward_training_note' => $event['note'],
+        );
+        foreach ($expected as $key => $value) {
+            if ((string) get_post_meta($event_id, $key, true) !== (string) $value) {
+                return new WP_Error(
+                    'import_verification_failed',
+                    'Проверка сохранённого события «' . $event['title'] . '» не пройдена.'
+                );
+            }
+        }
+        if ((string) get_post_field('post_title', $event_id) !== (string) $event['title']) {
+            return new WP_Error(
+                'import_verification_failed',
+                'Название события «' . $event['title'] . '» сохранилось некорректно.'
+            );
+        }
+    }
+    return true;
+}
+
+function forward_training_cached_result_is_current(array $response) {
+    $events = $response['result']['events'] ?? null;
+    if (!is_array($events)) {
+        return false;
+    }
+    foreach ($events as $event) {
+        if (!is_array($event) || empty($event['event_id']) || empty($event['uid'])) {
+            return false;
+        }
+        $event_id = (int) $event['event_id'];
+        if (get_post_status($event_id) !== 'publish'
+            || (string) get_post_meta($event_id, '_forward_training_uid', true) !== (string) $event['uid']) {
+            return false;
+        }
+    }
+    return true;
+}
+
 function forward_training_rest_bot_import(WP_REST_Request $request) {
     $idempotency_key = trim((string) $request->get_header('idempotency-key'));
     $result_key = 'forward_training_result_' . hash('sha256', $idempotency_key);
     $previous = get_transient($result_key);
-    if (is_array($previous)) {
+    if (is_array($previous) && forward_training_cached_result_is_current($previous)) {
         $previous['idempotent_replay'] = true;
         return new WP_REST_Response($previous, 200);
+    }
+    if ($previous !== false) {
+        delete_transient($result_key);
     }
 
     $parsed = forward_training_parse_payload($request->get_body());
@@ -634,6 +709,11 @@ function forward_training_rest_bot_import(WP_REST_Request $request) {
     if (is_wp_error($result)) {
         $result->add_data(array('status' => 500));
         return $result;
+    }
+    $verified = forward_training_verify_import($schedule, $result, $dry_run);
+    if (is_wp_error($verified)) {
+        $verified->add_data(array('status' => 500));
+        return $verified;
     }
 
     $response = array(
