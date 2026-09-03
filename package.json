@@ -27,9 +27,10 @@
     "check:messenger-player-identity": "node --no-warnings --experimental-strip-types checks/messenger-player-identity.mjs",
     "check:messenger-player-avatar": "node --no-warnings --experimental-strip-types checks/messenger-player-avatar.mjs",
     "check:messenger-message-mutation": "node --no-warnings --experimental-strip-types checks/messenger-message-mutation-policy.mjs",
+    "check:messenger-android-keyboard": "node --no-warnings --experimental-strip-types checks/messenger-android-keyboard-avoidance.mjs",
     "check:startup-config": "node --no-warnings --experimental-strip-types checks/startup-config-policy.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "npm run photos:generate && npm run logos:generate && npm run seed:verify && npm run generate:route-types && npm run check:messenger-unread && npm run check:messenger-player-identity && npm run check:messenger-player-avatar && npm run check:messenger-message-mutation && npm run check:startup-config && npm run typecheck && npm run lint",
+    "check": "npm run photos:generate && npm run logos:generate && npm run seed:verify && npm run generate:route-types && npm run check:messenger-unread && npm run check:messenger-player-identity && npm run check:messenger-player-avatar && npm run check:messenger-message-mutation && npm run check:messenger-android-keyboard && npm run check:startup-config && npm run typecheck && npm run lint",
     "prebuild": "expo prebuild",
     "eas-build": "npx --yes eas-cli@21.7.0 build"
   },
@@ -96,7 +97,6 @@
   "devDependencies": {
     "@babel/core": "^7.20.0",
     "@babel/plugin-transform-export-namespace-from": "^7.27.1",
-    "@eslint/js": "^9.19.0",
     "@expo/ngrok": "^4.1.3",
     "@types/react": "~19.1.12",
     "@types/sql.js": "^1.4.11",
