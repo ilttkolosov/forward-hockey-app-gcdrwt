@@ -24,6 +24,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Apply requested 30-line message collapse threshold
+        if: contains(github.event.head_commit.message, '[collapse-30-request]')
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('app/messenger/room/[id].tsx')
+          text = path.read_text(encoding='utf-8')
+          old_lines = 'const COLLAPSED_MESSAGE_LINES = 10;'
+          old_chars = 'const COLLAPSED_MESSAGE_ESTIMATED_CHARACTERS = 360;'
+          assert old_lines in text, 'old line threshold not found'
+          assert old_chars in text, 'old character threshold not found'
+          text = text.replace(old_lines, 'const COLLAPSED_MESSAGE_LINES = 30;', 1)
+          text = text.replace(old_chars, 'const COLLAPSED_MESSAGE_ESTIMATED_CHARACTERS = 1_080;', 1)
+          path.write_text(text, encoding='utf-8')
+          PY
       - name: Count and apply patch increments
         env:
           BEFORE_SHA: ${{ github.event.before }}
@@ -40,7 +55,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app.config.js package.json package-lock.json
+          git add app.config.js package.json package-lock.json 'app/messenger/room/[id].tsx'
           git commit -m "chore: bump patch version [versioned]"
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
