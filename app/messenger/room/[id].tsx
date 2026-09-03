@@ -50,6 +50,10 @@ import {
   reconcileMessengerMessageUpdates,
 } from "../../../features/messenger/feed";
 import MessageReceiptsModal from "../../../features/messenger/MessageReceiptsModal";
+import {
+  messageDeletionAvailable,
+  messageMutationAvailable,
+} from "../../../features/messenger/messageMutationPolicy";
 import { MessengerReportDialog } from "../../../features/messenger/MessengerSafetyActions";
 import MessengerAttachmentView from "../../../features/messenger/MessengerAttachmentView";
 import MessengerLinkPreview, {
@@ -196,7 +200,6 @@ interface MediaUploadRequest extends AttachmentDraft {
   replyTarget: MessengerMessage | null;
 }
 
-const MESSAGE_MUTATION_WINDOW_MS = 3 * 60 * 1000;
 const MAX_MESSAGE_LENGTH = 5_000;
 const COLLAPSED_MESSAGE_LINES = 30;
 const COLLAPSED_MESSAGE_ESTIMATED_CHARACTERS = 1_080;
@@ -216,40 +219,6 @@ const WEB_EMOJI_FONT =
   Platform.OS === "web"
     ? '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif'
     : undefined;
-
-function messageMutationAvailable(
-  message: MessengerMessage,
-  currentUserId: string | undefined,
-): boolean {
-  if (
-    message.pending ||
-    message.deleted_at ||
-    message.author.id !== currentUserId ||
-    message.kind === "system"
-  ) {
-    return false;
-  }
-  const createdAt = Date.parse(message.created_at);
-  if (!Number.isFinite(createdAt)) return false;
-  const age = Date.now() - createdAt;
-  return age >= 0 && age <= MESSAGE_MUTATION_WINDOW_MS;
-}
-
-function messageDeletionAvailable(
-  message: MessengerMessage,
-  currentUserId: string | undefined,
-  roomType: MessengerRoom["room_type"] | null,
-): boolean {
-  if (
-    message.pending ||
-    message.deleted_at ||
-    message.author.id !== currentUserId ||
-    message.kind === "system"
-  ) {
-    return false;
-  }
-  return roomType === "saved" || messageMutationAvailable(message, currentUserId);
-}
 
 function messageDayKey(value: string): string {
   const date = new Date(value);
@@ -887,6 +856,8 @@ interface MessengerMessageListItemProps {
   canWrite: boolean;
   canReact: boolean;
   roomType: MessengerRoom["room_type"] | null;
+  roomKind: string | null;
+  canManageRoom: boolean;
   roomTitle: string;
   highlighted: boolean;
   roomScreenActive: boolean;
@@ -967,6 +938,8 @@ const MessengerMessageListItem = React.memo(
     canWrite,
     canReact,
     roomType,
+    roomKind,
+    canManageRoom,
     roomTitle,
     highlighted,
     roomScreenActive,
@@ -1174,6 +1147,8 @@ const MessengerMessageListItem = React.memo(
                           item,
                           currentUserId ?? undefined,
                           roomType,
+                          roomKind,
+                          canManageRoom,
                         )
                           ? () => onDelete(item)
                           : undefined
@@ -1277,6 +1252,7 @@ export default function MessengerRoomScreen() {
     canReact?: string;
     canManage?: string;
     roomType?: string;
+    kind?: string;
     teamId?: string;
     avatarUrl?: string;
     lastReadSequence?: string;
@@ -1305,6 +1281,8 @@ export default function MessengerRoomScreen() {
   const [roomType, setRoomType] = useState<MessengerRoom["room_type"] | null>(
     () => routeRoomType(params.roomType),
   );
+  const [roomKind, setRoomKind] = useState<string | null>(params.kind || null);
+  const [roomCanManage, setRoomCanManage] = useState(params.canManage === "true");
   const [roomTeamId, setRoomTeamId] = useState(params.teamId || "");
   const [roomMemberCount, setRoomMemberCount] = useState<number | null>(() => {
     const initial = Number(params.memberCount);
@@ -2997,6 +2975,8 @@ export default function MessengerRoomScreen() {
     setRoomTitle(room.title);
     setRoomAvatarUrl(room.avatar_url);
     setRoomType(room.room_type);
+    setRoomKind(room.kind);
+    setRoomCanManage(room.can_manage);
     setRoomTeamId(room.team_id);
     if (typeof room.member_count === "number") {
       setRoomMemberCount(room.member_count);
@@ -4417,7 +4397,12 @@ export default function MessengerRoomScreen() {
   const beginEdit = useCallback(
     (message: MessengerMessage) => {
       if (
-        !messageMutationAvailable(message, session?.user.id) ||
+        !messageMutationAvailable(
+          message,
+          session?.user.id,
+          roomKind,
+          roomCanManage,
+        ) ||
         !editableMessengerMessage(message)
       ) {
         return;
@@ -4434,7 +4419,7 @@ export default function MessengerRoomScreen() {
         Platform.OS === "ios" ? 500 : 120,
       );
     },
-    [session?.user.id],
+    [roomCanManage, roomKind, session?.user.id],
   );
 
   const cancelEditing = useCallback(() => {
@@ -4497,7 +4482,17 @@ export default function MessengerRoomScreen() {
 
   const requestMessageDeletion = useCallback(
     (message: MessengerMessage) => {
-      if (!messageDeletionAvailable(message, session?.user.id, roomType)) return;
+      if (
+        !messageDeletionAvailable(
+          message,
+          session?.user.id,
+          roomType,
+          roomKind,
+          roomCanManage,
+        )
+      ) {
+        return;
+      }
       setShowAllReactions(false);
       setActionMessage(null);
       if (actionDismissTimer.current) clearTimeout(actionDismissTimer.current);
@@ -4567,7 +4562,14 @@ export default function MessengerRoomScreen() {
         Platform.OS === "ios" ? 500 : 120,
       );
     },
-    [db, messageMutationBusyId, roomType, session?.user.id],
+    [
+      db,
+      messageMutationBusyId,
+      roomCanManage,
+      roomKind,
+      roomType,
+      session?.user.id,
+    ],
   );
 
   const copyMessageText = useCallback(async (message: MessengerMessage) => {
@@ -4686,6 +4688,7 @@ export default function MessengerRoomScreen() {
             canReact: String(target.can_react),
             canManage: String(target.can_manage),
             roomType: target.room_type,
+            kind: target.kind,
             teamId: target.team_id,
             avatarUrl: target.avatar_url || "",
             memberCount: String(target.member_count ?? ""),
@@ -4915,11 +4918,23 @@ export default function MessengerRoomScreen() {
     actionMessage?.pending && actionMessage.send_error,
   );
   const actionMessageMutable = Boolean(
-    actionMessage && messageMutationAvailable(actionMessage, session?.user.id),
+    actionMessage &&
+      messageMutationAvailable(
+        actionMessage,
+        session?.user.id,
+        roomKind,
+        roomCanManage,
+      ),
   );
   const actionMessageDeletable = Boolean(
     actionMessage &&
-      messageDeletionAvailable(actionMessage, session?.user.id, roomType),
+      messageDeletionAvailable(
+        actionMessage,
+        session?.user.id,
+        roomType,
+        roomKind,
+        roomCanManage,
+      ),
   );
   const actionMessageEditable = Boolean(
     actionMessageMutable &&
@@ -5044,6 +5059,8 @@ export default function MessengerRoomScreen() {
             canWrite={canWrite}
             canReact={canReact}
             roomType={roomType}
+            roomKind={roomKind}
+            canManageRoom={roomCanManage}
             roomTitle={roomTitle}
             highlighted={highlightedMessageId === item.id}
             roomScreenActive={roomScreenActive}
@@ -5082,6 +5099,8 @@ export default function MessengerRoomScreen() {
       reactionBusyIds,
       requestMessageDeletion,
       quickReaction,
+      roomCanManage,
+      roomKind,
       roomScreenActive,
       roomType,
       roomTitle,
