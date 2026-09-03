@@ -738,6 +738,7 @@ export default function MessengerRoomsScreen() {
         canReact: String(room.can_react),
         canManage: String(room.can_manage),
         roomType: room.room_type,
+        kind: room.kind,
         teamId: room.team_id,
         avatarUrl: room.avatar_url || "",
         lastReadSequence: room.last_read_sequence,
