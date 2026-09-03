@@ -6,6 +6,7 @@ import android.content.ClipDescription
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.os.Build
 import android.net.Uri
@@ -24,6 +25,8 @@ import android.view.Gravity
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.ViewTreeObserver
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.view.inputmethod.EditorInfo
@@ -102,6 +105,7 @@ class ForwardRichTextInputView(
   val onFocus by EventDispatcher<Unit>()
   val onBlur by EventDispatcher<Unit>()
   val onContentSizeChange by EventDispatcher<Map<String, Any>>()
+  val onKeyboardGeometryChange by EventDispatcher<Map<String, Any>>()
   val onPasteAttachment by EventDispatcher<Map<String, Any>>()
 
   private val editor = ForwardRichEditText(context)
@@ -109,6 +113,12 @@ class ForwardRichTextInputView(
   private var maximumLength = 4000
   private var lastContentHeight = -1
   private val recentlyEmittedEncodedValues = ArrayDeque<String>()
+  private val keyboardVisibleFrame = Rect()
+  private val keyboardRootLocation = IntArray(2)
+  private var keyboardObserverRoot: View? = null
+  private var lastKeyboardGeometrySignature: String? = null
+  private val keyboardLayoutListener =
+    ViewTreeObserver.OnGlobalLayoutListener { emitKeyboardGeometry() }
 
   private fun enforceImeResize() {
     val window = context.findActivity()?.window ?: return
@@ -117,6 +127,75 @@ class ForwardRichTextInputView(
       (currentMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST.inv()) or
         WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
     if (nextMode != currentMode) window.setSoftInputMode(nextMode)
+  }
+
+  private fun startKeyboardGeometryObservation() {
+    val root = rootView
+    if (keyboardObserverRoot !== root) {
+      stopKeyboardGeometryObservation(emitHidden = false)
+      keyboardObserverRoot = root
+      if (root.viewTreeObserver.isAlive) {
+        root.viewTreeObserver.addOnGlobalLayoutListener(keyboardLayoutListener)
+      }
+    }
+    for (delay in longArrayOf(0L, 80L, 180L, 320L, 520L, 850L)) {
+      root.postDelayed({
+        if (editor.hasFocus()) emitKeyboardGeometry()
+      }, delay)
+    }
+  }
+
+  private fun stopKeyboardGeometryObservation(emitHidden: Boolean = true) {
+    val root = keyboardObserverRoot
+    if (root != null && root.viewTreeObserver.isAlive) {
+      root.viewTreeObserver.removeOnGlobalLayoutListener(keyboardLayoutListener)
+    }
+    keyboardObserverRoot = null
+    if (emitHidden) emitKeyboardGeometry(forceHidden = true)
+  }
+
+  private fun emitKeyboardGeometry(forceHidden: Boolean = false) {
+    val root = rootView
+    if (root.height <= 0) return
+
+    var frameworkImeInset = 0
+    var frameworkImeVisible = false
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      root.rootWindowInsets?.let { insets ->
+        frameworkImeInset = insets.getInsets(WindowInsets.Type.ime()).bottom
+        frameworkImeVisible = insets.isVisible(WindowInsets.Type.ime())
+      }
+    }
+
+    root.getWindowVisibleDisplayFrame(keyboardVisibleFrame)
+    root.getLocationOnScreen(keyboardRootLocation)
+    val rootBottomOnScreen = keyboardRootLocation[1] + root.height
+    val visibleFrameInset =
+      (rootBottomOnScreen - keyboardVisibleFrame.bottom).coerceAtLeast(0)
+    val effectiveImeInset = max(frameworkImeInset, visibleFrameInset)
+    val visible =
+      !forceHidden && editor.hasFocus() &&
+        ((frameworkImeVisible && frameworkImeInset > 0) ||
+          visibleFrameInset >= dp(80))
+    val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
+    fun toDp(value: Int): Int =
+      if (value <= 0) 0
+      else ceil(value.toDouble() / density.toDouble()).toInt()
+
+    val effectiveDp = toDp(if (visible) effectiveImeInset else 0)
+    val frameworkDp = toDp(frameworkImeInset)
+    val visibleFrameDp = toDp(visibleFrameInset)
+    val signature = "$visible:$effectiveDp:$frameworkDp:$visibleFrameDp"
+    if (signature == lastKeyboardGeometrySignature) return
+    lastKeyboardGeometrySignature = signature
+    onKeyboardGeometryChange(
+      mapOf(
+        "visible" to visible,
+        "imeHeight" to effectiveDp.toDouble(),
+        "frameworkImeHeight" to frameworkDp.toDouble(),
+        "visibleFrameInset" to visibleFrameDp.toDouble()
+      )
+    )
   }
 
   private val formatMenuIds = mapOf(
@@ -173,8 +252,10 @@ class ForwardRichTextInputView(
     editor.setOnFocusChangeListener { _, hasFocus ->
       if (hasFocus) {
         enforceImeResize()
+        startKeyboardGeometryObservation()
         onFocus(Unit)
       } else {
+        stopKeyboardGeometryObservation()
         onBlur(Unit)
       }
     }
@@ -273,6 +354,11 @@ class ForwardRichTextInputView(
     editor.clearFocus()
     val inputMethod = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
     inputMethod?.hideSoftInputFromWindow(editor.windowToken, 0)
+  }
+
+  override fun onDetachedFromWindow() {
+    stopKeyboardGeometryObservation(emitHidden = false)
+    super.onDetachedFromWindow()
   }
 
   private fun acceptRichContent(content: InputContentInfo, flags: Int): Boolean {
@@ -614,7 +700,9 @@ class ForwardRichTextInputView(
       val height = textHeight + editor.compoundPaddingTop + editor.compoundPaddingBottom
       if (height != lastContentHeight) {
         lastContentHeight = height
-        onContentSizeChange(mapOf("height" to height.toDouble()))
+        val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
+        val heightDp = ceil(height.toDouble() / density.toDouble())
+        onContentSizeChange(mapOf("height" to heightDp))
       }
     }
   }

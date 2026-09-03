@@ -159,6 +159,9 @@ assert.match(nativeInputSource, /setSoftInputMode\(nextMode\)/);
 assert.match(nativeInputSource, /enforceImeResize\(\)/);
 assert.match(nativeInputSource, /WindowInsets\.Type\.ime\(\)/);
 assert.match(nativeInputSource, /visibleFrameInset/);
-assert.match(nativeInputSource, /height\.toDouble\(\) \/ density\.toDouble\(\)/);
+assert.match(
+  nativeInputSource,
+  /height\.toDouble\(\) \/ density\.toDouble\(\)/,
+);
 
 console.log("Messenger Android keyboard avoidance checks passed.");

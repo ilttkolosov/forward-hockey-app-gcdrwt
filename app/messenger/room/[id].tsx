@@ -879,7 +879,8 @@ interface MessengerMessageListItemProps {
 
 function messageProbablyNeedsCollapse(text: string): boolean {
   return (
-    stripMessengerTextFormatting(text).length > COLLAPSED_MESSAGE_ESTIMATED_CHARACTERS ||
+    stripMessengerTextFormatting(text).length >
+      COLLAPSED_MESSAGE_ESTIMATED_CHARACTERS ||
     text.split("\n").length > COLLAPSED_MESSAGE_LINES
   );
 }
@@ -892,7 +893,9 @@ function ExpandableMessengerMessageText({
   style: React.ComponentProps<typeof Text>["style"];
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [longMessage, setLongMessage] = useState(() => messageProbablyNeedsCollapse(text));
+  const [longMessage, setLongMessage] = useState(() =>
+    messageProbablyNeedsCollapse(text),
+  );
 
   useEffect(() => {
     setExpanded(false);
@@ -904,9 +907,14 @@ function ExpandableMessengerMessageText({
       <MessengerLinkifiedText
         text={text}
         style={style}
-        numberOfLines={longMessage && !expanded ? COLLAPSED_MESSAGE_LINES : undefined}
+        numberOfLines={
+          longMessage && !expanded ? COLLAPSED_MESSAGE_LINES : undefined
+        }
         onTextLayout={(event) => {
-          if (!longMessage && event.nativeEvent.lines.length > COLLAPSED_MESSAGE_LINES) {
+          if (
+            !longMessage &&
+            event.nativeEvent.lines.length > COLLAPSED_MESSAGE_LINES
+          ) {
             setLongMessage(true);
           }
         }}
@@ -915,10 +923,14 @@ function ExpandableMessengerMessageText({
         <Pressable
           onPress={() => setExpanded((current) => !current)}
           accessibilityRole="button"
-          accessibilityLabel={expanded ? "Свернуть сообщение" : "Показать сообщение полностью"}
+          accessibilityLabel={
+            expanded ? "Свернуть сообщение" : "Показать сообщение полностью"
+          }
           hitSlop={6}
         >
-          <Text style={styles.messageExpandLink}>{expanded ? "Свернуть" : "… Далее"}</Text>
+          <Text style={styles.messageExpandLink}>
+            {expanded ? "Свернуть" : "… Далее"}
+          </Text>
         </Pressable>
       ) : null}
     </View>
@@ -930,306 +942,308 @@ function ExpandableMessengerMessageText({
  * a new optimistic message is appended, so React.memo can keep every old
  * image/video bubble untouched while the new row is painted and sent.
  */
-const MessengerMessageListItem = React.memo(
-  function MessengerMessageListItem({
-    item,
-    currentUserId,
-    accessToken,
-    unreadMarker,
-    canWrite,
-    canReact,
-    roomType,
-    roomKind,
-    canManageRoom,
-    roomTitle,
-    highlighted,
-    roomScreenActive,
-    viewable,
-    reactionBusy,
-    animatedReaction,
-    reactionAnimationKey,
-    onReply,
-    onOpenActions,
-    onForward,
-    onDelete,
-    onNavigateToReply,
-    onToggleReaction,
-    quickReaction,
-  }: MessengerMessageListItemProps) {
-    const mine = item.author.id === currentUserId;
-    const media = item.deleted_at ? null : (item.media ?? null);
-    const mediaItems = item.deleted_at
-      ? []
-      : item.media_items?.length
-        ? item.media_items
-        : media
-          ? [media]
-          : [];
-    const location = item.deleted_at ? null : (item.location ?? null);
-    const pendingAttachment = item.deleted_at
-      ? null
-      : (item.pending_attachment ?? null);
-    const body = item.deleted_at
-      ? "Сообщение удалено"
-      : item.text ||
-        (!mediaItems.length && !location && !pendingAttachment
-          ? item.kind === "image"
-            ? "Фото"
-            : item.kind === "video"
-              ? "Видео"
-              : item.kind === "file"
-                ? "Файл"
-                : item.kind === "location"
-                  ? "Геопозиция"
-                  : ""
-          : "");
-    const plainBody = stripMessengerTextFormatting(body);
-    const emojiOnly =
-      !item.deleted_at && item.kind === "text" && isEmojiOnly(plainBody);
-    const linkPreviewUrl = item.deleted_at
-      ? null
-      : firstMessengerMessageUrl(plainBody);
+const MessengerMessageListItem = React.memo(function MessengerMessageListItem({
+  item,
+  currentUserId,
+  accessToken,
+  unreadMarker,
+  canWrite,
+  canReact,
+  roomType,
+  roomKind,
+  canManageRoom,
+  roomTitle,
+  highlighted,
+  roomScreenActive,
+  viewable,
+  reactionBusy,
+  animatedReaction,
+  reactionAnimationKey,
+  onReply,
+  onOpenActions,
+  onForward,
+  onDelete,
+  onNavigateToReply,
+  onToggleReaction,
+  quickReaction,
+}: MessengerMessageListItemProps) {
+  const mine = item.author.id === currentUserId;
+  const media = item.deleted_at ? null : (item.media ?? null);
+  const mediaItems = item.deleted_at
+    ? []
+    : item.media_items?.length
+      ? item.media_items
+      : media
+        ? [media]
+        : [];
+  const location = item.deleted_at ? null : (item.location ?? null);
+  const pendingAttachment = item.deleted_at
+    ? null
+    : (item.pending_attachment ?? null);
+  const body = item.deleted_at
+    ? "Сообщение удалено"
+    : item.text ||
+      (!mediaItems.length && !location && !pendingAttachment
+        ? item.kind === "image"
+          ? "Фото"
+          : item.kind === "video"
+            ? "Видео"
+            : item.kind === "file"
+              ? "Файл"
+              : item.kind === "location"
+                ? "Геопозиция"
+                : ""
+        : "");
+  const plainBody = stripMessengerTextFormatting(body);
+  const emojiOnly =
+    !item.deleted_at && item.kind === "text" && isEmojiOnly(plainBody);
+  const linkPreviewUrl = item.deleted_at
+    ? null
+    : firstMessengerMessageUrl(plainBody);
 
-    if (item.kind === "system") {
-      return (
-        <View collapsable={false}>
-          {unreadMarker && <UnreadDivider />}
-          <View style={styles.systemMessageRow}>
-            <View style={styles.systemMessage}>
-              <Text style={styles.systemMessageText}>{body}</Text>
-              <Text style={styles.systemMessageTime}>
-                {new Date(item.created_at).toLocaleTimeString("ru-RU", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </Text>
-            </View>
-          </View>
-        </View>
-      );
-    }
-
+  if (item.kind === "system") {
     return (
       <View collapsable={false}>
         {unreadMarker && <UnreadDivider />}
-        <SwipeableMessage
-          enabled={canWrite && !item.pending && !item.deleted_at}
-          animateEntry={Boolean(item.pending && mine)}
-          onReply={() => onReply(item)}
-          onLongPress={() => {
-            if (!item.pending || item.send_error) onOpenActions(item);
-          }}
-          onDoubleTap={
-            canReact && !item.pending && !item.deleted_at
-              ? () => onToggleReaction(item, quickReaction)
-              : undefined
-          }
+        <View style={styles.systemMessageRow}>
+          <View style={styles.systemMessage}>
+            <Text style={styles.systemMessageText}>{body}</Text>
+            <Text style={styles.systemMessageTime}>
+              {new Date(item.created_at).toLocaleTimeString("ru-RU", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View collapsable={false}>
+      {unreadMarker && <UnreadDivider />}
+      <SwipeableMessage
+        enabled={canWrite && !item.pending && !item.deleted_at}
+        animateEntry={Boolean(item.pending && mine)}
+        onReply={() => onReply(item)}
+        onLongPress={() => {
+          if (!item.pending || item.send_error) onOpenActions(item);
+        }}
+        onDoubleTap={
+          canReact && !item.pending && !item.deleted_at
+            ? () => onToggleReaction(item, quickReaction)
+            : undefined
+        }
+      >
+        <View
+          style={[
+            styles.messageRow,
+            mine ? styles.messageRowMine : styles.messageRowTheirs,
+          ]}
         >
+          {!mine && (
+            <AuthenticatedAvatar
+              displayName={item.author.display_name}
+              avatarUrl={item.author.avatar_url}
+              accessToken={accessToken}
+              identityKey={item.author.id}
+              size={40}
+            />
+          )}
           <View
-            style={[
-              styles.messageRow,
-              mine ? styles.messageRowMine : styles.messageRowTheirs,
-            ]}
+            style={[styles.messageColumn, mine && styles.messageColumnMine]}
           >
-            {!mine && (
-              <AuthenticatedAvatar
-                displayName={item.author.display_name}
-                avatarUrl={item.author.avatar_url}
-                accessToken={accessToken}
-                identityKey={item.author.id}
-                size={40}
-              />
-            )}
-            <View style={[styles.messageColumn, mine && styles.messageColumnMine]}>
-              <View
-                style={[
-                  styles.message,
-                  mine ? styles.mine : styles.theirs,
-                  item.deleted_at && styles.deletedMessage,
-                  highlighted && styles.highlightedMessage,
-                ]}
-                accessibilityHint="Удерживайте для меню или смахните влево, чтобы ответить"
-              >
-                <MessageTail mine={mine} deleted={Boolean(item.deleted_at)} />
-                {!item.deleted_at && item.forwarded_from && (
-                  <View style={styles.forwardedHeader}>
-                    <Icon name="arrow-redo" size={14} color={colors.accent} />
-                    <Text style={styles.forwardedText} numberOfLines={1}>
-                      Переслано от{" "}
-                      <Text
-                        style={
-                          roomType && roomType !== "direct"
-                            ? {
-                                color: messengerAuthorColor(
-                                  item.forwarded_from.author.id,
-                                ),
-                              }
-                            : undefined
-                        }
-                      >
-                        {item.forwarded_from.author.display_name}
-                      </Text>
-                    </Text>
-                  </View>
-                )}
-                {!item.deleted_at && item.reply_to && (
-                  <Pressable
-                    style={styles.replyQuote}
-                    onPress={() => onNavigateToReply(item.reply_to!)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Перейти к исходному сообщению"
-                  >
+            <View
+              style={[
+                styles.message,
+                mine ? styles.mine : styles.theirs,
+                item.deleted_at && styles.deletedMessage,
+                highlighted && styles.highlightedMessage,
+              ]}
+              accessibilityHint="Удерживайте для меню или смахните влево, чтобы ответить"
+            >
+              <MessageTail mine={mine} deleted={Boolean(item.deleted_at)} />
+              {!item.deleted_at && item.forwarded_from && (
+                <View style={styles.forwardedHeader}>
+                  <Icon name="arrow-redo" size={14} color={colors.accent} />
+                  <Text style={styles.forwardedText} numberOfLines={1}>
+                    Переслано от{" "}
                     <Text
-                      style={[
-                        styles.replyAuthor,
+                      style={
                         roomType && roomType !== "direct"
                           ? {
                               color: messengerAuthorColor(
-                                item.reply_to.author.id,
+                                item.forwarded_from.author.id,
                               ),
                             }
-                          : undefined,
-                      ]}
-                      numberOfLines={1}
+                          : undefined
+                      }
                     >
-                      {item.reply_to.author.display_name}
+                      {item.forwarded_from.author.display_name}
                     </Text>
-                    <Text style={styles.replyText} numberOfLines={1}>
-                      {messageReplyPreview(item.reply_to)}
-                    </Text>
-                  </Pressable>
-                )}
-                {!mine && (
+                  </Text>
+                </View>
+              )}
+              {!item.deleted_at && item.reply_to && (
+                <Pressable
+                  style={styles.replyQuote}
+                  onPress={() => onNavigateToReply(item.reply_to!)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Перейти к исходному сообщению"
+                >
                   <Text
                     style={[
-                      styles.author,
+                      styles.replyAuthor,
                       roomType && roomType !== "direct"
                         ? {
-                            color: messengerAuthorColor(item.author.id),
+                            color: messengerAuthorColor(
+                              item.reply_to.author.id,
+                            ),
                           }
                         : undefined,
                     ]}
                     numberOfLines={1}
                   >
-                    {item.author.display_name}
+                    {item.reply_to.author.display_name}
                   </Text>
-                )}
-                {!pendingAttachment &&
-                  (mediaItems.length > 0 || location) &&
-                  accessToken && (
-                    <MessengerAttachmentView
-                      media={media}
-                      mediaItems={mediaItems}
-                      location={location}
-                      accessToken={accessToken}
-                      deferAutomaticCache={!roomScreenActive || !viewable}
-                      playbackEnabled={roomScreenActive && viewable}
-                      viewerTitle={roomTitle}
-                      viewerSubtitle={new Date(item.created_at).toLocaleString(
-                        "ru-RU",
-                        {
-                          day: "2-digit",
-                          month: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        },
-                      )}
-                      onShowInChat={() => onNavigateToReply(item)}
-                      onReply={
-                        canWrite && !item.pending ? () => onReply(item) : undefined
-                      }
-                      onForward={
-                        !item.pending && !item.deleted_at
-                          ? () => onForward(item)
-                          : undefined
-                      }
-                      onDelete={
-                        messageDeletionAvailable(
-                          item,
-                          currentUserId ?? undefined,
-                          roomType,
-                          roomKind,
-                          canManageRoom,
-                        )
-                          ? () => onDelete(item)
-                          : undefined
-                      }
-                    />
-                  )}
-                {pendingAttachment ? (
-                  <PendingAttachmentView
-                    message={item}
-                    pending={pendingAttachment}
-                  />
-                ) : null}
-                {body ? (
-                  <ExpandableMessengerMessageText
-                    text={body}
-                    style={[
-                      styles.messageText,
-                      emojiOnly && styles.emojiOnlyText,
-                      item.deleted_at && styles.deletedMessageText,
-                    ]}
-                  />
-                ) : null}
-                {linkPreviewUrl ? (
-                  <MessengerLinkPreview
-                    url={linkPreviewUrl}
-                    enabled={roomScreenActive && viewable}
-                    mine={mine}
-                  />
-                ) : null}
-                <View style={styles.messageFooter}>
-                  {!item.deleted_at && item.reactions.length > 0 && (
-                    <ScrollView
-                      horizontal
-                      nestedScrollEnabled
-                      showsHorizontalScrollIndicator={false}
-                      style={styles.reactionScroller}
-                      contentContainerStyle={styles.reactionSummary}
-                    >
-                      {item.reactions.map((reaction) => (
-                        <MessengerReactionChip
-                          key={reaction.reaction}
-                          reaction={reaction.reaction}
-                          count={reaction.count}
-                          selected={reaction.reacted_by_me}
-                          onPress={() =>
-                            onToggleReaction(item, reaction.reaction)
-                          }
-                          disabled={!canReact || reactionBusy}
-                          animationKey={
-                            animatedReaction === reaction.reaction
-                              ? reactionAnimationKey
-                              : null
-                          }
-                        />
-                      ))}
-                    </ScrollView>
-                  )}
-                  <View style={styles.messageMeta}>
-                    <Text style={styles.time}>
-                      {new Date(
-                        item.deleted_at || item.edited_at || item.created_at,
-                      ).toLocaleTimeString("ru-RU", {
+                  <Text style={styles.replyText} numberOfLines={1}>
+                    {messageReplyPreview(item.reply_to)}
+                  </Text>
+                </Pressable>
+              )}
+              {!mine && (
+                <Text
+                  style={[
+                    styles.author,
+                    roomType && roomType !== "direct"
+                      ? {
+                          color: messengerAuthorColor(item.author.id),
+                        }
+                      : undefined,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {item.author.display_name}
+                </Text>
+              )}
+              {!pendingAttachment &&
+                (mediaItems.length > 0 || location) &&
+                accessToken && (
+                  <MessengerAttachmentView
+                    media={media}
+                    mediaItems={mediaItems}
+                    location={location}
+                    accessToken={accessToken}
+                    deferAutomaticCache={!roomScreenActive || !viewable}
+                    playbackEnabled={roomScreenActive && viewable}
+                    viewerTitle={roomTitle}
+                    viewerSubtitle={new Date(item.created_at).toLocaleString(
+                      "ru-RU",
+                      {
+                        day: "2-digit",
+                        month: "2-digit",
                         hour: "2-digit",
                         minute: "2-digit",
-                      })}
-                    </Text>
-                    {item.edited_at && !item.deleted_at && (
-                      <Text style={styles.time}>Отредактировано</Text>
+                      },
                     )}
-                    {mine && <DeliveryChecks message={item} />}
-                  </View>
+                    onShowInChat={() => onNavigateToReply(item)}
+                    onReply={
+                      canWrite && !item.pending
+                        ? () => onReply(item)
+                        : undefined
+                    }
+                    onForward={
+                      !item.pending && !item.deleted_at
+                        ? () => onForward(item)
+                        : undefined
+                    }
+                    onDelete={
+                      messageDeletionAvailable(
+                        item,
+                        currentUserId ?? undefined,
+                        roomType,
+                        roomKind,
+                        canManageRoom,
+                      )
+                        ? () => onDelete(item)
+                        : undefined
+                    }
+                  />
+                )}
+              {pendingAttachment ? (
+                <PendingAttachmentView
+                  message={item}
+                  pending={pendingAttachment}
+                />
+              ) : null}
+              {body ? (
+                <ExpandableMessengerMessageText
+                  text={body}
+                  style={[
+                    styles.messageText,
+                    emojiOnly && styles.emojiOnlyText,
+                    item.deleted_at && styles.deletedMessageText,
+                  ]}
+                />
+              ) : null}
+              {linkPreviewUrl ? (
+                <MessengerLinkPreview
+                  url={linkPreviewUrl}
+                  enabled={roomScreenActive && viewable}
+                  mine={mine}
+                />
+              ) : null}
+              <View style={styles.messageFooter}>
+                {!item.deleted_at && item.reactions.length > 0 && (
+                  <ScrollView
+                    horizontal
+                    nestedScrollEnabled
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.reactionScroller}
+                    contentContainerStyle={styles.reactionSummary}
+                  >
+                    {item.reactions.map((reaction) => (
+                      <MessengerReactionChip
+                        key={reaction.reaction}
+                        reaction={reaction.reaction}
+                        count={reaction.count}
+                        selected={reaction.reacted_by_me}
+                        onPress={() =>
+                          onToggleReaction(item, reaction.reaction)
+                        }
+                        disabled={!canReact || reactionBusy}
+                        animationKey={
+                          animatedReaction === reaction.reaction
+                            ? reactionAnimationKey
+                            : null
+                        }
+                      />
+                    ))}
+                  </ScrollView>
+                )}
+                <View style={styles.messageMeta}>
+                  <Text style={styles.time}>
+                    {new Date(
+                      item.deleted_at || item.edited_at || item.created_at,
+                    ).toLocaleTimeString("ru-RU", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </Text>
+                  {item.edited_at && !item.deleted_at && (
+                    <Text style={styles.time}>Отредактировано</Text>
+                  )}
+                  {mine && <DeliveryChecks message={item} />}
                 </View>
               </View>
             </View>
           </View>
-        </SwipeableMessage>
-      </View>
-    );
-  },
-);
+        </View>
+      </SwipeableMessage>
+    </View>
+  );
+});
 
 function routeRoomType(
   value: string | undefined,
@@ -1283,7 +1297,9 @@ export default function MessengerRoomScreen() {
     () => routeRoomType(params.roomType),
   );
   const [roomKind, setRoomKind] = useState<string | null>(params.kind || null);
-  const [roomCanManage, setRoomCanManage] = useState(params.canManage === "true");
+  const [roomCanManage, setRoomCanManage] = useState(
+    params.canManage === "true",
+  );
   const [roomTeamId, setRoomTeamId] = useState(params.teamId || "");
   const [roomMemberCount, setRoomMemberCount] = useState<number | null>(() => {
     const initial = Number(params.memberCount);
@@ -1403,6 +1419,7 @@ export default function MessengerRoomScreen() {
   const composerShellRef = useRef<View>(null);
   const {
     bottomInset: androidKeyboardInset,
+    onNativeKeyboardGeometry: handleNativeKeyboardGeometry,
     onTargetLayout: handleComposerShellLayout,
     refresh: refreshAndroidKeyboardAvoidance,
   } = useAndroidKeyboardAvoidance(composerShellRef);
@@ -2243,12 +2260,7 @@ export default function MessengerRoomScreen() {
             total_duration_ms: Date.now() - cacheStartedAt,
           });
         }
-        if (
-          initial &&
-          !localSnapshotReady &&
-          params.pushMessageId &&
-          session
-        ) {
+        if (initial && !localSnapshotReady && params.pushMessageId && session) {
           const pushHydrationStartedAt = Date.now();
           try {
             // A notification handler and this screen can request the same
@@ -2354,11 +2366,11 @@ export default function MessengerRoomScreen() {
               ?.sequence;
         const remoteIsContiguousWithFeed = Boolean(
           !visibleConfirmedTail ||
-            !reconciliationCursor ||
-            compareMessengerSequence(
-              visibleConfirmedTail,
-              reconciliationCursor,
-            ) === 0,
+          !reconciliationCursor ||
+          compareMessengerSequence(
+            visibleConfirmedTail,
+            reconciliationCursor,
+          ) === 0,
         );
         let latestSequence = reconciliationCursor || localLatestSequence;
         let receivedMessageCount = 0;
@@ -2631,8 +2643,7 @@ export default function MessengerRoomScreen() {
       if (firstVisible) {
         const currentIndex = messagesRef.current.findIndex(
           (message) =>
-            message.client_message_id ===
-            firstVisible.item.client_message_id,
+            message.client_message_id === firstVisible.item.client_message_id,
         );
         const previous =
           currentIndex > 0 ? messagesRef.current[currentIndex - 1] : null;
@@ -4531,7 +4542,9 @@ export default function MessengerRoomScreen() {
                       setMessages((current) => {
                         const next =
                           roomType === "saved"
-                            ? current.filter((item) => item.id !== result.message.id)
+                            ? current.filter(
+                                (item) => item.id !== result.message.id,
+                              )
                             : current.map((item) =>
                                 item.id === result.message.id
                                   ? {
@@ -4545,7 +4558,9 @@ export default function MessengerRoomScreen() {
                       });
                       if (roomType === "saved") {
                         setFilteredMessages((current) =>
-                          current.filter((item) => item.id !== result.message.id),
+                          current.filter(
+                            (item) => item.id !== result.message.id,
+                          ),
                         );
                       }
                       await cacheUpdatedMessengerMessage(db, result.message);
@@ -4719,7 +4734,10 @@ export default function MessengerRoomScreen() {
       } catch (error) {
         Alert.alert(
           "Личный ответ не открыт",
-          messengerErrorMessage(error, "Этот пользователь недоступен для личной переписки"),
+          messengerErrorMessage(
+            error,
+            "Этот пользователь недоступен для личной переписки",
+          ),
         );
       }
     },
@@ -4907,10 +4925,10 @@ export default function MessengerRoomScreen() {
   const typingDots = useTypingDots(typingNames.length > 0);
   const showTypingNames = Boolean(
     roomType &&
-      roomType !== "direct" &&
-      roomType !== "saved" &&
-      roomMemberCount !== null &&
-      roomMemberCount >= 3,
+    roomType !== "direct" &&
+    roomType !== "saved" &&
+    roomMemberCount !== null &&
+    roomMemberCount >= 3,
   );
   const roomSubtitle =
     typingNames.length > 0
@@ -4934,35 +4952,35 @@ export default function MessengerRoomScreen() {
   );
   const actionMessageMutable = Boolean(
     actionMessage &&
-      messageMutationAvailable(
-        actionMessage,
-        session?.user.id,
-        roomKind,
-        roomCanManage,
-      ),
+    messageMutationAvailable(
+      actionMessage,
+      session?.user.id,
+      roomKind,
+      roomCanManage,
+    ),
   );
   const actionMessageDeletable = Boolean(
     actionMessage &&
-      messageDeletionAvailable(
-        actionMessage,
-        session?.user.id,
-        roomType,
-        roomKind,
-        roomCanManage,
-      ),
+    messageDeletionAvailable(
+      actionMessage,
+      session?.user.id,
+      roomType,
+      roomKind,
+      roomCanManage,
+    ),
   );
   const actionMessageEditable = Boolean(
     actionMessageMutable &&
-      actionMessage &&
-      editableMessengerMessage(actionMessage),
+    actionMessage &&
+    editableMessengerMessage(actionMessage),
   );
   const editingTextChanged = Boolean(
     editingMessage && text.trim() !== editingMessage.text.trim(),
   );
   const canSubmitEdit = Boolean(
     editingMessage &&
-      editingTextChanged &&
-      (editingMessage.kind !== "text" || text.trim()),
+    editingTextChanged &&
+    (editingMessage.kind !== "text" || text.trim()),
   );
   const canSubmitComposer = editingMessage
     ? canSubmitEdit
@@ -5273,9 +5291,7 @@ export default function MessengerRoomScreen() {
             }
             keyboardShouldPersistTaps="handled"
             maintainVisibleContentPosition={
-              listReady && !authorFilter
-                ? { minIndexForVisible: 0 }
-                : undefined
+              listReady && !authorFilter ? { minIndexForVisible: 0 } : undefined
             }
             onScroll={handleListScroll}
             onScrollBeginDrag={beginManualFeedNavigation}
@@ -5742,190 +5758,206 @@ export default function MessengerRoomScreen() {
                     contentContainerStyle={styles.forwardListContent}
                     keyboardShouldPersistTaps="handled"
                   >
-                  {forwardError ? (
-                    <TouchableOpacity
-                      style={styles.forwardError}
-                      onPress={() =>
-                        forwardingMessage && void openForward(forwardingMessage)
-                      }
-                    >
-                      <Icon
-                        name="alert-circle-outline"
-                        size={20}
-                        color={colors.warning}
-                      />
-                      <Text style={styles.forwardErrorText}>
-                        {forwardError}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : null}
-
-                  <Text style={styles.forwardSectionTitle}>Личное</Text>
-                  <TouchableOpacity
-                    style={[
-                      styles.forwardTarget,
-                      forwardSelectedKeys.has("saved") &&
-                        styles.forwardTargetSelected,
-                    ]}
-                    onPress={() => toggleForwardTarget("saved")}
-                    disabled={Boolean(forwardBusy)}
-                    accessibilityRole="checkbox"
-                    accessibilityState={{
-                      checked: forwardSelectedKeys.has("saved"),
-                    }}
-                  >
-                    <SavedMessagesAvatar size={44} userId={session?.user.id} />
-                    <View style={styles.forwardTargetText}>
-                      <Text style={styles.forwardTargetTitle}>Избранное</Text>
-                      <Text style={styles.forwardTargetSubtitle}>
-                        Сохранить сообщение для себя
-                      </Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.forwardCheckbox,
-                        forwardSelectedKeys.has("saved") &&
-                          styles.forwardCheckboxSelected,
-                      ]}
-                    >
-                      {forwardSelectedKeys.has("saved") ? (
-                        <Icon name="checkmark" size={17} color={colors.white} />
-                      ) : null}
-                    </View>
-                  </TouchableOpacity>
-
-                  {forwardRooms.length > 0 ? (
-                    <Text style={styles.forwardSectionTitle}>Чаты</Text>
-                  ) : null}
-                  {forwardRooms.map((target) => {
-                    const key = `room:${target.id}`;
-                    const selected = forwardSelectedKeys.has(key);
-                    return (
+                    {forwardError ? (
                       <TouchableOpacity
-                        key={key}
-                        style={[
-                          styles.forwardTarget,
-                          selected && styles.forwardTargetSelected,
-                        ]}
-                        onPress={() => toggleForwardTarget(key)}
-                        disabled={Boolean(forwardBusy)}
-                        accessibilityRole="checkbox"
-                        accessibilityState={{ checked: selected }}
+                        style={styles.forwardError}
+                        onPress={() =>
+                          forwardingMessage &&
+                          void openForward(forwardingMessage)
+                        }
                       >
-                        {target.room_type === "direct" && target.peer ? (
+                        <Icon
+                          name="alert-circle-outline"
+                          size={20}
+                          color={colors.warning}
+                        />
+                        <Text style={styles.forwardErrorText}>
+                          {forwardError}
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+
+                    <Text style={styles.forwardSectionTitle}>Личное</Text>
+                    <TouchableOpacity
+                      style={[
+                        styles.forwardTarget,
+                        forwardSelectedKeys.has("saved") &&
+                          styles.forwardTargetSelected,
+                      ]}
+                      onPress={() => toggleForwardTarget("saved")}
+                      disabled={Boolean(forwardBusy)}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{
+                        checked: forwardSelectedKeys.has("saved"),
+                      }}
+                    >
+                      <SavedMessagesAvatar
+                        size={44}
+                        userId={session?.user.id}
+                      />
+                      <View style={styles.forwardTargetText}>
+                        <Text style={styles.forwardTargetTitle}>Избранное</Text>
+                        <Text style={styles.forwardTargetSubtitle}>
+                          Сохранить сообщение для себя
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.forwardCheckbox,
+                          forwardSelectedKeys.has("saved") &&
+                            styles.forwardCheckboxSelected,
+                        ]}
+                      >
+                        {forwardSelectedKeys.has("saved") ? (
+                          <Icon
+                            name="checkmark"
+                            size={17}
+                            color={colors.white}
+                          />
+                        ) : null}
+                      </View>
+                    </TouchableOpacity>
+
+                    {forwardRooms.length > 0 ? (
+                      <Text style={styles.forwardSectionTitle}>Чаты</Text>
+                    ) : null}
+                    {forwardRooms.map((target) => {
+                      const key = `room:${target.id}`;
+                      const selected = forwardSelectedKeys.has(key);
+                      return (
+                        <TouchableOpacity
+                          key={key}
+                          style={[
+                            styles.forwardTarget,
+                            selected && styles.forwardTargetSelected,
+                          ]}
+                          onPress={() => toggleForwardTarget(key)}
+                          disabled={Boolean(forwardBusy)}
+                          accessibilityRole="checkbox"
+                          accessibilityState={{ checked: selected }}
+                        >
+                          {target.room_type === "direct" && target.peer ? (
+                            <AuthenticatedAvatar
+                              displayName={target.peer.display_name}
+                              avatarUrl={target.peer.avatar_url}
+                              accessToken={session?.access_token}
+                              identityKey={target.peer.id}
+                              size={44}
+                            />
+                          ) : (
+                            <View style={styles.forwardTargetIcon}>
+                              <Icon
+                                name="people"
+                                size={21}
+                                color={colors.primary}
+                              />
+                            </View>
+                          )}
+                          <View style={styles.forwardTargetText}>
+                            <Text
+                              style={styles.forwardTargetTitle}
+                              numberOfLines={1}
+                            >
+                              {target.title}
+                            </Text>
+                            <Text
+                              style={styles.forwardTargetSubtitle}
+                              numberOfLines={1}
+                            >
+                              {target.room_type === "direct"
+                                ? "Личный чат"
+                                : "Общий чат"}
+                              {` · ${target.team_name}`}
+                            </Text>
+                          </View>
+                          <View
+                            style={[
+                              styles.forwardCheckbox,
+                              selected && styles.forwardCheckboxSelected,
+                            ]}
+                          >
+                            {selected ? (
+                              <Icon
+                                name="checkmark"
+                                size={17}
+                                color={colors.white}
+                              />
+                            ) : null}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+
+                    {newForwardContacts.length > 0 ? (
+                      <Text style={styles.forwardSectionTitle}>
+                        Новый личный чат
+                      </Text>
+                    ) : null}
+                    {newForwardContacts.map((contact) => {
+                      const key = `contact:${contact.team_id}:${contact.id}`;
+                      const selected = forwardSelectedKeys.has(key);
+                      return (
+                        <TouchableOpacity
+                          key={key}
+                          style={[
+                            styles.forwardTarget,
+                            selected && styles.forwardTargetSelected,
+                          ]}
+                          onPress={() => toggleForwardTarget(key)}
+                          disabled={Boolean(forwardBusy)}
+                          accessibilityRole="checkbox"
+                          accessibilityState={{ checked: selected }}
+                        >
                           <AuthenticatedAvatar
-                            displayName={target.peer.display_name}
-                            avatarUrl={target.peer.avatar_url}
+                            displayName={contact.display_name}
+                            avatarUrl={contact.avatar_url}
                             accessToken={session?.access_token}
-                            identityKey={target.peer.id}
+                            identityKey={contact.id}
+                            roles={contact.roles}
                             size={44}
                           />
-                        ) : (
-                          <View style={styles.forwardTargetIcon}>
-                            <Icon
-                              name="people"
-                              size={21}
-                              color={colors.primary}
-                            />
+                          <View style={styles.forwardTargetText}>
+                            <Text
+                              style={styles.forwardTargetTitle}
+                              numberOfLines={1}
+                            >
+                              {contact.display_name}
+                            </Text>
+                            <Text
+                              style={styles.forwardTargetSubtitle}
+                              numberOfLines={1}
+                            >
+                              {contact.family_link
+                                ? "Семейный контакт"
+                                : "Контакт команды"}
+                              {` · ${contact.team_name}`}
+                            </Text>
                           </View>
-                        )}
-                        <View style={styles.forwardTargetText}>
-                          <Text
-                            style={styles.forwardTargetTitle}
-                            numberOfLines={1}
+                          <View
+                            style={[
+                              styles.forwardCheckbox,
+                              selected && styles.forwardCheckboxSelected,
+                            ]}
                           >
-                            {target.title}
-                          </Text>
-                          <Text
-                            style={styles.forwardTargetSubtitle}
-                            numberOfLines={1}
-                          >
-                            {target.room_type === "direct"
-                              ? "Личный чат"
-                              : "Общий чат"}
-                            {` · ${target.team_name}`}
-                          </Text>
-                        </View>
-                        <View
-                          style={[
-                            styles.forwardCheckbox,
-                            selected && styles.forwardCheckboxSelected,
-                          ]}
-                        >
-                          {selected ? (
-                            <Icon name="checkmark" size={17} color={colors.white} />
-                          ) : null}
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
+                            {selected ? (
+                              <Icon
+                                name="checkmark"
+                                size={17}
+                                color={colors.white}
+                              />
+                            ) : null}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
 
-                  {newForwardContacts.length > 0 ? (
-                    <Text style={styles.forwardSectionTitle}>
-                      Новый личный чат
-                    </Text>
-                  ) : null}
-                  {newForwardContacts.map((contact) => {
-                    const key = `contact:${contact.team_id}:${contact.id}`;
-                    const selected = forwardSelectedKeys.has(key);
-                    return (
-                      <TouchableOpacity
-                        key={key}
-                        style={[
-                          styles.forwardTarget,
-                          selected && styles.forwardTargetSelected,
-                        ]}
-                        onPress={() => toggleForwardTarget(key)}
-                        disabled={Boolean(forwardBusy)}
-                        accessibilityRole="checkbox"
-                        accessibilityState={{ checked: selected }}
-                      >
-                        <AuthenticatedAvatar
-                          displayName={contact.display_name}
-                          avatarUrl={contact.avatar_url}
-                          accessToken={session?.access_token}
-                          identityKey={contact.id}
-                          roles={contact.roles}
-                          size={44}
-                        />
-                        <View style={styles.forwardTargetText}>
-                          <Text
-                            style={styles.forwardTargetTitle}
-                            numberOfLines={1}
-                          >
-                            {contact.display_name}
-                          </Text>
-                          <Text
-                            style={styles.forwardTargetSubtitle}
-                            numberOfLines={1}
-                          >
-                            {contact.family_link
-                              ? "Семейный контакт"
-                              : "Контакт команды"}
-                            {` · ${contact.team_name}`}
-                          </Text>
-                        </View>
-                        <View
-                          style={[
-                            styles.forwardCheckbox,
-                            selected && styles.forwardCheckboxSelected,
-                          ]}
-                        >
-                          {selected ? (
-                            <Icon name="checkmark" size={17} color={colors.white} />
-                          ) : null}
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-
-                  {!forwardError &&
-                  forwardRooms.length === 0 &&
-                  newForwardContacts.length === 0 ? (
-                    <Text style={styles.forwardEmpty}>
-                      Нет доступных получателей
-                    </Text>
-                  ) : null}
+                    {!forwardError &&
+                    forwardRooms.length === 0 &&
+                    newForwardContacts.length === 0 ? (
+                      <Text style={styles.forwardEmpty}>
+                        Нет доступных получателей
+                      </Text>
+                    ) : null}
                   </ScrollView>
                   <View style={styles.forwardFooter}>
                     <TouchableOpacity
@@ -5935,7 +5967,9 @@ export default function MessengerRoomScreen() {
                           styles.forwardSendButtonDisabled,
                       ]}
                       onPress={() => void forwardToSelected()}
-                      disabled={forwardSelectedKeys.size === 0 || Boolean(forwardBusy)}
+                      disabled={
+                        forwardSelectedKeys.size === 0 || Boolean(forwardBusy)
+                      }
                       accessibilityRole="button"
                       accessibilityLabel={`Переслать выбранным получателям: ${forwardSelectedKeys.size}`}
                     >
@@ -6264,7 +6298,9 @@ export default function MessengerRoomScreen() {
                 style={[styles.input, { height: composerInputHeight }]}
                 value={text}
                 onChangeText={setText}
-                selection={Platform.OS === "web" ? composerSelection : undefined}
+                selection={
+                  Platform.OS === "web" ? composerSelection : undefined
+                }
                 onSelectionChange={
                   Platform.OS === "web" ? setComposerSelection : undefined
                 }
@@ -6291,6 +6327,7 @@ export default function MessengerRoomScreen() {
                 placeholderTextColor={colors.textSecondary}
                 selectionColor={colors.accent}
                 onContentSizeChange={handleComposerContentSizeChange}
+                onKeyboardGeometryChange={handleNativeKeyboardGeometry}
                 onPasteAttachment={(attachment) => {
                   void handlePastedAttachment(attachment);
                 }}

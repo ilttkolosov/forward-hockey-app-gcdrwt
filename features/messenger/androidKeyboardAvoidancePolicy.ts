@@ -80,12 +80,6 @@ export function calculateAndroidKeyboardInset({
     nativeHeight ?? 0,
     observedHeight,
   );
-  const maximum = Math.max(
-    0,
-    maximumKeyboardHeight + MAX_KEYBOARD_INSET_EXTRA,
-  );
-  return Math.min(
-    Math.ceil(overlap + KEYBOARD_CLEARANCE),
-    Math.ceil(maximum),
-  );
+  const maximum = Math.max(0, maximumKeyboardHeight + MAX_KEYBOARD_INSET_EXTRA);
+  return Math.min(Math.ceil(overlap + KEYBOARD_CLEARANCE), Math.ceil(maximum));
 }

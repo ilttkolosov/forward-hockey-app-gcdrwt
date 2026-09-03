@@ -78,9 +78,7 @@ interface NativeForwardRichTextInputProps {
   textColor?: string;
   placeholderTextColor?: string;
   selectionColor?: string;
-  onValueChange?: (
-    event: NativeSyntheticEvent<NativeValueChangeEvent>,
-  ) => void;
+  onValueChange?: (event: NativeSyntheticEvent<NativeValueChangeEvent>) => void;
   onFocus?: () => void;
   onBlur?: () => void;
   onContentSizeChange?: (
@@ -164,9 +162,10 @@ function getNativeComponent(): NativeComponent | null {
     Number(nativeModule.contentSizeUnitVersion ?? 0) >= 1;
 
   try {
-    cachedNativeComponent = requireNativeViewManager<NativeForwardRichTextInputProps>(
-      "ForwardRichTextInput",
-    ) as NativeComponent;
+    cachedNativeComponent =
+      requireNativeViewManager<NativeForwardRichTextInputProps>(
+        "ForwardRichTextInput",
+      ) as NativeComponent;
   } catch {
     // Expo Go and an old installed build do not contain this local module.
     // Keeping a normal TextInput fallback lets the JS bundle remain usable,

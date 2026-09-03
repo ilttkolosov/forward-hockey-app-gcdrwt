@@ -20,9 +20,7 @@ const METRICS_PROBE_DELAYS_MS = [0, 90, 220, 450, 800, 1_200] as const;
 
 interface AndroidKeyboardAvoidanceController {
   bottomInset: number;
-  onNativeKeyboardGeometry: (
-    geometry: ForwardRichTextKeyboardGeometry,
-  ) => void;
+  onNativeKeyboardGeometry: (geometry: ForwardRichTextKeyboardGeometry) => void;
   onTargetLayout: (event: LayoutChangeEvent) => void;
   refresh: () => void;
 }
