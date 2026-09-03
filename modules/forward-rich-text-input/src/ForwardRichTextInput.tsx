@@ -11,6 +11,7 @@ import React, {
   useRef,
 } from "react";
 import {
+  PixelRatio,
   Platform,
   TextInput,
   type NativeSyntheticEvent,
@@ -27,6 +28,13 @@ interface NativeContentSizeChangeEvent {
   height: number;
 }
 
+interface NativeKeyboardGeometryEvent {
+  visible: boolean;
+  imeHeight: number;
+  frameworkImeHeight?: number;
+  visibleFrameInset?: number;
+}
+
 interface NativePasteAttachmentEvent {
   kind?: "image" | "video" | "file";
   uri?: string;
@@ -37,6 +45,11 @@ interface NativePasteAttachmentEvent {
   error?: string;
 }
 
+interface NativeForwardRichTextInputModule {
+  keyboardGeometryVersion?: number;
+  contentSizeUnitVersion?: number;
+}
+
 export interface ForwardRichTextPastedAttachment {
   kind?: "image" | "video" | "file";
   uri?: string;
@@ -45,6 +58,13 @@ export interface ForwardRichTextPastedAttachment {
   sizeBytes?: number;
   clipboardImage?: boolean;
   error?: string;
+}
+
+export interface ForwardRichTextKeyboardGeometry {
+  visible: boolean;
+  imeHeight: number;
+  frameworkImeHeight?: number;
+  visibleFrameInset?: number;
 }
 
 interface NativeForwardRichTextInputProps {
@@ -65,6 +85,9 @@ interface NativeForwardRichTextInputProps {
   onBlur?: () => void;
   onContentSizeChange?: (
     event: NativeSyntheticEvent<NativeContentSizeChangeEvent>,
+  ) => void;
+  onKeyboardGeometryChange?: (
+    event: NativeSyntheticEvent<NativeKeyboardGeometryEvent>,
   ) => void;
   onPasteAttachment?: (
     event: NativeSyntheticEvent<NativePasteAttachmentEvent>,
@@ -96,6 +119,9 @@ export interface ForwardRichTextInputProps {
   onFocus?: () => void;
   onBlur?: () => void;
   onContentSizeChange?: (height: number) => void;
+  onKeyboardGeometryChange?: (
+    geometry: ForwardRichTextKeyboardGeometry,
+  ) => void;
   onPasteAttachment?: (attachment: ForwardRichTextPastedAttachment) => void;
   selection?: { start: number; end: number };
   onSelectionChange?: (selection: { start: number; end: number }) => void;
@@ -108,6 +134,8 @@ type NativeComponent = React.ComponentType<
 >;
 
 let cachedNativeComponent: NativeComponent | null | undefined;
+let cachedNativeKeyboardGeometrySupported = false;
+let cachedNativeContentSizeUsesDp = false;
 
 function getNativeComponent(): NativeComponent | null {
   if (cachedNativeComponent !== undefined) return cachedNativeComponent;
@@ -123,10 +151,17 @@ function getNativeComponent(): NativeComponent | null {
   // when the JS bundle is newer than the installed native binary. Rendering
   // that placeholder produces a visible "Unimplemented component" error, so
   // verify that the native module exists before requiring its view manager.
-  if (!requireOptionalNativeModule("ForwardRichTextInput")) {
+  const nativeModule = requireOptionalNativeModule(
+    "ForwardRichTextInput",
+  ) as NativeForwardRichTextInputModule | null;
+  if (!nativeModule) {
     cachedNativeComponent = null;
     return cachedNativeComponent;
   }
+  cachedNativeKeyboardGeometrySupported =
+    Number(nativeModule.keyboardGeometryVersion ?? 0) >= 1;
+  cachedNativeContentSizeUsesDp =
+    Number(nativeModule.contentSizeUnitVersion ?? 0) >= 1;
 
   try {
     cachedNativeComponent = requireNativeViewManager<NativeForwardRichTextInputProps>(
@@ -136,6 +171,8 @@ function getNativeComponent(): NativeComponent | null {
     // Expo Go and an old installed build do not contain this local module.
     // Keeping a normal TextInput fallback lets the JS bundle remain usable,
     // while native formatting is intentionally limited to a development build.
+    cachedNativeKeyboardGeometrySupported = false;
+    cachedNativeContentSizeUsesDp = false;
     cachedNativeComponent = null;
   }
   return cachedNativeComponent;
@@ -160,6 +197,7 @@ export const ForwardRichTextInput = forwardRef<
     onFocus,
     onBlur,
     onContentSizeChange,
+    onKeyboardGeometryChange,
     onPasteAttachment,
     selection,
     onSelectionChange,
@@ -194,9 +232,21 @@ export const ForwardRichTextInput = forwardRef<
 
   const handleNativeContentSize = useCallback(
     (event: NativeSyntheticEvent<NativeContentSizeChangeEvent>) => {
-      onContentSizeChange?.(event.nativeEvent.height);
+      const rawHeight = event.nativeEvent.height;
+      const height =
+        Platform.OS === "android" && !cachedNativeContentSizeUsesDp
+          ? rawHeight / Math.max(1, PixelRatio.get())
+          : rawHeight;
+      onContentSizeChange?.(height);
     },
     [onContentSizeChange],
+  );
+
+  const handleNativeKeyboardGeometry = useCallback(
+    (event: NativeSyntheticEvent<NativeKeyboardGeometryEvent>) => {
+      onKeyboardGeometryChange?.(event.nativeEvent);
+    },
+    [onKeyboardGeometryChange],
   );
 
   const handleNativePasteAttachment = useCallback(
@@ -253,6 +303,9 @@ export const ForwardRichTextInput = forwardRef<
       onFocus={onFocus}
       onBlur={onBlur}
       onContentSizeChange={handleNativeContentSize}
+      {...(cachedNativeKeyboardGeometrySupported
+        ? { onKeyboardGeometryChange: handleNativeKeyboardGeometry }
+        : {})}
       onPasteAttachment={handleNativePasteAttachment}
     />
   );
