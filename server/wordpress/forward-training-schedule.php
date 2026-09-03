@@ -754,7 +754,9 @@ function forward_training_rest_get_schedule(WP_REST_Request $request) {
         'generated_at' => wp_date(DateTimeInterface::ATOM),
     );
     $response = new WP_REST_Response($payload, 200);
-    $response->header('Cache-Control', 'public, max-age=60, must-revalidate');
+    $response->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    $response->header('Pragma', 'no-cache');
+    $response->header('Expires', '0');
     $response->header('X-Forward-Endpoint', 'training-schedule-v1');
     return $response;
 }
