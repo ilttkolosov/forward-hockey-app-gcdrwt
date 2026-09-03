@@ -2,6 +2,10 @@ import { Image } from "expo-image";
 import React, { useMemo } from "react";
 import { StyleSheet, View } from "react-native";
 import { messengerMediaUrl } from "../../services/messengerApi";
+import {
+  registerMessengerAvatarIdentity,
+  resolveMessengerAvatarIdentity,
+} from "./avatarIdentity";
 import { MESSENGER_PRESET_AVATARS } from "./presetAvatars";
 
 interface AuthenticatedAvatarProps {
@@ -69,8 +73,9 @@ function AuthenticatedAvatar({
   roles,
 }: AuthenticatedAvatarProps) {
   const uri = messengerMediaUrl(avatarUrl);
-  const identity = identityKey || displayName.trim().toLocaleLowerCase("ru-RU");
-  const hash = useMemo(() => stableHash(identity || "forward"), [identity]);
+  if (identityKey) registerMessengerAvatarIdentity(identityKey, displayName);
+  const identity = resolveMessengerAvatarIdentity(identityKey, displayName);
+  const hash = useMemo(() => stableHash(identity), [identity]);
   const preset =
     MESSENGER_PRESET_AVATARS[hash % MESSENGER_PRESET_AVATARS.length];
   const backgroundColor = roleColor(roles, hash);
