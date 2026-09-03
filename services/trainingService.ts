@@ -89,6 +89,39 @@ const normalizeTraining = (item: Training): Training => {
   };
 };
 
+const trainingFreshness = (training: Training): number => {
+  const updatedAt = Date.parse(training.updated_at);
+  return Number.isFinite(updatedAt) ? updatedAt : 0;
+};
+
+/**
+ * WordPress can temporarily return the old and new database rows for the same
+ * logical training after a range replacement. SQLite intentionally keeps uid
+ * unique, so select the freshest row before starting the replacement
+ * transaction instead of rejecting the whole schedule update.
+ */
+export const deduplicateTrainings = (items: Training[]): Training[] => {
+  const preferred = [...items].sort((left, right) => {
+    const freshnessDifference = trainingFreshness(right) - trainingFreshness(left);
+    if (freshnessDifference !== 0) return freshnessDifference;
+    return String(right.id).localeCompare(String(left.id), undefined, { numeric: true });
+  });
+  const ids = new Set<string>();
+  const uids = new Set<string>();
+  const unique = preferred.filter(item => {
+    if (ids.has(item.id) || uids.has(item.uid)) return false;
+    ids.add(item.id);
+    uids.add(item.uid);
+    return true;
+  });
+
+  return unique.sort((left, right) => (
+    left.start_at.localeCompare(right.start_at)
+    || left.type.localeCompare(right.type)
+    || left.uid.localeCompare(right.uid)
+  ));
+};
+
 const notifyListeners = (trainings: Training[]): void => {
   listeners.forEach(listener => listener(trainings));
 };
@@ -130,7 +163,14 @@ export const synchronizeTrainings = async (
       const networkDurationMs = Date.now() - networkStartedAt;
       failureStage = 'validation';
       const validationStartedAt = Date.now();
-      const normalized = response.data.map(normalizeTraining);
+      const received = response.data.map(normalizeTraining);
+      const normalized = deduplicateTrainings(received);
+      if (normalized.length !== received.length) {
+        console.warn(
+          `[Тренировки] API вернул дубликаты: получено=${received.length}, `
+          + `сохранено уникальных=${normalized.length}`
+        );
+      }
       if (normalized.some(item => item.team.id !== query.team)) {
         throw new Error('Сервер вернул расписание другой команды');
       }
