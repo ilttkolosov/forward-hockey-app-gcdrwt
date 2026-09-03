@@ -1,0 +1,1413 @@
+name: One-time resilient iOS registration patch v3
+
+on:
+  push:
+    branches:
+      - fix/minor-fixes-batch
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, '[ios-registration-patch-v3]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/minor-fixes-batch
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Replace rules modal with an awaited and observable flow
+        run: |
+          cat > features/messenger/MessengerRulesModal.tsx <<'EOF'
+          import Constants from "expo-constants";
+          import React, {
+            useCallback,
+            useEffect,
+            useMemo,
+            useRef,
+            useState,
+          } from "react";
+          import {
+            ActivityIndicator,
+            Modal,
+            Pressable,
+            ScrollView,
+            StyleSheet,
+            Text,
+            View,
+          } from "react-native";
+          import type { MessengerRulesVersion } from "./types";
+          import {
+            getCurrentMessengerRules,
+            MessengerApiError,
+            messengerErrorMessage,
+          } from "../../services/messengerApi";
+          import { messengerLog } from "../../services/messengerLogger";
+          import { colors } from "../../styles/commonStyles";
+
+          interface Props {
+            visible: boolean;
+            rules?: MessengerRulesVersion | null;
+            busy?: boolean;
+            cancelLabel?: string;
+            flow?: "registration" | "authenticated";
+            onAccept(
+              rules: MessengerRulesVersion,
+              appVersion: string,
+              appBuild?: string,
+            ): void | Promise<void>;
+            onCancel(): void | Promise<void>;
+            onDismiss?(): void;
+          }
+
+          type MarkdownBlock =
+            | { type: "heading"; level: number; content: string }
+            | { type: "paragraph"; content: string }
+            | { type: "listItem"; marker: string; content: string };
+
+          function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
+            const blocks: MarkdownBlock[] = [];
+            let paragraph: string[] = [];
+            const flushParagraph = () => {
+              if (!paragraph.length) return;
+              blocks.push({ type: "paragraph", content: paragraph.join("\n") });
+              paragraph = [];
+            };
+
+            markdown
+              .replace(/\r\n?/g, "\n")
+              .split("\n")
+              .forEach((rawLine) => {
+                const line = rawLine.trimEnd();
+                if (!line.trim()) {
+                  flushParagraph();
+                  return;
+                }
+                const heading = line.match(/^(#{1,6})\s+(.+)$/);
+                if (heading) {
+                  flushParagraph();
+                  blocks.push({
+                    type: "heading",
+                    level: heading[1].length,
+                    content: heading[2],
+                  });
+                  return;
+                }
+                const unorderedItem = line.match(/^\s*[-*+]\s+(.+)$/);
+                if (unorderedItem) {
+                  flushParagraph();
+                  blocks.push({
+                    type: "listItem",
+                    marker: "•",
+                    content: unorderedItem[1],
+                  });
+                  return;
+                }
+                const orderedItem = line.match(/^\s*(\d+)\.\s+(.+)$/);
+                if (orderedItem) {
+                  flushParagraph();
+                  blocks.push({
+                    type: "listItem",
+                    marker: `${orderedItem[1]}.`,
+                    content: orderedItem[2],
+                  });
+                  return;
+                }
+                paragraph.push(line.trim());
+              });
+            flushParagraph();
+            return blocks;
+          }
+
+          function renderInlineMarkdown(content: string): React.ReactNode[] {
+            const parts = content.split(
+              /(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\*[^*]+\*|_[^_]+_)/g,
+            );
+            return parts.filter(Boolean).map((part, index) => {
+              const key = `${index}-${part}`;
+              if (
+                (part.startsWith("**") && part.endsWith("**")) ||
+                (part.startsWith("__") && part.endsWith("__"))
+              ) {
+                return (
+                  <Text key={key} style={styles.inlineStrong}>
+                    {part.slice(2, -2)}
+                  </Text>
+                );
+              }
+              if (part.startsWith("`") && part.endsWith("`")) {
+                return (
+                  <Text key={key} style={styles.inlineCode}>
+                    {part.slice(1, -1)}
+                  </Text>
+                );
+              }
+              if (
+                (part.startsWith("*") && part.endsWith("*")) ||
+                (part.startsWith("_") && part.endsWith("_"))
+              ) {
+                return (
+                  <Text key={key} style={styles.inlineEmphasis}>
+                    {part.slice(1, -1)}
+                  </Text>
+                );
+              }
+              return part;
+            });
+          }
+
+          export default function MessengerRulesModal({
+            visible,
+            rules: suppliedRules,
+            busy = false,
+            cancelLabel = "Отмена",
+            flow = "authenticated",
+            onAccept,
+            onCancel,
+            onDismiss,
+          }: Props) {
+            const [rules, setRules] = useState<MessengerRulesVersion | null>(
+              suppliedRules ?? null,
+            );
+            const [checked, setChecked] = useState(false);
+            const [loading, setLoading] = useState(false);
+            const [loadError, setLoadError] = useState<string | null>(null);
+            const [actionError, setActionError] = useState<string | null>(null);
+            const [submitting, setSubmitting] = useState(false);
+            const [modalReady, setModalReady] = useState(false);
+            const submittingRef = useRef(false);
+
+            useEffect(() => {
+              if (!visible) {
+                setChecked(false);
+                setLoadError(null);
+                setActionError(null);
+                setModalReady(false);
+                submittingRef.current = false;
+                setSubmitting(false);
+                return;
+              }
+              messengerLog("info", "rules.modal.opened", { flow });
+              if (suppliedRules) {
+                setRules(suppliedRules);
+                setLoading(false);
+                return;
+              }
+              let active = true;
+              setLoading(true);
+              getCurrentMessengerRules()
+                .then((value) => {
+                  if (!active) return;
+                  setRules(value);
+                  setLoadError(null);
+                })
+                .catch((reason) => {
+                  if (!active) return;
+                  setLoadError(
+                    messengerErrorMessage(reason, "Не удалось загрузить Правила"),
+                  );
+                })
+                .finally(() => active && setLoading(false));
+              return () => {
+                active = false;
+              };
+            }, [flow, suppliedRules, visible]);
+
+            const appVersion = Constants.expoConfig?.version || "unknown";
+            const appBuild =
+              Constants.expoConfig?.ios?.buildNumber ||
+              String(Constants.expoConfig?.android?.versionCode || "") ||
+              undefined;
+            const documentBlocks = useMemo(
+              () => parseMarkdownBlocks(rules?.content_markdown || ""),
+              [rules?.content_markdown],
+            );
+            const actionBusy = busy || submitting;
+            const acceptDisabled =
+              !modalReady || !checked || !rules || actionBusy || loading;
+
+            const reloadRulesAfterConflict = useCallback(async () => {
+              try {
+                const latest = await getCurrentMessengerRules();
+                setRules(latest);
+                setChecked(false);
+                setLoadError(null);
+              } catch {
+                // The original actionable error remains visible. A later retry
+                // will fetch current rules again if the connection recovers.
+              }
+            }, []);
+
+            const handleAccept = useCallback(async () => {
+              if (
+                submittingRef.current ||
+                busy ||
+                !modalReady ||
+                !checked ||
+                !rules
+              ) {
+                return;
+              }
+              submittingRef.current = true;
+              setSubmitting(true);
+              setActionError(null);
+              const startedAt = Date.now();
+              messengerLog("info", "rules.accept.started", {
+                flow,
+                rules_version: rules.version,
+              });
+              try {
+                await onAccept(rules, appVersion, appBuild);
+                messengerLog("info", "rules.accept.succeeded", {
+                  flow,
+                  rules_version: rules.version,
+                  duration_ms: Date.now() - startedAt,
+                });
+              } catch (reason) {
+                if (
+                  reason instanceof MessengerApiError &&
+                  reason.code === "rules_version_changed"
+                ) {
+                  await reloadRulesAfterConflict();
+                }
+                const message = messengerErrorMessage(
+                  reason,
+                  "Не удалось завершить регистрацию. Проверьте соединение и повторите попытку.",
+                );
+                setActionError(message);
+                messengerLog("warn", "rules.accept.failed", {
+                  flow,
+                  duration_ms: Date.now() - startedAt,
+                  error_code:
+                    reason instanceof MessengerApiError
+                      ? reason.code
+                      : "client_error",
+                  message,
+                });
+              } finally {
+                submittingRef.current = false;
+                setSubmitting(false);
+              }
+            }, [
+              appBuild,
+              appVersion,
+              busy,
+              checked,
+              flow,
+              modalReady,
+              onAccept,
+              reloadRulesAfterConflict,
+              rules,
+            ]);
+
+            const handleCancel = useCallback(async () => {
+              if (submittingRef.current || busy) return;
+              submittingRef.current = true;
+              setSubmitting(true);
+              setActionError(null);
+              try {
+                await onCancel();
+              } catch (reason) {
+                const message = messengerErrorMessage(
+                  reason,
+                  "Не удалось отменить регистрацию. Повторите попытку.",
+                );
+                setActionError(message);
+                messengerLog("warn", "rules.cancel.failed", { flow, message });
+              } finally {
+                submittingRef.current = false;
+                setSubmitting(false);
+              }
+            }, [busy, flow, onCancel]);
+
+            return (
+              <Modal
+                visible={visible}
+                animationType="slide"
+                transparent
+                onShow={() => {
+                  setModalReady(true);
+                  messengerLog("info", "rules.modal.shown", { flow });
+                }}
+                onRequestClose={() => void handleCancel()}
+                onDismiss={() => {
+                  messengerLog("info", "rules.modal.dismissed", { flow });
+                  onDismiss?.();
+                }}
+              >
+                <View style={styles.backdrop}>
+                  <View style={styles.card}>
+                    <Text style={styles.title}>Правила пользования</Text>
+                    {rules ? (
+                      <Text style={styles.edition}>
+                        Версия {rules.version} от {rules.edition_date}
+                      </Text>
+                    ) : null}
+                    <View style={styles.document}>
+                      {loading ? (
+                        <ActivityIndicator
+                          style={styles.loader}
+                          color={colors.primary}
+                        />
+                      ) : loadError ? (
+                        <Text style={styles.error}>{loadError}</Text>
+                      ) : (
+                        <ScrollView
+                          contentContainerStyle={styles.documentContent}
+                          nestedScrollEnabled
+                          keyboardShouldPersistTaps="always"
+                        >
+                          {documentBlocks.map((block, index) => {
+                            const key = `${block.type}-${index}`;
+                            if (block.type === "heading") {
+                              return (
+                                <Text
+                                  key={key}
+                                  selectable
+                                  style={[
+                                    styles.markdownHeading,
+                                    block.level === 1
+                                      ? styles.markdownHeadingOne
+                                      : styles.markdownHeadingOther,
+                                  ]}
+                                >
+                                  {renderInlineMarkdown(block.content)}
+                                </Text>
+                              );
+                            }
+                            if (block.type === "listItem") {
+                              return (
+                                <View key={key} style={styles.markdownListItem}>
+                                  <Text style={styles.markdownBullet}>
+                                    {block.marker}
+                                  </Text>
+                                  <Text selectable style={styles.markdownParagraph}>
+                                    {renderInlineMarkdown(block.content)}
+                                  </Text>
+                                </View>
+                              );
+                            }
+                            return (
+                              <Text
+                                key={key}
+                                selectable
+                                style={styles.markdownParagraph}
+                              >
+                                {renderInlineMarkdown(block.content)}
+                              </Text>
+                            );
+                          })}
+                        </ScrollView>
+                      )}
+                    </View>
+                    <Pressable
+                      accessibilityRole="checkbox"
+                      accessibilityState={{
+                        checked,
+                        disabled: !rules || actionBusy,
+                      }}
+                      disabled={!rules || actionBusy}
+                      hitSlop={8}
+                      style={({ pressed }) => [
+                        styles.checkRow,
+                        pressed && styles.pressed,
+                      ]}
+                      onPress={() => {
+                        const next = !checked;
+                        setChecked(next);
+                        setActionError(null);
+                        messengerLog("info", "rules.checkbox.changed", {
+                          flow,
+                          checked: next,
+                        });
+                      }}
+                    >
+                      <View
+                        style={[
+                          styles.checkbox,
+                          checked && styles.checkboxChecked,
+                        ]}
+                      >
+                        {checked ? <Text style={styles.checkmark}>✓</Text> : null}
+                      </View>
+                      <Text style={styles.checkText}>
+                        Принимаю условия использования
+                      </Text>
+                    </Pressable>
+                    {actionError ? (
+                      <Text accessibilityRole="alert" style={styles.actionError}>
+                        {actionError}
+                      </Text>
+                    ) : null}
+                    <View style={styles.actions}>
+                      <Pressable
+                        accessibilityRole="button"
+                        disabled={actionBusy}
+                        hitSlop={8}
+                        style={({ pressed }) => [
+                          styles.cancelButton,
+                          actionBusy && styles.disabled,
+                          pressed && !actionBusy && styles.pressed,
+                        ]}
+                        onPress={() => void handleCancel()}
+                      >
+                        <Text style={styles.cancelText}>{cancelLabel}</Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityState={{
+                          disabled: acceptDisabled,
+                          busy: actionBusy,
+                        }}
+                        disabled={acceptDisabled}
+                        hitSlop={10}
+                        style={({ pressed }) => [
+                          styles.acceptButton,
+                          acceptDisabled && styles.disabled,
+                          pressed && !acceptDisabled && styles.pressed,
+                        ]}
+                        onPressIn={() => {
+                          if (!acceptDisabled) {
+                            messengerLog("info", "rules.accept.press_in", { flow });
+                          }
+                        }}
+                        onPress={() => {
+                          messengerLog("info", "rules.accept.press", { flow });
+                          void handleAccept();
+                        }}
+                      >
+                        {actionBusy ? (
+                          <ActivityIndicator color="#fff" />
+                        ) : (
+                          <Text style={styles.acceptText}>Принимаю</Text>
+                        )}
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              </Modal>
+            );
+          }
+
+          const styles = StyleSheet.create({
+            backdrop: {
+              flex: 1,
+              justifyContent: "center",
+              backgroundColor: "rgba(0,0,0,0.55)",
+              padding: 16,
+            },
+            card: {
+              maxHeight: "92%",
+              borderRadius: 18,
+              backgroundColor: colors.background,
+              padding: 18,
+            },
+            title: { fontSize: 21, fontWeight: "700", color: colors.text },
+            edition: {
+              marginTop: 4,
+              marginBottom: 10,
+              color: colors.textSecondary,
+            },
+            document: {
+              minHeight: 240,
+              flexShrink: 1,
+              borderWidth: 1,
+              borderColor: colors.border,
+              borderRadius: 12,
+              backgroundColor: "#fff",
+            },
+            documentContent: { padding: 14 },
+            markdownHeading: { color: colors.text, fontWeight: "700" },
+            markdownHeadingOne: {
+              marginBottom: 12,
+              fontSize: 19,
+              lineHeight: 25,
+            },
+            markdownHeadingOther: {
+              marginTop: 10,
+              marginBottom: 6,
+              fontSize: 16,
+              lineHeight: 22,
+            },
+            markdownParagraph: {
+              flex: 1,
+              marginBottom: 9,
+              fontSize: 14,
+              lineHeight: 21,
+              color: colors.text,
+            },
+            markdownListItem: {
+              flexDirection: "row",
+              alignItems: "flex-start",
+              paddingLeft: 4,
+            },
+            markdownBullet: {
+              width: 18,
+              fontSize: 16,
+              lineHeight: 21,
+              color: colors.text,
+            },
+            inlineStrong: { fontWeight: "700" },
+            inlineEmphasis: { fontStyle: "italic" },
+            inlineCode: {
+              fontFamily: "monospace",
+              backgroundColor: colors.background,
+            },
+            loader: { marginVertical: 80 },
+            error: { padding: 18, color: colors.error },
+            checkRow: {
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 10,
+              minHeight: 56,
+              paddingVertical: 14,
+            },
+            checkbox: {
+              width: 24,
+              height: 24,
+              borderRadius: 5,
+              borderWidth: 2,
+              borderColor: colors.primary,
+              alignItems: "center",
+              justifyContent: "center",
+            },
+            checkboxChecked: { backgroundColor: colors.primary },
+            checkmark: { color: "#fff", fontWeight: "800" },
+            checkText: { flex: 1, fontSize: 15, color: colors.text },
+            actionError: {
+              marginTop: -4,
+              marginBottom: 12,
+              color: colors.error,
+              fontSize: 14,
+              lineHeight: 19,
+              textAlign: "center",
+            },
+            actions: { flexDirection: "row", gap: 10 },
+            cancelButton: {
+              flex: 1,
+              minHeight: 50,
+              alignItems: "center",
+              justifyContent: "center",
+              paddingHorizontal: 13,
+              borderRadius: 10,
+              borderWidth: 1,
+              borderColor: colors.border,
+            },
+            acceptButton: {
+              flex: 1,
+              minHeight: 50,
+              alignItems: "center",
+              justifyContent: "center",
+              paddingHorizontal: 13,
+              borderRadius: 10,
+              backgroundColor: colors.primary,
+            },
+            disabled: { opacity: 0.45 },
+            pressed: { opacity: 0.72 },
+            cancelText: { color: colors.text, fontWeight: "600" },
+            acceptText: { color: "#fff", fontWeight: "700" },
+          });
+          EOF
+
+      - name: Patch registration transport and screen state machine
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import json
+          import re
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}: {old!r}')
+              file.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          api_path = Path('services/messengerApi.ts')
+          api = api_path.read_text(encoding='utf-8')
+          register_pattern = re.compile(
+              r'export async function registerInMessenger\(payload: \{.*?\n\}\) \{.*?\n\}\n\n'
+              r'(?=export async function completeMessengerPasswordChange\()',
+              re.S,
+          )
+          if not register_pattern.search(api):
+              raise SystemExit('messengerApi registration function boundary not found')
+          registration_transport = '''export interface MessengerRegistrationPayload {
+            invite_token: string;
+            username: string;
+            password: string;
+            display_name?: string;
+            email?: string;
+          }
+
+          export interface MessengerRegistrationRulesPayload {
+            version: string;
+            sha256: string;
+            confirmation_method: "registration_checkbox";
+            app_version: string;
+            app_build?: string;
+          }
+
+          let pendingLegacyRegistration:
+            | { key: string; session: MessengerSession }
+            | null = null;
+
+          function legacyRegistrationKey(
+            payload: MessengerRegistrationPayload,
+          ): string {
+            return `${payload.invite_token}\u0000${payload.username.trim().toLowerCase()}`;
+          }
+
+          async function requestMessengerRegistration(
+            path: "/auth/register" | "/auth/register-with-rules",
+            payload: MessengerRegistrationPayload,
+            context: Awaited<ReturnType<typeof sessionContext>>,
+            rules?: MessengerRegistrationRulesPayload,
+          ): Promise<MessengerSession> {
+            return messengerRequest<MessengerSession>(path, {
+              public: true,
+              method: "POST",
+              body: JSON.stringify({
+                ...payload,
+                ...context,
+                ...(rules
+                  ? {
+                      rules_version: rules.version,
+                      rules_sha256: rules.sha256,
+                      rules_confirmation_method: rules.confirmation_method,
+                      app_version: rules.app_version,
+                      app_build: rules.app_build,
+                    }
+                  : {}),
+              }),
+            });
+          }
+
+          async function acceptRulesForUnpublishedSession(
+            session: MessengerSession,
+            rules: MessengerRegistrationRulesPayload,
+            context: Awaited<ReturnType<typeof sessionContext>>,
+          ): Promise<void> {
+            await messengerRequest("/rules/accept", {
+              public: true,
+              method: "POST",
+              headers: { Authorization: `Bearer ${session.access_token}` },
+              body: JSON.stringify({
+                ...rules,
+                device_id: context.device_id,
+                platform: context.platform,
+              }),
+            });
+          }
+
+          export async function registerInMessenger(
+            payload: MessengerRegistrationPayload,
+          ) {
+            const result = await requestMessengerRegistration(
+              "/auth/register",
+              payload,
+              await sessionContext(),
+            );
+            await clearMessengerPasswordChange();
+            await saveMessengerSession(result);
+            return result;
+          }
+
+          /**
+           * New clients use the additive atomic endpoint. A narrowly scoped
+           * 404/405 fallback permits server-first and staged deployments while
+           * retaining the legacy routes for already released applications.
+           * The fallback session is deliberately not published until the rules
+           * request succeeds, and a retry cannot register the account twice.
+           */
+          export async function registerInMessengerWithRules(
+            payload: MessengerRegistrationPayload,
+            rules: MessengerRegistrationRulesPayload,
+          ): Promise<MessengerSession> {
+            const startedAt = Date.now();
+            const context = await sessionContext();
+            messengerLog("info", "auth.registration.atomic_started", {
+              platform: context.platform,
+            });
+            let result: MessengerSession;
+            try {
+              result = await requestMessengerRegistration(
+                "/auth/register-with-rules",
+                payload,
+                context,
+                rules,
+              );
+              pendingLegacyRegistration = null;
+            } catch (error) {
+              const endpointUnavailable =
+                error instanceof MessengerApiError &&
+                (error.status === 404 || error.status === 405);
+              if (!endpointUnavailable) throw error;
+
+              messengerLog("warn", "auth.registration.atomic_unavailable", {
+                status: error.status,
+                fallback: "legacy_two_step",
+              });
+              const key = legacyRegistrationKey(payload);
+              if (pendingLegacyRegistration?.key !== key) {
+                pendingLegacyRegistration = {
+                  key,
+                  session: await requestMessengerRegistration(
+                    "/auth/register",
+                    payload,
+                    context,
+                  ),
+                };
+              }
+              await acceptRulesForUnpublishedSession(
+                pendingLegacyRegistration.session,
+                rules,
+                context,
+              );
+              result = pendingLegacyRegistration.session;
+              pendingLegacyRegistration = null;
+            }
+
+            await clearMessengerPasswordChange();
+            await saveMessengerSession(result);
+            messengerLog("info", "auth.registration.atomic_completed", {
+              platform: context.platform,
+              duration_ms: Date.now() - startedAt,
+            });
+            return result;
+          }
+
+          '''
+          api = register_pattern.sub(registration_transport, api, count=1)
+          api_path.write_text(api, encoding='utf-8')
+
+          auth_path = Path('contexts/MessengerAuthContext.tsx')
+          auth = auth_path.read_text(encoding='utf-8')
+          auth = auth.replace(
+              '  logoutFromMessenger,\n  registerInMessenger,\n  uploadMessengerAvatar,\n',
+              '  logoutFromMessenger,\n  registerInMessengerWithRules,\n',
+              1,
+          )
+          auth = auth.replace(
+              'import { playerDownloadService } from "../services/playerDataService";\n',
+              '',
+              1,
+          )
+          contract_pattern = re.compile(
+              r'  register\(payload: \{\n'
+              r'    invite_token: string;\n'
+              r'    username: string;\n'
+              r'    password: string;\n'
+              r'    display_name\?: string;\n'
+              r'    email\?: string;\n'
+              r'    expected_player_id\?: number \| string \| null;\n'
+              r'  \}\): Promise<void>;',
+          )
+          replacement_contract = '''  register(payload: {
+            invite_token: string;
+            username: string;
+            password: string;
+            display_name?: string;
+            email?: string;
+            expected_player_id?: number | string | null;
+            rules: {
+              version: string;
+              sha256: string;
+              confirmation_method: "registration_checkbox";
+              app_version: string;
+              app_build?: string;
+            };
+          }): Promise<void>;'''
+          if not contract_pattern.search(auth):
+              raise SystemExit('MessengerAuthContext register contract not found')
+          auth = contract_pattern.sub(replacement_contract, auth, count=1)
+
+          callback_pattern = re.compile(
+              r'  const register = useCallback<MessengerAuthContextValue\["register"\]>\(\n'
+              r'.*?\n  \);\n\n(?=  const logout = useCallback)',
+              re.S,
+          )
+          if not callback_pattern.search(auth):
+              raise SystemExit('MessengerAuthContext register callback not found')
+          replacement_callback = '''  const register = useCallback<MessengerAuthContextValue["register"]>(
+            async (payload) => {
+              setStatus("loading");
+              try {
+                clearMessengerAliases();
+                const {
+                  expected_player_id: expectedPlayerId,
+                  rules,
+                  ...registrationPayload
+                } = payload;
+                let authenticated = await registerInMessengerWithRules(
+                  registrationPayload,
+                  rules,
+                );
+                const playerId = automaticMessengerAvatarPlayerId(
+                  authenticated.user,
+                  { player_id: expectedPlayerId },
+                );
+                if (
+                  playerId !== null &&
+                  authenticated.user.player_id !== playerId
+                ) {
+                  authenticated = {
+                    ...authenticated,
+                    user: {
+                      ...authenticated.user,
+                      player_id: playerId,
+                    },
+                  };
+                  await saveMessengerSession(authenticated);
+                }
+                // The saved accepted session schedules the existing deferred
+                // player-avatar reconciliation. File I/O must not block legal
+                // acceptance or make registration appear unresponsive.
+                await prepareMessengerAliases(authenticated.user.id);
+                setSession(authenticated);
+                setPasswordChange(null);
+                setStatus("authenticated");
+                setAnalyticsMessengerRole(
+                  authenticated.user.roles.map((role) => role.code),
+                );
+                trackMessengerAction("auth_completed", {
+                  method: "registration",
+                });
+              } catch (error) {
+                setStatus("unauthenticated");
+                throw error;
+              }
+            },
+            [],
+          );
+
+          '''
+          auth = callback_pattern.sub(replacement_callback, auth, count=1)
+          auth_path.write_text(auth, encoding='utf-8')
+
+          register_path = Path('app/messenger/register.tsx')
+          screen = register_path.read_text(encoding='utf-8')
+          screen = screen.replace(
+              'import React, { useCallback, useEffect, useState } from "react";\n',
+              'import React, { useCallback, useEffect, useRef, useState } from "react";\n',
+              1,
+          )
+          screen = screen.replace(
+              '  Alert,\n  KeyboardAvoidingView,\n',
+              '  Alert,\n  Keyboard,\n  KeyboardAvoidingView,\n',
+              1,
+          )
+          screen = screen.replace(
+              '  acceptMessengerRules,\n  previewMessengerInvitation,\n',
+              '  previewMessengerInvitation,\n',
+              1,
+          )
+          screen = screen.replace(
+              'import { loadMessengerSession } from "../../services/messengerSession";\n',
+              'import { messengerLog } from "../../services/messengerLogger";\nimport { loadMessengerSession } from "../../services/messengerSession";\n',
+              1,
+          )
+
+          helper_marker = '\nexport default function MessengerRegistrationScreen() {'
+          if screen.count(helper_marker) != 1:
+              raise SystemExit('Registration screen component marker is not unique')
+          keyboard_helper = '''
+          async function dismissKeyboardBeforeRules(): Promise<void> {
+            const keyboard = Keyboard as typeof Keyboard & {
+              isVisible?: () => boolean;
+            };
+            const metrics = Keyboard.metrics();
+            const wasVisible =
+              Platform.OS === "ios" &&
+              (keyboard.isVisible?.() === true || Boolean(metrics?.height));
+            Keyboard.dismiss();
+            if (Platform.OS !== "ios") {
+              await new Promise<void>((resolve) =>
+                requestAnimationFrame(() => resolve()),
+              );
+              return;
+            }
+            if (!wasVisible) {
+              // iOS can keep the former UITextInput session alive briefly even
+              // after the keyboard is no longer visible on screen.
+              await new Promise<void>((resolve) => setTimeout(resolve, 120));
+              return;
+            }
+            await new Promise<void>((resolve) => {
+              let settled = false;
+              let timeout: ReturnType<typeof setTimeout> | null = null;
+              const subscription = Keyboard.addListener("keyboardDidHide", finish);
+              function finish() {
+                if (settled) return;
+                settled = true;
+                subscription.remove();
+                if (timeout) clearTimeout(timeout);
+                requestAnimationFrame(() => resolve());
+              }
+              timeout = setTimeout(finish, 480);
+            });
+          }
+          '''
+          screen = screen.replace(helper_marker, keyboard_helper + helper_marker, 1)
+
+          screen = screen.replace(
+              '  const [busy, setBusy] = useState(false);\n',
+              '  const [busy, setBusy] = useState(false);\n  const [invitationBusy, setInvitationBusy] = useState(false);\n',
+              1,
+          )
+          state_marker = '  const [rulesVisible, setRulesVisible] = useState(false);\n'
+          if screen.count(state_marker) != 1:
+              raise SystemExit('Registration rulesVisible state marker is not unique')
+          state_addition = state_marker + '''  const invitationCheckRef = useRef<{
+            token: string;
+            generation: number;
+            promise: Promise<void>;
+          } | null>(null);
+          const invitationGenerationRef = useRef(0);
+          const scannerLockedRef = useRef(false);
+          const rulesOpeningRef = useRef(false);
+          const rulesDismissActionRef = useRef<
+            (() => void | Promise<void>) | null
+          >(null);
+          const rulesDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+            null,
+          );
+
+          const runRulesDismissAction = useCallback(() => {
+            if (rulesDismissTimerRef.current) {
+              clearTimeout(rulesDismissTimerRef.current);
+              rulesDismissTimerRef.current = null;
+            }
+            const action = rulesDismissActionRef.current;
+            rulesDismissActionRef.current = null;
+            if (!action) return;
+            void Promise.resolve(action()).catch((reason) =>
+              messengerLog("warn", "rules.dismiss_action.failed", {
+                message: reason instanceof Error ? reason.message : "unknown error",
+              }),
+            );
+          }, []);
+
+          const closeRulesThen = useCallback(
+            (action: () => void | Promise<void>) => {
+              rulesDismissActionRef.current = action;
+              setRulesVisible(false);
+              if (rulesDismissTimerRef.current) {
+                clearTimeout(rulesDismissTimerRef.current);
+              }
+              // iOS calls Modal.onDismiss after the native animation. The timer
+              // is only a guarded fallback for interrupted transitions and Android.
+              rulesDismissTimerRef.current = setTimeout(
+                runRulesDismissAction,
+                Platform.OS === "ios" ? 900 : 500,
+              );
+            },
+            [runRulesDismissAction],
+          );
+
+          const finishRegistration = useCallback(async () => {
+            const navigate = () => {
+              setRegisteringNewAccount(false);
+              if (params.sharePending === "1") {
+                router.replace("/messenger/share");
+              } else {
+                router.replace({
+                  pathname: "/messenger/profile",
+                  params: { firstRun: "1" },
+                });
+              }
+            };
+            try {
+              const activatedSession = await loadMessengerSession();
+              if (
+                activatedSession &&
+                (await shouldOfferMessengerPush(activatedSession.user.id))
+              ) {
+                await markMessengerPushOffered(activatedSession.user.id);
+                Alert.alert(
+                  "Уведомления о сообщениях",
+                  "Разрешить PUSH-уведомления мессенджера, системный звук и бейдж непрочитанных сообщений?",
+                  [
+                    { text: "Позже", style: "cancel", onPress: navigate },
+                    {
+                      text: "Разрешить",
+                      onPress: () => {
+                        void enableMessengerPush(true)
+                          .then(navigate)
+                          .catch((pushError) => {
+                            Alert.alert(
+                              "Уведомления не включены",
+                              pushError instanceof Error
+                                ? pushError.message
+                                : "Разрешение можно выдать позже в настройках.",
+                              [{ text: "OK", onPress: navigate }],
+                            );
+                          });
+                      },
+                    },
+                  ],
+                  { cancelable: false },
+                );
+                return;
+              }
+            } catch (reason) {
+              messengerLog("warn", "registration.push_offer.failed", {
+                message: reason instanceof Error ? reason.message : "unknown error",
+              });
+            }
+            navigate();
+          }, [params.sharePending, router]);
+
+          useEffect(
+            () => () => {
+              if (rulesDismissTimerRef.current) {
+                clearTimeout(rulesDismissTimerRef.current);
+              }
+              invitationGenerationRef.current += 1;
+            },
+            [],
+          );
+          '''
+          screen = screen.replace(state_marker, state_addition, 1)
+
+          screen = screen.replace(
+              '    if (isAuthenticated && !registeringNewAccount)\n      router.replace(authenticatedDestination);\n',
+              '    if (isAuthenticated && !registeringNewAccount && !rulesVisible)\n      router.replace(authenticatedDestination);\n',
+              1,
+          )
+          screen = screen.replace(
+              '    registeringNewAccount,\n    router,\n',
+              '    registeringNewAccount,\n    router,\n    rulesVisible,\n',
+              1,
+          )
+
+          check_pattern = re.compile(
+              r'  const checkInvitation = useCallback\(async \(value: string\) => \{.*?\n  \}, \[\]\);',
+              re.S,
+          )
+          if not check_pattern.search(screen):
+              raise SystemExit('Registration invitation check callback not found')
+          check_replacement = '''  const checkInvitation = useCallback((value: string): Promise<void> => {
+            const token = extractInviteToken(value);
+            if (!token) {
+              setError("Вставьте полную пригласительную ссылку или корректный токен.");
+              return Promise.resolve();
+            }
+            const active = invitationCheckRef.current;
+            if (active?.token === token) return active.promise;
+
+            const generation = ++invitationGenerationRef.current;
+            const task = (async () => {
+              setInvitationBusy(true);
+              setError(null);
+              try {
+                const result = await previewMessengerInvitation(token);
+                if (generation !== invitationGenerationRef.current) return;
+                if (!result.can_register) {
+                  setError("Это приглашение уже использовано, отозвано или просрочено.");
+                  return;
+                }
+                setInviteToken(token);
+                setPreview(result);
+                setDisplayName(result.display_name || "");
+                setInviteValue(value);
+                setScannerVisible(false);
+                console.log(`[Messenger] Приглашение ${result.id} успешно проверено`);
+              } catch (checkError) {
+                if (generation !== invitationGenerationRef.current) return;
+                setError(
+                  checkError instanceof Error
+                    ? checkError.message
+                    : "Приглашение не найдено",
+                );
+              } finally {
+                if (generation === invitationGenerationRef.current) {
+                  setInvitationBusy(false);
+                }
+              }
+            })();
+            invitationCheckRef.current = { token, generation, promise: task };
+            void task.finally(() => {
+              if (invitationCheckRef.current?.promise === task) {
+                invitationCheckRef.current = null;
+              }
+            });
+            return task;
+          }, []);'''
+          screen = check_pattern.sub(check_replacement, screen, count=1)
+
+          screen = screen.replace(
+              '    setScannerVisible(true);\n    setError(null);\n',
+              '    scannerLockedRef.current = false;\n    setScannerVisible(true);\n    setError(null);\n',
+              1,
+          )
+          old_barcode = '''  const handleBarcode = ({ data }: BarcodeScanningResult) => {
+            if (busy) return;
+            setScannerVisible(false);
+            setInviteValue(data);
+            void checkInvitation(data);
+          };'''
+          new_barcode = '''  const handleBarcode = ({ data }: BarcodeScanningResult) => {
+            if (scannerLockedRef.current) return;
+            scannerLockedRef.current = true;
+            setScannerVisible(false);
+            setInviteValue(data);
+            void checkInvitation(data);
+          };'''
+          if old_barcode not in screen:
+              raise SystemExit('Registration barcode callback not found')
+          screen = screen.replace(old_barcode, new_barcode, 1)
+
+          registration_flow_pattern = re.compile(
+              r'  const submitRegistration = \(\) => \{.*?\n  \};\n\n'
+              r'  const completeRegistration = async \(.*?\n  \};\n\n'
+              r'(?=  const submitLogin = async \(\) => \{)',
+              re.S,
+          )
+          if not registration_flow_pattern.search(screen):
+              raise SystemExit('Registration submit/complete flow boundary not found')
+          registration_flow = '''  const submitRegistration = async () => {
+            if (rulesOpeningRef.current || busy) return;
+            if (!inviteToken || !preview) {
+              setError(
+                "Данные приглашения были потеряны. Повторно откройте приглашение.",
+              );
+              return;
+            }
+            if (password.length < 6) {
+              setError("Пароль должен содержать не менее 6 символов.");
+              return;
+            }
+            if (password !== passwordConfirmation) {
+              setError("Введённые пароли не совпадают.");
+              return;
+            }
+            rulesOpeningRef.current = true;
+            setError(null);
+            messengerLog("info", "rules.registration.modal_requested", {
+              platform: Platform.OS,
+            });
+            try {
+              await dismissKeyboardBeforeRules();
+              setRulesVisible(true);
+            } finally {
+              rulesOpeningRef.current = false;
+            }
+          };
+
+          const completeRegistration = async (
+            rules: MessengerRulesVersion,
+            appVersion: string,
+            appBuild?: string,
+          ) => {
+            if (!inviteToken || !preview) {
+              throw new Error(
+                "Данные приглашения были потеряны. Закройте окно и повторно откройте приглашение.",
+              );
+            }
+            setRegisteringNewAccount(true);
+            setBusy(true);
+            setError(null);
+            const startedAt = Date.now();
+            messengerLog("info", "auth.registration.started", {
+              platform: Platform.OS,
+            });
+            try {
+              await register({
+                invite_token: inviteToken,
+                username: username.trim(),
+                password,
+                display_name: displayName.trim() || undefined,
+                email: email.trim() || undefined,
+                expected_player_id: preview.player_id,
+                rules: {
+                  version: rules.version,
+                  sha256: rules.sha256,
+                  confirmation_method: "registration_checkbox",
+                  app_version: appVersion,
+                  app_build: appBuild,
+                },
+              });
+              messengerLog("info", "auth.registration.succeeded", {
+                platform: Platform.OS,
+                duration_ms: Date.now() - startedAt,
+              });
+              closeRulesThen(finishRegistration);
+            } catch (registrationError) {
+              setRegisteringNewAccount(false);
+              messengerLog("warn", "auth.registration.failed", {
+                platform: Platform.OS,
+                duration_ms: Date.now() - startedAt,
+                message:
+                  registrationError instanceof Error
+                    ? registrationError.message
+                    : "unknown error",
+              });
+              throw registrationError;
+            } finally {
+              setBusy(false);
+            }
+          };
+
+          '''
+          screen = registration_flow_pattern.sub(registration_flow, screen, count=1)
+
+          check_button_old = '''                  onPress={() => void checkInvitation(inviteValue)}
+                  disabled={busy}
+                >
+                  {busy ? ('''
+          check_button_new = '''                  onPress={() => void checkInvitation(inviteValue)}
+                  disabled={invitationBusy}
+                >
+                  {invitationBusy ? ('''
+          if check_button_old not in screen:
+              raise SystemExit('Invitation check button block not found')
+          screen = screen.replace(check_button_old, check_button_new, 1)
+          screen = screen.replace(
+              '                  onPress={submitRegistration}\n',
+              '                  onPress={() => void submitRegistration()}\n',
+              1,
+          )
+
+          modal_pattern = re.compile(
+              r'      <MessengerRulesModal\n.*?\n      />\n(?=    </>)',
+              re.S,
+          )
+          if not modal_pattern.search(screen):
+              raise SystemExit('Registration rules modal invocation not found')
+          modal_replacement = '''      <MessengerRulesModal
+            visible={rulesVisible}
+            busy={busy}
+            flow="registration"
+            onAccept={completeRegistration}
+            onDismiss={runRulesDismissAction}
+            onCancel={async () => {
+              if (!inviteToken) {
+                throw new Error(
+                  "Данные приглашения были потеряны. Повторно откройте приглашение.",
+                );
+              }
+              setBusy(true);
+              try {
+                const result = await rejectMessengerInvitationRules(inviteToken);
+                closeRulesThen(() => {
+                  if (result.invitation_revoked) {
+                    Alert.alert(
+                      "Приглашение аннулировано",
+                      "Правила не были приняты три раза.",
+                      [{ text: "OK", onPress: () => router.back() }],
+                    );
+                  } else {
+                    router.back();
+                  }
+                });
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
+          '''
+          screen = modal_pattern.sub(modal_replacement, screen, count=1)
+          register_path.write_text(screen, encoding='utf-8')
+
+          Path('checks/messenger-ios-registration.mjs').write_text('''import assert from "node:assert/strict";
+          import { readFileSync } from "node:fs";
+
+          const modal = readFileSync(
+            new URL("../features/messenger/MessengerRulesModal.tsx", import.meta.url),
+            "utf8",
+          );
+          assert.match(modal, /const submittingRef = useRef\(false\)/);
+          assert.match(modal, /rules\.accept\.press_in/);
+          assert.match(modal, /rules\.accept\.failed/);
+          assert.match(modal, /accessibilityRole="alert"/);
+          assert.match(modal, /onDismiss=\{\(\) =>/);
+
+          const registration = readFileSync(
+            new URL("../app/messenger/register.tsx", import.meta.url),
+            "utf8",
+          );
+          assert.match(registration, /Keyboard\.dismiss\(\)/);
+          assert.match(registration, /scannerLockedRef\.current/);
+          assert.match(registration, /invitationCheckRef\.current/);
+          assert.match(registration, /onDismiss=\{runRulesDismissAction\}/);
+          assert.doesNotMatch(registration, /await acceptMessengerRules\(/);
+          assert.match(registration, /rules:\s*\{/);
+
+          const auth = readFileSync(
+            new URL("../contexts/MessengerAuthContext.tsx", import.meta.url),
+            "utf8",
+          );
+          assert.match(auth, /registerInMessengerWithRules/);
+          assert.doesNotMatch(auth, /await uploadMessengerAvatar\(localPhoto\)/);
+
+          const api = readFileSync(
+            new URL("../services/messengerApi.ts", import.meta.url),
+            "utf8",
+          );
+          assert.match(api, /\/auth\/register-with-rules/);
+          assert.match(api, /error\.status === 404 \|\| error\.status === 405/);
+          assert.match(api, /acceptRulesForUnpublishedSession/);
+          assert.match(api, /pendingLegacyRegistration/);
+          assert.match(api, /await saveMessengerSession\(result\)/);
+
+          console.log("Messenger iOS registration reliability checks passed.");
+          '''.replace('\n          ', '\n').lstrip(), encoding='utf-8')
+
+          package_path = Path('package.json')
+          package = json.loads(package_path.read_text(encoding='utf-8'))
+          scripts = package['scripts']
+          scripts['check:messenger-ios-registration'] = (
+              'node --no-warnings --experimental-strip-types '
+              'checks/messenger-ios-registration.mjs'
+          )
+          check = scripts['check']
+          marker = 'npm run check:messenger-avatar-ime-compat && '
+          addition = marker + 'npm run check:messenger-ios-registration && '
+          if 'check:messenger-ios-registration' not in check:
+              if marker not in check:
+                  raise SystemExit('package.json check insertion marker missing')
+              scripts['check'] = check.replace(marker, addition, 1)
+          package_path.write_text(
+              json.dumps(package, ensure_ascii=False, indent=2) + '\n',
+              encoding='utf-8',
+          )
+
+          for workflow in (
+              '.github/workflows/patch-ios-registration.yml',
+              '.github/workflows/patch-ios-registration-v2.yml',
+              '.github/workflows/patch-ios-registration-v3.yml',
+          ):
+              Path(workflow).unlink(missing_ok=True)
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Format and validate
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          npx prettier --write features/messenger/MessengerRulesModal.tsx app/messenger/register.tsx contexts/MessengerAuthContext.tsx services/messengerApi.ts checks/messenger-ios-registration.mjs package.json
+          npm run check:messenger-ios-registration
+          npm run typecheck
+          npx eslint features/messenger/MessengerRulesModal.tsx app/messenger/register.tsx contexts/MessengerAuthContext.tsx services/messengerApi.ts checks/messenger-ios-registration.mjs
+          npx expo export --platform ios --output-dir /tmp/forward-hockey-ios-registration-export
+
+      - name: Commit client changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: make rules registration resilient on iOS"
+          git push origin HEAD:fix/minor-fixes-batch
