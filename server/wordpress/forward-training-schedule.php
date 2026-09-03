@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Forward — расписание тренировок
  * Description: Безопасный импорт JSON/XML в The Events Calendar и API для мобильного приложения.
- * Version: 1.1.1
+ * Version: 1.1.2
  * Author: HC Forward
  *
  * Рекомендуемое размещение:
@@ -12,6 +12,9 @@
 if (!defined('ABSPATH')) {
     exit;
 }
+
+// Define FORWARD_TRAINING_BOT_SECRET in wp-config.php. Use a random value of
+// at least 32 bytes and never commit the real secret to this plugin file.
 
 const FORWARD_TRAINING_API_SCHEMA = 1;
 const FORWARD_TRAINING_MAX_EVENTS = 400;
@@ -32,6 +35,64 @@ function forward_training_register_rest_routes() {
             'team' => array('sanitize_callback' => 'sanitize_key'),
         ),
     ));
+
+    register_rest_route('app/v1', '/import-trainings-bot', array(
+        'methods' => WP_REST_Server::CREATABLE,
+        'callback' => 'forward_training_rest_bot_import',
+        'permission_callback' => 'forward_training_rest_bot_authorize',
+    ));
+}
+
+function forward_training_bot_error($code, $message, $status) {
+    return new WP_Error($code, $message, array('status' => (int) $status));
+}
+
+function forward_training_bot_secret() {
+    return defined('FORWARD_TRAINING_BOT_SECRET')
+        ? trim((string) FORWARD_TRAINING_BOT_SECRET)
+        : '';
+}
+
+/**
+ * Authenticates the messenger server without transmitting the shared secret.
+ * Signature payload: timestamp + nonce + idempotency key + SHA-256(body).
+ */
+function forward_training_rest_bot_authorize(WP_REST_Request $request) {
+    $secret = forward_training_bot_secret();
+    if (strlen($secret) < 32) {
+        return forward_training_bot_error(
+            'bot_endpoint_not_configured',
+            'Сервер публикации расписания не настроен.',
+            503
+        );
+    }
+
+    $timestamp = trim((string) $request->get_header('x-forward-timestamp'));
+    $nonce = trim((string) $request->get_header('x-forward-nonce'));
+    $idempotency_key = trim((string) $request->get_header('idempotency-key'));
+    $signature = strtolower(trim((string) $request->get_header('x-forward-signature')));
+
+    if (!preg_match('/^\d{10}$/', $timestamp)
+        || abs(time() - (int) $timestamp) > 300
+        || !preg_match('/^[A-Za-z0-9_-]{20,100}$/', $nonce)
+        || !preg_match('/^[A-Za-z0-9_-]{20,100}$/', $idempotency_key)
+        || !preg_match('/^[a-f0-9]{64}$/', $signature)) {
+        return forward_training_bot_error('bot_auth_invalid', 'Некорректная подпись запроса.', 401);
+    }
+
+    $body_hash = hash('sha256', (string) $request->get_body());
+    $signed = $timestamp . "\n" . $nonce . "\n" . $idempotency_key . "\n" . $body_hash;
+    $expected = hash_hmac('sha256', $signed, $secret);
+    if (!hash_equals($expected, $signature)) {
+        return forward_training_bot_error('bot_auth_invalid', 'Некорректная подпись запроса.', 401);
+    }
+
+    $nonce_key = 'forward_training_nonce_' . hash('sha256', $nonce);
+    if (get_transient($nonce_key) !== false) {
+        return forward_training_bot_error('bot_replay_rejected', 'Повторный запрос отклонён.', 409);
+    }
+    set_transient($nonce_key, '1', 10 * MINUTE_IN_SECONDS);
+    return true;
 }
 
 function forward_training_register_admin_page() {
@@ -537,6 +598,55 @@ function forward_training_import_schedule(array $schedule, $dry_run = false, $re
         'events' => $results,
         'removed_events' => $removed,
     );
+}
+
+function forward_training_rest_bot_import(WP_REST_Request $request) {
+    $idempotency_key = trim((string) $request->get_header('idempotency-key'));
+    $result_key = 'forward_training_result_' . hash('sha256', $idempotency_key);
+    $previous = get_transient($result_key);
+    if (is_array($previous)) {
+        $previous['idempotent_replay'] = true;
+        return new WP_REST_Response($previous, 200);
+    }
+
+    $parsed = forward_training_parse_payload($request->get_body());
+    if (is_wp_error($parsed)) {
+        $parsed->add_data(array('status' => 400));
+        return $parsed;
+    }
+    $schedule = forward_training_normalize_payload($parsed);
+    if (is_wp_error($schedule)) {
+        $details = $schedule->get_error_data();
+        return new WP_Error(
+            $schedule->get_error_code(),
+            $schedule->get_error_message(),
+            array(
+                'status' => 422,
+                'errors' => is_array($details) && !empty($details['errors'])
+                    ? $details['errors']
+                    : array($schedule->get_error_message()),
+            )
+        );
+    }
+
+    $dry_run = strtolower((string) $request->get_header('x-forward-action')) === 'preview';
+    $result = forward_training_import_schedule($schedule, $dry_run, false);
+    if (is_wp_error($result)) {
+        $result->add_data(array('status' => 500));
+        return $result;
+    }
+
+    $response = array(
+        'status' => 'success',
+        'schema_version' => FORWARD_TRAINING_API_SCHEMA,
+        'idempotency_key' => $idempotency_key,
+        'idempotent_replay' => false,
+        'published_at' => wp_date(DateTimeInterface::ATOM),
+        'result' => $result,
+    );
+    // A confirmed import can be retried safely after a lost HTTP response.
+    set_transient($result_key, $response, 7 * DAY_IN_SECONDS);
+    return new WP_REST_Response($response, 200);
 }
 
 function forward_training_rest_date($value, $fallback) {
