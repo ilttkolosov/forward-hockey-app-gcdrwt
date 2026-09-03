@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Forward — расписание тренировок
  * Description: Безопасный импорт JSON/XML в The Events Calendar и API для мобильного приложения.
- * Version: 1.1.5
+ * Version: 1.1.6
  * Author: HC Forward
  *
  * Рекомендуемое размещение:
@@ -346,6 +346,16 @@ function forward_training_normalize_payload(array $payload) {
             continue;
         }
 
+        $source_event_id = 0;
+        if (isset($source['source_id']) && $source['source_id'] !== null && $source['source_id'] !== '') {
+            $source_id_text = trim((string) $source['source_id']);
+            if (!preg_match('/^[1-9][0-9]*$/', $source_id_text)) {
+                $errors[] = "Строка {$row}: source_id должен быть положительным ID WordPress.";
+                continue;
+            }
+            $source_event_id = (int) $source_id_text;
+        }
+
         $uid_source = $team_id . '|' . $type . '|' . $start->format(DateTimeInterface::ATOM);
         $uid = !empty($source['uid'])
             ? sanitize_key($source['uid'])
@@ -361,6 +371,7 @@ function forward_training_normalize_payload(array $payload) {
         $title = $source_title !== '' ? $source_title : $default_title;
         $normalized[] = array(
             'row' => $row,
+            'source_id' => $source_event_id,
             'uid' => $uid,
             'type' => $type,
             'title' => $title,
@@ -425,6 +436,20 @@ function forward_training_find_event_by_uid($uid) {
     return $ids ? (int) $ids[0] : 0;
 }
 
+function forward_training_find_source_event($event_id, $team_id) {
+    if (!$event_id) return 0;
+    $post = get_post($event_id);
+    if (!$post
+        || $post->post_type !== 'tribe_events'
+        || !in_array($post->post_status, array('publish', 'future', 'draft', 'pending', 'private'), true)) {
+        return new WP_Error('source_event_missing', 'Исходное событие WordPress ' . $event_id . ' не найдено или удалено.');
+    }
+    if ((string) get_post_meta($event_id, '_forward_training_team_id', true) !== (string) $team_id) {
+        return new WP_Error('source_event_team_mismatch', 'Событие WordPress ' . $event_id . ' относится к другой команде.');
+    }
+    return (int) $event_id;
+}
+
 function forward_training_description(array $event) {
     $lines = array(
         '<p><strong>Команда:</strong> ' . esc_html($event['team_name']) . '</p>',
@@ -465,11 +490,35 @@ function forward_training_apply_event_meta($event_id, array $event) {
     clean_post_cache($event_id);
 }
 
-function forward_training_upsert_event(array $event, $dry_run = false) {
-    if (!post_type_exists('tribe_events') || !function_exists('tribe_events')) {
-        return new WP_Error('tec_missing', 'Плагин The Events Calendar не активен или его ORM недоступен.');
+function forward_training_event_is_current($event_id, array $event) {
+    if (get_post_status($event_id) !== 'publish'
+        || (string) get_post_field('post_title', $event_id) !== (string) $event['title']) {
+        return false;
     }
-    $existing_id = forward_training_find_event_by_uid($event['uid']);
+    $expected = array(
+        '_EventStartDate' => $event['start']->format('Y-m-d H:i:s'),
+        '_EventEndDate' => $event['end']->format('Y-m-d H:i:s'),
+        '_EventTimezone' => $event['timezone'],
+        '_forward_training_uid' => $event['uid'],
+        '_forward_training_type' => $event['type'],
+        '_forward_training_team_id' => $event['team_id'],
+        '_forward_training_team_name' => $event['team_name'],
+        '_forward_training_location' => $event['location'],
+        '_forward_training_note' => $event['note'],
+    );
+    foreach ($expected as $key => $value) {
+        if ((string) get_post_meta($event_id, $key, true) !== (string) $value) return false;
+    }
+    return true;
+}
+
+function forward_training_upsert_event(array $event, $dry_run = false) {
+    if (!post_type_exists('tribe_events')) {
+        return new WP_Error('tec_missing', 'Плагин The Events Calendar не активен.');
+    }
+    $existing_id = forward_training_find_source_event($event['source_id'], $event['team_id']);
+    if (is_wp_error($existing_id)) return $existing_id;
+    if (!$existing_id) $existing_id = forward_training_find_event_by_uid($event['uid']);
     if ($dry_run) {
         return array(
             'action' => $existing_id ? 'update' : 'create',
@@ -482,6 +531,15 @@ function forward_training_upsert_event(array $event, $dry_run = false) {
 
     $description = forward_training_description($event);
     if ($existing_id) {
+        if (forward_training_event_is_current($existing_id, $event)) {
+            return array(
+                'action' => 'unchanged',
+                'event_id' => $existing_id,
+                'uid' => $event['uid'],
+                'title' => $event['title'],
+                'start_at' => $event['start']->format(DateTimeInterface::ATOM),
+            );
+        }
         $result = wp_update_post(array(
             'ID' => $existing_id,
             'post_title' => $event['title'],
@@ -507,28 +565,22 @@ function forward_training_upsert_event(array $event, $dry_run = false) {
         $event_id = $existing_id;
         $action = 'update';
     } else {
-        $created = tribe_events()->set_args(array(
+        $created = wp_insert_post(array(
+            'post_type' => 'tribe_events',
             'post_title' => $event['title'],
             'post_content' => $description,
             'post_status' => 'publish',
-            'start_date' => $event['start']->format('Y-m-d H:i:s'),
-            'end_date' => $event['end']->format('Y-m-d H:i:s'),
-            'timezone' => $event['timezone'],
-        ))->create();
-        if ($created instanceof WP_Post) {
-            $event_id = (int) $created->ID;
-        } elseif (is_numeric($created)) {
-            $event_id = (int) $created;
-        } else {
-            return new WP_Error('tec_create_failed', 'The Events Calendar не создал событие.');
-        }
+        ), true);
+        if (is_wp_error($created)) return $created;
+        $event_id = (int) $created;
+        if (!$event_id) return new WP_Error('tec_create_failed', 'WordPress не создал событие календаря.');
         if (get_post_status($event_id) !== 'publish') {
             wp_publish_post($event_id);
         }
         if (get_post_status($event_id) !== 'publish') {
             return new WP_Error(
                 'tec_publish_failed',
-                'The Events Calendar создал событие ' . $event_id . ', но WordPress не опубликовал его.'
+                'WordPress создал событие ' . $event_id . ', но не опубликовал его.'
             );
         }
         $action = 'create';
@@ -631,9 +683,11 @@ function forward_training_verify_import(array $schedule, array $result, $dry_run
         $uid = (string) $event['uid'];
         $event_id = isset($saved_by_uid[$uid]) ? $saved_by_uid[$uid] : 0;
         if (!$event_id || get_post_status($event_id) !== 'publish') {
+            $actual_status = $event_id ? (string) get_post_status($event_id) : 'missing';
             return new WP_Error(
                 'import_verification_failed',
-                'Событие «' . $event['title'] . '» не появилось в опубликованном расписании.'
+                'Событие «' . $event['title'] . '» (ID ' . $event_id
+                    . ') имеет статус «' . $actual_status . '», ожидался publish.'
             );
         }
         $expected = array(
