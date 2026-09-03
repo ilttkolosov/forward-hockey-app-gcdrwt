@@ -1,6 +1,8 @@
 import { Image } from "expo-image";
+import { usePathname, useRouter } from "expo-router";
 import React, { useMemo } from "react";
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, TouchableOpacity, View } from "react-native";
+import { useMessengerAuth } from "../../contexts/MessengerAuthContext";
 import { messengerMediaUrl } from "../../services/messengerApi";
 import {
   registerMessengerAvatarIdentity,
@@ -72,6 +74,9 @@ function AuthenticatedAvatar({
   identityKey,
   roles,
 }: AuthenticatedAvatarProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const { session } = useMessengerAuth();
   const uri = messengerMediaUrl(avatarUrl);
   if (identityKey) registerMessengerAvatarIdentity(identityKey, displayName);
   const identity = resolveMessengerAvatarIdentity(identityKey, displayName);
@@ -79,8 +84,19 @@ function AuthenticatedAvatar({
   const preset =
     MESSENGER_PRESET_AVATARS[hash % MESSENGER_PRESET_AVATARS.length];
   const backgroundColor = roleColor(roles, hash);
+  const roomMatch = /^\/messenger\/room\/([^/]+)/.exec(pathname);
+  const roomId = roomMatch?.[1] || null;
+  // Message-feed author avatars are 40 px and always carry a stable user ID.
+  // Keep other avatar surfaces untouched so their existing row/viewer actions
+  // do not become nested navigation controls.
+  const opensForeignMessageAuthorProfile = Boolean(
+    roomId &&
+      size === 40 &&
+      identityKey &&
+      identityKey !== session?.user.id,
+  );
 
-  return (
+  const avatar = (
     <View
       style={[
         styles.avatar,
@@ -114,6 +130,30 @@ function AuthenticatedAvatar({
         />
       )}
     </View>
+  );
+
+  if (!opensForeignMessageAuthorProfile || !identityKey || !roomId) {
+    return avatar;
+  }
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.78}
+      onPress={() =>
+        router.push({
+          pathname: "/messenger/contact/[id]",
+          params: {
+            id: identityKey,
+            roomId,
+            openedAt: String(Date.now()),
+          },
+        })
+      }
+      accessibilityRole="button"
+      accessibilityLabel={`Открыть профиль ${displayName}`}
+    >
+      {avatar}
+    </TouchableOpacity>
   );
 }
 
