@@ -26,9 +26,10 @@
     "check:messenger-unread": "node --no-warnings --experimental-strip-types checks/messenger-unread-policy.mjs",
     "check:messenger-player-identity": "node --no-warnings --experimental-strip-types checks/messenger-player-identity.mjs",
     "check:messenger-player-avatar": "node --no-warnings --experimental-strip-types checks/messenger-player-avatar.mjs",
+    "check:messenger-message-mutation": "node --no-warnings --experimental-strip-types checks/messenger-message-mutation-policy.mjs",
     "check:startup-config": "node --no-warnings --experimental-strip-types checks/startup-config-policy.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "npm run photos:generate && npm run logos:generate && npm run seed:verify && npm run generate:route-types && npm run check:messenger-unread && npm run check:messenger-player-identity && npm run check:messenger-player-avatar && npm run check:startup-config && npm run typecheck && npm run lint",
+    "check": "npm run photos:generate && npm run logos:generate && npm run seed:verify && npm run generate:route-types && npm run check:messenger-unread && npm run check:messenger-player-identity && npm run check:messenger-player-avatar && npm run check:messenger-message-mutation && npm run check:startup-config && npm run typecheck && npm run lint",
     "prebuild": "expo prebuild",
     "eas-build": "npx --yes eas-cli@21.7.0 build"
   },
