@@ -530,6 +530,7 @@ function forward_training_upsert_event(array $event, $dry_run = false) {
     }
 
     $description = forward_training_description($event);
+    $meta_applied = false;
     if ($existing_id) {
         if (forward_training_event_is_current($existing_id, $event)) {
             return array(
@@ -569,14 +570,15 @@ function forward_training_upsert_event(array $event, $dry_run = false) {
             'post_type' => 'tribe_events',
             'post_title' => $event['title'],
             'post_content' => $description,
-            'post_status' => 'publish',
+            'post_status' => 'draft',
         ), true);
         if (is_wp_error($created)) return $created;
         $event_id = (int) $created;
         if (!$event_id) return new WP_Error('tec_create_failed', 'WordPress не создал событие календаря.');
-        if (get_post_status($event_id) !== 'publish') {
-            wp_publish_post($event_id);
-        }
+        forward_training_apply_event_meta($event_id, $event);
+        $meta_applied = true;
+        $published = wp_update_post(array('ID' => $event_id, 'post_status' => 'publish'), true);
+        if (is_wp_error($published)) return $published;
         if (get_post_status($event_id) !== 'publish') {
             return new WP_Error(
                 'tec_publish_failed',
@@ -586,7 +588,7 @@ function forward_training_upsert_event(array $event, $dry_run = false) {
         $action = 'create';
     }
 
-    forward_training_apply_event_meta($event_id, $event);
+    if (!$meta_applied) forward_training_apply_event_meta($event_id, $event);
     return array(
         'action' => $action,
         'event_id' => $event_id,
