@@ -28,6 +28,7 @@ import MessengerAvatarViewer from "../../../features/messenger/MessengerAvatarVi
 import MessengerSafetyActions from "../../../features/messenger/MessengerSafetyActions";
 import type { MessengerContactProfile } from "../../../features/messenger/types";
 import {
+  createMessengerDirectRoom,
   getMessengerRoomMemberProfile,
   getMessengerRoomMembers,
   getMessengerRooms,
@@ -83,6 +84,7 @@ export default function MessengerContactProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [openingChat, setOpeningChat] = useState(false);
   const [avatarVisible, setAvatarVisible] = useState(false);
   const [canLeave, setCanLeave] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -237,6 +239,45 @@ export default function MessengerContactProfileScreen() {
     }
   };
 
+  const openDirectChat = async () => {
+    if (!profile || !session || profile.id === session.user.id || openingChat) {
+      return;
+    }
+    setOpeningChat(true);
+    setError(null);
+    try {
+      const result = await createMessengerDirectRoom(profile.team_id, profile.id);
+      router.replace({
+        pathname: "/messenger/room/[id]",
+        params: {
+          id: result.room.id,
+          title: result.room.title,
+          canWrite: String(result.room.can_write),
+          canMedia: String(result.room.can_send_media),
+          canReact: String(result.room.can_react),
+          canManage: String(result.room.can_manage),
+          roomType: result.room.room_type,
+          teamId: result.room.team_id,
+          avatarUrl: result.room.avatar_url || "",
+          lastReadSequence: result.room.last_read_sequence,
+          latestSequence: result.room.last_message?.sequence || "",
+          unreadCount: String(result.room.unread_count),
+          peerId: result.room.peer?.id || profile.id,
+          peerLastSeenAt: result.room.peer?.last_seen_at || "",
+          peerNotificationsMuted: String(
+            Boolean(result.room.peer?.notifications_muted),
+          ),
+        },
+      });
+    } catch (openError) {
+      setError(
+        messengerErrorMessage(openError, "Не удалось открыть личный чат"),
+      );
+    } finally {
+      setOpeningChat(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.header}>
@@ -327,6 +368,30 @@ export default function MessengerContactProfileScreen() {
                   </Text>
                 )}
               </View>
+              {profile.id !== session.user.id ? (
+                <TouchableOpacity
+                  style={styles.messageButton}
+                  onPress={() => void openDirectChat()}
+                  disabled={openingChat}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Написать ${profile.display_name}`}
+                >
+                  {openingChat ? (
+                    <ActivityIndicator size="small" color={colors.white} />
+                  ) : (
+                    <>
+                      <Icon
+                        name="chatbubble-ellipses-outline"
+                        size={20}
+                        color={colors.white}
+                      />
+                      <Text style={styles.messageButtonText}>
+                        Написать сообщение
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              ) : null}
             </View>
 
             <View style={styles.aliasCard}>
@@ -500,6 +565,19 @@ const styles = StyleSheet.create({
   },
   roleText: { color: colors.primary, fontSize: 11, fontWeight: "800" },
   noRoles: { color: colors.textSecondary, fontSize: 12 },
+  messageButton: {
+    minHeight: 48,
+    width: "100%",
+    marginTop: 18,
+    paddingHorizontal: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: 14,
+    backgroundColor: colors.primary,
+  },
+  messageButtonText: { color: colors.white, fontSize: 14, fontWeight: "800" },
   aliasCard: {
     padding: 18,
     borderWidth: 1,
