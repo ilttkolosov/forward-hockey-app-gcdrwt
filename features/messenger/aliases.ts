@@ -1,6 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { MessengerContactAlias } from "./types";
 import { formatMessengerPlayerDisplayName } from "./playerIdentity";
+import {
+  clearMessengerAvatarIdentities,
+  registerMessengerAvatarIdentity,
+} from "./avatarIdentity";
 
 const STORAGE_PREFIX = "messenger_contact_aliases:";
 
@@ -76,6 +80,7 @@ export function clearMessengerAliases(): void {
   ownerUserId = null;
   prepared = false;
   aliases = new Map();
+  clearMessengerAvatarIdentities();
 }
 
 function transformedIdentity(
@@ -102,12 +107,19 @@ function transformedIdentity(
     : prepared
       ? (aliases.get(identityId) ?? null)
       : null;
+  const displayName = formatMessengerPlayerDisplayName(
+    personalAlias ?? original,
+    value.player_id,
+  );
+  registerMessengerAvatarIdentity(
+    identityId,
+    original,
+    personalAlias,
+    displayName,
+  );
   return {
     ...value,
-    display_name: formatMessengerPlayerDisplayName(
-      personalAlias ?? original,
-      value.player_id,
-    ),
+    display_name: displayName,
     original_display_name: original,
     ...(hasExplicitAlias ? { alias: personalAlias } : {}),
   };
