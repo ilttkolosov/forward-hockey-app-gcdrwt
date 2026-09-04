@@ -33,6 +33,9 @@ interface NativeKeyboardGeometryEvent {
   imeHeight: number;
   frameworkImeHeight?: number;
   visibleFrameInset?: number;
+  editorKeyboardOverlap?: number;
+  keyboardTopOnScreen?: number;
+  editorBottomOnScreen?: number;
 }
 
 interface NativePasteAttachmentEvent {
@@ -65,6 +68,9 @@ export interface ForwardRichTextKeyboardGeometry {
   imeHeight: number;
   frameworkImeHeight?: number;
   visibleFrameInset?: number;
+  editorKeyboardOverlap?: number;
+  keyboardTopOnScreen?: number;
+  editorBottomOnScreen?: number;
 }
 
 interface NativeForwardRichTextInputProps {

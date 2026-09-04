@@ -11,7 +11,7 @@ class ForwardRichTextInputModule : Module() {
     // Feature probes keep OTA/old-binary combinations safe: JavaScript only
     // sends the new view event prop when the installed native module declares
     // support, and normalizes legacy pixel-based content heights otherwise.
-    Constant("keyboardGeometryVersion") { 1 }
+    Constant("keyboardGeometryVersion") { 2 }
     Constant("contentSizeUnitVersion") { 1 }
 
     View(ForwardRichTextInputView::class) {

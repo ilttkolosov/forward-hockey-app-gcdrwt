@@ -15,12 +15,19 @@ type AndroidKeyboardFrame = Pick<
   "screenY" | "height"
 >;
 
+interface NativeEditorOverlapSnapshot {
+  overlap: number;
+  appliedInset: number;
+}
+
 const MEASUREMENT_DELAYS_MS = [0, 80, 220, 420, 800] as const;
 const METRICS_PROBE_DELAYS_MS = [0, 90, 220, 450, 800, 1_200] as const;
 
 interface AndroidKeyboardAvoidanceController {
   bottomInset: number;
-  onNativeKeyboardGeometry: (geometry: ForwardRichTextKeyboardGeometry) => void;
+  onNativeKeyboardGeometry: (
+    geometry: ForwardRichTextKeyboardGeometry,
+  ) => void;
   onTargetLayout: (event: LayoutChangeEvent) => void;
   refresh: () => void;
 }
@@ -29,6 +36,12 @@ function normalizedKeyboardHeight(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.max(0, value)
     : 0;
+}
+
+function finiteKeyboardValue(value: number | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : null;
 }
 
 /**
@@ -44,6 +57,8 @@ export function useAndroidKeyboardAvoidance(
   const appliedInsetRef = useRef(0);
   const keyboardFrameRef = useRef<AndroidKeyboardFrame | null>(null);
   const nativeKeyboardHeightRef = useRef(0);
+  const nativeEditorOverlapRef =
+    useRef<NativeEditorOverlapSnapshot | null>(null);
   const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
   const updateInset = useCallback((nextInset: number) => {
@@ -70,6 +85,28 @@ export function useAndroidKeyboardAvoidance(
     if (Platform.OS !== "android") return;
     const frame = keyboardFrameRef.current;
     const nativeKeyboardHeight = nativeKeyboardHeightRef.current;
+    const directOverlap = nativeEditorOverlapRef.current;
+
+    // A v2 native binary measures the editor and keyboard edge in the same
+    // Android screen coordinate space. This avoids mixing a root-relative
+    // IME inset with Dimensions.get("screen"), whose bottom includes the
+    // three-button navigation area on MagicOS.
+    if (directOverlap) {
+      updateInset(
+        calculateAndroidKeyboardInset({
+          targetBottom: 0,
+          appliedInset: appliedInsetRef.current,
+          keyboardScreenY: frame?.screenY ?? 0,
+          keyboardHeight: frame?.height ?? 0,
+          nativeKeyboardHeight,
+          nativeEditorOverlap: directOverlap.overlap,
+          nativeOverlapAppliedInset: directOverlap.appliedInset,
+          screenHeight: Dimensions.get("screen").height,
+        }),
+      );
+      return;
+    }
+
     const target = targetRef.current;
     if ((!frame && nativeKeyboardHeight <= 0) || !target) return;
 
@@ -103,7 +140,10 @@ export function useAndroidKeyboardAvoidance(
       if (!frame || !Number.isFinite(frame.height) || frame.height <= 0) {
         keyboardFrameRef.current = null;
         clearTimers();
-        if (nativeKeyboardHeightRef.current > 0) {
+        if (
+          nativeKeyboardHeightRef.current > 0 ||
+          nativeEditorOverlapRef.current
+        ) {
           scheduleMeasurements();
         } else {
           updateInset(0);
@@ -122,6 +162,16 @@ export function useAndroidKeyboardAvoidance(
 
   const onNativeKeyboardGeometry = useCallback(
     (geometry: ForwardRichTextKeyboardGeometry) => {
+      const editorOverlap = finiteKeyboardValue(
+        geometry.editorKeyboardOverlap,
+      );
+      nativeEditorOverlapRef.current =
+        geometry.visible && editorOverlap !== null
+          ? {
+              overlap: editorOverlap,
+              appliedInset: appliedInsetRef.current,
+            }
+          : null;
       nativeKeyboardHeightRef.current = geometry.visible
         ? Math.max(
             normalizedKeyboardHeight(geometry.imeHeight),
@@ -130,7 +180,11 @@ export function useAndroidKeyboardAvoidance(
           )
         : 0;
       clearTimers();
-      if (nativeKeyboardHeightRef.current > 0 || keyboardFrameRef.current) {
+      if (
+        nativeEditorOverlapRef.current ||
+        nativeKeyboardHeightRef.current > 0 ||
+        keyboardFrameRef.current
+      ) {
         scheduleMeasurements();
       } else {
         updateInset(0);
@@ -160,7 +214,9 @@ export function useAndroidKeyboardAvoidance(
     (_event: LayoutChangeEvent) => {
       if (
         Platform.OS !== "android" ||
-        (!keyboardFrameRef.current && nativeKeyboardHeightRef.current <= 0)
+        (!keyboardFrameRef.current &&
+          nativeKeyboardHeightRef.current <= 0 &&
+          !nativeEditorOverlapRef.current)
       ) {
         return;
       }
@@ -175,21 +231,30 @@ export function useAndroidKeyboardAvoidance(
       "keyboardDidShow",
       (event: KeyboardEvent) => rememberFrame(event.endCoordinates),
     );
-    const hideSubscription = Keyboard.addListener("keyboardDidHide", () =>
-      rememberFrame(null),
-    );
-    const dimensionsSubscription = Dimensions.addEventListener("change", () => {
-      const metrics = Keyboard.metrics();
-      if (metrics && metrics.height > 0) {
-        keyboardFrameRef.current = {
-          screenY: metrics.screenY,
-          height: metrics.height,
-        };
-      }
-      if (keyboardFrameRef.current || nativeKeyboardHeightRef.current > 0) {
-        scheduleMeasurements();
-      }
+    const hideSubscription = Keyboard.addListener("keyboardDidHide", () => {
+      nativeKeyboardHeightRef.current = 0;
+      nativeEditorOverlapRef.current = null;
+      rememberFrame(null);
     });
+    const dimensionsSubscription = Dimensions.addEventListener(
+      "change",
+      () => {
+        const metrics = Keyboard.metrics();
+        if (metrics && metrics.height > 0) {
+          keyboardFrameRef.current = {
+            screenY: metrics.screenY,
+            height: metrics.height,
+          };
+        }
+        if (
+          keyboardFrameRef.current ||
+          nativeKeyboardHeightRef.current > 0 ||
+          nativeEditorOverlapRef.current
+        ) {
+          scheduleMeasurements();
+        }
+      },
+    );
 
     return () => {
       showSubscription.remove();
@@ -197,6 +262,7 @@ export function useAndroidKeyboardAvoidance(
       dimensionsSubscription.remove();
       keyboardFrameRef.current = null;
       nativeKeyboardHeightRef.current = 0;
+      nativeEditorOverlapRef.current = null;
       clearTimers();
       appliedInsetRef.current = 0;
     };

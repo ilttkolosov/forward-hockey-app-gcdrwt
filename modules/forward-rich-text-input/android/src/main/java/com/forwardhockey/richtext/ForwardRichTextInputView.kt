@@ -115,6 +115,7 @@ class ForwardRichTextInputView(
   private val recentlyEmittedEncodedValues = ArrayDeque<String>()
   private val keyboardVisibleFrame = Rect()
   private val keyboardRootLocation = IntArray(2)
+  private val keyboardEditorLocation = IntArray(2)
   private var keyboardObserverRoot: View? = null
   private var lastKeyboardGeometrySignature: String? = null
   private val keyboardLayoutListener =
@@ -154,49 +155,88 @@ class ForwardRichTextInputView(
     if (emitHidden) emitKeyboardGeometry(forceHidden = true)
   }
 
-  private fun emitKeyboardGeometry(forceHidden: Boolean = false) {
-    val root = rootView
-    if (root.height <= 0) return
 
-    var frameworkImeInset = 0
-    var frameworkImeVisible = false
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-      root.rootWindowInsets?.let { insets ->
-        frameworkImeInset = insets.getInsets(WindowInsets.Type.ime()).bottom
-        frameworkImeVisible = insets.isVisible(WindowInsets.Type.ime())
-      }
+private fun emitKeyboardGeometry(forceHidden: Boolean = false) {
+  val root = rootView
+  if (root.height <= 0) return
+
+  var frameworkImeInset = 0
+  var frameworkImeVisible = false
+  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+    root.rootWindowInsets?.let { insets ->
+      frameworkImeInset = insets.getInsets(WindowInsets.Type.ime()).bottom
+      frameworkImeVisible = insets.isVisible(WindowInsets.Type.ime())
+    }
+  }
+
+  root.getWindowVisibleDisplayFrame(keyboardVisibleFrame)
+  root.getLocationOnScreen(keyboardRootLocation)
+  val rootBottomOnScreen = keyboardRootLocation[1] + root.height
+  val visibleFrameInset =
+    (rootBottomOnScreen - keyboardVisibleFrame.bottom).coerceAtLeast(0)
+  val effectiveImeInset = max(frameworkImeInset, visibleFrameInset)
+  val visible =
+    !forceHidden && editor.hasFocus() &&
+      ((frameworkImeVisible && frameworkImeInset > 0) ||
+        visibleFrameInset >= dp(80))
+
+  // Keep every value below in the same physical screen coordinate
+  // space. Deriving a top edge later from Dimensions.get("screen")
+  // is unsafe on three-button navigation devices because that screen
+  // height includes the navigation area while the root inset does not.
+  val keyboardTopCandidates = mutableListOf<Int>()
+  if (visible && frameworkImeVisible && frameworkImeInset > 0) {
+    keyboardTopCandidates.add(rootBottomOnScreen - frameworkImeInset)
+  }
+  if (visible && visibleFrameInset >= dp(80)) {
+    keyboardTopCandidates.add(keyboardVisibleFrame.bottom)
+  }
+  val keyboardTopOnScreen =
+    (keyboardTopCandidates.minOrNull() ?: rootBottomOnScreen)
+      .coerceIn(keyboardRootLocation[1], rootBottomOnScreen)
+
+  val editorAttached = editor.isAttachedToWindow && editor.height > 0
+  if (editorAttached) editor.getLocationOnScreen(keyboardEditorLocation)
+  val editorBottomOnScreen =
+    if (editorAttached) keyboardEditorLocation[1] + editor.height
+    else rootBottomOnScreen
+  val editorKeyboardOverlapPx =
+    if (visible && editorAttached) {
+      editorBottomOnScreen - keyboardTopOnScreen
+    } else {
+      0
     }
 
-    root.getWindowVisibleDisplayFrame(keyboardVisibleFrame)
-    root.getLocationOnScreen(keyboardRootLocation)
-    val rootBottomOnScreen = keyboardRootLocation[1] + root.height
-    val visibleFrameInset =
-      (rootBottomOnScreen - keyboardVisibleFrame.bottom).coerceAtLeast(0)
-    val effectiveImeInset = max(frameworkImeInset, visibleFrameInset)
-    val visible =
-      !forceHidden && editor.hasFocus() &&
-        ((frameworkImeVisible && frameworkImeInset > 0) ||
-          visibleFrameInset >= dp(80))
-    val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
-    fun toDp(value: Int): Int =
-      if (value <= 0) 0
-      else ceil(value.toDouble() / density.toDouble()).toInt()
+  val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
+  fun toDp(value: Int): Int =
+    if (value <= 0) 0
+    else ceil(value.toDouble() / density.toDouble()).toInt()
+  fun toCoordinateDp(value: Int): Double =
+    value.toDouble() / density.toDouble()
 
-    val effectiveDp = toDp(if (visible) effectiveImeInset else 0)
-    val frameworkDp = toDp(frameworkImeInset)
-    val visibleFrameDp = toDp(visibleFrameInset)
-    val signature = "$visible:$effectiveDp:$frameworkDp:$visibleFrameDp"
-    if (signature == lastKeyboardGeometrySignature) return
-    lastKeyboardGeometrySignature = signature
-    onKeyboardGeometryChange(
-      mapOf(
-        "visible" to visible,
-        "imeHeight" to effectiveDp.toDouble(),
-        "frameworkImeHeight" to frameworkDp.toDouble(),
-        "visibleFrameInset" to visibleFrameDp.toDouble()
-      )
+  val effectiveDp = toDp(if (visible) effectiveImeInset else 0)
+  val frameworkDp = toDp(frameworkImeInset)
+  val visibleFrameDp = toDp(visibleFrameInset)
+  val editorOverlapDp = toCoordinateDp(editorKeyboardOverlapPx)
+  val keyboardTopDp = toCoordinateDp(keyboardTopOnScreen)
+  val editorBottomDp = toCoordinateDp(editorBottomOnScreen)
+  val signature =
+    "$visible:$effectiveDp:$frameworkDp:$visibleFrameDp:" +
+      "$editorKeyboardOverlapPx:$keyboardTopOnScreen:$editorBottomOnScreen"
+  if (signature == lastKeyboardGeometrySignature) return
+  lastKeyboardGeometrySignature = signature
+  onKeyboardGeometryChange(
+    mapOf(
+      "visible" to visible,
+      "imeHeight" to effectiveDp.toDouble(),
+      "frameworkImeHeight" to frameworkDp.toDouble(),
+      "visibleFrameInset" to visibleFrameDp.toDouble(),
+      "editorKeyboardOverlap" to editorOverlapDp,
+      "keyboardTopOnScreen" to keyboardTopDp,
+      "editorBottomOnScreen" to editorBottomDp
     )
-  }
+  )
+}
 
   private val formatMenuIds = mapOf(
     ForwardTextFormat.BOLD to 0x464F0101,

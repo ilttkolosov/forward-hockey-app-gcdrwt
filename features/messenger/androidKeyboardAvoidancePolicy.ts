@@ -4,12 +4,15 @@ export interface AndroidKeyboardOverlapMeasurement {
   keyboardScreenY: number;
   keyboardHeight: number;
   nativeKeyboardHeight?: number;
+  nativeEditorOverlap?: number;
+  nativeOverlapAppliedInset?: number;
   screenHeight: number;
 }
 
 const OVERLAP_TOLERANCE = 2;
 const KEYBOARD_CLEARANCE = 4;
 const MAX_KEYBOARD_INSET_EXTRA = 40;
+const MAX_KEYBOARD_INSET_SCREEN_RATIO = 0.75;
 
 function finiteNumber(value: number | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -22,14 +25,16 @@ function positiveNumber(value: number | undefined): number | null {
 
 /**
  * Calculates only the part of the IME overlap that Android did not already
- * remove through adjustResize. `appliedInset` is added back to the measured
- * bottom so repeated measurements remain stable after the fallback margin is
- * applied.
+ * remove through adjustResize.
  *
- * Some vendor keyboards report `screenY` below their accessory toolbar. A
- * native WindowInsets measurement can therefore provide an earlier keyboard
- * top without changing correctly resized devices, whose target is already
- * above both candidates.
+ * New native binaries report the signed overlap between the actual editor
+ * bottom and the actual visible keyboard top in one coordinate space. That
+ * direct measurement is preferred because vendor navigation bars can make
+ * `screenHeight - imeHeight` inaccurate by roughly half a composer row.
+ * `nativeOverlapAppliedInset` reconstructs the unshifted overlap so repeated
+ * measurements remain stable after the fallback margin is applied.
+ *
+ * Older binaries continue through the height/screenY fallback below.
  */
 export function calculateAndroidKeyboardInset({
   targetBottom,
@@ -37,8 +42,30 @@ export function calculateAndroidKeyboardInset({
   keyboardScreenY,
   keyboardHeight,
   nativeKeyboardHeight,
+  nativeEditorOverlap,
+  nativeOverlapAppliedInset,
   screenHeight,
 }: AndroidKeyboardOverlapMeasurement): number {
+  const directOverlap = finiteNumber(nativeEditorOverlap);
+  if (directOverlap !== null) {
+    const insetAtMeasurement = Math.max(
+      0,
+      finiteNumber(nativeOverlapAppliedInset) ?? 0,
+    );
+    const naturalOverlap = directOverlap + insetAtMeasurement;
+    if (naturalOverlap <= OVERLAP_TOLERANCE) return 0;
+
+    const displayHeight = positiveNumber(screenHeight);
+    const maximum =
+      displayHeight !== null
+        ? displayHeight * MAX_KEYBOARD_INSET_SCREEN_RATIO
+        : Number.POSITIVE_INFINITY;
+    return Math.min(
+      Math.ceil(naturalOverlap + KEYBOARD_CLEARANCE),
+      Math.ceil(maximum),
+    );
+  }
+
   const measuredBottom = finiteNumber(targetBottom);
   if (measuredBottom === null) return 0;
 
@@ -80,6 +107,12 @@ export function calculateAndroidKeyboardInset({
     nativeHeight ?? 0,
     observedHeight,
   );
-  const maximum = Math.max(0, maximumKeyboardHeight + MAX_KEYBOARD_INSET_EXTRA);
-  return Math.min(Math.ceil(overlap + KEYBOARD_CLEARANCE), Math.ceil(maximum));
+  const maximum = Math.max(
+    0,
+    maximumKeyboardHeight + MAX_KEYBOARD_INSET_EXTRA,
+  );
+  return Math.min(
+    Math.ceil(overlap + KEYBOARD_CLEARANCE),
+    Math.ceil(maximum),
+  );
 }
