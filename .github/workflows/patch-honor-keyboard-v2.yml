@@ -1,0 +1,836 @@
+name: One-time exact Honor keyboard overlap patch
+
+on:
+  push:
+    branches:
+      - fix/minor-fixes-batch
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, '[honor-keyboard-patch-v2]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/minor-fixes-batch
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Apply direct native overlap measurement
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          from textwrap import dedent
+
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"Expected one match in {path}, found {count}: {old[:100]!r}"
+                  )
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          policy = dedent(r'''
+          export interface AndroidKeyboardOverlapMeasurement {
+            targetBottom: number;
+            appliedInset: number;
+            keyboardScreenY: number;
+            keyboardHeight: number;
+            nativeKeyboardHeight?: number;
+            nativeEditorOverlap?: number;
+            nativeOverlapAppliedInset?: number;
+            screenHeight: number;
+          }
+
+          const OVERLAP_TOLERANCE = 2;
+          const KEYBOARD_CLEARANCE = 4;
+          const MAX_KEYBOARD_INSET_EXTRA = 40;
+          const MAX_KEYBOARD_INSET_SCREEN_RATIO = 0.75;
+
+          function finiteNumber(value: number | undefined): number | null {
+            return typeof value === "number" && Number.isFinite(value) ? value : null;
+          }
+
+          function positiveNumber(value: number | undefined): number | null {
+            const finite = finiteNumber(value);
+            return finite !== null && finite > 0 ? finite : null;
+          }
+
+          /**
+           * Calculates only the part of the IME overlap that Android did not already
+           * remove through adjustResize.
+           *
+           * New native binaries report the signed overlap between the actual editor
+           * bottom and the actual visible keyboard top in one coordinate space. That
+           * direct measurement is preferred because vendor navigation bars can make
+           * `screenHeight - imeHeight` inaccurate by roughly half a composer row.
+           * `nativeOverlapAppliedInset` reconstructs the unshifted overlap so repeated
+           * measurements remain stable after the fallback margin is applied.
+           *
+           * Older binaries continue through the height/screenY fallback below.
+           */
+          export function calculateAndroidKeyboardInset({
+            targetBottom,
+            appliedInset,
+            keyboardScreenY,
+            keyboardHeight,
+            nativeKeyboardHeight,
+            nativeEditorOverlap,
+            nativeOverlapAppliedInset,
+            screenHeight,
+          }: AndroidKeyboardOverlapMeasurement): number {
+            const directOverlap = finiteNumber(nativeEditorOverlap);
+            if (directOverlap !== null) {
+              const insetAtMeasurement = Math.max(
+                0,
+                finiteNumber(nativeOverlapAppliedInset) ?? 0,
+              );
+              const naturalOverlap = directOverlap + insetAtMeasurement;
+              if (naturalOverlap <= OVERLAP_TOLERANCE) return 0;
+
+              const displayHeight = positiveNumber(screenHeight);
+              const maximum =
+                displayHeight !== null
+                  ? displayHeight * MAX_KEYBOARD_INSET_SCREEN_RATIO
+                  : Number.POSITIVE_INFINITY;
+              return Math.min(
+                Math.ceil(naturalOverlap + KEYBOARD_CLEARANCE),
+                Math.ceil(maximum),
+              );
+            }
+
+            const measuredBottom = finiteNumber(targetBottom);
+            if (measuredBottom === null) return 0;
+
+            const displayHeight = positiveNumber(screenHeight);
+            const eventHeight = positiveNumber(keyboardHeight);
+            const nativeHeight = positiveNumber(nativeKeyboardHeight);
+            const keyboardTopCandidates: number[] = [];
+
+            const reportedKeyboardTop = positiveNumber(keyboardScreenY);
+            if (reportedKeyboardTop !== null) {
+              keyboardTopCandidates.push(reportedKeyboardTop);
+            } else if (
+              displayHeight !== null &&
+              eventHeight !== null &&
+              displayHeight > eventHeight
+            ) {
+              keyboardTopCandidates.push(displayHeight - eventHeight);
+            }
+
+            if (
+              displayHeight !== null &&
+              nativeHeight !== null &&
+              displayHeight > nativeHeight
+            ) {
+              keyboardTopCandidates.push(displayHeight - nativeHeight);
+            }
+
+            if (keyboardTopCandidates.length === 0) return 0;
+            const keyboardTop = Math.min(...keyboardTopCandidates);
+            const alreadyApplied = Math.max(0, finiteNumber(appliedInset) ?? 0);
+            const naturalBottom = measuredBottom + alreadyApplied;
+            const overlap = naturalBottom - keyboardTop;
+            if (overlap <= OVERLAP_TOLERANCE) return 0;
+
+            const observedHeight =
+              displayHeight !== null ? Math.max(0, displayHeight - keyboardTop) : 0;
+            const maximumKeyboardHeight = Math.max(
+              eventHeight ?? 0,
+              nativeHeight ?? 0,
+              observedHeight,
+            );
+            const maximum = Math.max(
+              0,
+              maximumKeyboardHeight + MAX_KEYBOARD_INSET_EXTRA,
+            );
+            return Math.min(
+              Math.ceil(overlap + KEYBOARD_CLEARANCE),
+              Math.ceil(maximum),
+            );
+          }
+          ''').lstrip()
+          Path("features/messenger/androidKeyboardAvoidancePolicy.ts").write_text(
+              policy,
+              encoding="utf-8",
+          )
+
+          hook = dedent(r'''
+          import React, { useCallback, useEffect, useRef, useState } from "react";
+          import {
+            Dimensions,
+            Keyboard,
+            Platform,
+            type KeyboardEvent,
+            type LayoutChangeEvent,
+            type View,
+          } from "react-native";
+          import type { ForwardRichTextKeyboardGeometry } from "../../modules/forward-rich-text-input";
+          import { calculateAndroidKeyboardInset } from "./androidKeyboardAvoidancePolicy";
+
+          type AndroidKeyboardFrame = Pick<
+            KeyboardEvent["endCoordinates"],
+            "screenY" | "height"
+          >;
+
+          interface NativeEditorOverlapSnapshot {
+            overlap: number;
+            appliedInset: number;
+          }
+
+          const MEASUREMENT_DELAYS_MS = [0, 80, 220, 420, 800] as const;
+          const METRICS_PROBE_DELAYS_MS = [0, 90, 220, 450, 800, 1_200] as const;
+
+          interface AndroidKeyboardAvoidanceController {
+            bottomInset: number;
+            onNativeKeyboardGeometry: (
+              geometry: ForwardRichTextKeyboardGeometry,
+            ) => void;
+            onTargetLayout: (event: LayoutChangeEvent) => void;
+            refresh: () => void;
+          }
+
+          function normalizedKeyboardHeight(value: number | undefined): number {
+            return typeof value === "number" && Number.isFinite(value)
+              ? Math.max(0, value)
+              : 0;
+          }
+
+          function finiteKeyboardValue(value: number | undefined): number | null {
+            return typeof value === "number" && Number.isFinite(value)
+              ? value
+              : null;
+          }
+
+          /**
+           * Keeps a bottom-docked control above Android keyboards on devices where the
+           * Activity reports adjustResize but the vendor window implementation still
+           * overlays part of the React tree. Devices that resize correctly receive a
+           * zero inset, so this does not apply the keyboard height twice.
+           */
+          export function useAndroidKeyboardAvoidance(
+            targetRef: React.RefObject<View | null>,
+          ): AndroidKeyboardAvoidanceController {
+            const [bottomInset, setBottomInset] = useState(0);
+            const appliedInsetRef = useRef(0);
+            const keyboardFrameRef = useRef<AndroidKeyboardFrame | null>(null);
+            const nativeKeyboardHeightRef = useRef(0);
+            const nativeEditorOverlapRef =
+              useRef<NativeEditorOverlapSnapshot | null>(null);
+            const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+            const updateInset = useCallback((nextInset: number) => {
+              const normalized = Math.max(0, Math.round(nextInset));
+              if (normalized === appliedInsetRef.current) return;
+              appliedInsetRef.current = normalized;
+              setBottomInset(normalized);
+            }, []);
+
+            const clearTimers = useCallback(() => {
+              for (const timer of timersRef.current) clearTimeout(timer);
+              timersRef.current.clear();
+            }, []);
+
+            const schedule = useCallback((delay: number, callback: () => void) => {
+              const timer = setTimeout(() => {
+                timersRef.current.delete(timer);
+                callback();
+              }, delay);
+              timersRef.current.add(timer);
+            }, []);
+
+            const measureOverlap = useCallback(() => {
+              if (Platform.OS !== "android") return;
+              const frame = keyboardFrameRef.current;
+              const nativeKeyboardHeight = nativeKeyboardHeightRef.current;
+              const directOverlap = nativeEditorOverlapRef.current;
+
+              // A v2 native binary measures the editor and keyboard edge in the same
+              // Android screen coordinate space. This avoids mixing a root-relative
+              // IME inset with Dimensions.get("screen"), whose bottom includes the
+              // three-button navigation area on MagicOS.
+              if (directOverlap) {
+                updateInset(
+                  calculateAndroidKeyboardInset({
+                    targetBottom: 0,
+                    appliedInset: appliedInsetRef.current,
+                    keyboardScreenY: frame?.screenY ?? 0,
+                    keyboardHeight: frame?.height ?? 0,
+                    nativeKeyboardHeight,
+                    nativeEditorOverlap: directOverlap.overlap,
+                    nativeOverlapAppliedInset: directOverlap.appliedInset,
+                    screenHeight: Dimensions.get("screen").height,
+                  }),
+                );
+                return;
+              }
+
+              const target = targetRef.current;
+              if ((!frame && nativeKeyboardHeight <= 0) || !target) return;
+
+              target.measureInWindow((_x, y, _width, height) => {
+                if (height <= 0) return;
+                const activeFrame = keyboardFrameRef.current;
+                const activeNativeKeyboardHeight = nativeKeyboardHeightRef.current;
+                if (!activeFrame && activeNativeKeyboardHeight <= 0) return;
+                updateInset(
+                  calculateAndroidKeyboardInset({
+                    targetBottom: y + height,
+                    appliedInset: appliedInsetRef.current,
+                    keyboardScreenY: activeFrame?.screenY ?? 0,
+                    keyboardHeight: activeFrame?.height ?? 0,
+                    nativeKeyboardHeight: activeNativeKeyboardHeight,
+                    screenHeight: Dimensions.get("screen").height,
+                  }),
+                );
+              });
+            }, [targetRef, updateInset]);
+
+            const scheduleMeasurements = useCallback(() => {
+              if (Platform.OS !== "android") return;
+              for (const delay of MEASUREMENT_DELAYS_MS) {
+                schedule(delay, () => requestAnimationFrame(measureOverlap));
+              }
+            }, [measureOverlap, schedule]);
+
+            const rememberFrame = useCallback(
+              (frame: AndroidKeyboardFrame | null) => {
+                if (!frame || !Number.isFinite(frame.height) || frame.height <= 0) {
+                  keyboardFrameRef.current = null;
+                  clearTimers();
+                  if (
+                    nativeKeyboardHeightRef.current > 0 ||
+                    nativeEditorOverlapRef.current
+                  ) {
+                    scheduleMeasurements();
+                  } else {
+                    updateInset(0);
+                  }
+                  return;
+                }
+                keyboardFrameRef.current = {
+                  screenY: frame.screenY,
+                  height: frame.height,
+                };
+                clearTimers();
+                scheduleMeasurements();
+              },
+              [clearTimers, scheduleMeasurements, updateInset],
+            );
+
+            const onNativeKeyboardGeometry = useCallback(
+              (geometry: ForwardRichTextKeyboardGeometry) => {
+                const editorOverlap = finiteKeyboardValue(
+                  geometry.editorKeyboardOverlap,
+                );
+                nativeEditorOverlapRef.current =
+                  geometry.visible && editorOverlap !== null
+                    ? {
+                        overlap: editorOverlap,
+                        appliedInset: appliedInsetRef.current,
+                      }
+                    : null;
+                nativeKeyboardHeightRef.current = geometry.visible
+                  ? Math.max(
+                      normalizedKeyboardHeight(geometry.imeHeight),
+                      normalizedKeyboardHeight(geometry.frameworkImeHeight),
+                      normalizedKeyboardHeight(geometry.visibleFrameInset),
+                    )
+                  : 0;
+                clearTimers();
+                if (
+                  nativeEditorOverlapRef.current ||
+                  nativeKeyboardHeightRef.current > 0 ||
+                  keyboardFrameRef.current
+                ) {
+                  scheduleMeasurements();
+                } else {
+                  updateInset(0);
+                }
+              },
+              [clearTimers, scheduleMeasurements, updateInset],
+            );
+
+            const refresh = useCallback(() => {
+              if (Platform.OS !== "android") return;
+              clearTimers();
+              for (const delay of METRICS_PROBE_DELAYS_MS) {
+                schedule(delay, () => {
+                  const metrics = Keyboard.metrics();
+                  if (metrics && metrics.height > 0) {
+                    keyboardFrameRef.current = {
+                      screenY: metrics.screenY,
+                      height: metrics.height,
+                    };
+                  }
+                  requestAnimationFrame(measureOverlap);
+                });
+              }
+            }, [clearTimers, measureOverlap, schedule]);
+
+            const onTargetLayout = useCallback(
+              (_event: LayoutChangeEvent) => {
+                if (
+                  Platform.OS !== "android" ||
+                  (!keyboardFrameRef.current &&
+                    nativeKeyboardHeightRef.current <= 0 &&
+                    !nativeEditorOverlapRef.current)
+                ) {
+                  return;
+                }
+                schedule(0, () => requestAnimationFrame(measureOverlap));
+              },
+              [measureOverlap, schedule],
+            );
+
+            useEffect(() => {
+              if (Platform.OS !== "android") return undefined;
+              const showSubscription = Keyboard.addListener(
+                "keyboardDidShow",
+                (event: KeyboardEvent) => rememberFrame(event.endCoordinates),
+              );
+              const hideSubscription = Keyboard.addListener("keyboardDidHide", () => {
+                nativeKeyboardHeightRef.current = 0;
+                nativeEditorOverlapRef.current = null;
+                rememberFrame(null);
+              });
+              const dimensionsSubscription = Dimensions.addEventListener(
+                "change",
+                () => {
+                  const metrics = Keyboard.metrics();
+                  if (metrics && metrics.height > 0) {
+                    keyboardFrameRef.current = {
+                      screenY: metrics.screenY,
+                      height: metrics.height,
+                    };
+                  }
+                  if (
+                    keyboardFrameRef.current ||
+                    nativeKeyboardHeightRef.current > 0 ||
+                    nativeEditorOverlapRef.current
+                  ) {
+                    scheduleMeasurements();
+                  }
+                },
+              );
+
+              return () => {
+                showSubscription.remove();
+                hideSubscription.remove();
+                dimensionsSubscription.remove();
+                keyboardFrameRef.current = null;
+                nativeKeyboardHeightRef.current = 0;
+                nativeEditorOverlapRef.current = null;
+                clearTimers();
+                appliedInsetRef.current = 0;
+              };
+            }, [clearTimers, rememberFrame, scheduleMeasurements]);
+
+            return {
+              bottomInset,
+              onNativeKeyboardGeometry,
+              onTargetLayout,
+              refresh,
+            };
+          }
+          ''').lstrip()
+          Path("features/messenger/useAndroidKeyboardAvoidance.ts").write_text(
+              hook,
+              encoding="utf-8",
+          )
+
+          wrapper = Path(
+              "modules/forward-rich-text-input/src/ForwardRichTextInput.tsx"
+          )
+          wrapper_text = wrapper.read_text(encoding="utf-8")
+          geometry_tail = "  visibleFrameInset?: number;\n}"
+          geometry_replacement = (
+              "  visibleFrameInset?: number;\n"
+              "  editorKeyboardOverlap?: number;\n"
+              "  keyboardTopOnScreen?: number;\n"
+              "  editorBottomOnScreen?: number;\n"
+              "}"
+          )
+          count = wrapper_text.count(geometry_tail)
+          if count != 2:
+              raise SystemExit(
+                  f"Expected two keyboard geometry interfaces, found {count}"
+              )
+          wrapper.write_text(
+              wrapper_text.replace(geometry_tail, geometry_replacement),
+              encoding="utf-8",
+          )
+
+          module = Path(
+              "modules/forward-rich-text-input/android/src/main/java/com/forwardhockey/richtext/ForwardRichTextInputModule.kt"
+          )
+          replace_once(
+              module,
+              'Constant("keyboardGeometryVersion") { 1 }',
+              'Constant("keyboardGeometryVersion") { 2 }',
+          )
+
+          native = Path(
+              "modules/forward-rich-text-input/android/src/main/java/com/forwardhockey/richtext/ForwardRichTextInputView.kt"
+          )
+          replace_once(
+              native,
+              "  private val keyboardRootLocation = IntArray(2)\n",
+              "  private val keyboardRootLocation = IntArray(2)\n"
+              "  private val keyboardEditorLocation = IntArray(2)\n",
+          )
+          native_text = native.read_text(encoding="utf-8")
+          function_start = native_text.index(
+              "  private fun emitKeyboardGeometry(forceHidden: Boolean = false) {"
+          )
+          function_end = native_text.index(
+              "\n  private val formatMenuIds = mapOf(", function_start
+          )
+          new_function = dedent(r'''
+            private fun emitKeyboardGeometry(forceHidden: Boolean = false) {
+              val root = rootView
+              if (root.height <= 0) return
+
+              var frameworkImeInset = 0
+              var frameworkImeVisible = false
+              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                root.rootWindowInsets?.let { insets ->
+                  frameworkImeInset = insets.getInsets(WindowInsets.Type.ime()).bottom
+                  frameworkImeVisible = insets.isVisible(WindowInsets.Type.ime())
+                }
+              }
+
+              root.getWindowVisibleDisplayFrame(keyboardVisibleFrame)
+              root.getLocationOnScreen(keyboardRootLocation)
+              val rootBottomOnScreen = keyboardRootLocation[1] + root.height
+              val visibleFrameInset =
+                (rootBottomOnScreen - keyboardVisibleFrame.bottom).coerceAtLeast(0)
+              val effectiveImeInset = max(frameworkImeInset, visibleFrameInset)
+              val visible =
+                !forceHidden && editor.hasFocus() &&
+                  ((frameworkImeVisible && frameworkImeInset > 0) ||
+                    visibleFrameInset >= dp(80))
+
+              // Keep every value below in the same physical screen coordinate
+              // space. Deriving a top edge later from Dimensions.get("screen")
+              // is unsafe on three-button navigation devices because that screen
+              // height includes the navigation area while the root inset does not.
+              val keyboardTopCandidates = mutableListOf<Int>()
+              if (visible && frameworkImeVisible && frameworkImeInset > 0) {
+                keyboardTopCandidates.add(rootBottomOnScreen - frameworkImeInset)
+              }
+              if (visible && visibleFrameInset >= dp(80)) {
+                keyboardTopCandidates.add(keyboardVisibleFrame.bottom)
+              }
+              val keyboardTopOnScreen =
+                (keyboardTopCandidates.minOrNull() ?: rootBottomOnScreen)
+                  .coerceIn(keyboardRootLocation[1], rootBottomOnScreen)
+
+              val editorAttached = editor.isAttachedToWindow && editor.height > 0
+              if (editorAttached) editor.getLocationOnScreen(keyboardEditorLocation)
+              val editorBottomOnScreen =
+                if (editorAttached) keyboardEditorLocation[1] + editor.height
+                else rootBottomOnScreen
+              val editorKeyboardOverlapPx =
+                if (visible && editorAttached) {
+                  editorBottomOnScreen - keyboardTopOnScreen
+                } else {
+                  0
+                }
+
+              val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
+              fun toDp(value: Int): Int =
+                if (value <= 0) 0
+                else ceil(value.toDouble() / density.toDouble()).toInt()
+              fun toCoordinateDp(value: Int): Double =
+                value.toDouble() / density.toDouble()
+
+              val effectiveDp = toDp(if (visible) effectiveImeInset else 0)
+              val frameworkDp = toDp(frameworkImeInset)
+              val visibleFrameDp = toDp(visibleFrameInset)
+              val editorOverlapDp = toCoordinateDp(editorKeyboardOverlapPx)
+              val keyboardTopDp = toCoordinateDp(keyboardTopOnScreen)
+              val editorBottomDp = toCoordinateDp(editorBottomOnScreen)
+              val signature =
+                "$visible:$effectiveDp:$frameworkDp:$visibleFrameDp:" +
+                  "$editorKeyboardOverlapPx:$keyboardTopOnScreen:$editorBottomOnScreen"
+              if (signature == lastKeyboardGeometrySignature) return
+              lastKeyboardGeometrySignature = signature
+              onKeyboardGeometryChange(
+                mapOf(
+                  "visible" to visible,
+                  "imeHeight" to effectiveDp.toDouble(),
+                  "frameworkImeHeight" to frameworkDp.toDouble(),
+                  "visibleFrameInset" to visibleFrameDp.toDouble(),
+                  "editorKeyboardOverlap" to editorOverlapDp,
+                  "keyboardTopOnScreen" to keyboardTopDp,
+                  "editorBottomOnScreen" to editorBottomDp
+                )
+              )
+            }
+          ''')
+          native.write_text(
+              native_text[:function_start]
+              + new_function
+              + native_text[function_end:],
+              encoding="utf-8",
+          )
+
+          checks = dedent(r'''
+          import assert from "node:assert/strict";
+          import { readFileSync } from "node:fs";
+          import { calculateAndroidKeyboardInset } from "../features/messenger/androidKeyboardAvoidancePolicy.ts";
+
+          const overlay = calculateAndroidKeyboardInset({
+            targetBottom: 780,
+            appliedInset: 0,
+            keyboardScreenY: 500,
+            keyboardHeight: 300,
+            screenHeight: 800,
+          });
+          assert.equal(overlay, 284);
+
+          // Re-measuring after the margin is applied must keep the same correction,
+          // rather than oscillating between the measured inset and zero.
+          assert.equal(
+            calculateAndroidKeyboardInset({
+              targetBottom: 496,
+              appliedInset: overlay,
+              keyboardScreenY: 500,
+              keyboardHeight: 300,
+              screenHeight: 800,
+            }),
+            284,
+          );
+
+          assert.equal(
+            calculateAndroidKeyboardInset({
+              targetBottom: 500,
+              appliedInset: 0,
+              keyboardScreenY: 500,
+              keyboardHeight: 300,
+              screenHeight: 800,
+            }),
+            0,
+          );
+          assert.equal(
+            calculateAndroidKeyboardInset({
+              targetBottom: 610,
+              appliedInset: 0,
+              keyboardScreenY: 500,
+              keyboardHeight: 300,
+              screenHeight: 800,
+            }),
+            114,
+          );
+          assert.equal(
+            calculateAndroidKeyboardInset({
+              targetBottom: 502,
+              appliedInset: 0,
+              keyboardScreenY: 500,
+              keyboardHeight: 300,
+              screenHeight: 800,
+            }),
+            0,
+          );
+          assert.equal(
+            calculateAndroidKeyboardInset({
+              targetBottom: 780,
+              appliedInset: 0,
+              keyboardScreenY: 0,
+              keyboardHeight: 300,
+              screenHeight: 800,
+            }),
+            284,
+          );
+
+          // Legacy MagicOS fallback: a native IME height may expose an earlier top.
+          assert.equal(
+            calculateAndroidKeyboardInset({
+              targetBottom: 550,
+              appliedInset: 0,
+              keyboardScreenY: 560,
+              keyboardHeight: 240,
+              nativeKeyboardHeight: 300,
+              screenHeight: 800,
+            }),
+            54,
+          );
+
+          // New binaries report the signed editor/keyboard overlap directly in one
+          // coordinate space. Only the actually covered part plus 4 dp is applied.
+          const directHonorInset = calculateAndroidKeyboardInset({
+            targetBottom: 0,
+            appliedInset: 0,
+            keyboardScreenY: 0,
+            keyboardHeight: 0,
+            nativeEditorOverlap: 23.4,
+            nativeOverlapAppliedInset: 0,
+            screenHeight: 800,
+          });
+          assert.equal(directHonorInset, 28);
+
+          // The snapshot records which inset was active when native measured the
+          // editor. Re-measuring after movement therefore remains stable.
+          assert.equal(
+            calculateAndroidKeyboardInset({
+              targetBottom: 0,
+              appliedInset: directHonorInset,
+              keyboardScreenY: 0,
+              keyboardHeight: 0,
+              nativeEditorOverlap: -4.1,
+              nativeOverlapAppliedInset: directHonorInset,
+              screenHeight: 800,
+            }),
+            28,
+          );
+
+          // A correctly resized device must not be raised at all, even if legacy
+          // screen metrics would have suggested an overlap.
+          assert.equal(
+            calculateAndroidKeyboardInset({
+              targetBottom: 620,
+              appliedInset: 0,
+              keyboardScreenY: 500,
+              keyboardHeight: 300,
+              nativeEditorOverlap: 0,
+              nativeOverlapAppliedInset: 0,
+              screenHeight: 800,
+            }),
+            0,
+          );
+          assert.equal(
+            calculateAndroidKeyboardInset({
+              targetBottom: 0,
+              appliedInset: 20,
+              keyboardScreenY: 0,
+              keyboardHeight: 0,
+              nativeEditorOverlap: -20,
+              nativeOverlapAppliedInset: 20,
+              screenHeight: 800,
+            }),
+            0,
+          );
+
+          const roomSource = readFileSync(
+            new URL("../app/messenger/room/[id].tsx", import.meta.url),
+            "utf8",
+          );
+          assert.match(roomSource, /useAndroidKeyboardAvoidance\(composerShellRef\)/);
+          assert.match(roomSource, /marginBottom:\s*androidKeyboardInset/);
+          assert.match(roomSource, /refreshAndroidKeyboardAvoidance\(\)/);
+          assert.match(
+            roomSource,
+            /onKeyboardGeometryChange=\{handleNativeKeyboardGeometry\}/,
+          );
+
+          const hookSource = readFileSync(
+            new URL(
+              "../features/messenger/useAndroidKeyboardAvoidance.ts",
+              import.meta.url,
+            ),
+            "utf8",
+          );
+          assert.match(hookSource, /nativeEditorOverlapRef/);
+          assert.match(hookSource, /nativeOverlapAppliedInset/);
+
+          const wrapperSource = readFileSync(
+            new URL(
+              "../modules/forward-rich-text-input/src/ForwardRichTextInput.tsx",
+              import.meta.url,
+            ),
+            "utf8",
+          );
+          assert.match(wrapperSource, /PixelRatio\.get\(\)/);
+          assert.match(wrapperSource, /cachedNativeContentSizeUsesDp/);
+          assert.match(wrapperSource, /cachedNativeKeyboardGeometrySupported/);
+          assert.match(wrapperSource, /editorKeyboardOverlap\?: number/);
+
+          const nativeModuleSource = readFileSync(
+            new URL(
+              "../modules/forward-rich-text-input/android/src/main/java/com/forwardhockey/richtext/ForwardRichTextInputModule.kt",
+              import.meta.url,
+            ),
+            "utf8",
+          );
+          assert.match(
+            nativeModuleSource,
+            /Constant\("keyboardGeometryVersion"\) \{ 2 \}/,
+          );
+          assert.match(nativeModuleSource, /Constant\("contentSizeUnitVersion"\)/);
+          assert.match(nativeModuleSource, /"onKeyboardGeometryChange"/);
+
+          const nativeInputSource = readFileSync(
+            new URL(
+              "../modules/forward-rich-text-input/android/src/main/java/com/forwardhockey/richtext/ForwardRichTextInputView.kt",
+              import.meta.url,
+            ),
+            "utf8",
+          );
+          assert.match(nativeInputSource, /SOFT_INPUT_ADJUST_RESIZE/);
+          assert.match(nativeInputSource, /WindowInsets\.Type\.ime\(\)/);
+          assert.match(nativeInputSource, /getWindowVisibleDisplayFrame/);
+          assert.match(nativeInputSource, /editor\.getLocationOnScreen/);
+          assert.match(nativeInputSource, /"editorKeyboardOverlap" to editorOverlapDp/);
+          assert.match(
+            nativeInputSource,
+            /height\.toDouble\(\) \/ density\.toDouble\(\)/,
+          );
+
+          console.log("Messenger Android keyboard avoidance checks passed.");
+          ''').lstrip()
+          Path("checks/messenger-android-keyboard-avoidance.mjs").write_text(
+              checks,
+              encoding="utf-8",
+          )
+
+          Path(".github/workflows/patch-honor-keyboard-v2.yml").unlink()
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate focused JavaScript and TypeScript
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          git diff --check
+          npm run check:messenger-android-keyboard
+          npm run typecheck
+          npx eslint \
+            features/messenger/androidKeyboardAvoidancePolicy.ts \
+            features/messenger/useAndroidKeyboardAvoidance.ts \
+            modules/forward-rich-text-input/src/ForwardRichTextInput.tsx \
+            checks/messenger-android-keyboard-avoidance.mjs
+
+      - name: Compile Android app and native module
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          npx expo prebuild --platform android --no-install
+          cd android
+          ./gradlew :app:compileDebugKotlin --no-daemon --stacktrace
+
+      - name: Commit exact-overlap fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: use exact native keyboard overlap on Android"
+          git push origin HEAD:fix/minor-fixes-batch
