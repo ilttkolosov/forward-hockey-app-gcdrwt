@@ -1,6 +1,6 @@
 {
   "name": "Natively",
-  "version": "2.4.39",
+  "version": "2.4.40",
   "main": "index.ts",
   "scripts": {
     "dev": "EXPO_NO_TELEMETRY=1 expo start --tunnel",
