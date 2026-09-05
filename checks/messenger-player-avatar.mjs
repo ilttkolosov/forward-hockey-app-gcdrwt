@@ -33,7 +33,7 @@ const authSource = readFileSync(
 assert.match(authSource, /expected_player_id:\s*expectedPlayerId/);
 assert.match(
   authSource,
-  /automaticMessengerAvatarPlayerId\(\s*authenticated\.user,\s*\{ player_id: expectedPlayerId \},\s*\)/,
+  /automaticMessengerAvatarPlayerId\(\s*authenticated\.user,\s*\{ player_id: expectedPlayerId \},?\s*\)/,
 );
 
 const registrationSource = readFileSync(
