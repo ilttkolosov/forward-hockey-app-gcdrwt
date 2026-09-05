@@ -22,6 +22,7 @@ interface NativeEditorOverlapSnapshot {
 
 const MEASUREMENT_DELAYS_MS = [0, 80, 220, 420, 800] as const;
 const METRICS_PROBE_DELAYS_MS = [0, 90, 220, 450, 800, 1_200] as const;
+const ALREADY_RESIZED_VISIBLE_FRAME_TOLERANCE_DP = 24;
 
 interface AndroidKeyboardAvoidanceController {
   bottomInset: number;
@@ -42,6 +43,33 @@ function finiteKeyboardValue(value: number | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value)
     ? value
     : null;
+}
+
+function nativeRootAlreadyResizedForIme(
+  geometry: ForwardRichTextKeyboardGeometry,
+): boolean {
+  if (!geometry.visible) return false;
+  const frameworkImeHeight = normalizedKeyboardHeight(
+    geometry.frameworkImeHeight,
+  );
+  const visibleFrameInset = finiteKeyboardValue(geometry.visibleFrameInset);
+  const editorOverlap = finiteKeyboardValue(geometry.editorKeyboardOverlap);
+
+  // MIUI 14 can expose the full framework IME inset after adjustResize has
+  // already shortened the Activity root. In that state the visible display
+  // frame ends at the resized root (near-zero extra overlap). Treating the
+  // framework inset as another overlay moves the composer by a second keyboard
+  // height. Keep this guard deliberately narrow: it only applies to current
+  // native geometry that reports both visible-frame and direct-overlap data.
+  // MagicOS and older native binaries therefore continue through the existing
+  // direct physical-coordinate/fallback paths unchanged.
+  return (
+    frameworkImeHeight > 0 &&
+    visibleFrameInset !== null &&
+    editorOverlap !== null &&
+    Math.max(0, visibleFrameInset) <=
+      ALREADY_RESIZED_VISIBLE_FRAME_TOLERANCE_DP
+  );
 }
 
 /**
@@ -165,11 +193,12 @@ export function useAndroidKeyboardAvoidance(
       const editorOverlap = finiteKeyboardValue(
         geometry.editorKeyboardOverlap,
       );
+      const rootAlreadyResized = nativeRootAlreadyResizedForIme(geometry);
       nativeEditorOverlapRef.current =
         geometry.visible && editorOverlap !== null
           ? {
-              overlap: editorOverlap,
-              appliedInset: appliedInsetRef.current,
+              overlap: rootAlreadyResized ? 0 : editorOverlap,
+              appliedInset: rootAlreadyResized ? 0 : appliedInsetRef.current,
             }
           : null;
       nativeKeyboardHeightRef.current = geometry.visible
@@ -180,6 +209,17 @@ export function useAndroidKeyboardAvoidance(
           )
         : 0;
       clearTimers();
+
+      if (rootAlreadyResized) {
+        // The OS has already placed the composer above the IME. Reset any
+        // previously applied translation immediately and keep a zero direct
+        // overlap snapshot so keyboardDidShow cannot fall back to a second
+        // full-height compensation on MIUI.
+        updateInset(0);
+        scheduleMeasurements();
+        return;
+      }
+
       if (
         nativeEditorOverlapRef.current ||
         nativeKeyboardHeightRef.current > 0 ||

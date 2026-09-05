@@ -154,6 +154,30 @@ const hookSource = readFileSync(
 );
 assert.match(hookSource, /nativeEditorOverlapRef/);
 assert.match(hookSource, /nativeOverlapAppliedInset/);
+assert.match(
+  hookSource,
+  /ALREADY_RESIZED_VISIBLE_FRAME_TOLERANCE_DP\s*=\s*24/,
+);
+assert.match(
+  hookSource,
+  /frameworkImeHeight > 0[\s\S]*visibleFrameInset !== null[\s\S]*editorOverlap !== null[\s\S]*Math\.max\(0, visibleFrameInset\) <=\s*ALREADY_RESIZED_VISIBLE_FRAME_TOLERANCE_DP/,
+);
+assert.match(
+  hookSource,
+  /overlap:\s*rootAlreadyResized \? 0 : editorOverlap/,
+);
+assert.match(
+  hookSource,
+  /appliedInset:\s*rootAlreadyResized \? 0 : appliedInsetRef\.current/,
+);
+assert.match(
+  hookSource,
+  /if \(rootAlreadyResized\) \{[\s\S]*updateInset\(0\);[\s\S]*scheduleMeasurements\(\);[\s\S]*return;/,
+);
+assert.match(
+  hookSource,
+  /if \(directOverlap\) \{[\s\S]*nativeEditorOverlap:\s*directOverlap\.overlap[\s\S]*nativeOverlapAppliedInset:\s*directOverlap\.appliedInset/,
+);
 
 const wrapperSource = readFileSync(
   new URL(

@@ -33,14 +33,14 @@ const authSource = readFileSync(
 assert.match(authSource, /expected_player_id:\s*expectedPlayerId/);
 assert.match(
   authSource,
-  /automaticMessengerAvatarPlayerId\(\s*authenticated\.user,\s*\{ player_id: expectedPlayerId \},\s*\)/,
+  /automaticMessengerAvatarPlayerId\(\s*authenticated\.user,\s*\{\s*player_id:\s*expectedPlayerId,?\s*\},?\s*\)/,
 );
 
 const registrationSource = readFileSync(
   new URL("../app/messenger/register.tsx", import.meta.url),
   "utf8",
 );
-assert.match(registrationSource, /expected_player_id:\s*preview\?\.player_id/);
+assert.match(registrationSource, /expected_player_id:\s*preview\??\.player_id/);
 
 const playerDataSource = readFileSync(
   new URL("../services/playerDataService.ts", import.meta.url),
