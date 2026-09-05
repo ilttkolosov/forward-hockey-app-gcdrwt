@@ -40,7 +40,7 @@ const registrationSource = readFileSync(
   new URL("../app/messenger/register.tsx", import.meta.url),
   "utf8",
 );
-assert.match(registrationSource, /expected_player_id:\s*preview\?\.player_id/);
+assert.match(registrationSource, /expected_player_id:\s*preview\??\.player_id/);
 
 const playerDataSource = readFileSync(
   new URL("../services/playerDataService.ts", import.meta.url),
