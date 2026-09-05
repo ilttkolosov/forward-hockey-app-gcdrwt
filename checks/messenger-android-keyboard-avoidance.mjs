@@ -160,7 +160,7 @@ assert.match(
 );
 assert.match(
   hookSource,
-  /frameworkImeHeight > 0\s*&&\s*visibleFrameInset <=\s*ALREADY_RESIZED_VISIBLE_FRAME_TOLERANCE_DP/s,
+  /frameworkImeHeight > 0[\s\S]*visibleFrameInset !== null[\s\S]*editorOverlap !== null[\s\S]*Math\.max\(0, visibleFrameInset\) <=\s*ALREADY_RESIZED_VISIBLE_FRAME_TOLERANCE_DP/,
 );
 assert.match(
   hookSource,
