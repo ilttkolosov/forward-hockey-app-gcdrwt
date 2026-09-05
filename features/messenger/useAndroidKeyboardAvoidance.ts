@@ -52,20 +52,23 @@ function nativeRootAlreadyResizedForIme(
   const frameworkImeHeight = normalizedKeyboardHeight(
     geometry.frameworkImeHeight,
   );
-  const visibleFrameInset = normalizedKeyboardHeight(
-    geometry.visibleFrameInset,
-  );
+  const visibleFrameInset = finiteKeyboardValue(geometry.visibleFrameInset);
+  const editorOverlap = finiteKeyboardValue(geometry.editorKeyboardOverlap);
 
   // MIUI 14 can expose the full framework IME inset after adjustResize has
   // already shortened the Activity root. In that state the visible display
   // frame ends at the resized root (near-zero extra overlap). Treating the
   // framework inset as another overlay moves the composer by a second keyboard
-  // height. Keep this guard deliberately narrow: MagicOS devices whose visible
-  // frame still shows the IME overlap continue through the existing direct
-  // physical-coordinate path unchanged.
+  // height. Keep this guard deliberately narrow: it only applies to current
+  // native geometry that reports both visible-frame and direct-overlap data.
+  // MagicOS and older native binaries therefore continue through the existing
+  // direct physical-coordinate/fallback paths unchanged.
   return (
     frameworkImeHeight > 0 &&
-    visibleFrameInset <= ALREADY_RESIZED_VISIBLE_FRAME_TOLERANCE_DP
+    visibleFrameInset !== null &&
+    editorOverlap !== null &&
+    Math.max(0, visibleFrameInset) <=
+      ALREADY_RESIZED_VISIBLE_FRAME_TOLERANCE_DP
   );
 }
 
