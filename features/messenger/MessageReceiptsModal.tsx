@@ -60,6 +60,7 @@ function RecipientGroup({
             displayName={recipient.display_name}
             avatarUrl={recipient.avatar_url}
             accessToken={accessToken}
+            identityKey={recipient.user_id}
             size={40}
           />
           <View style={styles.recipientText}>
@@ -70,6 +71,14 @@ function RecipientGroup({
               {receiptTime(recipient.read_at || recipient.delivered_at)}
             </Text>
           </View>
+          {recipient.reaction ? (
+            <Text
+              style={styles.recipientReaction}
+              accessibilityLabel={`Реакция ${recipient.reaction}`}
+            >
+              {recipient.reaction}
+            </Text>
+          ) : null}
         </View>
       ))}
     </View>
@@ -143,6 +152,9 @@ export default function MessageReceiptsModal({
             <ScrollView
               style={styles.list}
               contentContainerStyle={styles.listContent}
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator
             >
               <RecipientGroup
                 title="Просмотрели"
@@ -187,7 +199,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(16, 40, 68, 0.38)",
   },
   sheet: {
-    maxHeight: "82%",
+    height: "82%",
     padding: 16,
     paddingBottom: 10,
     borderRadius: 22,
@@ -203,8 +215,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  list: { flexGrow: 0 },
-  listContent: { paddingBottom: 8 },
+  list: { flex: 1, minHeight: 0 },
+  listContent: { paddingBottom: 18 },
   group: { marginTop: 12 },
   groupHeader: {
     flexDirection: "row",
@@ -235,7 +247,14 @@ const styles = StyleSheet.create({
   recipientText: { flex: 1, minWidth: 0 },
   recipientName: { color: colors.text, fontSize: 14, fontWeight: "700" },
   recipientTime: { marginTop: 2, color: colors.textSecondary, fontSize: 11 },
+  recipientReaction: {
+    minWidth: 36,
+    marginLeft: 4,
+    fontSize: 24,
+    textAlign: "center",
+  },
   state: {
+    flex: 1,
     minHeight: 170,
     alignItems: "center",
     justifyContent: "center",
