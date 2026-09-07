@@ -23,6 +23,8 @@ jobs:
           rm scripts/apply-chat-pinning.py .github/workflows/pinning-workbench.yml
           git diff --check
       - run: npm ci
+      - name: Format new modules
+        run: npx --yes prettier@3.9.6 --write features/messenger/pins.ts features/messenger/usePinnedMessages.ts features/messenger/PinnedMessagesBanner.tsx services/messengerPins.ts checks/messenger-pins.mjs
       - name: Verify pin state policy
         run: node --no-warnings --experimental-strip-types checks/messenger-pins.mjs
       - name: Typecheck and regression checks
@@ -34,10 +36,11 @@ jobs:
         run: npx expo export --platform android --output-dir /tmp/forward-pinning-export
       - name: Commit verified implementation
         run: |
+          git restore --source=HEAD .github/
           node scripts/bump-app-version.mjs patch
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .github/workflows/quality.yml .github/workflows/pinning-workbench.yml scripts/apply-chat-pinning.py app/messenger/room/'[id].tsx' services/messengerRealtime.ts features/messenger/pins.ts features/messenger/usePinnedMessages.ts features/messenger/PinnedMessagesBanner.ts services/messengerPins.ts checks/messenger-pins.mjs docs/CHAT_PINNING.md app.config.js package.json package-lock.json
+          git add scripts/apply-chat-pinning.py app/messenger/room/'[id].tsx' services/messengerRealtime.ts features/messenger/pins.ts features/messenger/usePinnedMessages.ts features/messenger/PinnedMessagesBanner.tsx services/messengerPins.ts checks/messenger-pins.mjs docs/CHAT_PINNING.md app.config.js package.json package-lock.json
           git commit -m 'feat: add shared chat pin banner and navigation [versioned]'
           git push origin HEAD:feat/chat-message-pinning
       - name: Export verification snapshot
