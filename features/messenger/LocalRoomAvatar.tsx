@@ -80,7 +80,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(23, 52, 87, 0.14)",
-    backgroundColor: "#397BC0",
+    backgroundColor: "#FFFFFF",
   },
   image: { width: "100%", height: "100%" },
 });
