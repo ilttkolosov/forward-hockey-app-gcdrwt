@@ -34,6 +34,9 @@ jobs:
       - name: Typecheck and lint
         run: npm run check
 
+      - name: Verify pinned message ordering and previews
+        run: node --no-warnings --experimental-strip-types checks/messenger-pins.mjs
+
       - name: Validate Expo config
         env:
           CI: '1'
