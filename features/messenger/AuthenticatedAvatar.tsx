@@ -9,6 +9,7 @@ import {
   resolveMessengerAvatarIdentity,
 } from "./avatarIdentity";
 import AvatarInitials from "./AvatarInitials";
+import SavedMessagesAvatar from "./SavedMessagesAvatar";
 
 interface AuthenticatedAvatarProps {
   displayName: string;
@@ -90,6 +91,10 @@ function AuthenticatedAvatar({
       identityKey &&
       identityKey !== session?.user.id,
   );
+
+  if (!uri && displayName === "Избранное" && session?.user.id) {
+    return <SavedMessagesAvatar size={size} userId={session.user.id} />;
+  }
 
   const avatar = (
     <View
