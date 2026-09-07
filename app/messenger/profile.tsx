@@ -1,5 +1,4 @@
 import { Image } from "expo-image";
-import { Asset } from "expo-asset";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
@@ -7,6 +6,7 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image as NativeImage,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -173,14 +173,17 @@ export default function MessengerProfileScreen() {
     }
   };
 
-  const choosePresetAvatar = async (preset: MessengerPresetAvatar) => {
+  const choosePresetAvatar = (preset: MessengerPresetAvatar) => {
     try {
-      const asset = Asset.fromModule(preset.source);
-      await asset.downloadAsync();
+      // Presets are packaged with the application. Resolve the bundled resource
+      // directly instead of calling Asset.downloadAsync(), which can attempt a
+      // network fetch on some Expo/Android combinations and fail offline.
+      const source = NativeImage.resolveAssetSource(preset.source);
+      if (!source?.uri) throw new Error("Локальный ресурс аватара недоступен");
       setSelectedAsset({
-        uri: asset.localUri || asset.uri,
-        width: asset.width || 512,
-        height: asset.height || 512,
+        uri: source.uri,
+        width: source.width || 512,
+        height: source.height || 512,
         fileName: `${preset.id}.png`,
         mimeType: "image/png",
       });
@@ -227,7 +230,7 @@ export default function MessengerProfileScreen() {
         await uploadMessengerAvatar(preparedAvatar);
       }
       await refreshUser();
-          setSelectedAsset(null);
+      setSelectedAsset(null);
       console.log("[Messenger profile] Профиль пользователя сохранён");
       messengerLog("info", "profile.save.completed", {
         avatar_uploaded: Boolean(selectedAsset),
@@ -797,7 +800,7 @@ export default function MessengerProfileScreen() {
                 <TouchableOpacity
                   key={preset.id}
                   style={styles.presetAvatarChoice}
-                  onPress={() => void choosePresetAvatar(preset)}
+                  onPress={() => choosePresetAvatar(preset)}
                   accessibilityLabel={`Выбрать аватар ${preset.title}`}
                 >
                   <Image
