@@ -60,6 +60,7 @@ let pushRegistrationSyncState: {
 } | null = null;
 const pushEventCacheInFlight = new Map<string, Promise<void>>();
 const PUSH_DATABASE_RETRY_DELAYS_MS = [80, 240, 600] as const;
+const PUSH_TOKEN_RETRY_DELAYS_MS = [800, 2_000] as const;
 
 type NotificationPermissionRequest = "never" | "explicit" | "restore";
 
@@ -109,12 +110,23 @@ function nativePushTokenIdentity(
   return `${userId}:${token.type}:${data}`;
 }
 
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function isSQLiteBusyError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorText(error);
   return (
     /database is locked/i.test(message) ||
     /SQLITE_BUSY/i.test(message) ||
     /Error code 5/i.test(message)
+  );
+}
+
+function isTransientAndroidPushTokenError(error: unknown): boolean {
+  return (
+    Platform.OS === "android" &&
+    /SERVICE_NOT_AVAILABLE/i.test(errorText(error))
   );
 }
 
@@ -180,11 +192,32 @@ export async function getProjectExpoPushToken(): Promise<string> {
     );
   }
   await ensureMessengerNotificationChannel();
-  const token = await Notifications.getExpoPushTokenAsync({
-    projectId: expoProjectId(),
-  });
-  await AsyncStorage.setItem(SHARED_EXPO_PUSH_TOKEN_KEY, token.data);
-  return token.data;
+  const projectId = expoProjectId();
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const token = await Notifications.getExpoPushTokenAsync({ projectId });
+      await AsyncStorage.setItem(SHARED_EXPO_PUSH_TOKEN_KEY, token.data);
+      return token.data;
+    } catch (error) {
+      if (!isTransientAndroidPushTokenError(error)) throw error;
+      const delay = PUSH_TOKEN_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined) {
+        messengerLog("warn", "push.token.service_unavailable", {
+          attempts: attempt + 1,
+          message: errorText(error),
+        });
+        throw new Error(
+          "Не удалось получить PUSH-токен от сервисов Google. Проверьте интернет и работу сервисов Google Play, затем повторите попытку.",
+        );
+      }
+      messengerLog("debug", "push.token.service_unavailable_retry", {
+        attempt: attempt + 1,
+        delay_ms: delay,
+      });
+      await wait(delay);
+    }
+  }
 }
 
 async function ensureNotificationPermission(
