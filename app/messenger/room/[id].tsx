@@ -50,6 +50,9 @@ import {
   reconcileMessengerMessageUpdates,
 } from "../../../features/messenger/feed";
 import MessageReceiptsModal from "../../../features/messenger/MessageReceiptsModal";
+import PinnedMessagesBanner from "../../../features/messenger/PinnedMessagesBanner";
+import { usePinnedMessages } from "../../../features/messenger/usePinnedMessages";
+import { currentMessengerPinId, nextMessengerPinId } from "../../../features/messenger/pins";
 import {
   messageDeletionAvailable,
   messageMutationAvailable,
@@ -1006,7 +1009,10 @@ const MessengerMessageListItem = React.memo(function MessengerMessageListItem({
       <View collapsable={false}>
         {unreadMarker && <UnreadDivider />}
         <View style={styles.systemMessageRow}>
-          <View style={styles.systemMessage}>
+          <Pressable style={styles.systemMessage} disabled={!item.reply_to}
+            accessibilityRole={item.reply_to ? "button" : undefined}
+            accessibilityHint={item.reply_to ? "Перейти к исходному сообщению" : undefined}
+            onPress={() => { if (item.reply_to) onNavigateToReply(item.reply_to); }}>
             <Text style={styles.systemMessageText}>{body}</Text>
             <Text style={styles.systemMessageTime}>
               {new Date(item.created_at).toLocaleTimeString("ru-RU", {
@@ -1014,7 +1020,7 @@ const MessengerMessageListItem = React.memo(function MessengerMessageListItem({
                 minute: "2-digit",
               })}
             </Text>
-          </View>
+          </Pressable>
         </View>
       </View>
     );
@@ -1397,6 +1403,11 @@ export default function MessengerRoomScreen() {
   const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
   const [listReady, setListReady] = useState(false);
   const [roomScreenActive, setRoomScreenActive] = useState(false);
+  const pins = usePinnedMessages(roomId, session?.user.id, roomScreenActive);
+  const [pinSelection, setPinSelection] = useState<{ roomId: string; selected: string | null; visited: string | null }>({ roomId: "", selected: null, visited: null });
+  const [pinNavigationBusy, setPinNavigationBusy] = useState(false);
+  const pinNavigationLock = useRef(false);
+  const currentPinId = currentMessengerPinId(pins.items, pinSelection.roomId === roomId ? pinSelection.selected : null);
   const [viewableMessageIds, setViewableMessageIds] = useState<Set<string>>(
     new Set(),
   );
@@ -1632,7 +1643,7 @@ export default function MessengerRoomScreen() {
             openedAt: String(Date.now()),
           },
         });
-        return;
+        return true;
       }
       beginManualFeedNavigation();
       try {
@@ -1683,10 +1694,12 @@ export default function MessengerRoomScreen() {
         requestAnimationFrame(() =>
           requestAnimationFrame(positionMessageNavigationTarget),
         );
+        return true;
       } catch (error) {
         setSyncError(
           messengerErrorMessage(error, "Не удалось открыть исходное сообщение"),
         );
+        return false;
       }
     },
     [
@@ -4645,6 +4658,35 @@ export default function MessengerRoomScreen() {
     });
   }, [roomType]);
 
+  const navigateToPinnedMessage = useCallback(async () => {
+    const pin = pins.items.find((item) => item.message.id === currentPinId);
+    if (!pin || pinNavigationLock.current) return;
+    pinNavigationLock.current = true;
+    setPinNavigationBusy(true);
+    try {
+      if (authorFilter) clearAuthorFilter();
+      // Let the unfiltered FlatList commit before requesting its target index.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (await navigateToRepliedMessage(pin.message)) {
+        setPinSelection({ roomId, visited: pin.message.id, selected: nextMessengerPinId(pins.items, pin.message.id) });
+      }
+    } finally {
+      pinNavigationLock.current = false;
+      setPinNavigationBusy(false);
+    }
+  }, [authorFilter, clearAuthorFilter, currentPinId, navigateToRepliedMessage, pins.items, roomId]);
+
+  const toggleMessagePinned = useCallback(async (message: MessengerMessage) => {
+    const pinned = pins.items.some((item) => item.message.id === message.id);
+    setActionMessage(null);
+    try {
+      await pins.setPinned(message.id, !pinned);
+      if (!pinned) setPinSelection({ roomId, selected: message.id, visited: null });
+    } catch (error) {
+      Alert.alert("Закрепление сообщения", messengerErrorMessage(error, "Не удалось изменить закрепление"));
+    }
+  }, [pins, roomId]);
+
   const openForward = useCallback(async (message: MessengerMessage) => {
     setForwardingMessage(message);
     setForwardLoading(true);
@@ -5229,6 +5271,14 @@ export default function MessengerRoomScreen() {
           </TouchableOpacity>
         </View>
 
+        <PinnedMessagesBanner
+          items={pins.items}
+          messageId={currentPinId}
+          visitedId={pinSelection.roomId === roomId ? pinSelection.visited : null}
+          busy={pinNavigationBusy}
+          onPress={() => void navigateToPinnedMessage()}
+        />
+
         {authorFilter && (
           <View style={styles.authorFilterBanner}>
             <Icon name="funnel" size={18} color={colors.primary} />
@@ -5628,6 +5678,15 @@ export default function MessengerRoomScreen() {
                       />
                     )}
                     <Text style={styles.messageActionText}>Сохранить</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {actionMessage && pins.canPin && !actionMessage.pending && !actionMessage.deleted_at && actionMessage.kind !== "system" ? (
+                  <TouchableOpacity style={styles.messageAction} disabled={pins.busy}
+                    onPress={() => void toggleMessagePinned(actionMessage)}>
+                    <Icon name="pin-outline" size={21} color={colors.primary} />
+                    <Text style={styles.messageActionText}>
+                      {pins.items.some((item) => item.message.id === actionMessage.id) ? "Открепить сообщение" : "Закрепить сообщение"}
+                    </Text>
                   </TouchableOpacity>
                 ) : null}
                 {actionMessageEditable && actionMessage ? (
