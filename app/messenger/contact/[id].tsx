@@ -25,8 +25,12 @@ import { useMessengerAuth } from "../../../contexts/MessengerAuthContext";
 import AuthenticatedAvatar from "../../../features/messenger/AuthenticatedAvatar";
 import LeaveMessengerRoomButton from "../../../features/messenger/LeaveMessengerRoomButton";
 import MessengerAvatarViewer from "../../../features/messenger/MessengerAvatarViewer";
+import MessengerProfileMediaTab from "../../../features/messenger/MessengerProfileMediaTab";
 import MessengerSafetyActions from "../../../features/messenger/MessengerSafetyActions";
-import type { MessengerContactProfile } from "../../../features/messenger/types";
+import type {
+  MessengerContactProfile,
+  MessengerMessage,
+} from "../../../features/messenger/types";
 import {
   createMessengerDirectRoom,
   getMessengerRoomMemberProfile,
@@ -49,6 +53,8 @@ const ROLE_LABELS: Record<string, string> = {
   fan: "Болельщик",
   administrator: "Администратор",
 };
+
+type ProfileTab = "settings" | "media";
 
 function lastSeenText(value: string | null): string {
   if (!value) return "Не в сети";
@@ -88,6 +94,7 @@ export default function MessengerContactProfileScreen() {
   const [avatarVisible, setAvatarVisible] = useState(false);
   const [canLeave, setCanLeave] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<ProfileTab>("settings");
 
   const load = useCallback(async () => {
     if (!isAuthenticated || !roomId) return;
@@ -118,9 +125,7 @@ export default function MessengerContactProfileScreen() {
       void getMessengerRooms({ priority: "foreground" })
         .then((rooms) => {
           const room = rooms.find((candidate) => candidate.id === roomId);
-          setCanLeave(
-            Boolean(room?.can_leave && room.room_type === "direct"),
-          );
+          setCanLeave(Boolean(room?.can_leave && room.room_type === "direct"));
         })
         .catch((roomError) =>
           messengerLog("debug", "contact_profile.room_deferred", {
@@ -140,9 +145,6 @@ export default function MessengerContactProfileScreen() {
         presence_source: presenceWasPassed ? "navigation" : "deferred",
       });
 
-      // The profile response contains every field required to render the
-      // card. Presence is secondary and must never hold the entire screen
-      // behind a request for all room members.
       if (!presenceWasPassed) {
         void getMessengerRoomMembers(roomId, { priority: "background" })
           .then((members) => {
@@ -200,12 +202,13 @@ export default function MessengerContactProfileScreen() {
 
   useEffect(() => {
     const subscription = Keyboard.addListener("keyboardDidShow", () => {
+      if (activeTab !== "settings") return;
       requestAnimationFrame(() =>
         scrollRef.current?.scrollToEnd({ animated: true }),
       );
     });
     return () => subscription.remove();
-  }, []);
+  }, [activeTab]);
 
   const normalizedAlias = alias.trim();
   const aliasChanged = normalizedAlias !== (profile?.alias || "");
@@ -278,6 +281,32 @@ export default function MessengerContactProfileScreen() {
     }
   };
 
+  const showMessageInChat = useCallback(
+    (message: MessengerMessage) => {
+      router.push({
+        pathname: "/messenger/room/[id]",
+        params: {
+          id: roomId,
+          title: profile?.display_name || "Чат",
+          pushMessageId: message.id,
+          pushSequence: message.sequence,
+          openedAt: String(Date.now()),
+        },
+      });
+    },
+    [profile?.display_name, roomId, router],
+  );
+
+  const forwardMessage = useCallback(
+    (message: MessengerMessage) => {
+      router.push({
+        pathname: "/messenger/forward",
+        params: { messageId: message.id },
+      });
+    },
+    [router],
+  );
+
   return (
     <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.header}>
@@ -290,7 +319,7 @@ export default function MessengerContactProfileScreen() {
         </TouchableOpacity>
         <View style={styles.headerText}>
           <Text style={styles.headerTitle}>Профиль пользователя</Text>
-          <Text style={styles.headerSubtitle}>Личные настройки контакта</Text>
+          <Text style={styles.headerSubtitle}>Информация, настройки и медиа</Text>
         </View>
       </View>
 
@@ -321,11 +350,6 @@ export default function MessengerContactProfileScreen() {
                 activeOpacity={0.86}
                 accessibilityRole={profile.avatar_url ? "button" : undefined}
                 accessibilityLabel={`Фотография ${profile.display_name}`}
-                accessibilityHint={
-                  profile.avatar_url
-                    ? "Открывает фотографию на весь экран"
-                    : undefined
-                }
               >
                 <AuthenticatedAvatar
                   displayName={profile.display_name}
@@ -342,7 +366,14 @@ export default function MessengerContactProfileScreen() {
                   Настоящее имя: {profile.original_display_name}
                 </Text>
               ) : null}
-              <Text style={styles.username}>@{profile.username}</Text>
+              <View style={styles.identityRow}>
+                <Text style={styles.username}>@{profile.username}</Text>
+                {roleLabels.map((role) => (
+                  <View key={role} style={styles.roleChip}>
+                    <Text style={styles.roleText}>{role}</Text>
+                  </View>
+                ))}
+              </View>
               <View style={styles.statusRow}>
                 <View
                   style={[
@@ -354,27 +385,11 @@ export default function MessengerContactProfileScreen() {
                   {online ? "В сети" : lastSeenText(lastSeenAt)}
                 </Text>
               </View>
-              <Text style={styles.team}>{profile.team_name}</Text>
-              <View style={styles.roles}>
-                {roleLabels.length ? (
-                  roleLabels.map((role) => (
-                    <View key={role} style={styles.roleChip}>
-                      <Text style={styles.roleText}>{role}</Text>
-                    </View>
-                  ))
-                ) : (
-                  <Text style={styles.noRoles}>
-                    Роли в этой команде не назначены
-                  </Text>
-                )}
-              </View>
               {profile.id !== session.user.id ? (
                 <TouchableOpacity
                   style={styles.messageButton}
                   onPress={() => void openDirectChat()}
                   disabled={openingChat}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Написать ${profile.display_name}`}
                 >
                   {openingChat ? (
                     <ActivityIndicator size="small" color={colors.white} />
@@ -394,69 +409,130 @@ export default function MessengerContactProfileScreen() {
               ) : null}
             </View>
 
-            <View style={styles.aliasCard}>
-              <Text style={styles.sectionTitle}>Псевдоним</Text>
-              <Text style={styles.helper}>
-                Он виден только вам и заменяет имя этого пользователя во всех
-                чатах, группах и меню.
-              </Text>
-              <TextInput
-                style={styles.input}
-                value={alias}
-                onChangeText={(value) => {
-                  setAlias(value);
-                  setSaved(false);
-                  setError(null);
-                }}
-                maxLength={80}
-                placeholder={profile.original_display_name}
-                autoCapitalize="words"
-                returnKeyType="done"
-                onFocus={() =>
-                  requestAnimationFrame(() =>
-                    scrollRef.current?.scrollToEnd({ animated: true }),
-                  )
-                }
-                onSubmitEditing={() => void saveAlias()}
-              />
-              <Text style={styles.inputHint}>
-                Оставьте поле пустым, чтобы снова показывать настоящее имя.
-              </Text>
-              {saved ? (
-                <Text style={styles.saved}>Псевдоним сохранён</Text>
-              ) : null}
-              {error ? <Text style={styles.error}>{error}</Text> : null}
+            <View style={styles.tabs}>
               <TouchableOpacity
-                style={[styles.saveButton, !canSave && styles.disabled]}
-                onPress={() => void saveAlias()}
-                disabled={!canSave}
+                style={[
+                  styles.tab,
+                  activeTab === "settings" && styles.tabActive,
+                ]}
+                onPress={() => setActiveTab("settings")}
               >
-                {saving ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Text style={styles.saveText}>
-                    {normalizedAlias
-                      ? "Сохранить псевдоним"
-                      : "Удалить псевдоним"}
-                  </Text>
-                )}
+                <Icon
+                  name="settings-outline"
+                  size={18}
+                  color={
+                    activeTab === "settings"
+                      ? colors.primary
+                      : colors.textSecondary
+                  }
+                />
+                <Text
+                  style={[
+                    styles.tabText,
+                    activeTab === "settings" && styles.tabTextActive,
+                  ]}
+                >
+                  Настройки
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.tab,
+                  activeTab === "media" && styles.tabActive,
+                ]}
+                onPress={() => setActiveTab("media")}
+              >
+                <Icon
+                  name="images-outline"
+                  size={18}
+                  color={
+                    activeTab === "media"
+                      ? colors.primary
+                      : colors.textSecondary
+                  }
+                />
+                <Text
+                  style={[
+                    styles.tabText,
+                    activeTab === "media" && styles.tabTextActive,
+                  ]}
+                >
+                  Медиа
+                </Text>
               </TouchableOpacity>
             </View>
 
-            {profile.id !== session.user.id ? (
-              <MessengerSafetyActions
-                targetUserId={profile.id}
-                targetDisplayName={profile.display_name}
-                roomId={roomId}
-              />
-            ) : null}
+            {activeTab === "settings" ? (
+              <>
+                <View style={styles.aliasCard}>
+                  <Text style={styles.sectionTitle}>Псевдоним</Text>
+                  <Text style={styles.helper}>
+                    Он виден только вам и заменяет имя этого пользователя во всех
+                    чатах, группах и меню.
+                  </Text>
+                  <TextInput
+                    style={styles.input}
+                    value={alias}
+                    onChangeText={(value) => {
+                      setAlias(value);
+                      setSaved(false);
+                      setError(null);
+                    }}
+                    maxLength={80}
+                    placeholder={profile.original_display_name}
+                    autoCapitalize="words"
+                    returnKeyType="done"
+                    onSubmitEditing={() => void saveAlias()}
+                  />
+                  <Text style={styles.inputHint}>
+                    Оставьте поле пустым, чтобы снова показывать настоящее имя.
+                  </Text>
+                  {saved ? (
+                    <Text style={styles.saved}>Псевдоним сохранён</Text>
+                  ) : null}
+                  {error ? <Text style={styles.error}>{error}</Text> : null}
+                  <TouchableOpacity
+                    style={[styles.saveButton, !canSave && styles.disabled]}
+                    onPress={() => void saveAlias()}
+                    disabled={!canSave}
+                  >
+                    {saving ? (
+                      <ActivityIndicator color={colors.white} />
+                    ) : (
+                      <Text style={styles.saveText}>
+                        {normalizedAlias
+                          ? "Сохранить псевдоним"
+                          : "Удалить псевдоним"}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
 
-            <LeaveMessengerRoomButton
-              roomId={roomId}
-              roomType="direct"
-              canLeave={canLeave}
-              onLeft={() => router.dismissTo("/messenger/rooms")}
-            />
+                {profile.id !== session.user.id ? (
+                  <MessengerSafetyActions
+                    targetUserId={profile.id}
+                    targetDisplayName={profile.display_name}
+                    roomId={roomId}
+                  />
+                ) : null}
+
+                <LeaveMessengerRoomButton
+                  roomId={roomId}
+                  roomType="direct"
+                  canLeave={canLeave}
+                  onLeft={() => router.dismissTo("/messenger/rooms")}
+                />
+              </>
+            ) : (
+              <View style={styles.mediaCard}>
+                <MessengerProfileMediaTab
+                  roomId={roomId}
+                  accessToken={session.access_token}
+                  onShowInChat={showMessageInChat}
+                  onForward={forwardMessage}
+                />
+              </View>
+            )}
           </ScrollView>
         ) : (
           <View style={styles.center}>
@@ -538,7 +614,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: "center",
   },
-  username: { marginTop: 5, color: colors.textSecondary, fontSize: 13 },
+  identityRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  username: { color: colors.textSecondary, fontSize: 13 },
+  roleChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+    backgroundColor: "#EAF3FF",
+  },
+  roleText: { color: colors.primary, fontSize: 10, fontWeight: "800" },
   statusRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -549,22 +640,6 @@ const styles = StyleSheet.create({
   statusDotOnline: { backgroundColor: "#2FA84F" },
   statusDotOffline: { backgroundColor: colors.textSecondary },
   statusText: { color: colors.textSecondary, fontSize: 12 },
-  team: { marginTop: 10, color: colors.text, fontSize: 13, fontWeight: "700" },
-  roles: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: 7,
-    marginTop: 12,
-  },
-  roleChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    backgroundColor: "#EAF3FF",
-  },
-  roleText: { color: colors.primary, fontSize: 11, fontWeight: "800" },
-  noRoles: { color: colors.textSecondary, fontSize: 12 },
   messageButton: {
     minHeight: 48,
     width: "100%",
@@ -578,8 +653,35 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   messageButtonText: { color: colors.white, fontSize: 14, fontWeight: "800" },
+  tabs: {
+    flexDirection: "row",
+    padding: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 16,
+    backgroundColor: colors.surface,
+  },
+  tab: {
+    flex: 1,
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    borderRadius: 12,
+  },
+  tabActive: { backgroundColor: "#EAF3FF" },
+  tabText: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
+  tabTextActive: { color: colors.primary },
   aliasCard: {
     padding: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+  },
+  mediaCard: {
+    padding: 10,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 20,
