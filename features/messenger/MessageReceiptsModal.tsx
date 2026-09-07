@@ -7,8 +7,10 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
 import { colors } from "../../styles/commonStyles";
 import AuthenticatedAvatar from "./AuthenticatedAvatar";
@@ -95,6 +97,8 @@ export default function MessageReceiptsModal({
   onClose,
   onRetry,
 }: MessageReceiptsModalProps) {
+  const { height: viewportHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const groups = useMemo(
     () => ({
       read: recipients.filter((recipient) => recipient.status === "read"),
@@ -105,6 +109,20 @@ export default function MessageReceiptsModal({
     }),
     [recipients],
   );
+  const populatedGroups = [groups.read, groups.delivered, groups.sent].filter(
+    (group) => group.length > 0,
+  ).length;
+  const naturalHeight =
+    loading || error || recipients.length === 0
+      ? 220
+      : 82 +
+        recipients.length * 56 +
+        populatedGroups * 35 +
+        Math.max(insets.bottom, 10);
+  const sheetHeight = Math.min(
+    Math.max(170, naturalHeight),
+    Math.max(260, viewportHeight * 0.78),
+  );
 
   return (
     <Modal
@@ -113,11 +131,19 @@ export default function MessageReceiptsModal({
       animationType="slide"
       onRequestClose={onClose}
     >
-      <Pressable style={styles.backdrop} onPress={onClose}>
+      <View style={styles.backdrop}>
         <Pressable
-          style={styles.sheet}
-          onPress={(event) => event.stopPropagation()}
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityLabel="Закрыть статусы сообщения"
+        />
+        <View
+          style={[
+            styles.sheet,
+            { height: sheetHeight, paddingBottom: Math.max(insets.bottom, 10) },
+          ]}
         >
+          <View style={styles.handle} />
           <View style={styles.header}>
             <View style={styles.headerText}>
               <Text style={styles.title}>Статусы сообщения</Text>
@@ -155,6 +181,7 @@ export default function MessageReceiptsModal({
               nestedScrollEnabled
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator
+              alwaysBounceVertical={false}
             >
               <RecipientGroup
                 title="Просмотрели"
@@ -185,8 +212,8 @@ export default function MessageReceiptsModal({
               <Text style={styles.empty}>У сообщения нет получателей</Text>
             </View>
           )}
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -195,17 +222,26 @@ const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
     justifyContent: "flex-end",
-    padding: 14,
+    paddingHorizontal: 10,
+    paddingBottom: 6,
     backgroundColor: "rgba(16, 40, 68, 0.38)",
   },
   sheet: {
-    height: "82%",
-    padding: 16,
-    paddingBottom: 10,
+    maxHeight: "78%",
+    paddingHorizontal: 16,
+    paddingTop: 8,
     borderRadius: 22,
     backgroundColor: colors.surface,
   },
-  header: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
+  handle: {
+    width: 38,
+    height: 4,
+    alignSelf: "center",
+    marginBottom: 7,
+    borderRadius: 2,
+    backgroundColor: "#CBD2D9",
+  },
+  header: { flexDirection: "row", alignItems: "center", marginBottom: 4 },
   headerText: { flex: 1, minWidth: 0 },
   title: { color: colors.text, fontSize: 18, fontWeight: "800" },
   subtitle: { marginTop: 3, color: colors.textSecondary, fontSize: 12 },
@@ -216,8 +252,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   list: { flex: 1, minHeight: 0 },
-  listContent: { paddingBottom: 18 },
-  group: { marginTop: 12 },
+  listContent: { paddingBottom: 8 },
+  group: { marginTop: 8 },
   groupHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -255,7 +291,7 @@ const styles = StyleSheet.create({
   },
   state: {
     flex: 1,
-    minHeight: 170,
+    minHeight: 120,
     alignItems: "center",
     justifyContent: "center",
     gap: 8,

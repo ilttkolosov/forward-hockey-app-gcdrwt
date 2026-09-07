@@ -75,14 +75,21 @@ const formatUnreadCount = (count: number) =>
 const isNavigationHiddenRoute = (pathname: string) =>
   pathname.startsWith("/mobilegames/") ||
   pathname.startsWith("/messenger/room/") ||
+  pathname.startsWith("/messenger/group/") ||
+  pathname.startsWith("/messenger/contact/") ||
+  pathname === "/messenger/profile" ||
+  pathname === "/messenger/saved" ||
+  pathname === "/messenger/safety" ||
   pathname === "/messenger/share" ||
-  pathname === "/messenger/search";
+  pathname === "/messenger/search" ||
+  pathname === "/messenger/forward";
 
 export const usePersistentBottomNavigationInset = () => {
   const insets = useSafeAreaInsets();
-  return (
-    NAVIGATION_HEIGHT + NAVIGATION_SHADOW_EXTENT + Math.max(insets.bottom, 6)
-  );
+  const pathname = usePathname();
+  return isNavigationHiddenRoute(pathname)
+    ? Math.max(insets.bottom, 12)
+    : NAVIGATION_HEIGHT + NAVIGATION_SHADOW_EXTENT + Math.max(insets.bottom, 6);
 };
 
 const activeSectionForPath = (pathname: string): NavigationSection | null => {

@@ -25,8 +25,10 @@ import LeaveMessengerRoomButton from "../../../features/messenger/LeaveMessenger
 import LocalRoomAvatar from "../../../features/messenger/LocalRoomAvatar";
 import { MESSENGER_PRESET_AVATARS } from "../../../features/messenger/presetAvatars";
 import MessengerAvatarViewer from "../../../features/messenger/MessengerAvatarViewer";
+import MessengerProfileMediaTab from "../../../features/messenger/MessengerProfileMediaTab";
 import type {
   MessengerContact,
+  MessengerMessage,
   MessengerRoomMember,
   MessengerRoomSettings,
 } from "../../../features/messenger/types";
@@ -57,6 +59,7 @@ function contactKey(contact: MessengerContact): string {
 }
 
 type GroupParticipant = MessengerRoomMember & { is_admin: boolean };
+type GroupInfoTab = "participants" | "media";
 
 export default function MessengerGroupSettingsScreen() {
   const router = useRouter();
@@ -82,6 +85,10 @@ export default function MessengerGroupSettingsScreen() {
   const [addVisible, setAddVisible] = useState(false);
   const [avatarVisible, setAvatarVisible] = useState(false);
   const [localAvatarId, setLocalAvatarId] = useState<string | null>(null);
+  const [localAvatarPickerVisible, setLocalAvatarPickerVisible] =
+    useState(false);
+  const [activeTab, setActiveTab] = useState<GroupInfoTab>("participants");
+  const [participantQuery, setParticipantQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -151,6 +158,17 @@ export default function MessengerGroupSettingsScreen() {
       ),
     [contacts, memberIds, settings?.room.team_id],
   );
+  const filteredParticipants = useMemo(() => {
+    const query = participantQuery.trim().toLocaleLowerCase("ru");
+    if (!query) return participants;
+    return participants.filter((member) =>
+      [member.display_name, member.original_display_name, member.username]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase("ru")
+        .includes(query),
+    );
+  }, [participantQuery, participants]);
 
   const openParticipantProfile = (member: GroupParticipant) => {
     if (member.id === session?.user.id) {
@@ -299,6 +317,32 @@ export default function MessengerGroupSettingsScreen() {
       ],
     );
   };
+
+  const showMessageInChat = useCallback(
+    (message: MessengerMessage) => {
+      router.push({
+        pathname: "/messenger/room/[id]",
+        params: {
+          id: roomId,
+          title: settings?.room.title || title || "Чат",
+          pushMessageId: message.id,
+          pushSequence: message.sequence,
+          openedAt: String(Date.now()),
+        },
+      });
+    },
+    [roomId, router, settings?.room.title, title],
+  );
+
+  const forwardMessage = useCallback(
+    (message: MessengerMessage) => {
+      router.push({
+        pathname: "/messenger/forward",
+        params: { messageId: message.id },
+      });
+    },
+    [router],
+  );
 
   const deleteGroup = () => {
     if (!settings?.can_manage_members || saving) return;
@@ -459,57 +503,83 @@ export default function MessengerGroupSettingsScreen() {
 
               <Text style={styles.localAvatarTitle}>Личный аватар группы</Text>
               <Text style={styles.localAvatarHint}>
-                Видите только вы. Выберите стандартный аватар или используйте
-                общий аватар группы.
+                Видите только вы. Готовые варианты скрыты, пока они не нужны.
               </Text>
-              <View style={styles.localAvatarGrid}>
-                <TouchableOpacity
-                  style={[
-                    styles.localAvatarChoice,
-                    !localAvatarId && styles.localAvatarChoiceActive,
-                  ]}
-                  onPress={() => {
-                    setLocalAvatarId(null);
-                    void setLocalMessengerRoomAvatar(
-                      session.user.id,
-                      roomId,
-                      null,
-                    );
-                  }}
-                >
-                  <LocalRoomAvatar
-                    roomId={roomId}
-                    displayName={settings.room.title}
-                    avatarUrl={settings.room.avatar_url}
-                    accessToken={session.access_token}
-                    size={58}
-                  />
-                </TouchableOpacity>
-                {MESSENGER_PRESET_AVATARS.map((preset) => (
+              <TouchableOpacity
+                style={styles.localAvatarPickerButton}
+                onPress={() =>
+                  setLocalAvatarPickerVisible((current) => !current)
+                }
+                accessibilityRole="button"
+                accessibilityLabel="Выбрать из предустановленных аватаров"
+              >
+                <Icon name="images-outline" size={20} color={colors.primary} />
+                <Text style={styles.localAvatarPickerButtonText}>
+                  {localAvatarId
+                    ? "Изменить предустановленный аватар"
+                    : "Выбрать из предустановленных аватаров"}
+                </Text>
+                <Icon
+                  name={
+                    localAvatarPickerVisible ? "chevron-up" : "chevron-down"
+                  }
+                  size={18}
+                  color={colors.textSecondary}
+                />
+              </TouchableOpacity>
+              {localAvatarPickerVisible ? (
+                <View style={styles.localAvatarGrid}>
                   <TouchableOpacity
-                    key={preset.id}
                     style={[
                       styles.localAvatarChoice,
-                      localAvatarId === preset.id &&
-                        styles.localAvatarChoiceActive,
+                      !localAvatarId && styles.localAvatarChoiceActive,
                     ]}
                     onPress={() => {
-                      setLocalAvatarId(preset.id);
+                      setLocalAvatarId(null);
+                      setLocalAvatarPickerVisible(false);
                       void setLocalMessengerRoomAvatar(
                         session.user.id,
                         roomId,
-                        preset.id,
+                        null,
                       );
                     }}
+                    accessibilityLabel="Использовать общий аватар группы"
                   >
-                    <Image
-                      source={preset.source}
-                      style={styles.localAvatarImage}
-                      contentFit="contain"
+                    <LocalRoomAvatar
+                      roomId={roomId}
+                      displayName={settings.room.title}
+                      avatarUrl={settings.room.avatar_url}
+                      accessToken={session.access_token}
+                      size={58}
                     />
                   </TouchableOpacity>
-                ))}
-              </View>
+                  {MESSENGER_PRESET_AVATARS.map((preset) => (
+                    <TouchableOpacity
+                      key={preset.id}
+                      style={[
+                        styles.localAvatarChoice,
+                        localAvatarId === preset.id &&
+                          styles.localAvatarChoiceActive,
+                      ]}
+                      onPress={() => {
+                        setLocalAvatarId(preset.id);
+                        setLocalAvatarPickerVisible(false);
+                        void setLocalMessengerRoomAvatar(
+                          session.user.id,
+                          roomId,
+                          preset.id,
+                        );
+                      }}
+                    >
+                      <Image
+                        source={preset.source}
+                        style={styles.localAvatarImage}
+                        contentFit="contain"
+                      />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
 
               <Text style={styles.label}>Название группы</Text>
               <TextInput
@@ -549,80 +619,191 @@ export default function MessengerGroupSettingsScreen() {
             </View>
 
             <View style={styles.card}>
-              <View style={styles.sectionHeader}>
-                <View>
-                  <Text style={styles.sectionTitle}>Участники</Text>
-                  <Text style={styles.sectionSubtitle}>
-                    {participants.length} в группе
+              <View style={styles.tabs}>
+                <TouchableOpacity
+                  style={[
+                    styles.tab,
+                    activeTab === "participants" && styles.tabActive,
+                  ]}
+                  onPress={() => setActiveTab("participants")}
+                >
+                  <Icon
+                    name="people-outline"
+                    size={18}
+                    color={
+                      activeTab === "participants"
+                        ? colors.primary
+                        : colors.textSecondary
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.tabText,
+                      activeTab === "participants" && styles.tabTextActive,
+                    ]}
+                  >
+                    Участники
                   </Text>
-                </View>
-                {settings.can_manage_members ? (
-                  <TouchableOpacity
-                    style={styles.addButton}
-                    onPress={() => setAddVisible(true)}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.tab,
+                    activeTab === "media" && styles.tabActive,
+                  ]}
+                  onPress={() => setActiveTab("media")}
+                >
+                  <Icon
+                    name="images-outline"
+                    size={18}
+                    color={
+                      activeTab === "media"
+                        ? colors.primary
+                        : colors.textSecondary
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.tabText,
+                      activeTab === "media" && styles.tabTextActive,
+                    ]}
                   >
-                    <Icon name="person-add" size={19} color={colors.primary} />
-                    <Text style={styles.addButtonText}>Добавить</Text>
-                  </TouchableOpacity>
-                ) : null}
+                    Медиа
+                  </Text>
+                </TouchableOpacity>
               </View>
-              {participants.map((member) => (
-                <View key={member.id} style={styles.memberRow}>
-                  <TouchableOpacity
-                    style={styles.memberProfileButton}
-                    onPress={() => openParticipantProfile(member)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Открыть профиль ${member.display_name}`}
-                  >
-                    <AuthenticatedAvatar
-                      displayName={member.display_name}
-                      avatarUrl={member.avatar_url}
-                      accessToken={session.access_token}
-                      size={44}
-                    />
-                    <View style={styles.memberText}>
-                      <Text style={styles.memberName} numberOfLines={1}>
-                        {member.display_name}
-                      </Text>
-                      <Text style={styles.memberRole}>
-                        {member.is_admin
-                          ? "Администратор · создатель"
-                          : member.id === session.user.id
-                            ? "Участник · Вы"
-                            : "Участник"}
+
+              {activeTab === "participants" ? (
+                <>
+                  <View style={styles.sectionHeader}>
+                    <View>
+                      <Text style={styles.sectionTitle}>Участники</Text>
+                      <Text style={styles.sectionSubtitle}>
+                        {participants.length} в группе
                       </Text>
                     </View>
-                    <Icon
-                      name="chevron-forward"
-                      size={18}
-                      color={colors.textSecondary}
-                    />
-                  </TouchableOpacity>
-                  {settings.can_manage_members && !member.is_admin ? (
-                    memberBusy === member.id ? (
-                      <ActivityIndicator color={colors.primary} />
-                    ) : (
+                    {settings.can_manage_members ? (
                       <TouchableOpacity
-                        style={styles.removeMemberButton}
-                        onPress={() => removeMember(member)}
-                        accessibilityLabel={`Исключить ${member.display_name}`}
+                        style={styles.addButton}
+                        onPress={() => setAddVisible(true)}
                       >
                         <Icon
-                          name="remove-circle-outline"
-                          size={23}
-                          color={colors.error}
+                          name="person-add"
+                          size={19}
+                          color={colors.primary}
+                        />
+                        <Text style={styles.addButtonText}>Добавить</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                  <View style={styles.participantSearch}>
+                    <Icon
+                      name="search-outline"
+                      size={19}
+                      color={colors.textSecondary}
+                    />
+                    <TextInput
+                      style={styles.participantSearchInput}
+                      value={participantQuery}
+                      onChangeText={setParticipantQuery}
+                      placeholder="Поиск участника"
+                      placeholderTextColor={colors.textSecondary}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    {participantQuery ? (
+                      <TouchableOpacity
+                        style={styles.participantSearchClear}
+                        onPress={() => setParticipantQuery("")}
+                        accessibilityLabel="Очистить поиск участников"
+                      >
+                        <Icon
+                          name="close-circle"
+                          size={19}
+                          color={colors.textSecondary}
                         />
                       </TouchableOpacity>
-                    )
-                  ) : member.is_admin ? (
-                    <Icon
-                      name="shield-checkmark"
-                      size={22}
-                      color={colors.primary}
-                    />
-                  ) : null}
-                </View>
-              ))}
+                    ) : null}
+                  </View>
+                  {filteredParticipants.length ? (
+                    filteredParticipants.map((member) => (
+                      <View key={member.id} style={styles.memberRow}>
+                        <TouchableOpacity
+                          style={styles.memberProfileButton}
+                          onPress={() => openParticipantProfile(member)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Открыть профиль ${member.display_name}`}
+                        >
+                          <AuthenticatedAvatar
+                            displayName={member.display_name}
+                            avatarUrl={member.avatar_url}
+                            accessToken={session.access_token}
+                            identityKey={member.id}
+                            size={44}
+                          />
+                          <View style={styles.memberText}>
+                            <Text style={styles.memberName} numberOfLines={1}>
+                              {member.display_name}
+                            </Text>
+                            <Text style={styles.memberRole}>
+                              {member.is_admin
+                                ? "Администратор · создатель"
+                                : member.id === session.user.id
+                                  ? "Участник · Вы"
+                                  : "Участник"}
+                            </Text>
+                          </View>
+                          <Icon
+                            name="chevron-forward"
+                            size={18}
+                            color={colors.textSecondary}
+                          />
+                        </TouchableOpacity>
+                        {settings.can_manage_members && !member.is_admin ? (
+                          memberBusy === member.id ? (
+                            <ActivityIndicator color={colors.primary} />
+                          ) : (
+                            <TouchableOpacity
+                              style={styles.removeMemberButton}
+                              onPress={() => removeMember(member)}
+                              accessibilityLabel={`Исключить ${member.display_name}`}
+                            >
+                              <Icon
+                                name="remove-circle-outline"
+                                size={23}
+                                color={colors.error}
+                              />
+                            </TouchableOpacity>
+                          )
+                        ) : member.is_admin ? (
+                          <Icon
+                            name="shield-checkmark"
+                            size={22}
+                            color={colors.primary}
+                          />
+                        ) : null}
+                      </View>
+                    ))
+                  ) : (
+                    <View style={styles.emptyParticipants}>
+                      <Icon
+                        name="search-outline"
+                        size={30}
+                        color={colors.textSecondary}
+                      />
+                      <Text style={styles.centerText}>
+                        Участники не найдены
+                      </Text>
+                    </View>
+                  )}
+                </>
+              ) : (
+                <MessengerProfileMediaTab
+                  roomId={roomId}
+                  accessToken={session.access_token}
+                  onShowInChat={showMessageInChat}
+                  onForward={forwardMessage}
+                />
+              )}
             </View>
 
             {settings.can_manage_members ? (
@@ -780,6 +961,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
   },
+  localAvatarPickerButton: {
+    alignSelf: "stretch",
+    minHeight: 46,
+    marginTop: 10,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 13,
+    backgroundColor: colors.backgroundAlt,
+  },
+  localAvatarPickerButtonText: {
+    flex: 1,
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: "800",
+  },
   localAvatarGrid: {
     alignSelf: "stretch",
     flexDirection: "row",
@@ -797,7 +997,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "transparent",
     borderRadius: 32,
-    backgroundColor: "#397BC0",
+    backgroundColor: colors.white,
   },
   localAvatarChoiceActive: { borderColor: colors.primary },
   localAvatarImage: { width: 58, height: 58 },
@@ -859,6 +1059,33 @@ const styles = StyleSheet.create({
   },
   saveButtonText: { color: colors.white, fontWeight: "800", fontSize: 15 },
   disabled: { opacity: 0.45 },
+  tabs: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 16,
+    padding: 4,
+    borderRadius: 14,
+    backgroundColor: colors.backgroundAlt,
+  },
+  tab: {
+    flex: 1,
+    minHeight: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    borderRadius: 11,
+  },
+  tabActive: {
+    backgroundColor: colors.surface,
+    shadowColor: "#102A43",
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  tabText: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
+  tabTextActive: { color: colors.primary },
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -877,6 +1104,35 @@ const styles = StyleSheet.create({
     backgroundColor: "#EAF3FF",
   },
   addButtonText: { color: colors.primary, fontSize: 12, fontWeight: "800" },
+  participantSearch: {
+    height: 44,
+    marginBottom: 8,
+    paddingHorizontal: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 13,
+    backgroundColor: colors.backgroundAlt,
+  },
+  participantSearchInput: {
+    flex: 1,
+    minWidth: 0,
+    color: colors.text,
+    fontSize: 14,
+  },
+  participantSearchClear: {
+    width: 30,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyParticipants: {
+    minHeight: 135,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   memberRow: {
     minHeight: 64,
     flexDirection: "row",

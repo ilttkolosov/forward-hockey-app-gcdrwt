@@ -5419,286 +5419,317 @@ export default function MessengerRoomScreen() {
               style={styles.actionSheet}
               onPress={(event) => event.stopPropagation()}
             >
-              {actionMessage && (
-                <View style={styles.actionMessagePreview}>
-                  <Text style={styles.actionPreviewAuthor} numberOfLines={1}>
-                    {actionMessage.author.display_name}
-                  </Text>
-                  <Text style={styles.actionPreviewText} numberOfLines={2}>
-                    {actionMessage.deleted_at
-                      ? "Сообщение удалено"
-                      : stripMessengerTextFormatting(actionMessage.text) ||
-                        (actionMessage.kind === "image"
-                          ? "Фото"
-                          : actionMessage.kind === "video"
-                            ? "Видео"
-                            : actionMessage.kind === "file"
-                              ? actionMessage.media?.original_name || "Файл"
-                              : actionMessage.kind === "location"
-                                ? "Геопозиция"
-                                : "Сообщение")}
-                  </Text>
-                </View>
-              )}
-              {canReact &&
-                actionMessage &&
-                !actionMessage.pending &&
-                !actionMessage.deleted_at && (
-                  <View>
-                    <View style={styles.reactionPicker}>
-                      {quickReactions.map((reaction) => (
-                        <TouchableOpacity
-                          key={reaction}
-                          style={styles.reactionButton}
-                          onPress={() =>
-                            void toggleReaction(actionMessage, reaction)
-                          }
-                          disabled={reactionBusyIds.has(actionMessage.id)}
-                        >
-                          <Text style={styles.reactionButtonText}>
-                            {reaction}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                      <TouchableOpacity
-                        style={styles.reactionMoreButton}
-                        onPress={() =>
-                          setShowAllReactions((current) => !current)
-                        }
-                        accessibilityLabel="Другие реакции"
-                      >
-                        <Icon
-                          name={showAllReactions ? "chevron-up" : "add"}
-                          size={22}
-                          color={colors.primary}
-                        />
-                      </TouchableOpacity>
-                    </View>
-                    {showAllReactions && (
-                      <View style={styles.reactionPalette}>
-                        {STANDARD_MESSENGER_REACTIONS.map((reaction) => (
+              <ScrollView
+                style={styles.actionMenuCard}
+                contentContainerStyle={styles.actionMenuContent}
+                showsVerticalScrollIndicator={false}
+                nestedScrollEnabled
+              >
+                {actionMessage && (
+                  <View style={styles.actionMessagePreview}>
+                    <Text style={styles.actionPreviewAuthor} numberOfLines={1}>
+                      {actionMessage.author.display_name}
+                    </Text>
+                    <Text style={styles.actionPreviewText} numberOfLines={2}>
+                      {actionMessage.deleted_at
+                        ? "Сообщение удалено"
+                        : stripMessengerTextFormatting(actionMessage.text) ||
+                          (actionMessage.kind === "image"
+                            ? "Фото"
+                            : actionMessage.kind === "video"
+                              ? "Видео"
+                              : actionMessage.kind === "file"
+                                ? actionMessage.media?.original_name || "Файл"
+                                : actionMessage.kind === "location"
+                                  ? "Геопозиция"
+                                  : "Сообщение")}
+                    </Text>
+                  </View>
+                )}
+                {canReact &&
+                  actionMessage &&
+                  !actionMessage.pending &&
+                  !actionMessage.deleted_at && (
+                    <View>
+                      <View style={styles.reactionPicker}>
+                        {quickReactions.map((reaction) => (
                           <TouchableOpacity
                             key={reaction}
-                            style={styles.reactionPaletteButton}
+                            style={styles.reactionButton}
                             onPress={() =>
                               void toggleReaction(actionMessage, reaction)
                             }
                             disabled={reactionBusyIds.has(actionMessage.id)}
                           >
-                            <Text style={styles.reactionPaletteText}>
+                            <Text style={styles.reactionButtonText}>
                               {reaction}
                             </Text>
                           </TouchableOpacity>
                         ))}
-                        <Text style={styles.reactionPaletteHint}>
-                          Выбранная реакция попадёт в быстрый набор
-                        </Text>
+                        <TouchableOpacity
+                          style={styles.reactionMoreButton}
+                          onPress={() =>
+                            setShowAllReactions((current) => !current)
+                          }
+                          accessibilityLabel="Другие реакции"
+                        >
+                          <Icon
+                            name={showAllReactions ? "chevron-up" : "add"}
+                            size={22}
+                            color={colors.primary}
+                          />
+                        </TouchableOpacity>
                       </View>
-                    )}
-                  </View>
-                )}
-              {actionMessageFailed && actionMessage ? (
-                <>
+                      {showAllReactions && (
+                        <View style={styles.reactionPalette}>
+                          {STANDARD_MESSENGER_REACTIONS.map((reaction) => (
+                            <TouchableOpacity
+                              key={reaction}
+                              style={styles.reactionPaletteButton}
+                              onPress={() =>
+                                void toggleReaction(actionMessage, reaction)
+                              }
+                              disabled={reactionBusyIds.has(actionMessage.id)}
+                            >
+                              <Text style={styles.reactionPaletteText}>
+                                {reaction}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                          <Text style={styles.reactionPaletteHint}>
+                            Выбранная реакция попадёт в быстрый набор
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
+                {actionMessageFailed && actionMessage ? (
+                  <>
+                    <TouchableOpacity
+                      style={styles.messageAction}
+                      onPress={() => void retryFailedMessage(actionMessage)}
+                      disabled={sending}
+                    >
+                      <Icon name="refresh" size={21} color={colors.primary} />
+                      <Text style={styles.messageActionText}>
+                        Отправить заново
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.messageAction, styles.messageActionDanger]}
+                      onPress={() =>
+                        requestFailedMessageCancellation(actionMessage)
+                      }
+                    >
+                      <Icon
+                        name="close-circle-outline"
+                        size={21}
+                        color={colors.error}
+                      />
+                      <Text
+                        style={[
+                          styles.messageActionText,
+                          styles.messageActionTextDanger,
+                        ]}
+                      >
+                        Отменить отправку
+                      </Text>
+                    </TouchableOpacity>
+                  </>
+                ) : null}
+                {canWrite &&
+                actionMessage &&
+                !actionMessage.pending &&
+                !actionMessage.deleted_at ? (
                   <TouchableOpacity
                     style={styles.messageAction}
-                    onPress={() => void retryFailedMessage(actionMessage)}
-                    disabled={sending}
+                    onPress={() => beginReply(actionMessage)}
                   >
-                    <Icon name="refresh" size={21} color={colors.primary} />
-                    <Text style={styles.messageActionText}>
-                      Отправить заново
-                    </Text>
+                    <Icon name="arrow-undo" size={21} color={colors.primary} />
+                    <Text style={styles.messageActionText}>Ответить</Text>
                   </TouchableOpacity>
+                ) : null}
+                {actionMessage &&
+                !actionMessage.pending &&
+                !actionMessage.deleted_at &&
+                actionMessage.author.id !== session?.user.id &&
+                roomType !== "direct" &&
+                roomType !== "saved" ? (
                   <TouchableOpacity
-                    style={[styles.messageAction, styles.messageActionDanger]}
+                    style={styles.messageAction}
                     onPress={() =>
-                      requestFailedMessageCancellation(actionMessage)
+                      queueMessageAction("private_reply", actionMessage)
                     }
                   >
                     <Icon
-                      name="close-circle-outline"
+                      name="person-outline"
                       size={21}
-                      color={colors.error}
+                      color={colors.primary}
                     />
+                    <Text style={styles.messageActionText}>
+                      Ответить лично {actionMessage.author.display_name}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                {actionMessage &&
+                !actionMessage.pending &&
+                !actionMessage.deleted_at &&
+                actionMessage.text.trim() ? (
+                  <TouchableOpacity
+                    style={styles.messageAction}
+                    onPress={() => void copyMessageText(actionMessage)}
+                  >
+                    <Icon
+                      name="copy-outline"
+                      size={21}
+                      color={colors.primary}
+                    />
+                    <Text style={styles.messageActionText}>
+                      Скопировать текст
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                {actionMessage &&
+                !actionMessage.pending &&
+                actionMessage.kind !== "system" &&
+                roomType !== "direct" &&
+                roomType !== "saved" ? (
+                  <TouchableOpacity
+                    style={styles.messageAction}
+                    onPress={() => applyAuthorFilter(actionMessage)}
+                  >
+                    <Icon
+                      name="funnel-outline"
+                      size={21}
+                      color={colors.primary}
+                    />
+                    <Text style={styles.messageActionText}>
+                      Только сообщения автора
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                {actionMessage &&
+                !actionMessage.pending &&
+                !actionMessage.deleted_at &&
+                actionMessage.media &&
+                (actionMessage.media_items?.length ?? 1) <= 1 ? (
+                  <TouchableOpacity
+                    style={styles.messageAction}
+                    onPress={() => void saveMessageAttachment(actionMessage)}
+                    disabled={savingMessageId === actionMessage.id}
+                  >
+                    {savingMessageId === actionMessage.id ? (
+                      <ActivityIndicator color={colors.primary} />
+                    ) : (
+                      <Icon
+                        name="download-outline"
+                        size={21}
+                        color={colors.primary}
+                      />
+                    )}
+                    <Text style={styles.messageActionText}>Сохранить</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {actionMessageEditable && actionMessage ? (
+                  <TouchableOpacity
+                    style={styles.messageAction}
+                    onPress={() => beginEdit(actionMessage)}
+                  >
+                    <Icon
+                      name="create-outline"
+                      size={21}
+                      color={colors.primary}
+                    />
+                    <Text style={styles.messageActionText}>Редактировать</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {actionMessageDeletable && actionMessage ? (
+                  <TouchableOpacity
+                    style={[styles.messageAction, styles.messageActionDanger]}
+                    onPress={() => requestMessageDeletion(actionMessage)}
+                    disabled={messageMutationBusyId === actionMessage.id}
+                  >
+                    {messageMutationBusyId === actionMessage.id ? (
+                      <ActivityIndicator color={colors.error} />
+                    ) : (
+                      <Icon
+                        name="trash-outline"
+                        size={21}
+                        color={colors.error}
+                      />
+                    )}
                     <Text
                       style={[
                         styles.messageActionText,
                         styles.messageActionTextDanger,
                       ]}
                     >
-                      Отменить отправку
+                      Удалить
                     </Text>
                   </TouchableOpacity>
-                </>
-              ) : null}
-              {canWrite &&
-              actionMessage &&
-              !actionMessage.pending &&
-              !actionMessage.deleted_at ? (
-                <TouchableOpacity
-                  style={styles.messageAction}
-                  onPress={() => beginReply(actionMessage)}
-                >
-                  <Icon name="arrow-undo" size={21} color={colors.primary} />
-                  <Text style={styles.messageActionText}>Ответить</Text>
-                </TouchableOpacity>
-              ) : null}
-              {actionMessage &&
-              !actionMessage.pending &&
-              !actionMessage.deleted_at &&
-              actionMessage.author.id !== session?.user.id &&
-              roomType !== "direct" &&
-              roomType !== "saved" ? (
-                <TouchableOpacity
-                  style={styles.messageAction}
-                  onPress={() =>
-                    queueMessageAction("private_reply", actionMessage)
-                  }
-                >
-                  <Icon
-                    name="person-outline"
-                    size={21}
-                    color={colors.primary}
-                  />
-                  <Text style={styles.messageActionText}>
-                    Ответить лично {actionMessage.author.display_name}
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-              {actionMessage &&
-              !actionMessage.pending &&
-              !actionMessage.deleted_at &&
-              actionMessage.text.trim() ? (
-                <TouchableOpacity
-                  style={styles.messageAction}
-                  onPress={() => void copyMessageText(actionMessage)}
-                >
-                  <Icon name="copy-outline" size={21} color={colors.primary} />
-                  <Text style={styles.messageActionText}>
-                    Скопировать текст
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-              {actionMessage &&
-              !actionMessage.pending &&
-              actionMessage.kind !== "system" &&
-              roomType !== "direct" &&
-              roomType !== "saved" ? (
-                <TouchableOpacity
-                  style={styles.messageAction}
-                  onPress={() => applyAuthorFilter(actionMessage)}
-                >
-                  <Icon
-                    name="funnel-outline"
-                    size={21}
-                    color={colors.primary}
-                  />
-                  <Text style={styles.messageActionText}>
-                    Только сообщения автора
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-              {actionMessage &&
-              !actionMessage.pending &&
-              !actionMessage.deleted_at &&
-              actionMessage.media &&
-              (actionMessage.media_items?.length ?? 1) <= 1 ? (
-                <TouchableOpacity
-                  style={styles.messageAction}
-                  onPress={() => void saveMessageAttachment(actionMessage)}
-                  disabled={savingMessageId === actionMessage.id}
-                >
-                  {savingMessageId === actionMessage.id ? (
-                    <ActivityIndicator color={colors.primary} />
-                  ) : (
+                ) : null}
+                {actionMessage &&
+                !actionMessage.pending &&
+                actionMessage.author.id === session?.user.id ? (
+                  <TouchableOpacity
+                    style={styles.messageAction}
+                    onPress={() =>
+                      queueMessageAction("receipts", actionMessage)
+                    }
+                  >
                     <Icon
-                      name="download-outline"
+                      name="checkmark-done"
                       size={21}
                       color={colors.primary}
                     />
-                  )}
-                  <Text style={styles.messageActionText}>Сохранить</Text>
-                </TouchableOpacity>
-              ) : null}
-              {actionMessageEditable && actionMessage ? (
-                <TouchableOpacity
-                  style={styles.messageAction}
-                  onPress={() => beginEdit(actionMessage)}
-                >
-                  <Icon
-                    name="create-outline"
-                    size={21}
-                    color={colors.primary}
-                  />
-                  <Text style={styles.messageActionText}>Редактировать</Text>
-                </TouchableOpacity>
-              ) : null}
-              {actionMessageDeletable && actionMessage ? (
-                <TouchableOpacity
-                  style={[styles.messageAction, styles.messageActionDanger]}
-                  onPress={() => requestMessageDeletion(actionMessage)}
-                  disabled={messageMutationBusyId === actionMessage.id}
-                >
-                  {messageMutationBusyId === actionMessage.id ? (
-                    <ActivityIndicator color={colors.error} />
-                  ) : (
-                    <Icon name="trash-outline" size={21} color={colors.error} />
-                  )}
-                  <Text
-                    style={[
-                      styles.messageActionText,
-                      styles.messageActionTextDanger,
-                    ]}
+                    <Text style={styles.messageActionText}>Статусы</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {actionMessage &&
+                !actionMessage.pending &&
+                !actionMessage.deleted_at ? (
+                  <TouchableOpacity
+                    style={styles.messageAction}
+                    onPress={() => queueMessageAction("forward", actionMessage)}
                   >
-                    Удалить
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-              {actionMessage &&
-              !actionMessage.pending &&
-              actionMessage.author.id === session?.user.id ? (
-                <TouchableOpacity
-                  style={styles.messageAction}
-                  onPress={() => queueMessageAction("receipts", actionMessage)}
-                >
-                  <Icon
-                    name="checkmark-done"
-                    size={21}
-                    color={colors.primary}
-                  />
-                  <Text style={styles.messageActionText}>Статусы</Text>
-                </TouchableOpacity>
-              ) : null}
-              {actionMessage &&
-              !actionMessage.pending &&
-              !actionMessage.deleted_at ? (
-                <TouchableOpacity
-                  style={styles.messageAction}
-                  onPress={() => queueMessageAction("forward", actionMessage)}
-                >
-                  <Icon name="arrow-redo" size={21} color={colors.primary} />
-                  <Text style={styles.messageActionText}>Переслать</Text>
-                </TouchableOpacity>
-              ) : null}
-              {actionMessage &&
-              !actionMessage.pending &&
-              !actionMessage.deleted_at &&
-              actionMessage.kind !== "system" &&
-              actionMessage.author.id !== session?.user.id ? (
-                <TouchableOpacity
-                  style={styles.messageAction}
-                  onPress={() => queueMessageAction("report", actionMessage)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Пожаловаться на сообщение"
-                >
-                  <Icon name="flag-outline" size={21} color={colors.error} />
-                  <Text
-                    style={[styles.messageActionText, { color: colors.error }]}
+                    <Icon name="arrow-redo" size={21} color={colors.primary} />
+                    <Text style={styles.messageActionText}>Переслать</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {actionMessage &&
+                !actionMessage.pending &&
+                !actionMessage.deleted_at &&
+                actionMessage.kind !== "system" &&
+                actionMessage.author.id !== session?.user.id ? (
+                  <TouchableOpacity
+                    style={styles.messageAction}
+                    onPress={() => queueMessageAction("report", actionMessage)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Пожаловаться на сообщение"
                   >
-                    Пожаловаться
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
+                    <Icon name="flag-outline" size={21} color={colors.error} />
+                    <Text
+                      style={[
+                        styles.messageActionText,
+                        { color: colors.error },
+                      ]}
+                    >
+                      Пожаловаться
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </ScrollView>
+              <TouchableOpacity
+                style={styles.actionCancelButton}
+                onPress={() => {
+                  setShowAllReactions(false);
+                  setActionMessage(null);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Закрыть меню сообщения"
+              >
+                <Text style={styles.actionCancelText}>Отмена</Text>
+              </TouchableOpacity>
             </Pressable>
           </Pressable>
         </Modal>
@@ -6996,18 +7027,33 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(16, 40, 68, 0.38)",
   },
   actionSheet: {
+    width: "100%",
     maxHeight: "88%",
-    padding: 16,
-    borderRadius: 20,
+    backgroundColor: "transparent",
+  },
+  actionMenuCard: {
+    flexShrink: 1,
+    borderRadius: 14,
     backgroundColor: colors.surface,
   },
+  actionMenuContent: { overflow: "hidden", borderRadius: 14 },
+  actionCancelButton: {
+    minHeight: 56,
+    marginTop: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 14,
+    backgroundColor: colors.surface,
+  },
+  actionCancelText: { color: colors.primary, fontSize: 17, fontWeight: "800" },
   actionMessagePreview: {
-    marginBottom: 12,
-    padding: 11,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.accent,
-    borderRadius: 10,
-    backgroundColor: colors.backgroundAlt,
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 10,
+    paddingHorizontal: 4,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
   actionPreviewAuthor: {
     color: colors.accent,
@@ -7024,14 +7070,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 11,
-    minHeight: 48,
-    paddingHorizontal: 12,
-    marginTop: 4,
-    borderRadius: 13,
-    backgroundColor: "#EAF3FF",
+    minHeight: 52,
+    paddingHorizontal: 18,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    backgroundColor: colors.surface,
   },
-  messageActionText: { color: colors.primary, fontSize: 15, fontWeight: "800" },
-  messageActionDanger: { backgroundColor: "#FDEEEE" },
+  messageActionText: { color: colors.primary, fontSize: 16, fontWeight: "600" },
+  messageActionDanger: { backgroundColor: colors.surface },
   messageActionTextDanger: { color: colors.error },
   forwardSheet: {
     maxHeight: "82%",
@@ -7199,6 +7245,7 @@ const styles = StyleSheet.create({
   reactionPicker: {
     flexDirection: "row",
     gap: 4,
+    marginHorizontal: 12,
     marginBottom: 12,
   },
   reactionButton: {
