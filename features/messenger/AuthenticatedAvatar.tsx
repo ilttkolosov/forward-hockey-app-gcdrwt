@@ -8,7 +8,7 @@ import {
   registerMessengerAvatarIdentity,
   resolveMessengerAvatarIdentity,
 } from "./avatarIdentity";
-import { MESSENGER_PRESET_AVATARS } from "./presetAvatars";
+import AvatarInitials from "./AvatarInitials";
 
 interface AuthenticatedAvatarProps {
   displayName: string;
@@ -81,14 +81,9 @@ function AuthenticatedAvatar({
   if (identityKey) registerMessengerAvatarIdentity(identityKey, displayName);
   const identity = resolveMessengerAvatarIdentity(identityKey, displayName);
   const hash = useMemo(() => stableHash(identity), [identity]);
-  const preset =
-    MESSENGER_PRESET_AVATARS[hash % MESSENGER_PRESET_AVATARS.length];
-  const backgroundColor = roleColor(roles, hash);
+  const backgroundColor = uri ? "#FFFFFF" : roleColor(roles, hash);
   const roomMatch = /^\/messenger\/room\/([^/]+)/.exec(pathname);
   const roomId = roomMatch?.[1] || null;
-  // Message-feed author avatars are 40 px and always carry a stable user ID.
-  // Keep other avatar surfaces untouched so their existing row/viewer actions
-  // do not become nested navigation controls.
   const opensForeignMessageAuthorProfile = Boolean(
     roomId &&
       size === 40 &&
@@ -122,12 +117,7 @@ function AuthenticatedAvatar({
           transition={120}
         />
       ) : (
-        <Image
-          source={preset.source}
-          style={styles.image}
-          contentFit="contain"
-          transition={120}
-        />
+        <AvatarInitials displayName={displayName} size={size} />
       )}
     </View>
   );
@@ -157,9 +147,6 @@ function AuthenticatedAvatar({
   );
 }
 
-// Message bubbles update frequently (delivery marks, composer state and
-// viewability). Reusing an unchanged avatar prevents expo-image from being
-// reconciled again whenever another message is appended to the feed.
 export default React.memo(AuthenticatedAvatar);
 
 const styles = StyleSheet.create({
