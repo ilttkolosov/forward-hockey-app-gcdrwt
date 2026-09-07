@@ -457,9 +457,7 @@ export default function MessengerGroupSettingsScreen() {
                   </TouchableOpacity>
                 )}
 
-              <Text style={styles.localAvatarTitle}>
-                Личный аватар группы
-              </Text>
+              <Text style={styles.localAvatarTitle}>Личный аватар группы</Text>
               <Text style={styles.localAvatarHint}>
                 Видите только вы. Выберите стандартный аватар или используйте
                 общий аватар группы.
