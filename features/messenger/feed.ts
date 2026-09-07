@@ -341,6 +341,30 @@ function mergeMessengerMessage(
   };
 }
 
+/**
+ * A normal append merge receives live/newer rows. Initial PUSH hydration is
+ * different: on a cold start the tapped message can be rendered by itself
+ * before the authoritative REST window arrives. In that case the later batch
+ * contains confirmed rows with lower server sequences. Insert only those
+ * missing historical rows before the first higher confirmed sequence instead
+ * of appending them after the PUSH bubble. Existing bubbles are never sorted
+ * or shuffled, and ordinary live/pending tail messages keep append semantics.
+ */
+function insertEarlierConfirmedMessengerMessage(
+  messages: MessengerMessage[],
+  message: MessengerMessage,
+): boolean {
+  if (message.pending) return false;
+  const insertionIndex = messages.findIndex(
+    (existing) =>
+      !existing.pending &&
+      compareMessengerSequence(message.sequence, existing.sequence) < 0,
+  );
+  if (insertionIndex < 0) return false;
+  messages.splice(insertionIndex, 0, message);
+  return true;
+}
+
 function mergeMessengerMessagesAt(
   current: MessengerMessage[],
   incoming: MessengerMessage[],
@@ -373,7 +397,14 @@ function mergeMessengerMessagesAt(
         protectedReactionIds,
       );
     } else {
-      added.push(normalizedMessengerMessage(nextMessage));
+      const normalized = normalizedMessengerMessage(nextMessage);
+      if (
+        placement === "append" &&
+        insertEarlierConfirmedMessengerMessage(merged, normalized)
+      ) {
+        continue;
+      }
+      added.push(normalized);
     }
   }
 
@@ -384,9 +415,11 @@ function mergeMessengerMessagesAt(
 
 /**
  * Reconciles live, optimistic and server-confirmed messages without changing
- * the position of a bubble that is already rendered. In particular, replacing
- * a pending message with the server copy only updates its delivery metadata;
- * it must never reorder the feed.
+ * the position of a bubble that is already rendered. Replacing a pending
+ * message with the server copy only updates that row. A sparse PUSH-started
+ * window may additionally fill confirmed sequence gaps before the rendered
+ * PUSH bubble, because blindly appending that authoritative history is what
+ * caused the transient reversed chronology on first entry.
  */
 export function mergeMessengerMessages(
   current: MessengerMessage[],

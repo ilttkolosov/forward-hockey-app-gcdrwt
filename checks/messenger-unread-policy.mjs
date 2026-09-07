@@ -21,6 +21,7 @@ import {
   recoveredMessengerRoomUnreadFloor,
 } from "../features/messenger/presentedUnreadPolicy.ts";
 import { messengerRoomInitialSyncPlan } from "../features/messenger/roomInitialSyncPolicy.ts";
+import { mergeMessengerMessages } from "../features/messenger/feed.ts";
 
 const expoNotificationsPatch = readFileSync(
   new URL("../patches/expo-notifications+0.32.17.patch", import.meta.url),
@@ -54,6 +55,67 @@ assert.deepEqual(
   }),
   { direction: "after", limit: 20, afterSequence: "500" },
   "A later reconciliation may continue after the proven visible cursor",
+);
+
+function confirmedMessage(sequence) {
+  return {
+    id: `message-${sequence}`,
+    sequence,
+    room_id: "push-room",
+    client_message_id: `client-${sequence}`,
+    kind: "text",
+    text: `Message ${sequence}`,
+    created_at: `2026-09-06T19:${String(Number(sequence) % 60).padStart(2, "0")}:00.000Z`,
+    edited_at: null,
+    deleted_at: null,
+    author: {
+      id: "sender",
+      username: "sender",
+      display_name: "Sender",
+      avatar_url: null,
+    },
+    media: null,
+    media_items: [],
+    location: null,
+    reply_to: null,
+    forwarded_from: null,
+    reactions: [],
+    delivery: {
+      status: "sent",
+      recipient_count: 1,
+      delivered_count: 0,
+      read_count: 0,
+    },
+    pending: false,
+    send_error: null,
+    pending_attachment: null,
+  };
+}
+
+// Reproduces the PUSH-only first frame from the screenshots. The notification
+// target is rendered before the authoritative latest window arrives. The merge
+// must fill older server sequences before that existing bubble instead of
+// appending them underneath it.
+const pushFirstFrame = [confirmedMessage("100")];
+const authoritativeLatestWindow = Array.from({ length: 20 }, (_, index) =>
+  confirmedMessage(String(81 + index)),
+);
+const reconciledPushWindow = mergeMessengerMessages(
+  pushFirstFrame,
+  authoritativeLatestWindow,
+);
+assert.deepEqual(
+  reconciledPushWindow.map((message) => message.sequence),
+  Array.from({ length: 20 }, (_, index) => String(81 + index)),
+  "A PUSH-hydrated target must keep chronological order when the latest window fills its missing history",
+);
+const withLiveTail = mergeMessengerMessages(reconciledPushWindow, [
+  confirmedMessage("101"),
+]);
+assert.equal(
+  withLiveTail.at(-1)?.sequence,
+  "101",
+  "A genuine live message must retain normal append semantics after PUSH reconciliation",
 );
 
 assert.equal(
