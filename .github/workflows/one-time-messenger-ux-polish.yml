@@ -6,6 +6,7 @@ on:
       - fix/minor-fixes-batch
     paths:
       - .github/workflows/one-time-messenger-ux-polish.yml
+      - scripts/one-time-messenger-ux-polish.mjs
 
 permissions:
   contents: write
