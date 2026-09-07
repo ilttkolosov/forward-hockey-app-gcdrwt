@@ -1,0 +1,27 @@
+name: Chat pinning workbench
+on:
+  push:
+    branches: [feat/chat-message-pinning]
+    paths: [.github/workflows/pinning-workbench.yml, scripts/apply-chat-pinning.py]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect integration points
+        run: |
+          grep -nE 'pinned|pinMessage|messageActions|actionMessage|contextMenu|scrollToMessage|jumpToMessage|system|can_write|roomHeader|return \(' 'app/messenger/room/[id].tsx' || true
+          cat package.json
+          ls features/messenger
+      - name: Export source snapshot for verification
+        run: |
+          tar --exclude=.git --exclude=assets --exclude=node_modules --exclude=android --exclude=ios -czf /tmp/pinning-source.tgz .
+          mkdir -p /tmp/pinning-artifact
+          mv /tmp/pinning-source.tgz /tmp/pinning-artifact/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pinning-source
+          path: /tmp/pinning-artifact
+          retention-days: 1
