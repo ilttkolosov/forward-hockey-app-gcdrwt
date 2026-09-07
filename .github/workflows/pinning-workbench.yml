@@ -4,24 +4,50 @@ on:
     branches: [feat/chat-message-pinning]
     paths: [.github/workflows/pinning-workbench.yml, scripts/apply-chat-pinning.py]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  inspect:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect integration points
-        run: |
-          grep -nE 'pinned|pinMessage|messageActions|actionMessage|contextMenu|scrollToMessage|jumpToMessage|system|can_write|roomHeader|return \(' 'app/messenger/room/[id].tsx' || true
-          cat package.json
-          ls features/messenger
-      - name: Export source snapshot for verification
-        run: |
-          tar --exclude=.git --exclude=assets --exclude=node_modules --exclude=android --exclude=ios -czf /tmp/pinning-source.tgz .
-          mkdir -p /tmp/pinning-artifact
-          mv /tmp/pinning-source.tgz /tmp/pinning-artifact/
-      - uses: actions/upload-artifact@v4
         with:
-          name: pinning-source
+          ref: feat/chat-message-pinning
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply chat integration
+        run: |
+          python scripts/apply-chat-pinning.py
+          rm scripts/apply-chat-pinning.py .github/workflows/pinning-workbench.yml
+          git diff --check
+      - run: npm ci
+      - name: Verify pin state policy
+        run: node --no-warnings --experimental-strip-types checks/messenger-pins.mjs
+      - name: Typecheck and regression checks
+        run: npm run check
+      - name: Bundle Android JavaScript
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: npx expo export --platform android --output-dir /tmp/forward-pinning-export
+      - name: Commit verified implementation
+        run: |
+          node scripts/bump-app-version.mjs patch
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/quality.yml .github/workflows/pinning-workbench.yml scripts/apply-chat-pinning.py app/messenger/room/'[id].tsx' services/messengerRealtime.ts features/messenger/pins.ts features/messenger/usePinnedMessages.ts features/messenger/PinnedMessagesBanner.ts services/messengerPins.ts checks/messenger-pins.mjs docs/CHAT_PINNING.md app.config.js package.json package-lock.json
+          git commit -m 'feat: add shared chat pin banner and navigation [versioned]'
+          git push origin HEAD:feat/chat-message-pinning
+      - name: Export verification snapshot
+        if: always()
+        run: |
+          mkdir -p /tmp/pinning-artifact
+          tar --exclude=.git --exclude=node_modules --exclude=assets --exclude=android --exclude=ios -czf /tmp/pinning-artifact/source.tgz .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pinning-verified-source
           path: /tmp/pinning-artifact
           retention-days: 1
