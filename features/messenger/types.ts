@@ -303,6 +303,8 @@ export interface MessengerMessageReceipt {
   delivered_at: string | null;
   read_at: string | null;
   status: "sent" | "delivered" | "read";
+  /** Added by newer servers; older server versions simply omit the field. */
+  reaction?: string | null;
 }
 
 export interface MessengerContactAlias {
