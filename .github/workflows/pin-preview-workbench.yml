@@ -1,0 +1,49 @@
+name: Verify pin preview indicator
+on:
+  push:
+    branches: [work/pin-preview-highlight]
+    paths: [scripts/apply-pin-preview.py, .github/workflows/pin-preview-workbench.yml]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: work/pin-preview-highlight
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: python scripts/apply-pin-preview.py
+      - run: npm ci
+      - run: npx --yes prettier@3.9.6 --write features/messenger/PinnedMessagesBanner.tsx features/messenger/pins.ts checks/messenger-pins.mjs checks/messenger-pin-presentation.cjs
+      - run: npm install --prefix /tmp/forward-pin-tests --no-package-lock --ignore-scripts react@19.1.0 react-test-renderer@19.1.0
+      - name: Verify actual banner selection and earlier focus fixes
+        env:
+          PIN_TEST_MODULES: /tmp/forward-pin-tests
+        run: |
+          node --no-warnings --experimental-strip-types checks/messenger-pins.mjs
+          node --no-warnings --experimental-strip-types checks/messenger-pin-focus.mjs
+          node checks/messenger-pins-runtime.cjs
+          node checks/messenger-pin-presentation.cjs
+      - run: npm run check
+      - name: Export iOS and Android JavaScript
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          npx expo export --platform android --output-dir /tmp/pin-preview-android
+          npx expo export --platform ios --output-dir /tmp/pin-preview-ios
+      - name: Commit verified source
+        run: |
+          rm scripts/apply-pin-preview.py
+          node scripts/bump-app-version.mjs patch
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add features/messenger/PinnedMessagesBanner.tsx features/messenger/pins.ts checks/messenger-pins.mjs checks/messenger-pin-presentation.cjs docs/CHAT_PINNING.md app.config.js package.json package-lock.json scripts/apply-pin-preview.py
+          git commit -m 'fix: match pin indicator to preview and cycle backward [versioned]'
+          git push origin HEAD:work/pin-preview-highlight
