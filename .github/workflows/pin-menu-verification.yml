@@ -1,0 +1,46 @@
+name: Pin menu verification
+on:
+  push:
+    branches: [feat/chat-message-pinning]
+    paths: [scripts/apply-pin-menu-fix.py, .github/workflows/pin-menu-verification.yml]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/chat-message-pinning
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply source fix
+        run: |
+          python scripts/apply-pin-menu-fix.py
+          rm scripts/apply-pin-menu-fix.py
+          git diff --check
+      - run: npm ci
+      - name: Install isolated React test runtime
+        run: npm install --prefix /tmp/forward-pin-tests --no-package-lock --ignore-scripts react@19.1.0 react-test-renderer@19.1.0
+      - name: Test actual pin hook and request scheduler
+        env:
+          PIN_TEST_MODULES: /tmp/forward-pin-tests
+        run: node checks/messenger-pins-runtime.cjs
+      - run: npm run check
+      - name: Bundle iOS and Android JavaScript
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: npx expo export --platform ios --platform android --output-dir /tmp/forward-pin-export
+      - name: Commit verified source
+        run: |
+          node scripts/bump-app-version.mjs patch
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add services/messengerPins.ts features/messenger/usePinnedMessages.ts app/messenger/room/'[id].tsx' checks/messenger-pins-runtime.cjs docs/CHAT_PINNING.md scripts/apply-pin-menu-fix.py app.config.js package.json package-lock.json
+          git commit -m 'fix: keep pin action visible during chat synchronization [versioned]'
+          git push origin HEAD:feat/chat-message-pinning
