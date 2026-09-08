@@ -45,6 +45,11 @@ jobs:
           PIN_TEST_MODULES: /tmp/forward-pin-tests
         run: node checks/messenger-pins-runtime.cjs
 
+      - name: Verify pin banner, latest selection and thumbnail lifecycle
+        env:
+          PIN_TEST_MODULES: /tmp/forward-pin-tests
+        run: node checks/messenger-pin-presentation.cjs
+
       - name: Validate Expo config
         env:
           CI: '1'

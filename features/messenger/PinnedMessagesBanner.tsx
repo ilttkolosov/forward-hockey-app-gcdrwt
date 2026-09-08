@@ -6,8 +6,14 @@ import {
   Text,
   View,
 } from "react-native";
+import Svg, { Path } from "react-native-svg";
+import PinnedMediaThumbnail from "./PinnedMediaThumbnail";
 import { colors } from "../../styles/commonStyles";
-import { pinnedMessengerPreview, type MessengerPin } from "./pins";
+import {
+  pinnedMessengerPreview,
+  pinnedMessengerMedia,
+  type MessengerPin,
+} from "./pins";
 
 interface Props {
   items: MessengerPin[];
@@ -15,14 +21,17 @@ interface Props {
   visitedId: string | null;
   busy: boolean;
   onPress: () => void;
+  accessToken: string;
+  active: boolean;
 }
-
 export default function PinnedMessagesBanner({
   items,
   messageId,
   visitedId,
   busy,
   onPress,
+  accessToken,
+  active,
 }: Props) {
   const index = items.findIndex((pin) => pin.message.id === messageId);
   const pin = items[index];
@@ -31,6 +40,7 @@ export default function PinnedMessagesBanner({
     ? visitedId
     : messageId;
   const preview = pinnedMessengerPreview(pin.message);
+  const media = pinnedMessengerMedia(pin.message);
   return (
     <Pressable
       style={styles.banner}
@@ -56,22 +66,43 @@ export default function PinnedMessagesBanner({
           />
         ))}
       </View>
+      {media && (
+        <PinnedMediaThumbnail
+          media={media}
+          accessToken={accessToken}
+          active={active}
+        />
+      )}
       <View style={styles.content}>
         <Text style={styles.title} numberOfLines={1}>
-          Закреплённое сообщение
-          {items.length > 1 ? ` · ${index + 1}/${items.length}` : ""}
+          Закрепленное сообщение
         </Text>
         <Text style={styles.preview} numberOfLines={1} ellipsizeMode="tail">
           {preview}
         </Text>
       </View>
-      {busy && <ActivityIndicator size="small" color={colors.primary} />}
+      <View style={styles.symbol} pointerEvents="none" accessible={false}>
+        {busy ? (
+          <ActivityIndicator size="small" color={colors.primary} />
+        ) : (
+          <Svg width={24} height={24} viewBox="0 0 24 24">
+            <Path
+              d="M3 5h17M3 10h8M3 15h6M14 9h6M15 9v5l-2 3h8l-2-3V9M17 17v5"
+              fill="none"
+              stroke={colors.primary}
+              strokeWidth={1.8}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </Svg>
+        )}
+      </View>
     </Pressable>
   );
 }
 const styles = StyleSheet.create({
   banner: {
-    minHeight: 58,
+    minHeight: 64,
     paddingVertical: 8,
     paddingHorizontal: 16,
     flexDirection: "row",
@@ -80,9 +111,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
-  rail: { height: 40, width: 5, marginRight: 10, alignItems: "center" },
+  rail: { height: 48, width: 5, marginRight: 10, alignItems: "center" },
   segment: { flex: 1, borderRadius: 2, backgroundColor: colors.primary },
   content: { flex: 1, minWidth: 0 },
+  symbol: {
+    width: 24,
+    height: 24,
+    marginLeft: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   title: {
     color: colors.primary,
     fontSize: 12,
