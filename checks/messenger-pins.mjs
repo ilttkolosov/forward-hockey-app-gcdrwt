@@ -33,8 +33,10 @@ assert.deepEqual(
 );
 assert.equal(currentMessengerPinId(pins, "missing"), "b");
 assert.equal(currentMessengerPinId(pins, "a"), "a");
-assert.equal(nextMessengerPinId(pins, "b"), "c");
-assert.equal(nextMessengerPinId(pins, "c"), "a");
+assert.equal(nextMessengerPinId(pins, "b"), "a");
+assert.equal(nextMessengerPinId(pins, "c"), "b");
+assert.equal(nextMessengerPinId(pins, "a"), "c");
+assert.equal(nextMessengerPinId(pins, "missing"), "b");
 assert.equal(nextMessengerPinId([pins[0]], "c"), "c");
 assert.equal(nextMessengerPinId([], "b"), null);
 assert.equal(currentMessengerPinId([], "b"), null);
@@ -58,6 +60,22 @@ assert.deepEqual(
   "message time, not pin/edit time or sequence",
 );
 assert.equal(currentMessengerPinId(chronological, null), "newest");
+let selected = currentMessengerPinId(chronological, null);
+for (const expected of [
+  "middle",
+  "older",
+  "newest",
+  "middle",
+  "older",
+  "newest",
+]) {
+  selected = nextMessengerPinId(chronological, selected);
+  assert.equal(
+    selected,
+    expected,
+    "preview cycles backward through message dates",
+  );
+}
 for (const separator of ["\n", "\r\n", "\r", "\u2028", "\u2029"])
   assert.equal(
     pinnedMessengerPreview({

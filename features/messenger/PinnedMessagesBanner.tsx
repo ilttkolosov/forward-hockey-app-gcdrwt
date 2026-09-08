@@ -27,7 +27,6 @@ interface Props {
 export default function PinnedMessagesBanner({
   items,
   messageId,
-  visitedId,
   busy,
   onPress,
   accessToken,
@@ -36,9 +35,8 @@ export default function PinnedMessagesBanner({
   const index = items.findIndex((pin) => pin.message.id === messageId);
   const pin = items[index];
   if (!pin) return null;
-  const activeId = items.some((item) => item.message.id === visitedId)
-    ? visitedId
-    : messageId;
+  // The rail describes the preview (the next tap target), never the focused row.
+  const activeId = messageId;
   const preview = pinnedMessengerPreview(pin.message);
   const media = pinnedMessengerMedia(pin.message);
   return (

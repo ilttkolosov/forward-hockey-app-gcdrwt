@@ -83,7 +83,11 @@ export function nextMessengerPinId(
   visitedId: string,
 ): string | null {
   const index = items.findIndex((pin) => pin.message.id === visitedId);
-  return items.length ? items[(index + 1) % items.length]!.message.id : null;
+  if (!items.length) return null;
+  // The fixed rail is oldest -> newest; tapping walks newest -> oldest and wraps.
+  return items[
+    index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length
+  ]!.message.id;
 }
 /** The bottom of an older cached page or an author filter is NOT the chat bottom. */
 export function shouldResetPinAtLatest(options: {
