@@ -1403,7 +1403,12 @@ export default function MessengerRoomScreen() {
   const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
   const [listReady, setListReady] = useState(false);
   const [roomScreenActive, setRoomScreenActive] = useState(false);
-  const pins = usePinnedMessages(roomId, session?.user.id, roomScreenActive);
+  const pins = usePinnedMessages(roomId, session?.user.id, roomScreenActive, canWrite);
+  const actionMessageId = actionMessage?.id;
+  const refreshPins = pins.refresh;
+  useEffect(() => {
+    if (actionMessageId && roomScreenActive) void refreshPins();
+  }, [actionMessageId, roomScreenActive, refreshPins]);
   const [pinSelection, setPinSelection] = useState<{ roomId: string; selected: string | null; visited: string | null }>({ roomId: "", selected: null, visited: null });
   const [pinNavigationBusy, setPinNavigationBusy] = useState(false);
   const pinNavigationLock = useRef(false);

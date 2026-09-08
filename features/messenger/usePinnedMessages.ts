@@ -7,6 +7,7 @@ import {
 } from "../../services/messengerPins";
 import { subscribeMessengerRealtime } from "../../services/messengerRealtime";
 import { orderedMessengerPins, type MessengerPin } from "./pins";
+import { messengerLog } from "../../services/messengerLogger";
 
 interface PinSnapshot {
   key: string;
@@ -20,6 +21,7 @@ export function usePinnedMessages(
   roomId: string,
   userId: string | undefined,
   active: boolean,
+  roomCanWrite = false,
 ) {
   const key = `${userId ?? ""}:${roomId}`;
   const [snapshot, setSnapshot] = useState<PinSnapshot>({
@@ -36,7 +38,10 @@ export function usePinnedMessages(
   const refreshRef = useRef<() => Promise<void>>(async () => {});
   const pinIds = useRef(new Set<string>());
   const items = snapshot.key === key ? snapshot.items : empty;
-  const canPin = snapshot.key === key && snapshot.canPin;
+  // A failed/slow initial list request is NOT a denial of permission. The room
+  // already exposes can_write; the server still authorizes every PUT/DELETE.
+  // An explicit server denial (including an older server's 404) takes precedence.
+  const canPin = snapshot.key === key ? snapshot.canPin : roomCanWrite;
   pinIds.current = new Set(items.map((pin) => pin.message.id));
 
   useEffect(() => {
@@ -44,7 +49,15 @@ export function usePinnedMessages(
     let cancelled = false;
     let dirty = false;
     let running: Promise<void> | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryCount = 0;
+    const cancelRetry = () => {
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = null;
+    };
     const refresh = (): Promise<void> => {
+      if (cancelled) return Promise.resolve();
+      cancelRetry();
       dirty = true;
       if (running) return running;
       running = (async () => {
@@ -52,6 +65,7 @@ export function usePinnedMessages(
           dirty = false;
           try {
             const result = await getMessengerPins(roomId);
+            retryCount = 0;
             // An invalidation during GET requires a fresh snapshot, not the stale response.
             if (!cancelled && !dirty)
               setSnapshot({
@@ -63,12 +77,28 @@ export function usePinnedMessages(
             if (
               !cancelled &&
               error instanceof MessengerApiError &&
-              [401, 403, 404].includes(error.status)
+              [401, 403, 404, 405].includes(error.status)
             ) {
               // 404 also supports rolling deployment against the older server.
               setSnapshot({ key, items: [], canPin: false });
             }
-            // Temporary connection failures retain the last known list.
+            messengerLog("warn", "pins.load_failed", {
+              room_id: roomId,
+              status: error instanceof MessengerApiError ? error.status : 0,
+              code: error instanceof MessengerApiError ? error.code : "transport_failure",
+            });
+            // Restore initial state promptly after a temporary outage instead
+            // of leaving the menu hidden until the 30-second reconciliation.
+            const permanent = error instanceof MessengerApiError &&
+              [401, 403, 404, 405].includes(error.status);
+            if (!cancelled && !permanent && !dirty && retryCount < 3) {
+              retryTimer = setTimeout(() => {
+                retryTimer = null;
+                if (AppState.currentState === "active" || AppState.currentState == null)
+                  void refresh();
+              }, [1_000, 2_000, 5_000][retryCount++]!);
+            }
+            // Temporary failures retain the last successful list and permission.
           }
         } while (!cancelled && dirty);
       })().finally(() => {
@@ -105,6 +135,7 @@ export function usePinnedMessages(
     }, 30_000);
     return () => {
       cancelled = true;
+      cancelRetry();
       unsubscribe();
       appState.remove();
       clearInterval(timer);

@@ -9,7 +9,9 @@ export async function getMessengerPins(
     can_pin: boolean;
     items: MessengerPin[];
   }>(`/chat/rooms/${encodeURIComponent(roomId)}/pins`, {
-    transportPriority: "background",
+    // This is visible chat state, not disposable media/cache prefetch.
+    // Normal priority survives the foreground history/read-receipt requests.
+    transportPriority: "normal",
   });
   return {
     ...result,
