@@ -69,12 +69,16 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
   await act(async () => {
     latest.visit("3");
   });
-  assert.equal(latest.currentId, "1");
+  assert.equal(latest.currentId, "2");
   assert.equal(latest.visitedId, "3");
+  await act(async () => {
+    latest.visit("2");
+  });
+  assert.equal(latest.currentId, "1");
   await act(async () => {
     latest.visit("1");
   });
-  assert.equal(latest.currentId, "2");
+  assert.equal(latest.currentId, "3", "oldest wraps back to newest");
   const staleRevision = latest.getRevision();
   await act(async () => {
     latest.resetToLatest();
@@ -212,6 +216,100 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(texts, ["Закрепленное сообщение", "Текст"]);
   assert.equal(tree.root.findByType("Thumbnail").props.media, photo);
   assert.equal(tree.root.findAllByType("Svg").length, 1);
+  await act(async () => {
+    tree.unmount();
+  });
+  // Actual hook and banner: the focused row must never override the next preview.
+  const previewPins = pins.map((pin) => ({
+    ...pin,
+    message: { ...pin.message, text: `Превью ${pin.message.id}` },
+  }));
+  let selection;
+  function PreviewHarness({
+    items = previewPins,
+    identity = "user:preview",
+    active = true,
+  }) {
+    selection = usePinnedMessageSelection(items, identity, active);
+    return React.createElement(Banner, {
+      items,
+      messageId: selection.currentId,
+      visitedId: selection.visitedId,
+      busy: false,
+      active,
+      accessToken: "fixture",
+      onPress() {},
+    });
+  }
+  await act(async () => {
+    tree = create(React.createElement(PreviewHarness));
+  });
+  const segments = () =>
+    tree.root.findAll(
+      (node) =>
+        typeof node.props.testID === "string" &&
+        node.props.testID.startsWith("pin-segment-"),
+    );
+  const originalSegments = segments();
+  function checkPreview(expected, focused) {
+    assert.equal(selection.currentId, expected);
+    assert.equal(selection.visitedId, focused);
+    assert.deepEqual(
+      tree.root.findAllByType("Text").map((node) => node.children.join("")),
+      ["Закрепленное сообщение", `Превью ${expected}`],
+    );
+    const current = segments();
+    assert.deepEqual(
+      current.map((node) => node.props.testID),
+      ["pin-segment-1", "pin-segment-2", "pin-segment-3"],
+    );
+    current.forEach((node, index) => {
+      assert.equal(
+        node,
+        originalSegments[index],
+        "fixed section identity survives cycling",
+      );
+      const style = Object.assign({}, ...node.props.style);
+      assert.equal(
+        style.width,
+        String(index + 1) === expected ? 4 : 2,
+        "bold segment belongs to the preview, not the focused row",
+      );
+    });
+  }
+  checkPreview("3", null);
+  for (const [focused, preview] of [
+    ["3", "2"],
+    ["2", "1"],
+    ["1", "3"],
+    ["3", "2"],
+    ["2", "1"],
+    ["1", "3"],
+  ]) {
+    await act(async () => {
+      selection.visit(focused);
+    });
+    checkPreview(preview, focused);
+  }
+  await act(async () => {
+    selection.resetToLatest();
+  });
+  checkPreview("3", null);
+  await act(async () => {
+    tree.update(
+      React.createElement(PreviewHarness, { items: [previewPins[0]] }),
+    );
+  });
+  await act(async () => {
+    selection.visit("1");
+  });
+  assert.equal(selection.currentId, "1", "one pin cycles to itself");
+  assert.equal(segments().length, 1);
+  assert.equal(Object.assign({}, ...segments()[0].props.style).width, 4);
+  await act(async () => {
+    tree.update(React.createElement(PreviewHarness, { items: [] }));
+  });
+  assert.equal(tree.toJSON(), null, "empty pins have no banner or rail");
   await act(async () => {
     tree.unmount();
   });
