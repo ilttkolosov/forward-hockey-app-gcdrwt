@@ -1,5 +1,6 @@
 from pathlib import Path
 import hashlib
+import re
 p=Path('app/messenger/room/[id].tsx')
 raw=p.read_bytes()
 assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest() == '1a9496f0bbefaa4a1d782993f00f71b0d4e8d823'
@@ -10,7 +11,11 @@ s=s.replace('  const [pinSelection, setPinSelection] = useState<{ roomId: string
   const resetPinSelection = pinSelection.resetToLatest;
   const pinIdentityRef = useRef(pinIdentity);
   pinIdentityRef.current = pinIdentity;
-  const pinUserScroll = useRef(false);''')
+  const pinUserScroll = useRef(false);
+  useFocusEffect(useCallback(() => {
+    pinUserScroll.current = false;
+    resetPinSelection();
+  }, [resetPinSelection]));''')
 s=s.replace('  const currentPinId = currentMessengerPinId(pins.items, pinSelection.roomId === roomId ? pinSelection.selected : null);', '  const currentPinId = pinSelection.currentId;')
 s=s.replace('''      nearLatest.current = atLatest;
       setShowJumpToLatest''', '''      nearLatest.current = atLatest;
@@ -42,9 +47,9 @@ s=s.replace('navigateToRepliedMessage, pins.items, roomId]);', 'navigateToReplie
 s=s.replace('if (!pinned) setPinSelection({ roomId, selected: message.id, visited: null });', 'if (!pinned && pinIdentityRef.current === pinIdentity) pinSelection.select(message.id);')
 s=s.replace('  }, [pins, roomId]);', '  }, [pinIdentity, pinSelection, pins]);')
 s=s.replace('visitedId={pinSelection.roomId === roomId ? pinSelection.visited : null}', 'visitedId={pinSelection.visitedId}\n          accessToken={session?.access_token ?? ""}\n          active={roomScreenActive}')
-s=s.replace('onScrollBeginDrag={beginManualFeedNavigation}', 'onScrollBeginDrag={() => { pinUserScroll.current = true; beginManualFeedNavigation(); }}')
+s=s.replace('onScrollBeginDrag={beginManualFeedNavigation}', 'onScrollBeginDrag={() => { pinUserScroll.current = true; messageNavigationTarget.current = null; beginManualFeedNavigation(); }}')
 s=s.replace('                void loadNewerMessages().finally(() => scrollToLatest(true));', '                resetPinSelection();\n                void loadNewerMessages().finally(() => scrollToLatest(true));')
-assert 'setPinSelection' not in s
+assert not re.search(r'\bsetPinSelection\b', s)
 p.write_text(s)
 p=Path('docs/CHAT_PINNING.md')
 s=p.read_text().replace('Сообщения идут от новых к старым по серверному bigint sequence без потери точности.', 'Сообщения идут от старых к новым по created_at самого сообщения. Время закрепления\nи редактирования не влияет на порядок; bigint sequence используется только для\nстабильного порядка при одинаковом времени, без потери точности.')
