@@ -37,6 +37,14 @@ jobs:
       - name: Verify pinned message ordering and previews
         run: node --no-warnings --experimental-strip-types checks/messenger-pins.mjs
 
+      - name: Install isolated React test runtime
+        run: npm install --prefix /tmp/forward-pin-tests --no-package-lock --ignore-scripts react@19.1.0 react-test-renderer@19.1.0
+
+      - name: Verify pin menu during competing chat requests
+        env:
+          PIN_TEST_MODULES: /tmp/forward-pin-tests
+        run: node checks/messenger-pins-runtime.cjs
+
       - name: Validate Expo config
         env:
           CI: '1'
