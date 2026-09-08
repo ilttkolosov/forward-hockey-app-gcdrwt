@@ -54,6 +54,7 @@ import PinnedMessagesBanner from "../../../features/messenger/PinnedMessagesBann
 import { usePinnedMessages } from "../../../features/messenger/usePinnedMessages";
 import { shouldResetPinAtLatest } from "../../../features/messenger/pins";
 import { usePinnedMessageSelection } from "../../../features/messenger/usePinnedMessageSelection";
+import { waitForMessengerFocus } from "../../../features/messenger/messageFocus";
 import {
   messageDeletionAvailable,
   messageMutationAvailable,
@@ -1452,6 +1453,7 @@ export default function MessengerRoomScreen() {
   const messagesRef = useRef<MessengerMessage[]>([]);
   const roomTypeRef = useRef(roomType);
   const viewableServerMessageIds = useRef<string[]>([]);
+  const focusVisibleServerMessageIds = useRef<string[]>([]);
   const editingMessageRef = useRef<MessengerMessage | null>(null);
   const refreshRunning = useRef(false);
   const olderMessagesLoading = useRef(false);
@@ -1525,7 +1527,10 @@ export default function MessengerRoomScreen() {
   const messageNavigationTarget = useRef<{
     messageId: string;
     attempts: number;
+    positioned: boolean;
+    confirmed: boolean;
   } | null>(null);
+  const messageNavigationGeneration = useRef(0);
   const messageNavigationTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -1619,28 +1624,22 @@ export default function MessengerRoomScreen() {
     }
   }, [clearPendingLatestScroll]);
 
+  const cancelMessageNavigation = useCallback(() => {
+    messageNavigationGeneration.current += 1;
+    messageNavigationTarget.current = null;
+    if (messageNavigationTimer.current) clearTimeout(messageNavigationTimer.current);
+    messageNavigationTimer.current = null;
+    setHighlightedMessageId(null);
+  }, []);
+
   const positionMessageNavigationTarget = useCallback(() => {
     const target = messageNavigationTarget.current;
-    if (!target) return;
-    const index = messagesRef.current.findIndex(
-      (message) => message.id === target.messageId,
-    );
+    if (!target || !listRef.current) return;
+    const index = messagesRef.current.findIndex((message) => message.id === target.messageId);
     if (index < 0) return;
-    listRef.current?.scrollToIndex({
-      index,
-      animated: true,
-      viewPosition: 0.45,
-      viewOffset: 0,
-    });
-    setHighlightedMessageId(target.messageId);
-    if (messageNavigationTimer.current) {
-      clearTimeout(messageNavigationTimer.current);
-    }
-    messageNavigationTimer.current = setTimeout(() => {
-      messageNavigationTarget.current = null;
-      messageNavigationTimer.current = null;
-      setHighlightedMessageId(null);
-    }, 2_500);
+    target.positioned = true;
+    // Repeated animations after content-size changes race each other on media rows.
+    listRef.current.scrollToIndex({ index, animated: false, viewPosition: 0.45, viewOffset: 0 });
   }, []);
 
   const navigateToRepliedMessage = useCallback(
@@ -1660,17 +1659,23 @@ export default function MessengerRoomScreen() {
         });
         return true;
       }
+      cancelMessageNavigation();
+      const navigationGeneration = messageNavigationGeneration.current;
+      const identity = pinIdentityRef.current;
+      const currentNavigation = () => messageNavigationGeneration.current === navigationGeneration && pinIdentityRef.current === identity;
       beginManualFeedNavigation();
       try {
         let sequence = reply.sequence;
         let context = sequence
           ? await loadCachedMessengerMessageContext(db, roomId, sequence, 30)
           : [];
+        if (!currentNavigation()) return false;
         let target =
           messagesRef.current.find((message) => message.id === reply.id) ||
           context.find((message) => message.id === reply.id);
         if (!target) {
           target = await getMessengerMessage(reply.id);
+          if (!currentNavigation()) return false;
           sequence = target.sequence;
           const [before, after] = await Promise.all([
             getMessengerMessages(roomId, {
@@ -1691,6 +1696,7 @@ export default function MessengerRoomScreen() {
           );
           await cacheMessengerMessages(db, context);
         }
+        if (!currentNavigation() || target.deleted_at) return false;
         if (context.length) {
           setMessages((current) => {
             const merged = mergeMessengerMessages(
@@ -1705,12 +1711,36 @@ export default function MessengerRoomScreen() {
         messageNavigationTarget.current = {
           messageId: target.id,
           attempts: 0,
+          positioned: false,
+          confirmed: false,
         };
+        const focusTarget = messageNavigationTarget.current;
         requestAnimationFrame(() =>
           requestAnimationFrame(positionMessageNavigationTarget),
         );
+        const reached = await waitForMessengerFocus({
+          isCurrent: () => currentNavigation() && messageNavigationTarget.current === focusTarget,
+          isVisible: () => focusTarget.positioned && focusVisibleServerMessageIds.current.includes(target.id),
+        });
+        if (!reached) {
+          if (currentNavigation()) {
+            cancelMessageNavigation();
+            setSyncError("Не удалось сфокусировать сообщение. Повторите переход.");
+          }
+          return false;
+        }
+        focusTarget.confirmed = true;
+        setHighlightedMessageId(target.id);
+        messageNavigationTimer.current = setTimeout(() => {
+          if (!currentNavigation()) return;
+          messageNavigationTimer.current = null;
+          setHighlightedMessageId(null);
+          // Keep the layout anchor for delayed media until manual/new navigation.
+        }, 1800);
         return true;
       } catch (error) {
+        if (!currentNavigation()) return false;
+        cancelMessageNavigation();
         setSyncError(
           messengerErrorMessage(error, "Не удалось открыть исходное сообщение"),
         );
@@ -1719,6 +1749,7 @@ export default function MessengerRoomScreen() {
     },
     [
       beginManualFeedNavigation,
+      cancelMessageNavigation,
       db,
       positionMessageNavigationTarget,
       roomId,
@@ -2725,10 +2756,22 @@ export default function MessengerRoomScreen() {
     [acknowledgeLatest, settleInitialPosition],
   );
 
-  const initialViewabilityConfig = useMemo(
-    () => ({ itemVisiblePercentThreshold: 1 }),
-    [],
-  );
+  // Preserve the 1% read/unread policy; navigation requires a fully visible
+  // short row or at least half of the viewport for a large row.
+  const viewableHandlerRef = useRef(handleViewableItemsChanged);
+  viewableHandlerRef.current = handleViewableItemsChanged;
+  const messageViewabilityPairs = useMemo(() => [
+    {
+      viewabilityConfig: { itemVisiblePercentThreshold: 1 },
+      onViewableItemsChanged: (info: { viewableItems: ViewToken<MessengerMessage>[] }) => viewableHandlerRef.current(info),
+    },
+    {
+      viewabilityConfig: { viewAreaCoveragePercentThreshold: 50, minimumViewTime: 80 },
+      onViewableItemsChanged: ({ viewableItems }: { viewableItems: ViewToken<MessengerMessage>[] }) => {
+        focusVisibleServerMessageIds.current = viewableItems.filter((token) => token.isViewable).map((token) => token.item.id);
+      },
+    },
+  ], []);
 
   useEffect(() => {
     if (!initialUnreadExpected || unreadMarkerClientId || !session) return;
@@ -2875,7 +2918,9 @@ export default function MessengerRoomScreen() {
     }) => {
       const navigationTarget = messageNavigationTarget.current;
       if (navigationTarget) {
+        navigationTarget.positioned = false;
         navigationTarget.attempts += 1;
+        if (navigationTarget.attempts > 32) { cancelMessageNavigation(); return; }
         listRef.current?.scrollToOffset({
           offset: Math.max(0, (info.averageItemLength || 72) * info.index),
           animated: false,
@@ -2900,7 +2945,7 @@ export default function MessengerRoomScreen() {
         Math.min(80 + initialPositionAttempts.current * 20, 240),
       );
     },
-    [positionInitialMessages, positionMessageNavigationTarget],
+    [cancelMessageNavigation, positionInitialMessages, positionMessageNavigationTarget],
   );
 
   const loadFilteredAuthorMessages = useCallback(
@@ -3365,6 +3410,7 @@ export default function MessengerRoomScreen() {
         setRoomScreenActive(false);
         setViewableMessageIds(new Set());
         viewableServerMessageIds.current = [];
+        focusVisibleServerMessageIds.current = [];
         cancelAnimationFrame(roomDetailsFrame);
         setMessengerActiveRoom(null);
         sendMessengerTyping(roomId, false);
@@ -3394,6 +3440,7 @@ export default function MessengerRoomScreen() {
           pushReactionAnimationTimer.current = null;
         }
         setPushReactionAnimation(null);
+        messageNavigationGeneration.current += 1;
         messageNavigationTarget.current = null;
         pendingMessageAction.current = null;
         pendingAttachmentRequest.current = null;
@@ -4349,6 +4396,8 @@ export default function MessengerRoomScreen() {
   );
 
   const send = () => {
+    cancelMessageNavigation();
+    resetPinSelection();
     if (editingMessage) {
       void submitEdit();
       return;
@@ -4652,6 +4701,7 @@ export default function MessengerRoomScreen() {
   const applyAuthorFilter = useCallback(
     (message: MessengerMessage) => {
       if (message.pending || message.kind === "system") return;
+      cancelMessageNavigation();
       const filter = {
         id: message.author.id,
         name: message.author.display_name,
@@ -4668,7 +4718,7 @@ export default function MessengerRoomScreen() {
       });
       void loadFilteredAuthorMessages(filter);
     },
-    [loadFilteredAuthorMessages, roomType],
+    [cancelMessageNavigation, loadFilteredAuthorMessages, roomType],
   );
 
   const clearAuthorFilter = useCallback(() => {
@@ -5375,11 +5425,10 @@ export default function MessengerRoomScreen() {
               listReady && !authorFilter ? { minIndexForVisible: 0 } : undefined
             }
             onScroll={handleListScroll}
-            onScrollBeginDrag={() => { pinUserScroll.current = true; messageNavigationTarget.current = null; beginManualFeedNavigation(); }}
+            onScrollBeginDrag={() => { pinUserScroll.current = true; cancelMessageNavigation(); beginManualFeedNavigation(); }}
             scrollEventThrottle={80}
             onScrollToIndexFailed={handleScrollToIndexFailed}
-            onViewableItemsChanged={handleViewableItemsChanged}
-            viewabilityConfig={initialViewabilityConfig}
+            viewabilityConfigCallbackPairs={messageViewabilityPairs}
             onContentSizeChange={() => {
               if (!visibleMessages.length) return;
               initialListContentMeasured.current = true;
@@ -5469,6 +5518,7 @@ export default function MessengerRoomScreen() {
               onPress={() => {
                 nearLatest.current = true;
                 setShowJumpToLatest(false);
+                cancelMessageNavigation();
                 resetPinSelection();
                 void loadNewerMessages().finally(() => scrollToLatest(true));
               }}

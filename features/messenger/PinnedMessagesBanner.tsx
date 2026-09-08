@@ -55,6 +55,7 @@ export default function PinnedMessagesBanner({
         {items.map((item, segment) => (
           <View
             key={item.message.id}
+            testID={`pin-segment-${item.message.id}`}
             style={[
               styles.segment,
               {
@@ -111,7 +112,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
-  rail: { height: 48, width: 5, marginRight: 10, alignItems: "center" },
+  rail: {
+    height: 48,
+    width: 5,
+    flexShrink: 0,
+    marginRight: 10,
+    alignItems: "center",
+  },
   segment: { flex: 1, borderRadius: 2, backgroundColor: colors.primary },
   content: { flex: 1, minWidth: 0 },
   symbol: {
