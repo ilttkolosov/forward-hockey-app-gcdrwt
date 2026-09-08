@@ -1,7 +1,11 @@
 import { createVideoPlayer, type VideoThumbnail } from "expo-video";
 
 /** A single still frame, not an autoplaying VideoView. Dispose on success/error/unmount. */
-export function requestMessengerPinVideoThumbnail(uri: string, headers: Record<string, string> | undefined, onFrame: (frame: VideoThumbnail) => void): () => void {
+export function requestMessengerPinVideoThumbnail(
+  uri: string,
+  headers: Record<string, string> | undefined,
+  onFrame: (frame: VideoThumbnail) => void,
+): () => void {
   const player = createVideoPlayer(null);
   let disposed = false;
   let generating = false;
@@ -18,11 +22,16 @@ export function requestMessengerPinVideoThumbnail(uri: string, headers: Record<s
     if (disposed || generating) return;
     generating = true;
     try {
-      const [frame] = await player.generateThumbnailsAsync(0, { maxWidth: 160, maxHeight: 160 });
+      const [frame] = await player.generateThumbnailsAsync(0, {
+        maxWidth: 160,
+        maxHeight: 160,
+      });
       if (!disposed && frame) onFrame(frame);
     } catch {
       // Broken/unsupported/offline media leaves a harmless media-type placeholder.
-    } finally { dispose(); }
+    } finally {
+      dispose();
+    }
   };
   try {
     player.muted = true;
@@ -34,9 +43,14 @@ export function requestMessengerPinVideoThumbnail(uri: string, headers: Record<s
       else if (status === "error") dispose();
     });
     timeout = setTimeout(dispose, 15_000);
-    void player.replaceAsync({ uri, headers }).then(() => {
-      if (!disposed && player.status === "readyToPlay") void generate();
-    }).catch(dispose);
-  } catch { dispose(); }
+    void player
+      .replaceAsync({ uri, headers })
+      .then(() => {
+        if (!disposed && player.status === "readyToPlay") void generate();
+      })
+      .catch(dispose);
+  } catch {
+    dispose();
+  }
   return dispose;
 }

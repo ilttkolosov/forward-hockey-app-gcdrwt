@@ -52,7 +52,8 @@ import {
 import MessageReceiptsModal from "../../../features/messenger/MessageReceiptsModal";
 import PinnedMessagesBanner from "../../../features/messenger/PinnedMessagesBanner";
 import { usePinnedMessages } from "../../../features/messenger/usePinnedMessages";
-import { currentMessengerPinId, nextMessengerPinId } from "../../../features/messenger/pins";
+import { shouldResetPinAtLatest } from "../../../features/messenger/pins";
+import { usePinnedMessageSelection } from "../../../features/messenger/usePinnedMessageSelection";
 import {
   messageDeletionAvailable,
   messageMutationAvailable,
@@ -1409,10 +1410,19 @@ export default function MessengerRoomScreen() {
   useEffect(() => {
     if (actionMessageId && roomScreenActive) void refreshPins();
   }, [actionMessageId, roomScreenActive, refreshPins]);
-  const [pinSelection, setPinSelection] = useState<{ roomId: string; selected: string | null; visited: string | null }>({ roomId: "", selected: null, visited: null });
+  const pinIdentity = `${session?.user.id ?? ""}:${roomId}`;
+  const pinSelection = usePinnedMessageSelection(pins.items, pinIdentity, roomScreenActive);
+  const resetPinSelection = pinSelection.resetToLatest;
+  const pinIdentityRef = useRef(pinIdentity);
+  pinIdentityRef.current = pinIdentity;
+  const pinUserScroll = useRef(false);
+  useFocusEffect(useCallback(() => {
+    pinUserScroll.current = false;
+    resetPinSelection();
+  }, [resetPinSelection]));
   const [pinNavigationBusy, setPinNavigationBusy] = useState(false);
   const pinNavigationLock = useRef(false);
-  const currentPinId = currentMessengerPinId(pins.items, pinSelection.roomId === roomId ? pinSelection.selected : null);
+  const currentPinId = pinSelection.currentId;
   const [viewableMessageIds, setViewableMessageIds] = useState<Set<string>>(
     new Set(),
   );
@@ -2946,6 +2956,17 @@ export default function MessengerRoomScreen() {
       const atLatest =
         contentOffset.y + layoutMeasurement.height >= contentSize.height - 120;
       nearLatest.current = atLatest;
+      if (pinUserScroll.current && contentOffset.y + layoutMeasurement.height >= contentSize.height - 4 && shouldResetPinAtLatest({
+        distanceFromBottom: contentSize.height - contentOffset.y - layoutMeasurement.height,
+        listReady, userScrolled: pinUserScroll.current, filtered: Boolean(authorFilter),
+        navigating: pinNavigationLock.current,
+        loadedSequence: [...messagesRef.current].reverse().find((message) => !message.pending)?.sequence ?? null,
+        latestSequence: latestKnownSequence.current,
+        hasMoreNewer: remoteHasMoreNewerMessages.current,
+      })) {
+        pinUserScroll.current = false;
+        resetPinSelection();
+      }
       setShowJumpToLatest(!authorFilter && !atLatest);
       feedIsScrolling.current = true;
       setFloatingDate(floatingDateLabelRef.current);
@@ -2996,6 +3017,7 @@ export default function MessengerRoomScreen() {
       loadNewerMessages,
       loadOlderMessages,
       listReady,
+      resetPinSelection,
     ],
   );
 
@@ -4666,31 +4688,33 @@ export default function MessengerRoomScreen() {
   const navigateToPinnedMessage = useCallback(async () => {
     const pin = pins.items.find((item) => item.message.id === currentPinId);
     if (!pin || pinNavigationLock.current) return;
+    const selectionRevision = pinSelection.getRevision();
     pinNavigationLock.current = true;
+    pinUserScroll.current = false;
     setPinNavigationBusy(true);
     try {
       if (authorFilter) clearAuthorFilter();
       // Let the unfiltered FlatList commit before requesting its target index.
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      if (await navigateToRepliedMessage(pin.message)) {
-        setPinSelection({ roomId, visited: pin.message.id, selected: nextMessengerPinId(pins.items, pin.message.id) });
+      if (await navigateToRepliedMessage(pin.message) && pinIdentityRef.current === pinIdentity) {
+        pinSelection.visit(pin.message.id, selectionRevision);
       }
     } finally {
       pinNavigationLock.current = false;
       setPinNavigationBusy(false);
     }
-  }, [authorFilter, clearAuthorFilter, currentPinId, navigateToRepliedMessage, pins.items, roomId]);
+  }, [authorFilter, clearAuthorFilter, currentPinId, navigateToRepliedMessage, pinIdentity, pinSelection, pins.items]);
 
   const toggleMessagePinned = useCallback(async (message: MessengerMessage) => {
     const pinned = pins.items.some((item) => item.message.id === message.id);
     setActionMessage(null);
     try {
       await pins.setPinned(message.id, !pinned);
-      if (!pinned) setPinSelection({ roomId, selected: message.id, visited: null });
+      if (!pinned && pinIdentityRef.current === pinIdentity) pinSelection.select(message.id);
     } catch (error) {
       Alert.alert("Закрепление сообщения", messengerErrorMessage(error, "Не удалось изменить закрепление"));
     }
-  }, [pins, roomId]);
+  }, [pinIdentity, pinSelection, pins]);
 
   const openForward = useCallback(async (message: MessengerMessage) => {
     setForwardingMessage(message);
@@ -5279,7 +5303,9 @@ export default function MessengerRoomScreen() {
         <PinnedMessagesBanner
           items={pins.items}
           messageId={currentPinId}
-          visitedId={pinSelection.roomId === roomId ? pinSelection.visited : null}
+          visitedId={pinSelection.visitedId}
+          accessToken={session?.access_token ?? ""}
+          active={roomScreenActive}
           busy={pinNavigationBusy}
           onPress={() => void navigateToPinnedMessage()}
         />
@@ -5349,7 +5375,7 @@ export default function MessengerRoomScreen() {
               listReady && !authorFilter ? { minIndexForVisible: 0 } : undefined
             }
             onScroll={handleListScroll}
-            onScrollBeginDrag={beginManualFeedNavigation}
+            onScrollBeginDrag={() => { pinUserScroll.current = true; messageNavigationTarget.current = null; beginManualFeedNavigation(); }}
             scrollEventThrottle={80}
             onScrollToIndexFailed={handleScrollToIndexFailed}
             onViewableItemsChanged={handleViewableItemsChanged}
@@ -5443,6 +5469,7 @@ export default function MessengerRoomScreen() {
               onPress={() => {
                 nearLatest.current = true;
                 setShowJumpToLatest(false);
+                resetPinSelection();
                 void loadNewerMessages().finally(() => scrollToLatest(true));
               }}
               accessibilityRole="button"
