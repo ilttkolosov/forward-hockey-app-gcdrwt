@@ -25,11 +25,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Bundle Android JavaScript
+      - name: Bundle Android and iOS JavaScript
         env:
           CI: '1'
           EXPO_NO_TELEMETRY: '1'
-        run: npx expo export --platform android --output-dir /tmp/forward-hockey-export
+        run: |
+          npx expo export --platform android --output-dir /tmp/forward-hockey-export-android
+          npx expo export --platform ios --output-dir /tmp/forward-hockey-export-ios
 
       - name: Typecheck and lint
         run: npm run check
@@ -44,6 +46,11 @@ jobs:
         env:
           PIN_TEST_MODULES: /tmp/forward-pin-tests
         run: node checks/messenger-pins-runtime.cjs
+
+      - name: Verify pin selection, banner and thumbnail lifecycle
+        env:
+          PIN_TEST_MODULES: /tmp/forward-pin-tests
+        run: node checks/messenger-pin-presentation.cjs
 
       - name: Validate Expo config
         env:
