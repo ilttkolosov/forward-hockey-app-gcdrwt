@@ -37,6 +37,9 @@ jobs:
       - name: Verify pinned message ordering and previews
         run: node --no-warnings --experimental-strip-types checks/messenger-pins.mjs
 
+      - name: Verify confirmed pin focus and cancellation
+        run: node --no-warnings --experimental-strip-types checks/messenger-pin-focus.mjs
+
       - name: Install isolated React test runtime
         run: npm install --prefix /tmp/forward-pin-tests --no-package-lock --ignore-scripts react@19.1.0 react-test-renderer@19.1.0
 
