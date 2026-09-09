@@ -1,0 +1,49 @@
+name: Verify Android pin navigation
+on:
+  push:
+    branches: [work/android-pin-navigation]
+    paths: [scripts/apply-navigation-fix.py, .github/workflows/android-pin-navigation-workbench.yml]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: work/android-pin-navigation
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply integrity-checked client patch
+        run: python scripts/apply-navigation-fix.py
+      - run: npm ci
+      - name: Format focus helper and tests
+        run: npx --yes prettier@3.9.6 --write features/messenger/messageFocus.ts checks/messenger-pin-focus.mjs checks/messenger-navigation-runtime.cjs
+      - run: npm run check
+      - name: Install isolated React test runtime
+        run: npm install --prefix /tmp/forward-pin-tests --no-package-lock --ignore-scripts react@19.1.0 react-test-renderer@19.1.0
+      - name: Verify existing pin menu and preview cycle
+        env:
+          PIN_TEST_MODULES: /tmp/forward-pin-tests
+        run: |
+          node --no-warnings --experimental-strip-types checks/messenger-pins.mjs
+          node checks/messenger-pins-runtime.cjs
+          node checks/messenger-pin-presentation.cjs
+      - name: Bundle Android and iOS JavaScript
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: npx expo export --platform android --platform ios --output-dir /tmp/forward-pin-navigation-export
+      - name: Commit verified source
+        run: |
+          rm scripts/apply-navigation-fix.py
+          node scripts/bump-app-version.mjs patch
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/apply-navigation-fix.py app/messenger/room/'[id].tsx' features/messenger/messageFocus.ts checks/messenger-pin-focus.mjs checks/messenger-navigation-runtime.cjs docs/CHAT_PINNING.md package.json package-lock.json app.config.js
+          git commit -m 'fix: separate navigation errors and verify native message focus [versioned]'
+          git push origin HEAD:work/android-pin-navigation
