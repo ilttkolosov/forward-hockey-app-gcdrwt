@@ -1,6 +1,6 @@
 {
   "name": "Natively",
-  "version": "2.4.82",
+  "version": "2.4.83",
   "main": "index.ts",
   "scripts": {
     "dev": "EXPO_NO_TELEMETRY=1 expo start --tunnel",
@@ -30,11 +30,12 @@
     "check:messenger-android-keyboard": "node --no-warnings --experimental-strip-types checks/messenger-android-keyboard-avoidance.mjs",
     "check:startup-config": "node --no-warnings --experimental-strip-types checks/startup-config-policy.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "npm run photos:generate && npm run logos:generate && npm run seed:verify && npm run generate:route-types && npm run check:messenger-unread && npm run check:messenger-player-identity && npm run check:messenger-player-avatar && npm run check:messenger-message-mutation && npm run check:messenger-avatar-ime-compat && npm run check:messenger-ios-registration && npm run check:messenger-android-keyboard && npm run check:startup-config && npm run typecheck && npm run lint",
+    "check": "npm run photos:generate && npm run logos:generate && npm run seed:verify && npm run generate:route-types && npm run check:messenger-unread && npm run check:messenger-player-identity && npm run check:messenger-player-avatar && npm run check:messenger-message-mutation && npm run check:messenger-avatar-ime-compat && npm run check:messenger-ios-registration && npm run check:messenger-android-keyboard && npm run check:startup-config && npm run typecheck && npm run lint && npm run check:messenger-navigation",
     "prebuild": "expo prebuild",
     "eas-build": "npx --yes eas-cli@21.7.0 build",
     "check:messenger-avatar-ime-compat": "node --no-warnings --experimental-strip-types checks/messenger-avatar-ime-compat.mjs",
-    "check:messenger-ios-registration": "node --no-warnings --experimental-strip-types checks/messenger-ios-registration.mjs"
+    "check:messenger-ios-registration": "node --no-warnings --experimental-strip-types checks/messenger-ios-registration.mjs",
+    "check:messenger-navigation": "node --no-warnings --experimental-strip-types checks/messenger-navigation-runtime.cjs && node --no-warnings --experimental-strip-types checks/messenger-pin-focus.mjs"
   },
   "dependencies": {
     "@appmetrica/react-native-analytics": "^4.2.0",
