@@ -18,7 +18,17 @@ jobs:
           node-version: 22
           cache: npm
       - name: Apply integrity-checked client patch
-        run: python scripts/apply-navigation-fix.py
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/apply-navigation-fix.py')
+          text = p.read_text()
+          before = "subprocess.run(['git','apply','--check','-'], input=patch, check=True)"
+          after = "patch = patch.replace(b'--- /dev/null\\n', b'new file mode 100644\\n--- /dev/null\\n')\n" + before
+          assert text.count(before) == 1
+          p.write_text(text.replace(before, after))
+          PY
+          python scripts/apply-navigation-fix.py
       - run: npm ci
       - name: Format focus helper and tests
         run: npx --yes prettier@3.9.6 --write features/messenger/messageFocus.ts checks/messenger-pin-focus.mjs checks/messenger-navigation-runtime.cjs
