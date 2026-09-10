@@ -49,9 +49,10 @@ function App() {
         if (stopped) return;
         await write({ mode, status: 'requesting-frame', index });
         let loaded = false;
-        cleanup = request(uri, undefined, (frame) => {
+        // Native SharedRef images are already decoded: onDisplay, not network onLoad.
+      cleanup = request(uri, undefined, (frame) => {
           if (stopped) return;
-          setPicture({ key: index, frame, onLoad: async () => {
+          setPicture({ key: index, frame, onDisplay: async () => {
             if (loaded || stopped) return;
             loaded = true;
             await write({ mode, status: 'rendered-frame', index, width: frame.width, height: frame.height });
@@ -70,7 +71,7 @@ function App() {
   return <View style={{ flex: 1, padding: 50, justifyContent: 'center' }}>
     <Text>{label}</Text>
     {picture && <Image key={picture.key} source={picture.frame} style={{ width: 160, height: 160 }}
-      onLoad={picture.onLoad} onError={(error) => setLabel('Native image error: ' + JSON.stringify(error))} />}
+      onDisplay={picture.onDisplay} onError={(error) => setLabel('Native image error: ' + JSON.stringify(error))} />}
   </View>;
 }
 registerRootComponent(App);
@@ -148,7 +149,8 @@ def main():
     documents.mkdir(exist_ok=True)
     outcomes = {}
     for mode, seconds in [('baseline', 25), ('fixed', 70)]:
-        run(['xcrun', 'simctl', 'terminate', udid, BUNDLE], host, 'terminate-' + mode, check=False)
+        if mode != 'baseline':
+            run(['xcrun', 'simctl', 'terminate', udid, BUNDLE], host, 'terminate-' + mode, timeout=60, check=False)
         (documents / 'mode.txt').write_text(mode)
         result = documents / 'result.json'
         result.unlink(missing_ok=True)
