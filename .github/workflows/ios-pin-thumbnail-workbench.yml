@@ -3,10 +3,6 @@ on:
   push:
     branches: [work/ios-pin-thumbnail-crash]
     paths:
-      - services/messengerPinVideoThumbnail.ts
-      - checks/ios-pin-thumbnail-smoke.py
-      - checks/messenger-pin-thumbnail-contract.cjs
-      - scripts/prepare-ios-pin-thumbnail-fix.py
       - .github/workflows/ios-pin-thumbnail-workbench.yml
 permissions:
   contents: write
@@ -14,9 +10,9 @@ concurrency:
   group: ios-pin-thumbnail-workbench
   cancel-in-progress: true
 jobs:
-  javascript:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  native-ios:
+    runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,61 +21,34 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: python scripts/prepare-ios-pin-thumbnail-fix.py
-      - run: npm ci
-      - run: npx --yes prettier@3.9.6 --write services/messengerPinVideoThumbnail.ts checks/messenger-pin-thumbnail-contract.cjs checks/messenger-pin-presentation.cjs
-      - name: Prove contract test rejects the previous scalar call
+      - name: Observe display of already decoded native image refs
         run: |
-          cp services/messengerPinVideoThumbnail.ts /tmp/fixed-thumbnail.ts
-          git show edc8ac4f6427f340a826a2c96ad9b1a7769d096e:services/messengerPinVideoThumbnail.ts > services/messengerPinVideoThumbnail.ts
-          if node checks/messenger-pin-thumbnail-contract.cjs; then
-            echo 'Regression test incorrectly accepted the unsafe scalar argument'; exit 1
-          fi
-          cp /tmp/fixed-thumbnail.ts services/messengerPinVideoThumbnail.ts
-          node checks/messenger-pin-thumbnail-contract.cjs
-      - run: npm run check
-      - run: npm install --prefix /tmp/forward-pin-tests --no-package-lock --ignore-scripts react@19.1.0 react-test-renderer@19.1.0
-      - name: Existing navigation, menu, selection and thumbnail regressions
-        env:
-          PIN_TEST_MODULES: /tmp/forward-pin-tests
-        run: |
-          node --no-warnings --experimental-strip-types checks/messenger-pins.mjs
-          node --no-warnings --experimental-strip-types checks/messenger-pin-focus.mjs
-          node checks/messenger-pins-runtime.cjs
-          node checks/messenger-pin-presentation.cjs
-      - name: Export iOS and Android JavaScript
-        env:
-          CI: '1'
-          EXPO_NO_TELEMETRY: '1'
-        run: npx expo export --platform ios --platform android --output-dir /tmp/forward-ios-pin-fix
-      - name: Commit verified source to work branch
-        run: |
-          rm scripts/prepare-ios-pin-thumbnail-fix.py
-          node scripts/bump-app-version.mjs patch
-          git diff --check
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add services/messengerPinVideoThumbnail.ts checks/messenger-pin-thumbnail-contract.cjs checks/messenger-pin-presentation.cjs docs/CHAT_PINNING.md package.json package-lock.json app.config.js scripts/prepare-ios-pin-thumbnail-fix.py
-          git commit -m 'fix: pass native timestamp array for iOS pin thumbnails [versioned]'
-          git push origin HEAD:work/ios-pin-thumbnail-crash
-  native-ios:
-    runs-on: macos-15
-    timeout-minutes: 35
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('checks/ios-pin-thumbnail-smoke.py')
+          s = p.read_text()
+          assert s.count('onLoad: async () => {') == 1
+          s = s.replace('onLoad: async () => {', 'onDisplay: async () => {')
+          s = s.replace('onLoad={picture.onLoad}', 'onDisplay={picture.onDisplay}')
+          s = s.replace("      cleanup = request(uri, undefined, (frame) => {", "      // Native SharedRef images are already decoded: onDisplay, not network onLoad.\n      cleanup = request(uri, undefined, (frame) => {")
+          old = "        run(['xcrun', 'simctl', 'terminate', udid, BUNDLE], host, 'terminate-' + mode, check=False)"
+          assert old in s
+          s = s.replace(old, "        if mode != 'baseline':\n            run(['xcrun', 'simctl', 'terminate', udid, BUNDLE], host, 'terminate-' + mode, timeout=60, check=False)")
+          p.write_text(s)
+          PY
       - name: Run actual locked Expo video on an iOS simulator
         env:
           CI: '1'
           EXPO_NO_TELEMETRY: '1'
         run: python3 checks/ios-pin-thumbnail-smoke.py
+      - name: Preserve verified simulator regression
+        run: |
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add checks/ios-pin-thumbnail-smoke.py
+          git commit -m 'test: verify iOS native frames through onDisplay [versioned]'
+          git push origin HEAD:work/ios-pin-thumbnail-crash
       - uses: actions/upload-artifact@v4
         if: always()
         with:
