@@ -22,7 +22,10 @@ export function requestMessengerPinVideoThumbnail(
     if (disposed || generating) return;
     generating = true;
     try {
-      const [frame] = await player.generateThumbnailsAsync(0, {
+      // SDK 54's iOS bridge crashes casting a scalar JS value to native [Double].
+      // Although the TS API allows a number, always pass an explicit array.
+      // See expo/expo#43372 and the SDK 55 core fix expo/expo#42694.
+      const [frame] = await player.generateThumbnailsAsync([0], {
         maxWidth: 160,
         maxHeight: 160,
       });

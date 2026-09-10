@@ -165,7 +165,11 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
   );
   await tick();
   assert.equal(players[0].muted, true);
-  assert.equal(players[0].time, 0);
+  assert.deepEqual(
+    players[0].time,
+    [0],
+    "SDK 54 iOS native bridge requires an array",
+  );
   assert.equal(players[0].source.headers.Authorization, "Bearer fixture");
   players[0].frame([{ nativeRefType: "image" }]);
   await tick();
