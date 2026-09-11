@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 12,
+  "schemaVersion": 13,
   "migrations": [
     {
       "version": 1,
@@ -60,6 +60,11 @@
       "version": 12,
       "name": "news_article_cache",
       "sql": "CREATE TABLE IF NOT EXISTS news_articles (id INTEGER PRIMARY KEY NOT NULL, published_at TEXT NOT NULL, modified_at TEXT NOT NULL, title TEXT NOT NULL, excerpt TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '', featured_media_id INTEGER NOT NULL DEFAULT 0, image_url TEXT, image_alt TEXT, content_text TEXT NOT NULL DEFAULT '', content_html TEXT NOT NULL DEFAULT '', content_loaded INTEGER NOT NULL DEFAULT 0, indexed_at TEXT NOT NULL, content_synced_at TEXT);\nCREATE INDEX IF NOT EXISTS idx_news_articles_published ON news_articles(published_at DESC, id DESC);\nINSERT INTO metadata (key, value) VALUES ('news_total_pages', '1') ON CONFLICT(key) DO NOTHING;\nINSERT INTO metadata (key, value) VALUES ('schema_version', '12') ON CONFLICT(key) DO UPDATE SET value = excluded.value;"
+    },
+    {
+      "version": 13,
+      "name": "messenger_durable_media_outbox",
+      "sql": "CREATE TABLE IF NOT EXISTS messenger_media_outbox (client_message_id TEXT PRIMARY KEY NOT NULL, user_id TEXT NOT NULL, room_id TEXT NOT NULL, created_at TEXT NOT NULL, message_json TEXT NOT NULL, files_json TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER NOT NULL DEFAULT 0, prepared INTEGER NOT NULL DEFAULT 0, accepted_json TEXT);\nCREATE INDEX IF NOT EXISTS idx_messenger_media_outbox_user_due ON messenger_media_outbox(user_id, state, next_attempt_at);\nINSERT INTO metadata (key, value) VALUES ('schema_version', '13') ON CONFLICT(key) DO UPDATE SET value = excluded.value;"
     }
   ]
 }

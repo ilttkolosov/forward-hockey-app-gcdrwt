@@ -59,6 +59,9 @@ jobs:
           PIN_TEST_MODULES: /tmp/forward-pin-tests
         run: npm run check:media-viewer
 
+      - name: Verify keyboard restoration and durable media queue
+        run: npm run check:messenger-android-keyboard && npm run check:messenger-media-outbox
+
       - name: Validate Expo config
         env:
           CI: '1'

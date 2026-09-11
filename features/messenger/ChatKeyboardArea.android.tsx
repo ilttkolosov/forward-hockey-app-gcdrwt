@@ -32,8 +32,8 @@ export default function ChatKeyboardArea({ children, onTransitionStart }: ChatKe
   }, [reportTransition]);
 
   return (
-    <View style={styles.clip} onLayout={onLayout}>
-      <KeyboardAvoidingView style={styles.body} behavior="translate-with-padding" keyboardVerticalOffset={top + safeTop}>
+    <View style={styles.clip} onLayout={onLayout} collapsable={false}>
+      <KeyboardAvoidingView collapsable={false} style={styles.body} behavior="translate-with-padding" keyboardVerticalOffset={top + safeTop}>
         {children}
       </KeyboardAvoidingView>
     </View>

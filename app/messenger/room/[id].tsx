@@ -122,12 +122,10 @@ import {
   getMessengerRoomMembers,
   getMessengerRooms,
   isMessengerConnectionError,
-  isMessengerUploadCancelledError,
   messengerErrorMessage,
   removeMessengerReaction,
   saveMessengerMessage,
   sendMessengerLocation,
-  sendMessengerMedia,
   setMessengerReaction,
   syncMessengerRoomMessages,
   updateMessengerMessage,
@@ -158,12 +156,10 @@ import {
   type MessengerUploadFile,
 } from "../../../services/messengerAttachmentPicker";
 import {
-  beginLocalMessengerMediaUpload,
-  endLocalMessengerMediaUpload,
   prefetchMessengerMedia,
-  seedMessengerMediaCache,
 } from "../../../services/messengerMediaCache";
-import { runManagedMessengerMediaUpload } from "../../../services/messengerMediaUploadManager";
+import { queueMessengerMediaMessage, retryMessengerMediaMessage, subscribeMessengerMediaOutbox } from "../../../services/messengerMediaOutbox";
+import { loadMessengerMediaOutbox } from "../../../features/messenger/mediaOutboxRepository";
 import { warmMessengerBufferedUploadFiles } from "../../../services/messengerMediaUploadWarmup";
 import { saveMessengerMediaToDevice } from "../../../services/messengerMediaSave";
 import { colors } from "../../../styles/commonStyles";
@@ -204,11 +200,7 @@ interface AttachmentDraft {
   files: MessengerUploadFile[];
 }
 
-interface MediaUploadRequest extends AttachmentDraft {
-  clientMessageId: string;
-  caption: string;
-  replyTarget: MessengerMessage | null;
-}
+
 
 const MAX_MESSAGE_LENGTH = 5_000;
 const COLLAPSED_MESSAGE_LINES = 30;
@@ -664,6 +656,7 @@ function PendingAttachmentView({
   message: MessengerMessage;
   pending: MessengerPendingAttachment;
 }) {
+  const db = useSQLiteContext();
   const failed = pending.stage === "failed";
   const committed = pending.stage === "committed";
   const [showTransientProgress, setShowTransientProgress] = useState(false);
@@ -693,6 +686,7 @@ function PendingAttachmentView({
                   ? "file"
                   : "image",
             local_uri: pending.local_uri,
+            thumbnail_uri: pending.thumbnail_uri,
             file_name: pending.file_name,
             size_bytes: pending.size_bytes,
           } as const,
@@ -712,9 +706,9 @@ function PendingAttachmentView({
                 { width: albumTileSize, height: albumTileSize },
               ]}
             >
-              {item.kind === "image" ? (
+              {item.kind === "image" || item.thumbnail_uri ? (
                 <Image
-                  source={item.local_uri}
+                  source={item.kind === "image" ? item.local_uri : item.thumbnail_uri}
                   style={styles.pendingAttachmentAlbumImage}
                   contentFit="cover"
                 />
@@ -728,14 +722,21 @@ function PendingAttachmentView({
             </View>
           ))}
         </View>
-      ) : message.kind === "image" && pending.local_uri ? (
-        <Image
-          source={pending.local_uri}
-          style={styles.pendingAttachmentImage}
-          contentFit="cover"
-          transition={120}
-        />
+      ) : (message.kind === "image" || message.kind === "video") && pending.local_uri ? (
+        <View style={styles.pendingAttachmentImage}>
+          {message.kind === "image" || pending.thumbnail_uri ? (
+            <Image source={message.kind === "image" ? pending.local_uri : pending.thumbnail_uri}
+              style={StyleSheet.absoluteFill} contentFit="cover" />
+          ) : null}
+          {message.kind === "video" && <Icon name="play-circle" size={44} color={colors.primary} />}
+        </View>
       ) : null}
+      {failed && pending.source !== "location" && (
+        <TouchableOpacity accessibilityRole="button" onPress={() => {
+          void retryMessengerMediaMessage(db, message.author.id, message.client_message_id)
+            .catch(error => Alert.alert("Не удалось повторить отправку", messengerErrorMessage(error)));
+        }}><Text style={styles.pendingAttachmentLabel}>Отправить заново</Text></TouchableOpacity>
+      )}
       {!committed && (failed || showTransientProgress) && (
         <View style={styles.pendingAttachmentStatus}>
           {failed ? (
@@ -1516,6 +1517,7 @@ export default function MessengerRoomScreen() {
     typeof setTimeout
   > | null>(null);
   const nearLatest = useRef(true);
+  const followSentMessage = useRef<string | null>(null);
   const latestVisibleSequence = useRef<string | null>(null);
   const initialReadSequence = useRef(params.lastReadSequence || "0");
   const initialUnreadBoundarySequence = useRef(params.lastReadSequence || "0");
@@ -1619,6 +1621,7 @@ export default function MessengerRoomScreen() {
 
   const beginManualFeedNavigation = useCallback(() => {
     feedManuallyNavigated.current = true;
+    followSentMessage.current = null;
     nearLatest.current = false;
     keyboardScrollPending.current = false;
     clearPendingLatestScroll();
@@ -1961,6 +1964,15 @@ export default function MessengerRoomScreen() {
     roomTypeRef.current = roomType;
   }, [roomType]);
 
+  useEffect(() => subscribeMessengerMediaOutbox(message => {
+    if (message.room_id !== roomId || message.author.id !== session?.user.id) return;
+    setMessages(current => mergeMessengerMessages(
+      message.pending ? current : current.map(item => item.client_message_id === message.client_message_id
+        ? { ...item, pending_attachment: null } : item),
+      [message], reactionMutationIds.current,
+    ));
+  }), [roomId, session?.user.id]);
+
   const flushOutbox = useCallback(async () => {
     if (!isAuthenticated) return;
     await flushMessengerOutbox(db);
@@ -2273,13 +2285,14 @@ export default function MessengerRoomScreen() {
           initialUnreadTailSequence.current =
             expectedUnreadCount > 0 ? expectedLatestSequence : null;
           const windowStartedAt = Date.now();
-          const [cached, pending] = await Promise.all([
+          const [cached, pending, mediaPending] = await Promise.all([
             loadCachedMessengerMessageWindow(db, roomId, {
               anchorSequence: initialUnreadBoundarySequence.current,
               hasUnread: expectedUnreadCount > 0,
               limit: 20,
             }),
             loadMessengerOutbox(db, roomId),
+            loadMessengerMediaOutbox(db, session.user.id, roomId),
           ]);
           const windowLoadedAt = Date.now();
           const confirmedClientIds = new Set(
@@ -2302,9 +2315,12 @@ export default function MessengerRoomScreen() {
                 ),
               ),
             );
-          const local = mergeMessengerMessages(cached, pendingMessages);
+          const local = mergeMessengerMessages(cached, [...pendingMessages,
+            ...mediaPending.map(item => item.accepted ?? item.message)
+              .filter(message => !confirmedClientIds.has(message.client_message_id)),
+          ].sort((a, b) => a.created_at.localeCompare(b.created_at)));
           if (local.length) {
-            setMessages(local);
+            setMessages(current => mergeMessengerMessages(local, current.filter(message => message.pending)));
             setLoading(false);
           }
           initialUnreadExpectedRef.current = expectedUnreadCount > 0;
@@ -3055,7 +3071,7 @@ export default function MessengerRoomScreen() {
         event.nativeEvent;
       const atLatest =
         contentOffset.y + layoutMeasurement.height >= contentSize.height - 120;
-      nearLatest.current = atLatest;
+      nearLatest.current = followSentMessage.current ? true : atLatest;
       if (pinUserScroll.current && contentOffset.y + layoutMeasurement.height >= contentSize.height - 4 && shouldResetPinAtLatest({
         distanceFromBottom: contentSize.height - contentOffset.y - layoutMeasurement.height,
         listReady, userScrolled: pinUserScroll.current, filtered: Boolean(authorFilter),
@@ -3558,6 +3574,8 @@ export default function MessengerRoomScreen() {
       client_message_id: clientMessageId,
       has_reply: Boolean(replyTarget?.id),
     });
+    cancelMessageNavigation();
+    followSentMessage.current = clientMessageId;
     setText("");
     setReplyingTo(null);
     setMessages((current) => mergeMessengerMessages(current, [optimistic]));
@@ -3629,119 +3647,6 @@ export default function MessengerRoomScreen() {
       );
     },
     [],
-  );
-
-  const sendUpload = useCallback(
-    async (request: MediaUploadRequest, signal: AbortSignal) => {
-      assertMessengerUploadLimits(request.files);
-      beginLocalMessengerMediaUpload(request.clientMessageId);
-      try {
-        const totalUploadBytes = request.files.reduce(
-          (total, file) => total + (file.size_bytes ?? 0),
-          0,
-        );
-        const uploadStartedAt = Date.now();
-        messengerLog("info", "media.upload.started", {
-          room_id: roomId,
-          client_message_id: request.clientMessageId,
-          media_count: request.files.length,
-          media_types: request.files.map((file) => file.kind).join(","),
-          upload_size_bytes: totalUploadBytes,
-          upload_size_kb: Math.round(totalUploadBytes / 1024),
-          has_caption: Boolean(request.caption),
-        });
-        let lastShownPercent = -1;
-        const result = await sendMessengerMedia(
-          roomId,
-          request.clientMessageId,
-          request.files,
-          request.caption,
-          request.replyTarget?.id,
-          ({ percent }) => {
-            if (signal.aborted) return;
-            if (
-              percent !== 100 &&
-              lastShownPercent >= 0 &&
-              percent < lastShownPercent + 5
-            ) {
-              return;
-            }
-            lastShownPercent = percent;
-            updatePendingAttachment(request.clientMessageId, (message) => ({
-              ...message,
-              pending_attachment: message.pending_attachment
-                ? {
-                    ...message.pending_attachment,
-                    label: `Загрузка: ${percent}%`,
-                    progress_percent: percent,
-                  }
-                : null,
-            }));
-          },
-          signal,
-        );
-        const serverAcceptedAt = Date.now();
-        messengerLog("info", "media.upload.server_accepted", {
-          room_id: roomId,
-          message_id: result.message.id,
-          duration_ms: serverAcceptedAt - uploadStartedAt,
-        });
-        const confirmedMedia = result.message.media_items?.length
-          ? result.message.media_items
-          : result.message.media
-            ? [result.message.media]
-            : [];
-        for (const [index, media] of confirmedMedia.entries()) {
-          const file = request.files[index];
-          if (!file) continue;
-          try {
-            // Seed before exposing the confirmed attachment. Otherwise the
-            // attachment view starts an unnecessary download of the same file.
-            await seedMessengerMediaCache(media, file.uri);
-          } catch (cacheError) {
-            messengerLog("warn", "media.cache.seed_failed", {
-              asset_id: media.id,
-              message:
-                cacheError instanceof Error
-                  ? cacheError.message
-                  : "Не удалось сохранить локальную копию",
-            });
-          }
-        }
-        // Cache seeding has completed (or explicitly failed), so the next render
-        // can safely switch from the picker URI to the confirmed attachment.
-        updatePendingAttachment(request.clientMessageId, (message) => ({
-          ...message,
-          pending_attachment: null,
-        }));
-        await storeSentMessage(result.message);
-        messengerLog("info", "media.upload.completed", {
-          room_id: roomId,
-          message_id: result.message.id,
-          media_count: confirmedMedia.length,
-          stored_size_bytes: confirmedMedia.reduce(
-            (total, media) => total + media.size_bytes,
-            0,
-          ),
-          cache_seed_duration_ms: Date.now() - serverAcceptedAt,
-        });
-        trackMessengerAction("message_sent", {
-          content_type:
-            request.files.length > 1
-              ? "multiple"
-              : request.files[0]?.kind || "file",
-          attachment_count: request.files.length,
-          attachment_source: request.source,
-          has_text: Boolean(request.caption),
-          has_reply: Boolean(request.replyTarget?.id),
-          room_type: roomType || "unknown",
-          source: "composer",
-        });
-      } finally {
-        endLocalMessengerMediaUpload(request.clientMessageId);
-      }
-    },
-    [roomId, roomType, storeSentMessage, updatePendingAttachment],
   );
 
   const chooseAttachment = useCallback(
@@ -4054,101 +3959,27 @@ export default function MessengerRoomScreen() {
   const sendAttachmentDraft = useCallback(() => {
     if (!attachmentDraft || !roomId || !session || sending) return;
     const clientMessageId = Crypto.randomUUID();
-    const caption = text.trim();
-    const replyTarget = replyingTo;
-    const request: MediaUploadRequest = {
-      ...attachmentDraft,
-      clientMessageId,
-      caption,
-      replyTarget,
-    };
     const optimistic = pendingMessengerAttachmentMessage(
-      roomId,
-      clientMessageId,
-      attachmentDraft.source,
-      caption,
-      session.user,
-      replyTarget ?? undefined,
-      attachmentDraft.files,
+      roomId, clientMessageId, attachmentDraft.source, text.trim(), session.user,
+      replyingTo ?? undefined, attachmentDraft.files,
     );
-    const uploadLabel =
-      attachmentDraft.files.length > 1
-        ? `Отправляем ${attachmentDraft.files.length} вложений…`
-        : attachmentDraft.files[0]?.kind === "image"
-          ? "Отправляем фотографию…"
-          : attachmentDraft.files[0]?.kind === "video"
-            ? "Отправляем видео…"
-            : "Отправляем файл…";
-    optimistic.pending_attachment = optimistic.pending_attachment
-      ? {
-          ...optimistic.pending_attachment,
-          stage: "uploading",
-          label: uploadLabel,
-          progress_percent: null,
-        }
-      : null;
     setText("");
     setReplyingTo(null);
     setAttachmentDraft(null);
-    setSending(true);
-    setMessages((current) => mergeMessengerMessages(current, [optimistic]));
+    cancelMessageNavigation();
+    setAuthorFilter(null);
+    followSentMessage.current = clientMessageId;
     nearLatest.current = true;
-    scrollToLatest(true);
-    // Start the globally owned upload in the same turn as the send tap. It
-    // must not depend on another animation frame that may never run after an
-    // immediate navigation, app switch or screen lock.
-    void runManagedMessengerMediaUpload({
-      roomId,
-      clientMessageId,
-      run: (signal) => sendUpload(request, signal),
-    })
-      .then(() => {
-        setOffline(false);
-        setSyncError(null);
-      })
-      .catch((error) => {
-        if (isMessengerUploadCancelledError(error)) return;
-        reportAnalyticsError("messenger_media_send_failed", error);
-        const message = messengerErrorMessage(
-          error,
-          "Не удалось отправить вложение",
-        );
-        setOffline(isMessengerConnectionError(error));
-        setSyncError(message);
-        updatePendingAttachment(clientMessageId, (pendingMessage) => ({
-          ...pendingMessage,
-          send_error: message,
-          pending_attachment: pendingMessage.pending_attachment
-            ? {
-                ...pendingMessage.pending_attachment,
-                stage: "failed",
-                label: "Вложения не отправлены",
-                progress_percent: null,
-              }
-            : null,
-        }));
-        messengerLog("warn", "media.upload.failed", {
-          room_id: roomId,
-          client_message_id: clientMessageId,
-          media_count: request.files.length,
-          message,
-        });
-        Alert.alert("Ошибка вложения", message);
-      })
-      .finally(() => {
-        setSending(false);
-      });
-  }, [
-    attachmentDraft,
-    replyingTo,
-    roomId,
-    scrollToLatest,
-    sendUpload,
-    sending,
-    session,
-    text,
-    updatePendingAttachment,
-  ]);
+    setMessages(current => mergeMessengerMessages(current, [optimistic]));
+    // SQLite is the first async operation. The application worker owns copying,
+    // poster creation, upload and retries, including after this room unmounts.
+    void queueMessengerMediaMessage(db, optimistic, attachmentDraft.files).catch(error => {
+      const message = messengerErrorMessage(error, "Не удалось сохранить вложение локально");
+      updatePendingAttachment(clientMessageId, item => ({ ...item, send_error: message,
+        pending_attachment: item.pending_attachment ? { ...item.pending_attachment, stage: "failed", label: "Неотправлено" } : null }));
+      setSyncError(message);
+    });
+  }, [attachmentDraft, cancelMessageNavigation, db, replyingTo, roomId, sending, session, text, updatePendingAttachment]);
 
   const retryFailedMessage = useCallback(
     async (failedMessage: MessengerMessage) => {
@@ -4290,125 +4121,16 @@ export default function MessengerRoomScreen() {
         return;
       }
 
-      const sourceItems = pending.items?.length
-        ? pending.items
-        : pending.local_uri && pending.file_name
-          ? [
-              {
-                kind: failedMessage.kind as "image" | "video" | "file",
-                local_uri: pending.local_uri,
-                file_name: pending.file_name,
-                mime_type: fallbackUploadMimeType(
-                  pending.file_name,
-                  failedMessage.kind as "image" | "video" | "file",
-                ),
-                size_bytes: pending.size_bytes,
-                original_size_bytes: pending.size_bytes,
-              },
-            ]
-          : [];
-      const files: MessengerUploadFile[] = sourceItems.map((item) => ({
-        uri: item.local_uri,
-        name: item.file_name,
-        type:
-          item.mime_type || fallbackUploadMimeType(item.file_name, item.kind),
-        kind: item.kind,
-        size_bytes: item.size_bytes,
-        original_size_bytes:
-          item.original_size_bytes ?? item.size_bytes ?? null,
-        width: item.width,
-        height: item.height,
-      }));
-      if (!files.length) {
-        Alert.alert(
-          "Не удалось повторить отправку",
-          "Локальная копия вложения больше недоступна.",
-        );
-        return;
+      try {
+        cancelMessageNavigation();
+        followSentMessage.current = failedMessage.client_message_id;
+        nearLatest.current = true;
+        await retryMessengerMediaMessage(db, session.user.id, failedMessage.client_message_id);
+      } catch (error) {
+        Alert.alert("Не удалось повторить отправку", messengerErrorMessage(error));
       }
-      const request: MediaUploadRequest = {
-        source: pending.source,
-        files,
-        clientMessageId,
-        caption: failedMessage.text,
-        replyTarget,
-      };
-      const optimistic = pendingMessengerAttachmentMessage(
-        roomId,
-        clientMessageId,
-        pending.source,
-        failedMessage.text,
-        session.user,
-        replyTarget ?? undefined,
-        files,
-      );
-      optimistic.reply_to = failedMessage.reply_to;
-      optimistic.pending_attachment = optimistic.pending_attachment
-        ? {
-            ...optimistic.pending_attachment,
-            stage: "uploading",
-            label:
-              files.length > 1
-                ? `Отправляем ${files.length} вложений…`
-                : "Отправляем вложение…",
-            progress_percent: null,
-          }
-        : null;
-      setSending(true);
-      setMessages((current) =>
-        mergeMessengerMessages(
-          current.filter(
-            (message) =>
-              message.client_message_id !== failedMessage.client_message_id,
-          ),
-          [optimistic],
-        ),
-      );
-      nearLatest.current = true;
-      scrollToLatest(true);
-      void runManagedMessengerMediaUpload({
-        roomId,
-        clientMessageId,
-        run: (signal) => sendUpload(request, signal),
-      })
-        .then(() => {
-          setOffline(false);
-          setSyncError(null);
-        })
-        .catch((error) => {
-          if (isMessengerUploadCancelledError(error)) return;
-          const message = messengerErrorMessage(
-            error,
-            "Не удалось отправить вложение",
-          );
-          updatePendingAttachment(clientMessageId, (item) => ({
-            ...item,
-            send_error: message,
-            pending_attachment: item.pending_attachment
-              ? {
-                  ...item.pending_attachment,
-                  stage: "failed",
-                  label: "Вложения не отправлены",
-                  progress_percent: null,
-                }
-              : null,
-          }));
-          setOffline(isMessengerConnectionError(error));
-          setSyncError(message);
-        })
-        .finally(() => setSending(false));
     },
-    [
-      db,
-      flushOutbox,
-      roomId,
-      scrollToLatest,
-      sendUpload,
-      sending,
-      session,
-      storeSentMessage,
-      updatePendingAttachment,
-    ],
+    [cancelMessageNavigation, db, flushOutbox, roomId, scrollToLatest, sending, session, storeSentMessage, updatePendingAttachment],
   );
 
   const requestFailedMessageCancellation = useCallback(
@@ -5473,7 +5195,7 @@ export default function MessengerRoomScreen() {
               const height = Math.round(event.nativeEvent.layout.height);
               if (height === feedHeight) return;
               setFeedHeight(height);
-              if ((keyboardScrollPending.current || nearLatest.current) && !messageNavigationTarget.current) {
+              if ((followSentMessage.current || keyboardScrollPending.current || nearLatest.current) && !messageNavigationTarget.current) {
                 // One alignment after actual viewport layout; no show/focus timers.
                 listRef.current?.scrollToEnd({ animated: false });
               }
@@ -5495,7 +5217,7 @@ export default function MessengerRoomScreen() {
             }
             keyboardShouldPersistTaps="handled"
             maintainVisibleContentPosition={
-              listReady && !authorFilter && !messageNavigationId ? { minIndexForVisible: 0 } : undefined
+              listReady && !followSentMessage.current && !authorFilter && !messageNavigationId ? { minIndexForVisible: 0 } : undefined
             }
             onScroll={handleListScroll}
             onScrollBeginDrag={() => { pinUserScroll.current = true; cancelMessageNavigation(); beginManualFeedNavigation(); }}
@@ -5511,6 +5233,10 @@ export default function MessengerRoomScreen() {
               }
               if (messageNavigationTarget.current) {
                 requestAnimationFrame(positionMessageNavigationTarget);
+                return;
+              }
+              if (followSentMessage.current) {
+                listRef.current?.scrollToEnd({ animated: false });
                 return;
               }
               const animated = pendingScrollAnimation.current;
@@ -6865,6 +6591,9 @@ const styles = StyleSheet.create({
     maxWidth: 248,
   },
   pendingAttachmentImage: {
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
     width: 224,
     height: 164,
     marginBottom: 7,

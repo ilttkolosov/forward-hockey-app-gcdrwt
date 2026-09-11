@@ -82,6 +82,29 @@ for (const [height, top, nav] of [[872, 120, 24], [872, 160, 48], [420, 100, 24]
   assert.equal(h.frame(0, 0, true).paddingTop, 0, "floating/hardware keyboard creates no artificial inset");
 }
 
+// Execute the real hook, including mount restoration (the old harness only
+// supplied idealised padding/translation and missed this native navigation bug).
+react.useLayoutEffect = (effect) => effect();
+for (const initialProgress of [0, 0.4, 1]) {
+  let handler;
+  const hooks = compile(read("node_modules/react-native-keyboard-controller/src/components/KeyboardAvoidingView/hooks.ts"), {
+    "react-native": { Platform: { OS: "android" } },
+    "react-native-reanimated": { useSharedValue: value => ({ value }), runOnUI: fn => fn },
+    "../../context": { useKeyboardContext: () => ({ reanimated: { progress: { value: initialProgress }, height: { value: -280 * initialProgress } } }) },
+    "../../hooks": { useKeyboardHandler: value => { handler = value; } },
+  });
+  const geometry = hooks.useKeyboardAnimation();
+  handler.onEnd({ height: 310, progress: 1 });
+  assert.equal(geometry.heightWhenOpened.value, 310, "native reattachment snapshot has no start event");
+  const restored = hooks.useTranslateAnimation();
+  assert.equal(restored.padding.value - restored.translate.value, 0, "mount must not expose blank padding above the feed");
+  handler.onEnd({ height: 0, progress: 0 });
+  assert.equal(restored.padding.value, 0);
+  assert.equal(restored.translate.value, 0);
+  handler.onEnd({ height: 280, progress: 1 });
+  assert.equal(restored.padding.value - restored.translate.value, 0);
+}
+
 // Run the real editor wrapper, catching the String -> Int color bridge failure
 // from device logs. iOS and fallback TextInput keep their existing color values.
 const wrapperSource = read("modules/forward-rich-text-input/src/ForwardRichTextInput.tsx");

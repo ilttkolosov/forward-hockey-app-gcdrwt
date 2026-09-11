@@ -1,0 +1,92 @@
+diff --git a/node_modules/react-native-keyboard-controller/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt b/node_modules/react-native-keyboard-controller/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt
+index 81cd40c..7f3eba8 100644
+--- a/node_modules/react-native-keyboard-controller/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt
++++ b/node_modules/react-native-keyboard-controller/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt
+@@ -60,6 +60,7 @@ class KeyboardAnimationCallback(
+   private var prevKeyboardHeight = 0.0
+   private var isKeyboardVisible = false
+   private var isTransitioning = false
++  private var needsInitialSync = true
+   private var duration = 0
+   private var viewTagFocused = -1
+   private var animationsToSkip = hashSetOf<WindowInsetsAnimationCompat>()
+@@ -135,6 +136,13 @@ class KeyboardAnimationCallback(
+     v: View,
+     insets: WindowInsetsCompat,
+   ): WindowInsetsCompat {
++    // Re-enabling the provider may follow a hide that happened while callbacks
++    // were detached. Publish the current system insets once, even when closed.
++    // An actual IME animation owns its own start/move/end sequence.
++    if (needsInitialSync && !isSuspended && !isTransitioning && !InteractiveKeyboardProvider.isInteractive) {
++      needsInitialSync = false
++      syncKeyboardPosition()
++    }
+     val keyboardHeight = getCurrentKeyboardHeight()
+     // when keyboard appears values will be (false && true)
+     // when keyboard disappears values will be (true && false)
+@@ -166,6 +174,11 @@ class KeyboardAnimationCallback(
+     return insets
+   }
+ 
++  override fun onPrepare(animation: WindowInsetsAnimationCompat) {
++    super.onPrepare(animation)
++    if (animation.isKeyboardAnimation && !isSuspended) needsInitialSync = false
++  }
++
+   @Suppress("detekt:ReturnCount")
+   override fun onStart(
+     animation: WindowInsetsAnimationCompat,
+@@ -175,6 +188,7 @@ class KeyboardAnimationCallback(
+       return bounds
+     }
+ 
++    needsInitialSync = false
+     isTransitioning = true
+     isKeyboardVisible = isKeyboardVisible()
+     duration = animation.durationMillis.toInt()
+@@ -347,6 +361,7 @@ class KeyboardAnimationCallback(
+   ) {
+     val keyboardHeight = height ?: getCurrentKeyboardHeight()
+     // update internal state
++    persistentKeyboardHeight = keyboardHeight
+     isKeyboardVisible = isVisible ?: isKeyboardVisible()
+     prevKeyboardHeight = keyboardHeight
+     isTransitioning = false
+diff --git a/node_modules/react-native-keyboard-controller/src/components/KeyboardAvoidingView/hooks.ts b/node_modules/react-native-keyboard-controller/src/components/KeyboardAvoidingView/hooks.ts
+index 4d504fe..a324cf8 100644
+--- a/node_modules/react-native-keyboard-controller/src/components/KeyboardAvoidingView/hooks.ts
++++ b/node_modules/react-native-keyboard-controller/src/components/KeyboardAvoidingView/hooks.ts
+@@ -1,6 +1,6 @@
+ import { useLayoutEffect } from "react";
+ import { Platform } from "react-native";
+-import { useSharedValue } from "react-native-reanimated";
++import { runOnUI, useSharedValue } from "react-native-reanimated";
+ 
+ import { useKeyboardContext } from "../../context";
+ import { useKeyboardHandler } from "../../hooks";
+@@ -52,6 +52,8 @@ export const useKeyboardAnimation = () => {
+         "worklet";
+ 
+         isClosed.value = e.height === 0;
++        // Native snapshots (provider/modal reattachment) can arrive without onStart.
++        if (e.height > 0) heightWhenOpened.value = e.height;
+ 
+         height.value = e.height;
+         progress.value = e.progress;
+@@ -69,8 +71,14 @@ export const useTranslateAnimation = () => {
+   const translate = useSharedValue(0);
+ 
+   useLayoutEffect(() => {
+-    // eslint-disable-next-line react-compiler/react-compiler
+-    padding.value = reanimated.progress.value;
++    // Restore both halves together when a chat mounts with an existing IME.
++    // Restoring only padding exposes a keyboard-sized blank strip at the top.
++    runOnUI(() => {
++      "worklet";
++      const initialProgress = reanimated.progress.value;
++      padding.value = initialProgress;
++      translate.value = initialProgress;
++    })();
+   }, []);
+ 
+   useKeyboardHandler(

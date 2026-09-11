@@ -188,6 +188,7 @@ export function pendingMessengerAttachmentMessage(
   attachments: {
     kind: "image" | "video" | "file";
     uri: string;
+    thumbnail_uri?: string;
     name: string;
     type: string;
     size_bytes: number | null;
@@ -250,11 +251,13 @@ export function pendingMessengerAttachmentMessage(
       label: pendingAttachmentLabel(source),
       progress_percent: null,
       local_uri: firstAttachment?.uri ?? null,
+      thumbnail_uri: firstAttachment?.thumbnail_uri,
       file_name: firstAttachment?.name ?? null,
       size_bytes: firstAttachment?.size_bytes ?? null,
       items: attachments.map((attachment) => ({
         kind: attachment.kind,
         local_uri: attachment.uri,
+        thumbnail_uri: attachment.thumbnail_uri,
         file_name: attachment.name,
         mime_type: attachment.type,
         size_bytes: attachment.size_bytes,
@@ -302,6 +305,8 @@ function mergeMessengerMessage(
   incoming: MessengerMessage,
   protectedReactionIds: ReadonlySet<string>,
 ): MessengerMessage {
+  // A delayed SQLite/progress snapshot must never downgrade an accepted row.
+  if (!existing.pending && incoming.pending) return existing;
   const mediaItems = incoming.media_items?.length
     ? incoming.media_items
     : incoming.media
