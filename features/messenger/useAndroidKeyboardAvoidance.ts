@@ -8,7 +8,10 @@ import {
   type View,
 } from "react-native";
 import type { ForwardRichTextKeyboardGeometry } from "../../modules/forward-rich-text-input";
-import { calculateAndroidKeyboardInset } from "./androidKeyboardAvoidancePolicy";
+import {
+  androidImeGeometryMayStillResize,
+  calculateAndroidKeyboardInset,
+} from "./androidKeyboardAvoidancePolicy";
 
 type AndroidKeyboardFrame = Pick<
   KeyboardEvent["endCoordinates"],
@@ -20,9 +23,15 @@ interface NativeEditorOverlapSnapshot {
   appliedInset: number;
 }
 
+interface PendingImeResizeSnapshot extends NativeEditorOverlapSnapshot {
+  startedAt: number;
+  nativeKeyboardHeight: number;
+}
+
 const MEASUREMENT_DELAYS_MS = [0, 80, 220, 420, 800] as const;
 const METRICS_PROBE_DELAYS_MS = [0, 90, 220, 450, 800, 1_200] as const;
 const ALREADY_RESIZED_VISIBLE_FRAME_TOLERANCE_DP = 24;
+const IME_RESIZE_SETTLING_MS = 650;
 
 interface AndroidKeyboardAvoidanceController {
   bottomInset: number;
@@ -87,6 +96,7 @@ export function useAndroidKeyboardAvoidance(
   const nativeKeyboardHeightRef = useRef(0);
   const nativeEditorOverlapRef =
     useRef<NativeEditorOverlapSnapshot | null>(null);
+  const pendingImeResizeRef = useRef<PendingImeResizeSnapshot | null>(null);
   const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
   const updateInset = useCallback((nextInset: number) => {
@@ -111,6 +121,16 @@ export function useAndroidKeyboardAvoidance(
 
   const measureOverlap = useCallback(() => {
     if (Platform.OS !== "android") return;
+    const pendingResize = pendingImeResizeRef.current;
+    if (pendingResize) {
+      if (Date.now() - pendingResize.startedAt < IME_RESIZE_SETTLING_MS) return;
+      pendingImeResizeRef.current = null;
+      nativeEditorOverlapRef.current = {
+        overlap: pendingResize.overlap,
+        appliedInset: pendingResize.appliedInset,
+      };
+      nativeKeyboardHeightRef.current = pendingResize.nativeKeyboardHeight;
+    }
     const frame = keyboardFrameRef.current;
     const nativeKeyboardHeight = nativeKeyboardHeightRef.current;
     const directOverlap = nativeEditorOverlapRef.current;
@@ -194,6 +214,39 @@ export function useAndroidKeyboardAvoidance(
         geometry.editorKeyboardOverlap,
       );
       const rootAlreadyResized = nativeRootAlreadyResizedForIme(geometry);
+      const nativeKeyboardHeight = geometry.visible
+        ? Math.max(
+            normalizedKeyboardHeight(geometry.imeHeight),
+            normalizedKeyboardHeight(geometry.frameworkImeHeight),
+            normalizedKeyboardHeight(geometry.visibleFrameInset),
+          )
+        : 0;
+
+      if (
+        !rootAlreadyResized &&
+        appliedInsetRef.current === 0 &&
+        editorOverlap !== null &&
+        androidImeGeometryMayStillResize(geometry)
+      ) {
+        // MIUI emits a pre-adjustResize geometry snapshot while its keyboard
+        // animation is still changing the Activity root. Hold that one large
+        // correction until the root settles. MagicOS reports only a small
+        // residual overlap, so its proven immediate compensation is untouched.
+        const startedAt = pendingImeResizeRef.current?.startedAt ?? Date.now();
+        pendingImeResizeRef.current = {
+          startedAt,
+          overlap: editorOverlap,
+          appliedInset: 0,
+          nativeKeyboardHeight,
+        };
+        nativeEditorOverlapRef.current = null;
+        nativeKeyboardHeightRef.current = 0;
+        clearTimers();
+        scheduleMeasurements();
+        return;
+      }
+
+      pendingImeResizeRef.current = null;
       nativeEditorOverlapRef.current =
         geometry.visible && editorOverlap !== null
           ? {
@@ -201,13 +254,7 @@ export function useAndroidKeyboardAvoidance(
               appliedInset: rootAlreadyResized ? 0 : appliedInsetRef.current,
             }
           : null;
-      nativeKeyboardHeightRef.current = geometry.visible
-        ? Math.max(
-            normalizedKeyboardHeight(geometry.imeHeight),
-            normalizedKeyboardHeight(geometry.frameworkImeHeight),
-            normalizedKeyboardHeight(geometry.visibleFrameInset),
-          )
-        : 0;
+      nativeKeyboardHeightRef.current = nativeKeyboardHeight;
       clearTimers();
 
       if (rootAlreadyResized) {
@@ -274,6 +321,7 @@ export function useAndroidKeyboardAvoidance(
     const hideSubscription = Keyboard.addListener("keyboardDidHide", () => {
       nativeKeyboardHeightRef.current = 0;
       nativeEditorOverlapRef.current = null;
+      pendingImeResizeRef.current = null;
       rememberFrame(null);
     });
     const dimensionsSubscription = Dimensions.addEventListener(
@@ -303,6 +351,7 @@ export function useAndroidKeyboardAvoidance(
       keyboardFrameRef.current = null;
       nativeKeyboardHeightRef.current = 0;
       nativeEditorOverlapRef.current = null;
+      pendingImeResizeRef.current = null;
       clearTimers();
       appliedInsetRef.current = 0;
     };

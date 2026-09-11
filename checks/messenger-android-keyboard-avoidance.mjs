@@ -1,6 +1,43 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { calculateAndroidKeyboardInset } from "../features/messenger/androidKeyboardAvoidancePolicy.ts";
+import {
+  androidImeGeometryMayStillResize,
+  calculateAndroidKeyboardInset,
+} from "../features/messenger/androidKeyboardAvoidancePolicy.ts";
+
+// MIUI's first frame can describe the editor before adjustResize and therefore
+// looks like a full keyboard overlay. It must be allowed to settle first.
+assert.equal(
+  androidImeGeometryMayStillResize({
+    visible: true,
+    frameworkImeHeight: 300,
+    visibleFrameInset: 296,
+    editorKeyboardOverlap: 282,
+  }),
+  true,
+);
+
+// Once MIUI has resized the root, the normal zero-inset guard takes over.
+assert.equal(
+  androidImeGeometryMayStillResize({
+    visible: true,
+    frameworkImeHeight: 300,
+    visibleFrameInset: 0,
+    editorKeyboardOverlap: -4,
+  }),
+  false,
+);
+
+// Honor/MagicOS needs its small residual overlap corrected immediately.
+assert.equal(
+  androidImeGeometryMayStillResize({
+    visible: true,
+    frameworkImeHeight: 300,
+    visibleFrameInset: 300,
+    editorKeyboardOverlap: 23.4,
+  }),
+  false,
+);
 
 const overlay = calculateAndroidKeyboardInset({
   targetBottom: 780,
@@ -153,6 +190,9 @@ const hookSource = readFileSync(
   "utf8",
 );
 assert.match(hookSource, /nativeEditorOverlapRef/);
+assert.match(hookSource, /pendingImeResizeRef/);
+assert.match(hookSource, /IME_RESIZE_SETTLING_MS\s*=\s*650/);
+assert.match(hookSource, /androidImeGeometryMayStillResize\(geometry\)/);
 assert.match(hookSource, /nativeOverlapAppliedInset/);
 assert.match(
   hookSource,
