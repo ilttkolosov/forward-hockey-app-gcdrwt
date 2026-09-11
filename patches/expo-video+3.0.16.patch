@@ -1,0 +1,171 @@
+diff --git a/node_modules/expo-video/ios/VideoPlayer.swift b/node_modules/expo-video/ios/VideoPlayer.swift
+--- a/node_modules/expo-video/ios/VideoPlayer.swift
++++ b/node_modules/expo-video/ios/VideoPlayer.swift
+@@ -10,6 +10,18 @@
+   var observer: VideoPlayerObserver?
+   lazy var subtitles: VideoPlayerSubtitles = VideoPlayerSubtitles(owner: self)
+   private var dangerousPropertiesStore = DangerousPropertiesStore()
++  // JS release can precede deinit while AVFoundation tasks still retain the player.
++  private let lifecycleLock = NSLock()
++  private var releaseRequested = false
++  private var didCleanUp = false
++  private var sourceInitializationTask: Task<Void, Error>?
++  private var sourceLoadTask: Task<Void, Never>?
++
++  private var hasBeenReleased: Bool {
++    lifecycleLock.lock()
++    defer { lifecycleLock.unlock() }
++    return releaseRequested
++  }
+   lazy var audioTracks: VideoPlayerAudioTracks = VideoPlayerAudioTracks(owner: self)
+ 
+   var loop = false
+@@ -160,9 +172,10 @@
+ 
+     if useSynchronousReplace {
+       try replaceCurrentItem(with: initialSource)
+-    } else {
+-      Task {
+-        try await replaceCurrentItem(with: initialSource)
++    } else if initialSource != nil {
++      sourceInitializationTask = Task { [weak self] in
++        guard let self, !self.hasBeenReleased else { return }
++        try await self.replaceCurrentItem(with: initialSource)
+       }
+     }
+   }
+@@ -179,21 +192,49 @@
+   }
+ 
+   deinit {
++    releasePlayer()
++  }
++
++  override func sharedObjectWillRelease() {
++    // Mark cancellation before SharedObject removes the JS association. Teardown
++    // runs on main for KVO safety; retain self only until that teardown completes.
++    lifecycleLock.lock()
++    releaseRequested = true
++    lifecycleLock.unlock()
++    if Thread.isMainThread {
++      releasePlayer()
++    } else {
++      DispatchQueue.main.async { self.releasePlayer() }
++    }
++  }
++
++  private func releasePlayer() {
++    lifecycleLock.lock()
++    releaseRequested = true
++    let needsCleanup = !didCleanUp
++    didCleanUp = true
++    lifecycleLock.unlock()
++    guard needsCleanup else { return }
++
++    sourceInitializationTask?.cancel()
++    sourceInitializationTask = nil
++    sourceLoadTask?.cancel()
++    sourceLoadTask = nil
++    videoSourceLoader.cancelCurrentTask()
+     observer?.cleanup()
++    observer = nil
+     NowPlayingManager.shared.unregisterPlayer(self)
+     VideoManager.shared.unregister(videoPlayer: self)
+ 
+-    videoSourceLoader.cancelCurrentTask()
+-
+-    // We have to replace from the main thread because of KVOs (see comment in VideoSourceLoader).
+-    // Moreover, in this case we have to keep a strong reference to AVPlayer and remove its item
+-    // If we don't do this AVPlayer doesn't get deallocated
++    // Keep only AVPlayer alive until its item is removed, not its JS wrapper.
+     DispatchQueue.main.async { [ref] in
++      ref.pause()
+       ref.replaceCurrentItem(with: nil)
+     }
+   }
+ 
+   func replaceCurrentItem(with videoSource: VideoSource?) throws {
++    guard !hasBeenReleased else { return }
+     dangerousPropertiesStore.ownerIsReplacing = true
+     videoSourceLoader.cancelCurrentTask()
+     guard
+@@ -221,7 +262,7 @@
+     // sometimes the KVOs will try to deliver updates after the item has been changed or player deallocated,
+     // which causes crashes.
+     DispatchQueue.main.async { [weak self] in
+-      guard let self else {
++      guard let self, !self.hasBeenReleased else {
+         return
+       }
+       self.ref.replaceCurrentItem(with: playerItem)
+@@ -234,6 +275,7 @@
+    * Replaces the current item, while loading the AVAsset on a different thread. The synchronous version can lock the main thread for extended periods of time.
+    */
+   func replaceCurrentItem(with videoSource: VideoSource?) async throws {
++    guard !hasBeenReleased, !Task.isCancelled else { return }
+     guard let videoSource, videoSource.uri != nil else {
+       clearCurrentItem()
+       return
+@@ -245,6 +287,7 @@
+       // The caller that cancelled this task should handle dangerousPropertiesStore
+       return
+     }
++    guard !hasBeenReleased, !Task.isCancelled else { return }
+ 
+     if let drm = videoSource.drm {
+       try drm.type.assertIsSupported()
+@@ -258,7 +301,7 @@
+     // sometimes the KVOs will try to deliver updates after the item has been changed or player deallocated,
+     // which causes crashes.
+     DispatchQueue.main.async { [weak self] in
+-      guard let self else {
++      guard let self, !self.hasBeenReleased else {
+         return
+       }
+       self.ref.replaceCurrentItem(with: playerItem)
+@@ -354,6 +397,8 @@
+   }
+ 
+   func onLoadedPlayerItem(player: AVPlayer, playerItem: AVPlayerItem?) {
++    guard !hasBeenReleased else { return }
++    sourceLoadTask?.cancel()
+     // This event means that a new player item has been loaded so the subtitle tracks should change
+     let oldTracks = subtitles.availableSubtitleTracks
+     self.subtitles.onNewPlayerItemLoaded(playerItem: playerItem)
+@@ -372,10 +417,14 @@
+     )
+     safeEmit(event: "availableAudioTracksChange", payload: audioPayload)
+ 
+-    Task {
++    sourceLoadTask = Task { [weak self] in
+       let videoPlayerItem: VideoPlayerItem? = playerItem as? VideoPlayerItem
+-      // Those properties will be already loaded 99.9% of time, so the event delay should be almost 0
+-      availableVideoTracks = await videoPlayerItem?.videoTracks ?? []
++      let tracks = await videoPlayerItem?.videoTracks ?? []
++      // Do not retain a released wrapper across asset I/O, or publish metadata
++      // belonging to an item that was replaced while the tracks were loading.
++      guard !Task.isCancelled, let self, !self.hasBeenReleased,
++        self.ref.currentItem === playerItem else { return }
++      self.availableVideoTracks = tracks
+ 
+       let videoSourceLoadedPayload = VideoSourceLoadedEventPayload(
+         videoSource: videoPlayerItem?.videoSource,
+@@ -415,8 +464,16 @@
+   }
+ 
+   func safeEmit(event: String, payload: Record? = nil) {
+-    if self.appContext != nil {
+-      self.emit(event: event, arguments: payload?.toDictionary(appContext: appContext))
++    guard !hasBeenReleased, let appContext, let runtime = try? appContext.runtime else { return }
++    // The bridge schedules events onto JS. Release may happen AFTER scheduling:
++    // check this player's lifetime again on that same queue before resolving its
++    // JS object. This cancels stale events, not warnings from other modules.
++    runtime.schedule { [weak self, weak appContext] in
++      guard let self, !self.hasBeenReleased, let appContext,
++        let runtime = try? appContext.runtime,
++        let jsObject = self.getJavaScriptObject() else { return }
++      let argument: Any = payload.map { $0.toDictionary(appContext: appContext) as Any } ?? NSNull()
++      JSIUtils.emitEvent(event, to: jsObject, withArguments: [argument], in: runtime)
+     }
+   }
+ 

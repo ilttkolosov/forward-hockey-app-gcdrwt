@@ -1,0 +1,18 @@
+diff --git a/node_modules/react-native-svg/apple/RNSVGRenderable.mm b/node_modules/react-native-svg/apple/RNSVGRenderable.mm
+--- a/node_modules/react-native-svg/apple/RNSVGRenderable.mm
++++ b/node_modules/react-native-svg/apple/RNSVGRenderable.mm
+@@ -292,7 +292,13 @@
+ 
+       CIImage *content = [CIImage imageWithCGImage:contentImage];
+ 
+-      CGImage *backgroundImage = CGBitmapContextCreateImage(context);
++      // UIKit may supply a display-list context to drawRect, not a bitmap.
++      // Snapshotting it asks CoreGraphics to create a bitmap with no color space
++      // and 0 bits/component. SourceGraphic filters (e.g. our Gaussian shadow)
++      // do not need that backdrop; retain the existing empty-background fallback.
++      CGImage *backgroundImage = CGBitmapContextGetBitsPerPixel(context) > 0
++          ? CGBitmapContextCreateImage(context)
++          : nil;
+       CIImage *background =
+           (backgroundImage != nil) ? [CIImage imageWithCGImage:backgroundImage] : [CIImage emptyImage];
+ 
