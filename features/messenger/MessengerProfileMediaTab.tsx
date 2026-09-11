@@ -24,7 +24,7 @@ import { saveMessengerMediaToDevice } from "../../services/messengerMediaSave";
 import { openMessengerFilePreview } from "../../services/messengerNativeFilePreview";
 import { getMessengerRoomMediaPage } from "../../services/messengerProfileMedia";
 import { colors } from "../../styles/commonStyles";
-import MessengerMediaViewer from "./MessengerMediaViewer";
+import MediaLightbox from "./MediaLightbox";
 import type { MessengerMedia, MessengerMessage } from "./types";
 
 interface MediaEntry {
@@ -326,7 +326,7 @@ export default function MessengerProfileMediaTab({
       ) : null}
       {error ? <Text style={styles.inlineError}>{error}</Text> : null}
 
-      <MessengerMediaViewer
+      <MediaLightbox
         items={viewerItems}
         index={viewerIndex}
         session={viewerSession}

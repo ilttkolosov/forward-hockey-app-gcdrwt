@@ -148,7 +148,7 @@ def main():
     spec=importlib.util.spec_from_file_location('fixture',ROOT/'checks/ios-pin-thumbnail-smoke.py');fixture=importlib.util.module_from_spec(spec);spec.loader.exec_module(fixture)
     (host/'fixture.mp4').write_bytes(base64.b64decode(fixture.FIXTURE))
     for folder in ['features/messenger','styles','services','components']:(host/folder).mkdir(parents=True)
-    for name in ['MessengerMediaViewer.tsx','MessengerZoomableMedia.tsx','MessengerVideoPlayer.tsx','MessengerProfileMediaTab.tsx','useMediaViewerLoading.ts','mediaViewerPolicy.ts','types.ts']:
+    for name in ['MediaLightbox.tsx','MessengerMediaViewer.tsx','MessengerZoomableMedia.tsx','MessengerVideoPlayer.tsx','MessengerProfileMediaTab.tsx','useMediaViewerLoading.ts','mediaViewerPolicy.ts','types.ts']:
         shutil.copy2(ROOT/'features/messenger'/name,host/'features/messenger'/name)
     (host/'components/Icon.tsx').write_text("import React from 'react';import {Text} from 'react-native';export default function Icon(){return <Text>•</Text>;}\n")
     (host/'styles/commonStyles.ts').write_text('export const colors={white:"white",primary:"#1456a5",textSecondary:"#333",warning:"red",background:"white",text:"black",border:"#aaa"};')

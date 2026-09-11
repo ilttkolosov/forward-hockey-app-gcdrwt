@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = Path('/tmp/ios-media-lifecycle-results')
 BUNDLE = 'com.forward.media-lifecycle-regression'
 BASE = '3824b6df875134e0f42d923de9c57da3ac425135'
-GRAPHICS_WARNINGS = r"Unsupported image format 'UNKNOWN'|(?:CGBitmapContext\w*|CGDisplayList\w*): (?:unsupported|invalid context)"
+GRAPHICS_WARNINGS = r"Unsupported image format 'UNKNOWN'|(?:CGBitmapContext\w*|CGContext\w*|CGDisplayList\w*): (?:unsupported|invalid context)"
 HARNESS = r'''
 import React, { useEffect, useState } from 'react';
 import { View, Text } from 'react-native';
@@ -171,8 +171,10 @@ def main():
     run(['pod','install'],host/'ios','pods',timeout=900)
     workspace = next((host/'ios').glob('*.xcworkspace')); derived=host/'build'
     devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','-j']))['devices']
-    chosen=next((d for runtime in sorted(devices,reverse=True) if '.iOS-' in runtime for d in devices[runtime] if d['name'].startswith('iPhone')),None)
-    assert chosen,'No iPhone simulator'; udid=chosen['udid']
+    sdk=subprocess.check_output(['xcrun','--sdk','iphonesimulator','--show-sdk-version'],text=True).strip().split('.')
+    runtime='.iOS-'+'-'.join(sdk[:2])
+    chosen=next((d for key in devices if runtime in key for d in devices[key] if d['name'].startswith('iPhone')),None)
+    assert chosen,'No simulator matching active Xcode SDK '+runtime; udid=chosen['udid']
     (OUT/'simulator.json').write_text(json.dumps(chosen,indent=2))
     # Reproduce the shipped invalid bitmap probe, not just the original warning.
     old_patch = host/'previous-svg.patch'
@@ -206,7 +208,11 @@ def main():
         if native_log.exists(): shutil.copy2(native_log,OUT/('runtime-'+mode+'.log'))
         else: (OUT/('runtime-'+mode+'.log')).write_text('Host did not create its native log')
         run(['xcrun','simctl','io',udid,'screenshot',str(OUT/(mode+'.png'))],host,'screenshot-'+mode,timeout=60,check=False)
-        run(['xcrun','simctl','spawn',udid,'log','show','--last','2m','--style','compact','--predicate','process == "MediaLifecycleRegression"'],host,'system-'+mode,timeout=60,check=False)
+        # Scope to this launch, not the baseline process which ran minutes earlier.
+        launch=(OUT/('launch-'+mode+'.log')).read_text()
+        pid=re.search(r': (\d+)\s*$',launch)
+        assert pid, 'Could not identify test process: '+launch
+        run(['xcrun','simctl','spawn',udid,'log','show','--last','2m','--style','compact','--predicate','processIdentifier == '+pid[1]],host,'system-'+mode,timeout=60,check=False)
         run(['xcrun','simctl','terminate',udid,BUNDLE],host,'terminate-'+mode,timeout=60,check=False)
         outcomes[mode]=value
         text=(OUT/('runtime-'+mode+'.log')).read_text(errors='replace') + (OUT/('system-'+mode+'.log')).read_text(errors='replace')

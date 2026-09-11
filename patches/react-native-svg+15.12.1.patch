@@ -1,25 +1,26 @@
 diff --git a/node_modules/react-native-svg/apple/Elements/RNSVGSvgView.mm b/node_modules/react-native-svg/apple/Elements/RNSVGSvgView.mm
 --- a/node_modules/react-native-svg/apple/Elements/RNSVGSvgView.mm
 +++ b/node_modules/react-native-svg/apple/Elements/RNSVGSvgView.mm
-@@ -9,6 +9,8 @@
+@@ -9,6 +9,10 @@
  #import "RNSVGSvgView.h"
  #import <React/RCTLog.h>
  #import "RNSVGNode.h"
 +#import "RNSVGFilter.h"
 +#import "RNSVGRenderUtils.h"
++#include <math.h>
++#include <stdint.h>
  #import "RNSVGViewBox.h"
  
  #ifdef RCT_NEW_ARCH_ENABLED
-@@ -22,6 +24,25 @@
+@@ -22,6 +26,24 @@
  #if TARGET_OS_OSX // [macOS
  #import "RNSVGUIKit.h"
  #endif // macOS]
 +
 +#if !TARGET_OS_OSX
-+// UIKit drawRect may be recording a display list. There is no public, warning-free
-+// bitmap type probe: even CGBitmapContextGetBitsPerPixel requires a known bitmap.
-+// Only SVGs using filters need a backdrop snapshot. Render those into an image
-+// renderer we own, so both SourceGraphic and BackgroundImage have valid pixels.
++// A UIKit drawRect context can be a display list, not a bitmap. Even bitmap
++// "inspection" APIs log an invalid-context warning there. Filtered SVGs need
++// readable BackgroundImage pixels, so give the whole SVG an owned RGBA bitmap.
 +static BOOL RNSVGContainsFilter(RNSVGPlatformView *view)
 +{
 +  if ([view isKindOfClass:[RNSVGFilter class]]) {
@@ -36,24 +37,62 @@ diff --git a/node_modules/react-native-svg/apple/Elements/RNSVGSvgView.mm b/node
  
  @implementation RNSVGSvgView {
    NSMutableDictionary<NSString *, RNSVGNode *> *_clipPaths;
-@@ -328,6 +349,23 @@
+@@ -328,6 +350,61 @@
  #endif
    CGContextRef context = UIGraphicsGetCurrentContext();
  
 +#if !TARGET_OS_OSX
 +  if (RNSVGContainsFilter(self)) {
 +    CGRect bounds = self.bounds;
-+    if (CGRectIsEmpty(bounds) || !isfinite(bounds.size.width) || !isfinite(bounds.size.height)) {
++    CGFloat scale = [RNSVGRenderUtils getScreenScale];
++    if (!context || CGRectIsEmpty(bounds) || !isfinite(bounds.origin.x) || !isfinite(bounds.origin.y) ||
++        !isfinite(bounds.size.width) || !isfinite(bounds.size.height) || !isfinite(scale) || scale <= 0) {
 +      return;
 +    }
-+    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
-+    format.opaque = NO;
-+    format.scale = [RNSVGRenderUtils getScreenScale];
-+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithBounds:bounds format:format];
-+    UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *rendererContext) {
-+      [self drawToContext:rendererContext.CGContext withRect:bounds];
-+    }];
-+    [image drawInRect:bounds];
++    double pixelWidth = ceil(bounds.size.width * scale);
++    double pixelHeight = ceil(bounds.size.height * scale);
++    // Validate before converting to size_t and before row/total byte arithmetic.
++    if (!isfinite(pixelWidth) || !isfinite(pixelHeight) || pixelWidth < 1 || pixelHeight < 1 ||
++        pixelWidth >= (double)(SIZE_MAX - 15) / 4 || pixelHeight >= (double)SIZE_MAX) {
++      return;
++    }
++    size_t width = (size_t)pixelWidth;
++    size_t height = (size_t)pixelHeight;
++    size_t bytesPerRow = (width * 4 + 15) & ~(size_t)15;
++    if (height > SIZE_MAX / bytesPerRow) {
++      return;
++    }
++    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
++    if (!colorSpace) {
++      return;
++    }
++    CGContextRef bitmapContext = CGBitmapContextCreate(
++        NULL, width, height, 8, bytesPerRow, colorSpace,
++        kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
++    CGColorSpaceRelease(colorSpace);
++    if (!bitmapContext) {
++      // Do not fall back to passing the unknown UIKit context to SVG filters.
++      return;
++    }
++    // Match UIKit's top-left, point-based coordinates at the native screen scale.
++    CGContextTranslateCTM(bitmapContext, 0, height);
++    CGContextScaleCTM(bitmapContext, scale, -scale);
++    CGContextTranslateCTM(bitmapContext, -bounds.origin.x, -bounds.origin.y);
++    CGContextClipToRect(bitmapContext, bounds);
++    UIGraphicsPushContext(bitmapContext);
++    [self drawToContext:bitmapContext withRect:bounds];
++    UIGraphicsPopContext();
++    CGImageRef raster = CGBitmapContextCreateImage(bitmapContext);
++    CGContextRelease(bitmapContext);
++    if (raster) {
++      UIImage *image = [UIImage imageWithCGImage:raster scale:scale orientation:UIImageOrientationUp];
++      CGContextSaveGState(context);
++      CGContextClipToRect(context, bounds);
++      // Avoid stretching a rounded-up pixel edge on fractional-point bounds.
++      [image drawAtPoint:bounds.origin];
++      CGContextRestoreGState(context);
++      CGImageRelease(raster);
++    }
 +    return;
 +  }
 +#endif

@@ -26,9 +26,20 @@ const svg = read(
   "node_modules/react-native-svg/apple/Elements/RNSVGSvgView.mm",
 );
 assert.match(svg, /RNSVGContainsFilter\(self\)/);
-assert.match(svg, /UIGraphicsImageRenderer \*renderer/);
-assert.match(svg, /drawToContext:rendererContext.CGContext/);
-assert.match(svg, /\[image drawInRect:bounds\]/);
+assert.match(svg, /CGContextRef bitmapContext = CGBitmapContextCreate\(/);
+assert.match(svg, /CGBitmapContextCreateImage\(bitmapContext\)/);
+assert.match(svg, /UIGraphicsPushContext\(bitmapContext\)/);
+assert.match(svg, /drawToContext:bitmapContext withRect:bounds/);
+assert.match(svg, /UIGraphicsPopContext\(\)/);
+assert.match(svg, /CGContextRelease\(bitmapContext\)/);
+assert.match(svg, /CGColorSpaceRelease\(colorSpace\)/);
+assert.match(svg, /CGImageRelease\(raster\)/);
+assert.match(svg, /\[image drawAtPoint:bounds.origin\]/);
+assert.match(svg, /height > SIZE_MAX \/ bytesPerRow/);
+assert.doesNotMatch(
+  svg,
+  /UIGraphicsImageRenderer|CGBitmapContextGetBitsPerPixel\(/,
+);
 assert.doesNotMatch(
   read("node_modules/react-native-svg/apple/RNSVGRenderable.mm"),
   /CGBitmapContextGet(?:BitsPerPixel|BitsPerComponent|Data|ColorSpace)\(context\)/,

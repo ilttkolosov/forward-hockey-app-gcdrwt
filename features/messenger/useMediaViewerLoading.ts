@@ -21,21 +21,38 @@ export function useMediaViewerLoading(
     if (visit.current.key !== key)
       visit.current = { key, requested: new Set() };
     if (!current || index === null) return;
+    const currentVisit = visit.current;
+    let cancelled = false;
     // Visible item first; only adjacent photos are prefetched, not all videos.
     const candidates = [current, items[index - 1], items[index + 1]];
-    for (const item of candidates) {
-      if (!item || (item !== current && item.type !== "image")) continue;
-      if (visit.current.requested.has(item.id)) continue;
-      visit.current.requested.add(item.id);
-      if (inFlight.current.has(item.id)) continue;
-      const pending = inFlight.current;
-      const request = Promise.resolve().then(() => ensureRef.current(item));
-      pending.set(item.id, request);
-      void request
-        .catch(() => undefined)
-        .finally(() => {
-          if (pending.get(item.id) === request) pending.delete(item.id);
-        });
-    }
+    void Promise.resolve().then(() => {
+      if (cancelled || visit.current !== currentVisit) return;
+      for (const item of candidates) {
+        if (!item || (item !== current && item.type !== "image")) continue;
+        if (currentVisit.requested.has(item.id)) continue;
+        // Mark at execution, not scheduling: StrictMode's cancelled first effect
+        // must not consume the automatic attempt of its replacement effect.
+        currentVisit.requested.add(item.id);
+        const pending = inFlight.current;
+        if (pending.has(item.id)) continue;
+        let request: Promise<string>;
+        try {
+          request = Promise.resolve(ensureRef.current(item));
+        } catch (error) {
+          request = Promise.reject(error);
+        }
+        pending.set(item.id, request);
+        void request
+          .catch(() => undefined)
+          .finally(() => {
+            if (pending.get(item.id) === request) pending.delete(item.id);
+          });
+      }
+    });
+    return () => {
+      // Let an already running cache request finish, but never start one for a
+      // modal/page that has already closed or changed before this effect ran.
+      cancelled = true;
+    };
   }, [items, index, session]);
 }

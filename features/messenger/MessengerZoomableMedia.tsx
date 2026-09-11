@@ -3,6 +3,7 @@ import { StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { mediaPanIntent, shouldDismissMedia } from "./mediaViewerPolicy";
 import Animated, {
+  cancelAnimation,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -53,6 +54,8 @@ export default function MessengerZoomableMedia({
   const panMode = useSharedValue<"zoom" | "dismiss" | "none">("none");
   const closing = useSharedValue(false);
   const multipleTouches = useSharedValue(false);
+  const pinching = useSharedValue(false);
+  const mounted = useRef(true);
   const callbacks = useRef({ onZoomChange, onDismiss });
   callbacks.current = { onZoomChange, onDismiss };
   // Neighbor downloads and parent callbacks must not reset the active photo.
@@ -60,11 +63,15 @@ export default function MessengerZoomableMedia({
     (value: boolean) => callbacks.current.onZoomChange?.(value),
     [],
   );
-  const notifyDismiss = useCallback(() => callbacks.current.onDismiss?.(), []);
+  const notifyDismiss = useCallback(() => {
+    if (mounted.current) callbacks.current.onDismiss?.();
+  }, []);
   const reset = useCallback(() => {
     dismissY.value = 0;
     closing.value = false;
     panMode.value = "none";
+    pinching.value = false;
+    multipleTouches.value = false;
     scale.value = withTiming(MIN_SCALE);
     startScale.value = MIN_SCALE;
     translateX.value = withTiming(0);
@@ -76,6 +83,8 @@ export default function MessengerZoomableMedia({
     closing,
     dismissY,
     panMode,
+    pinching,
+    multipleTouches,
     notifyZoom,
     scale,
     startScale,
@@ -87,10 +96,23 @@ export default function MessengerZoomableMedia({
   useEffect(() => {
     reset();
   }, [reset, resetKey, active, width, height]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      cancelAnimation(dismissY);
+    };
+  }, [dismissY]);
   const gesture = useMemo(() => {
     const pinch = Gesture.Pinch()
       .enabled(active && zoomEnabled)
+      .onTouchesDown((_event, manager) => {
+        if (closing.value) manager.fail();
+      })
       .onStart(() => {
+        pinching.value = true;
+        multipleTouches.value = true;
+        dismissY.value = withTiming(0);
         startScale.value = scale.value;
         startTranslateX.value = translateX.value;
         startTranslateY.value = translateY.value;
@@ -119,7 +141,10 @@ export default function MessengerZoomableMedia({
           maximumY,
         );
       })
-      .onEnd(() => {
+      .onFinalize(() => {
+        // Finalize also runs for interruptions/cancellation, unlike onEnd.
+        if (!pinching.value) return;
+        pinching.value = false;
         if (scale.value <= 1.01) {
           scale.value = withTiming(MIN_SCALE);
           translateX.value = withTiming(0);
@@ -140,30 +165,42 @@ export default function MessengerZoomableMedia({
       .manualActivation(true)
       .maxPointers(1)
       .onTouchesDown((event, manager) => {
-        if (event.numberOfTouches !== 1 || closing.value) {
+        if (event.numberOfTouches !== 1 || closing.value || pinching.value) {
           multipleTouches.value = true;
           manager.fail();
           return;
         }
         const touch = event.allTouches[0];
+        if (!touch) {
+          manager.fail();
+          return;
+        }
         touchX.value = touch.absoluteX;
         touchY.value = touch.absoluteY;
         panMode.value = "none";
         multipleTouches.value = false;
       })
       .onTouchesMove((event, manager) => {
-        if (event.numberOfTouches !== 1) {
+        if (
+          event.numberOfTouches !== 1 ||
+          multipleTouches.value ||
+          pinching.value
+        ) {
           multipleTouches.value = true;
           manager.fail();
           return;
         }
         if (panMode.value !== "none") return;
         const touch = event.allTouches[0];
+        if (!touch) {
+          manager.fail();
+          return;
+        }
         const intent = mediaPanIntent(
           touch.absoluteX - touchX.value,
           touch.absoluteY - touchY.value,
           event.numberOfTouches,
-          scale.value,
+          Math.max(scale.value, startScale.value),
           dismissEnabled,
         );
         if (intent === "fail") manager.fail();
@@ -199,6 +236,8 @@ export default function MessengerZoomableMedia({
           successful &&
           panMode.value === "dismiss" &&
           !multipleTouches.value &&
+          !pinching.value &&
+          Math.max(scale.value, startScale.value) <= 1.01 &&
           !closing.value &&
           shouldDismissMedia(event.translationY, event.velocityY, height)
         ) {
@@ -222,7 +261,7 @@ export default function MessengerZoomableMedia({
       .numberOfTaps(2)
       .maxDuration(280)
       .onEnd((event, successful) => {
-        if (!successful) return;
+        if (!successful || closing.value) return;
         if (scale.value > 1.01) {
           scale.value = withTiming(MIN_SCALE);
           translateX.value = withTiming(0);
@@ -269,6 +308,7 @@ export default function MessengerZoomableMedia({
     touchX,
     touchY,
     multipleTouches,
+    pinching,
     panMode,
     height,
     nativeChild,

@@ -29,7 +29,7 @@ import { saveMessengerMediaToDevice } from "../../services/messengerMediaSave";
 import { colors } from "../../styles/commonStyles";
 import { getMessengerFilePresentation } from "./filePresentation";
 import MessengerLocationPreview from "./MessengerLocationPreview";
-import MessengerMediaViewer from "./MessengerMediaViewer";
+import MediaLightbox from "./MediaLightbox";
 import MessengerVideoPlayer from "./MessengerVideoPlayer";
 import type { MessengerLocation, MessengerMedia } from "./types";
 
@@ -528,7 +528,7 @@ function MessengerAttachmentView({
         </TouchableOpacity>
       )}
 
-      <MessengerMediaViewer
+      <MediaLightbox
         items={viewerItems}
         index={viewerIndex}
         session={viewerSession}
