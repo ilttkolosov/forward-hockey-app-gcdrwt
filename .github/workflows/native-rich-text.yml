@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - stabilization/native-rich-text-input
+      - refactor/native-chat-keyboard
 
 jobs:
   android-native-module:
@@ -50,7 +51,21 @@ jobs:
         working-directory: android
         run: ./gradlew :app:compileDebugKotlin --stacktrace
 
+      - name: Assemble keyboard test APK (arm64 release)
+        if: github.ref_name == 'refactor/native-chat-keyboard'
+        working-directory: android
+        run: ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --stacktrace
+
+      - name: Preserve keyboard test APK
+        if: github.ref_name == 'refactor/native-chat-keyboard'
+        uses: actions/upload-artifact@v4
+        with:
+          name: forward-keyboard-arm64-release
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
   ios-native-module:
+    if: github.ref_name != 'refactor/native-chat-keyboard'
     runs-on: macos-26
     timeout-minutes: 45
     steps:

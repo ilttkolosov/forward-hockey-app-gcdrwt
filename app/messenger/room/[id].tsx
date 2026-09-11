@@ -67,7 +67,8 @@ import MessengerLinkPreview, {
 } from "../../../features/messenger/MessengerLinkPreview";
 import SavedMessagesAvatar from "../../../features/messenger/SavedMessagesAvatar";
 import { useTypingDots } from "../../../features/messenger/useTypingDots";
-import { useAndroidKeyboardAvoidance } from "../../../features/messenger/useAndroidKeyboardAvoidance";
+import ChatKeyboardArea from "../../../features/messenger/ChatKeyboardArea";
+
 import {
   ForwardRichTextInput,
   type ForwardRichTextInputHandle,
@@ -182,6 +183,8 @@ import {
   reportAnalyticsError,
   trackMessengerAction,
 } from "../../../services/analyticsService";
+
+const KeyboardFrame = Platform.OS === "ios" ? KeyboardAvoidingView : View;
 
 type MessengerAttachmentKind = "camera" | "library" | "file" | "location";
 type InitialAnchorMode = "read_anchor" | "unread_fallback" | "latest";
@@ -1454,13 +1457,6 @@ export default function MessengerRoomScreen() {
   const renderedNavigationId = useRef<string | null>(null);
   const renderedListReady = useRef(false);
   const inputRef = useRef<ForwardRichTextInputHandle>(null);
-  const composerShellRef = useRef<View>(null);
-  const {
-    bottomInset: androidKeyboardInset,
-    onNativeKeyboardGeometry: handleNativeKeyboardGeometry,
-    onTargetLayout: handleComposerShellLayout,
-    refresh: refreshAndroidKeyboardAvoidance,
-  } = useAndroidKeyboardAvoidance(composerShellRef);
   const messagesRef = useRef<MessengerMessage[]>([]);
   const roomTypeRef = useRef(roomType);
   const viewableServerMessageIds = useRef<string[]>([]);
@@ -1484,9 +1480,6 @@ export default function MessengerRoomScreen() {
     null,
   );
   const pendingAttachmentRequest = useRef<PendingAttachmentRequest | null>(
-    null,
-  );
-  const keyboardScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
   const keyboardScrollPending = useRef(false);
@@ -1566,14 +1559,6 @@ export default function MessengerRoomScreen() {
   }, [messages]);
 
   useEffect(() => {
-    if (Platform.OS !== "android" || androidKeyboardInset <= 0) return;
-    messengerLog("info", "room.keyboard.overlay_compensated", {
-      room_id: roomId,
-      bottom_inset: androidKeyboardInset,
-    });
-  }, [androidKeyboardInset, roomId]);
-
-  useEffect(() => {
     editingMessageRef.current = editingMessage;
   }, [editingMessage]);
 
@@ -1637,10 +1622,6 @@ export default function MessengerRoomScreen() {
     nearLatest.current = false;
     keyboardScrollPending.current = false;
     clearPendingLatestScroll();
-    if (keyboardScrollTimer.current) {
-      clearTimeout(keyboardScrollTimer.current);
-      keyboardScrollTimer.current = null;
-    }
   }, [clearPendingLatestScroll]);
 
   const cancelMessageNavigation = useCallback(() => {
@@ -1935,49 +1916,25 @@ export default function MessengerRoomScreen() {
     };
   }, [params.privateReplyMessageId, roomType]);
 
+  const handleKeyboardTransitionStart = useCallback(() => {
+    keyboardScrollPending.current = nearLatest.current && !messageNavigationTarget.current;
+  }, []);
+
   useEffect(() => {
-    const showEvent =
-      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent =
-      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSubscription = Keyboard.addListener(
-      showEvent,
-      (event: KeyboardEvent) => {
-        if (Platform.OS === "ios") Keyboard.scheduleLayoutAnimation(event);
-        if (!nearLatest.current) return;
-        keyboardScrollPending.current = true;
-        scrollToLatest(Platform.OS !== "android");
-        if (keyboardScrollTimer.current) {
-          clearTimeout(keyboardScrollTimer.current);
-        }
-        keyboardScrollTimer.current = setTimeout(
-          () => {
-            if (nearLatest.current) scrollToLatest(Platform.OS !== "android");
-            keyboardScrollPending.current = false;
-            keyboardScrollTimer.current = null;
-          },
-          Math.max(120, (event.duration || 250) + 80),
-        );
-      },
-    );
-    const hideSubscription = Keyboard.addListener(hideEvent, () => {
-      if (keyboardScrollTimer.current) {
-        clearTimeout(keyboardScrollTimer.current);
-        keyboardScrollTimer.current = null;
-      }
-      keyboardScrollPending.current = false;
-      if (nearLatest.current) scrollToLatest(false);
+    if (Platform.OS !== "ios") return undefined;
+    const show = Keyboard.addListener("keyboardWillShow", (event: KeyboardEvent) => {
+      handleKeyboardTransitionStart();
+      Keyboard.scheduleLayoutAnimation(event);
+    });
+    const hide = Keyboard.addListener("keyboardWillHide", (event: KeyboardEvent) => {
+      handleKeyboardTransitionStart();
+      Keyboard.scheduleLayoutAnimation(event);
     });
     return () => {
-      showSubscription.remove();
-      hideSubscription.remove();
-      if (keyboardScrollTimer.current) {
-        clearTimeout(keyboardScrollTimer.current);
-        keyboardScrollTimer.current = null;
-      }
-      clearPendingLatestScroll();
+      show.remove();
+      hide.remove();
     };
-  }, [clearPendingLatestScroll, scrollToLatest]);
+  }, [handleKeyboardTransitionStart]);
 
   const candidateMessages = authorFilter ? filteredMessages : messages;
   const visibleMessages =
@@ -5376,13 +5333,7 @@ export default function MessengerRoomScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        // Android is resized by windowSoftInputMode=adjustResize from
-        // app.config.js. Applying a second JS height correction here can
-        // double-shrink the feed on devices where adjustResize works.
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
+      <KeyboardFrame style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.iconButton}
@@ -5497,6 +5448,7 @@ export default function MessengerRoomScreen() {
           </View>
         )}
 
+        <ChatKeyboardArea onTransitionStart={handleKeyboardTransitionStart}>
         <View style={styles.iceBackground} ref={feedViewportRef} collapsable={false}>
           <Image
             cachePolicy="memory-disk"
@@ -5519,10 +5471,13 @@ export default function MessengerRoomScreen() {
             }
             onLayout={(event) => {
               const height = Math.round(event.nativeEvent.layout.height);
-              if (height !== feedHeight) setFeedHeight(height);
-              if (keyboardScrollPending.current) {
-                scrollToLatest(Platform.OS !== "android");
+              if (height === feedHeight) return;
+              setFeedHeight(height);
+              if ((keyboardScrollPending.current || nearLatest.current) && !messageNavigationTarget.current) {
+                // One alignment after actual viewport layout; no show/focus timers.
+                listRef.current?.scrollToEnd({ animated: false });
               }
+              keyboardScrollPending.current = false;
             }}
             // The SQLite viewport contains up to 20 messages. Rendering only
             // 18 here made FlatList measure and scroll to the end, append the
@@ -6380,15 +6335,7 @@ export default function MessengerRoomScreen() {
 
         {canWrite ? (
           <View
-            ref={composerShellRef}
-            collapsable={false}
-            onLayout={handleComposerShellLayout}
-            style={[
-              styles.composerShell,
-              Platform.OS === "android" && androidKeyboardInset > 0
-                ? { marginBottom: androidKeyboardInset }
-                : null,
-            ]}
+            style={styles.composerShell}
           >
             {attachmentPreparationLabel && (
               <View style={styles.attachmentPreparation}>
@@ -6617,18 +6564,11 @@ export default function MessengerRoomScreen() {
                 placeholderTextColor={colors.textSecondary}
                 selectionColor={colors.accent}
                 onContentSizeChange={handleComposerContentSizeChange}
-                onKeyboardGeometryChange={handleNativeKeyboardGeometry}
                 onPasteAttachment={(attachment) => {
                   void handlePastedAttachment(attachment);
                 }}
                 onFocus={() => {
                   setComposerFocused(true);
-                  if (Platform.OS === "android") {
-                    refreshAndroidKeyboardAvoidance();
-                  }
-                  if (!nearLatest.current) return;
-                  keyboardScrollPending.current = true;
-                  scrollToLatest(Platform.OS !== "android");
                 }}
                 onBlur={() => setComposerFocused(false)}
               />
@@ -6659,7 +6599,8 @@ export default function MessengerRoomScreen() {
             </Text>
           </View>
         )}
-      </KeyboardAvoidingView>
+        </ChatKeyboardArea>
+      </KeyboardFrame>
     </SafeAreaView>
   );
 }
