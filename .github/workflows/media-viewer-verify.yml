@@ -4,7 +4,7 @@ on:
     branches: [work/media-viewer-swipe-fix]
     paths: [.github/workflows/media-viewer-verify.yml]
 permissions:
-  contents: write
+  contents: read
 jobs:
   ios:
     runs-on: macos-15
@@ -25,24 +25,19 @@ jobs:
           distribution: temurin
           java-version: '17'
       - run: curl -fsSL https://get.maestro.mobile.dev | bash
-      - name: Select an XCTest runtime compatible with the selected SDK
+      - name: Configure isolated XCTest runtime and screenshot output
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p=Path('checks/media-viewer-native-smoke.py');s=p.read_text()
           s=s.replace("        device=next(d for r in sorted(devices,reverse=True) if '.iOS-' in r for d in devices[r] if d['name'].startswith('iPhone'))", "        sdk = subprocess.check_output(['xcrun','--sdk','iphonesimulator','--show-sdk-version'],text=True).strip().split('.')\n        runtime = '.iOS-'+'-'.join(sdk[:2])\n        candidates = [d for r in devices if runtime in r for d in devices[r] if d['name'].startswith('iPhone')]\n        assert candidates, 'No simulator matching active Xcode SDK '+runtime\n        device = candidates[0]\n        (OUT/'simulator.json').write_text(json.dumps(device,indent=2))")
           s=s.replace("        app=next((derived/'Build/Products/Release-iphonesimulator').glob('*.app'))", "        run(['open','-a','Simulator'],host,'simulator-ui')\n        app=next((derived/'Build/Products/Release-iphonesimulator').glob('*.app'))")
+          s=s.replace('- takeScreenshot: /tmp/media-viewer-native-results/', '- takeScreenshot: ')
+          s=s.replace("'test','--debug-output',OUT/'maestro',OUT/'flow.yaml'", "'test','--test-output-dir',OUT/'maestro','--debug-output',OUT/'maestro',OUT/'flow.yaml'")
           p.write_text(s)
           PY
           xcodebuild -version
       - run: python3 checks/media-viewer-native-smoke.py ios
-      - name: Preserve verified test harness
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add checks/media-viewer-native-smoke.py
-          git diff --cached --quiet || git commit -m 'test: verify native media gestures with matching XCTest runtime [versioned]'
-          git push origin HEAD:work/media-viewer-swipe-fix
       - name: Collect driver and host diagnostics
         if: always()
         run: |
@@ -55,4 +50,5 @@ jobs:
         with:
           name: media-viewer-native-ios
           path: /tmp/media-viewer-native-results
+          include-hidden-files: true
           retention-days: 7
