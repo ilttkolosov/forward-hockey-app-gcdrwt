@@ -1,6 +1,6 @@
 # Android chat keyboard: system insets
 
-Branch: `refactor/native-chat-keyboard`. First test build: 2.4.93 (246).
+Branch: `refactor/native-chat-keyboard`. Test build: 2.4.94 (247).
 
 ## Ownership and coordinates
 
@@ -16,7 +16,7 @@ All editor keyboard geometry observers, timer probes and Xiaomi exceptions were 
 
 `npm run check:messenger-android-keyboard` executes the pinned avoiding-view implementation against window, header and system-bar geometry; repeated open/close and height changes; and the actual rich-text wrapper for Android/iOS colors. It also checks that the old geometry paths are absent. These simulated checks do not reproduce vendor firmware.
 
-GitHub Actions performs TypeScript, lint, bundle checks and Android native compilation, followed by an arm64 release APK. Device validation remains required.
+GitHub Actions performs TypeScript, lint, bundle checks and Android native compilation. Build the release APK locally using the instructions below. Device validation remains required.
 
 ## Device checks
 
