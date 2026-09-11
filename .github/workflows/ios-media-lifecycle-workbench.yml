@@ -1,28 +1,94 @@
-name: Inspect iOS media lifecycle
+name: Verify iOS media lifecycle
 on:
   push:
     branches: [work/ios-media-lifecycle-cleanup]
-    paths: [.github/workflows/ios-media-lifecycle-workbench.yml]
+    paths: [.github/workflows/ios-media-lifecycle-workbench.yml, scripts/apply-ios-media-fix.py]
 permissions:
   contents: read
+concurrency:
+  group: ios-media-lifecycle-workbench
+  cancel-in-progress: true
 jobs:
-  inspect:
+  javascript:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - name: Export source and locked native implementation
+      - name: Verify and apply source patch
         run: |
-          mkdir -p /tmp/ios-media-review
-          tar --exclude=.git --exclude=node_modules --exclude=android --exclude=ios -czf /tmp/ios-media-review/source.tgz .
-          tar -czf /tmp/ios-media-review/native-source.tgz node_modules/expo-video node_modules/expo-image node_modules/expo-modules-core node_modules/react-native/React node_modules/react-native-screens/ios node_modules/react-native-screens/RNScreens.podspec node_modules/react-native-svg/apple node_modules/@react-navigation/elements node_modules/@react-navigation/native-stack
-      - uses: actions/upload-artifact@v4
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/apply-ios-media-fix.py')
+          s = p.read_text()
+          for before, after in [('tj015bTQ8x7','tj015bQ8x7'),('TNeKfSEKqko','TNeKfSEqko'),('0Iv1bUPYxr','0Iv1UPYxr'),('OqP3b9dBCen','OqP3b9BCen'),('WITitkolosovFFJL','WITitFFJL'),('+na9sde277du','+na9s277du')]:
+              s = s.replace(before, after)
+          p.write_text(s)
+          PY
+          python scripts/apply-ios-media-fix.py
+      - run: npm ci
+      - run: npx --yes prettier@3.9.6 --write checks/ios-media-patch-contract.cjs
+      - run: npm run check
+      - name: Existing pin menu, presentation and focus regressions
+        env:
+          PIN_TEST_MODULES: /tmp/forward-pin-tests
+        run: |
+          npm install --prefix /tmp/forward-pin-tests --no-package-lock --ignore-scripts react@19.1.0 react-test-renderer@19.1.0
+          node --no-warnings --experimental-strip-types checks/messenger-pins.mjs
+          node --no-warnings --experimental-strip-types checks/messenger-pin-focus.mjs
+          node checks/messenger-pins-runtime.cjs
+          node checks/messenger-pin-presentation.cjs
+      - name: Export iOS and Android JavaScript
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: npx expo export --platform ios --platform android --output-dir /tmp/forward-ios-media-fix
+      - name: Commit verified source to work branch
+        run: |
+          rm scripts/apply-ios-media-fix.py
+          node scripts/bump-app-version.mjs patch
+          git diff --check -- . ':!patches/*.patch'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add patches/expo-video+3.0.16.patch patches/react-native-svg+15.12.1.patch checks/ios-media-lifecycle-smoke.py checks/ios-media-patch-contract.cjs docs/CHAT_PINNING.md package.json package-lock.json app.config.js scripts/apply-ios-media-fix.py
+          git commit -m 'fix: end native iOS media tasks before release and guard SVG bitmap snapshots [versioned]'
+          git push origin HEAD:work/ios-media-lifecycle-cleanup
+  native-ios:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
         with:
-          name: ios-media-review
-          path: /tmp/ios-media-review
-          retention-days: 3
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify and apply source patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/apply-ios-media-fix.py')
+          s = p.read_text()
+          for before, after in [('tj015bTQ8x7','tj015bQ8x7'),('TNeKfSEKqko','TNeKfSEqko'),('0Iv1bUPYxr','0Iv1UPYxr'),('OqP3b9dBCen','OqP3b9BCen'),('WITitkolosovFFJL','WITitFFJL'),('+na9sde277du','+na9s277du')]:
+              s = s.replace(before, after)
+          p.write_text(s)
+          PY
+          python scripts/apply-ios-media-fix.py
+      - name: Compare real native video and navigation surface before and after patches
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: python3 checks/ios-media-lifecycle-smoke.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-media-lifecycle-native
+          path: /tmp/ios-media-lifecycle-results
+          retention-days: 7
