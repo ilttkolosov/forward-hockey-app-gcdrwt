@@ -22,10 +22,17 @@ const emit = player.slice(player.indexOf("  func safeEmit("));
 assert.match(emit, /runtime\.schedule \{ \[weak self, weak appContext\]/);
 assert.match(emit, /guard let self, !self\.hasBeenReleased/);
 assert.match(emit, /JSIUtils\.emitEvent\(event, to: jsObject/);
-const svg = read("node_modules/react-native-svg/apple/RNSVGRenderable.mm");
-assert.match(
-  svg,
-  /CGBitmapContextGetBitsPerPixel\(context\) > 0\s*\? CGBitmapContextCreateImage\(context\)\s*:\s*nil/,
+const svg = read(
+  "node_modules/react-native-svg/apple/Elements/RNSVGSvgView.mm",
+);
+assert.match(svg, /RNSVGContainsFilter\(self\)/);
+assert.match(svg, /UIGraphicsImageRenderer \*renderer/);
+assert.match(svg, /drawToContext:rendererContext.CGContext/);
+assert.match(svg, /\[image drawInRect:bounds\]/);
+assert.doesNotMatch(
+  read("node_modules/react-native-svg/apple/RNSVGRenderable.mm"),
+  /CGBitmapContextGet(?:BitsPerPixel|BitsPerComponent|Data|ColorSpace)\(context\)/,
+  "Do not probe a UIKit display list with a bitmap-only function",
 );
 assert.match(
   read("components/PersistentBottomNavigation.tsx"),

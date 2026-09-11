@@ -53,6 +53,11 @@ jobs:
           PIN_TEST_MODULES: /tmp/forward-pin-tests
         run: node checks/messenger-pin-presentation.cjs
 
+      - name: Verify media autoload and swipe dismissal policy
+        env:
+          PIN_TEST_MODULES: /tmp/forward-pin-tests
+        run: npm run check:media-viewer
+
       - name: Validate Expo config
         env:
           CI: '1'

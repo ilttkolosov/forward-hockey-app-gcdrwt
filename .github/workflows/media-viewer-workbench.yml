@@ -2,24 +2,43 @@ name: Media viewer workbench
 on:
   push:
     branches: [work/media-viewer-swipe-autoload]
-    paths: [.github/workflows/media-viewer-workbench.yml]
 permissions:
   contents: read
 jobs:
-  snapshot:
+  regression:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: |
+      - name: Install isolated test tools
+        run: npm install --prefix /tmp/forward-pin-tests --no-package-lock --ignore-scripts react@19.1.0 react-test-renderer@19.1.0 prettier@3.6.2
+      - name: Capture workbench source and test tools
+        run: |
           mkdir -p /tmp/media-viewer-source
           tar --exclude=.git --exclude=node_modules --exclude=android --exclude=ios -czf /tmp/media-viewer-source/source.tgz .
+          tar -czf /tmp/media-viewer-source/compiler-and-svg.tgz node_modules/typescript node_modules/react-native-svg
+          tar -C /tmp/forward-pin-tests -czf /tmp/media-viewer-source/test-runtime.tgz node_modules
+          git rev-parse HEAD > /tmp/media-viewer-source/commit.txt
       - uses: actions/upload-artifact@v4
         with:
           name: media-viewer-source
           path: /tmp/media-viewer-source
           retention-days: 3
+      - name: Media viewer runtime regressions
+        env:
+          PIN_TEST_MODULES: /tmp/forward-pin-tests
+        run: npm run check:media-viewer
+      - name: Full checks
+        run: npm run check
+      - name: Bundle Android and iOS JavaScript
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: npx expo export --platform android --platform ios --output-dir /tmp/forward-media-export
