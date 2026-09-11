@@ -1,0 +1,134 @@
+diff --git a/checks/media-viewer-native-smoke.py b/checks/media-viewer-native-smoke.py
+index 99a217e..0119666 100644
+--- a/checks/media-viewer-native-smoke.py
++++ b/checks/media-viewer-native-smoke.py
+@@ -96,6 +96,10 @@ FLOW = '''appId: com.forward.media.viewer.regression
+     end: 20%, 50%
+     duration: 500
+ - assertVisible: "3 из 5"
++- extendedWaitUntil:
++    visible:
++      id: viewer-video-fixture-2
++    timeout: 15000
+ - assertNotVisible: "Нажмите, чтобы загрузить"
+ - takeScreenshot: profile-video
+ - swipe:
+diff --git a/checks/media-viewer-runtime.cjs b/checks/media-viewer-runtime.cjs
+index 3519f99..880d3c3 100644
+--- a/checks/media-viewer-runtime.cjs
++++ b/checks/media-viewer-runtime.cjs
+@@ -411,6 +411,30 @@ const touch = (x, y, n = 1) => ({
+     tap = gestures.find((x) => x.kind === "tap");
+   const pinch = gestures.find((x) => x.kind === "pinch");
+   assert.ok(pan.config.blocksExternalGesture);
++  assert.ok(pinch.config.blocksExternalGesture);
++  let pinchFailed = 0;
++  const pinchManager = { fail: () => pinchFailed++ };
++  // Both recognizers, not only Pan, must release the native horizontal list.
++  const waitingPinchDrag = (dx, dy, n = 1) => {
++    pinch.callbacks.onTouchesDown(touch(100, 100), pinchManager);
++    pinch.callbacks.onTouchesMove(touch(100 + dx, 100 + dy, n), pinchManager);
++  };
++  waitingPinchDrag(3, 3);
++  assert.equal(
++    pinchFailed,
++    0,
++    "a stationary first finger allows pinch to start",
++  );
++  waitingPinchDrag(70, 2);
++  assert.equal(
++    pinchFailed,
++    1,
++    "single-finger paging must fail the waiting pinch",
++  );
++  waitingPinchDrag(0, 70);
++  assert.equal(pinchFailed, 2, "downward dismissal does not wait for a pinch");
++  waitingPinchDrag(70, 2, 2);
++  assert.equal(pinchFailed, 2, "two fingers retain pinch ownership");
+   let activated = 0,
+     failed = 0;
+   const manager = { activate: () => activated++, fail: () => failed++ };
+@@ -452,6 +476,8 @@ const touch = (x, y, n = 1) => ({
+   );
+   drag(0, 240);
+   assert.equal(animations.length, 0, "zoomed pan does not dismiss");
++  waitingPinchDrag(70, 2);
++  assert.equal(pinchFailed, 2, "zoomed panning may still add a pinch finger");
+   await act(async () => {
+     tap.callbacks.onEnd({ x: 195, y: 422 }, true);
+   });
+diff --git a/features/messenger/MediaLightbox.tsx b/features/messenger/MediaLightbox.tsx
+index 6d495c9..3496b96 100644
+--- a/features/messenger/MediaLightbox.tsx
++++ b/features/messenger/MediaLightbox.tsx
+@@ -242,6 +242,7 @@ export default function MediaLightbox({
+           )}
+           {localUri && item.type === "video" && active && (
+             <View
++              testID={`viewer-video-${item.id}`}
+               style={[
+                 styles.videoStage,
+                 { top: videoTop, width, height: videoHeight },
+diff --git a/features/messenger/MessengerZoomableMedia.tsx b/features/messenger/MessengerZoomableMedia.tsx
+index 828073e..089e93b 100644
+--- a/features/messenger/MessengerZoomableMedia.tsx
++++ b/features/messenger/MessengerZoomableMedia.tsx
+@@ -51,6 +51,8 @@ export default function MessengerZoomableMedia({
+   const dismissY = useSharedValue(0);
+   const touchX = useSharedValue(0);
+   const touchY = useSharedValue(0);
++  const pinchTouchX = useSharedValue(0);
++  const pinchTouchY = useSharedValue(0);
+   const panMode = useSharedValue<"zoom" | "dismiss" | "none">("none");
+   const closing = useSharedValue(false);
+   const multipleTouches = useSharedValue(false);
+@@ -106,8 +108,38 @@ export default function MessengerZoomableMedia({
+   const gesture = useMemo(() => {
+     const pinch = Gesture.Pinch()
+       .enabled(active && zoomEnabled)
+-      .onTouchesDown((_event, manager) => {
+-        if (closing.value) manager.fail();
++      .onTouchesDown((event, manager) => {
++        if (closing.value) {
++          manager.fail();
++          return;
++        }
++        const touch = event.allTouches[0];
++        if (event.numberOfTouches === 1 && touch) {
++          pinchTouchX.value = touch.absoluteX;
++          pinchTouchY.value = touch.absoluteY;
++        }
++      })
++      .onTouchesMove((event, manager) => {
++        // A waiting pinch also blocks the native pager. Release it once a
++        // single finger commits to a drag, rather than waiting for finger-up.
++        // Keep it pending while stationary so a second finger can begin zoom.
++        if (
++          event.numberOfTouches !== 1 ||
++          pinching.value ||
++          multipleTouches.value ||
++          Math.max(scale.value, startScale.value) > 1.01
++        )
++          return;
++        const touch = event.allTouches[0];
++        if (!touch) return;
++        const intent = mediaPanIntent(
++          touch.absoluteX - pinchTouchX.value,
++          touch.absoluteY - pinchTouchY.value,
++          1,
++          MIN_SCALE,
++          true,
++        );
++        if (intent !== "wait") manager.fail();
+       })
+       .onStart(() => {
+         pinching.value = true;
+@@ -307,6 +339,8 @@ export default function MessengerZoomableMedia({
+     closing,
+     touchX,
+     touchY,
++    pinchTouchX,
++    pinchTouchY,
+     multipleTouches,
+     pinching,
+     panMode,

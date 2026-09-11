@@ -6,6 +6,8 @@ permissions:
   contents: read
 jobs:
   regression:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -18,6 +20,21 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Materialize and version the native gesture correction
+        run: |
+          if [ -f .github/media-viewer-gesture.patch ]; then
+            node -e 'if(require("./package.json").version !== "2.4.87") process.exit(1)'
+            git apply --check --index .github/media-viewer-gesture.patch
+            git apply --index .github/media-viewer-gesture.patch
+            rm .github/media-viewer-gesture.patch
+            node scripts/bump-app-version.mjs patch
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add -A
+            git diff --cached --check
+            git commit -m 'fix: release waiting pinch for native media paging [versioned]'
+            git push origin HEAD:work/media-viewer-swipe-autoload
+          fi
       - id: source
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - run: npm ci
@@ -27,7 +44,7 @@ jobs:
         run: |
           mkdir -p /tmp/media-viewer-source
           tar --exclude=.git --exclude=node_modules --exclude=android --exclude=ios -czf /tmp/media-viewer-source/source.tgz .
-          tar -czf /tmp/media-viewer-source/compiler-and-svg.tgz node_modules/typescript node_modules/react-native-svg
+          tar -czf /tmp/media-viewer-source/compiler-and-svg.tgz node_modules/typescript node_modules/react-native-svg node_modules/react-native-gesture-handler
           tar -C /tmp/forward-pin-tests -czf /tmp/media-viewer-source/test-runtime.tgz node_modules
           git rev-parse HEAD > /tmp/media-viewer-source/commit.txt
       - uses: actions/upload-artifact@v4
