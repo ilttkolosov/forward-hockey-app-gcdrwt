@@ -36,7 +36,7 @@ jobs:
           patch.write_text(payload['patch'])
           subprocess.run(['git', 'apply', '--check', '--index', str(patch)], check=True)
           subprocess.run(['git', 'apply', '--index', str(patch)], check=True)
-          Path('.github/workflows/media-viewer-workbench.yml').write_text(payload['workflow'])
+          # Workflow cleanup is published separately through the GitHub connector.
           for p in folder.iterdir(): p.unlink()
           folder.rmdir()
           PY
