@@ -9,6 +9,7 @@ import { messengerLog } from "./messengerLogger";
 
 export interface MessengerUploadFile {
   uri: string;
+  thumbnail_uri?: string;
   name: string;
   type: string;
   kind: "image" | "video" | "file";

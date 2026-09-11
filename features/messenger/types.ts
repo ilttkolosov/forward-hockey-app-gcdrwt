@@ -238,11 +238,13 @@ export interface MessengerPendingAttachment {
   label: string;
   progress_percent?: number | null;
   local_uri: string | null;
+  thumbnail_uri?: string;
   file_name: string | null;
   size_bytes: number | null;
   items?: {
     kind: "image" | "video" | "file";
     local_uri: string;
+    thumbnail_uri?: string;
     file_name: string;
     mime_type: string;
     size_bytes: number | null;

@@ -21,6 +21,7 @@ export type MessengerRealtimeEvent =
   | { type: "message.created"; message: MessengerMessage }
   | { type: "message.updated"; message: MessengerMessage }
   | { type: "room.updated"; room_id: string; deleted?: boolean }
+  | { type: "room.pins_updated"; room_id: string }
   | {
       type: "message.receipt_updated";
       room_id: string;
@@ -306,6 +307,9 @@ export function connectMessengerRealtime(accessToken: string): void {
           message: applyMessengerAliases(payload.message),
         });
     },
+  );
+  nextSocket.on("room.pins_updated", (payload: { room_id: string }) =>
+    publish({ type: "room.pins_updated", room_id: payload.room_id }),
   );
   nextSocket.on(
     "room.updated",

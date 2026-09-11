@@ -452,6 +452,7 @@ export function removeCachedMessengerRoom(
         "DELETE FROM messenger_outbox WHERE room_id = ?",
         roomId,
       );
+      await transaction.runAsync("DELETE FROM messenger_media_outbox WHERE room_id = ?", roomId);
       await transaction.runAsync(
         "DELETE FROM messenger_room_read_state WHERE room_id = ?",
         roomId,
@@ -1345,6 +1346,7 @@ export function clearMessengerLocalData(db: SQLiteDatabase): Promise<void> {
   return enqueueMessengerWrite(db, async () => {
     await withMessengerTransaction(db, async (transaction) => {
       await transaction.runAsync("DELETE FROM messenger_outbox");
+      await transaction.runAsync("DELETE FROM messenger_media_outbox");
       await transaction.runAsync("DELETE FROM messenger_messages");
       await transaction.runAsync("DELETE FROM messenger_room_read_state");
       await transaction.runAsync("DELETE FROM messenger_room_cache_state");

@@ -80,6 +80,7 @@ import {
 import PersistentBottomNavigation from '../components/PersistentBottomNavigation';
 import { warmMessengerUiAssets } from '../services/messengerUiAssets';
 import StartupConfigGate from '../components/StartupConfigGate';
+import AppKeyboardProvider from '../features/messenger/AppKeyboardProvider';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { refreshCurrentTournamentTable } from '../services/primaryDataRefresh';
 global.Buffer = Buffer;
@@ -831,6 +832,7 @@ function RootLayoutContent() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <AppKeyboardProvider>
       <StatusBar style="dark" backgroundColor={colors.background} />
       <MessengerShareIntentBridge />
       <AnalyticsRouteTracker />
@@ -874,6 +876,7 @@ function RootLayoutContent() {
           }}
         />
       </View>
+      </AppKeyboardProvider>
     </GestureHandlerRootView>
   );
 }

@@ -6,6 +6,7 @@ import { useSQLiteContext } from "expo-sqlite";
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -50,6 +51,11 @@ import {
   reconcileMessengerMessageUpdates,
 } from "../../../features/messenger/feed";
 import MessageReceiptsModal from "../../../features/messenger/MessageReceiptsModal";
+import PinnedMessagesBanner from "../../../features/messenger/PinnedMessagesBanner";
+import { usePinnedMessages } from "../../../features/messenger/usePinnedMessages";
+import { shouldResetPinAtLatest } from "../../../features/messenger/pins";
+import { usePinnedMessageSelection } from "../../../features/messenger/usePinnedMessageSelection";
+import { measureMessengerFocus, waitForMessengerFocus, type MessengerFocusMeasurement } from "../../../features/messenger/messageFocus";
 import {
   messageDeletionAvailable,
   messageMutationAvailable,
@@ -61,7 +67,8 @@ import MessengerLinkPreview, {
 } from "../../../features/messenger/MessengerLinkPreview";
 import SavedMessagesAvatar from "../../../features/messenger/SavedMessagesAvatar";
 import { useTypingDots } from "../../../features/messenger/useTypingDots";
-import { useAndroidKeyboardAvoidance } from "../../../features/messenger/useAndroidKeyboardAvoidance";
+import ChatKeyboardArea from "../../../features/messenger/ChatKeyboardArea";
+
 import {
   ForwardRichTextInput,
   type ForwardRichTextInputHandle,
@@ -115,12 +122,10 @@ import {
   getMessengerRoomMembers,
   getMessengerRooms,
   isMessengerConnectionError,
-  isMessengerUploadCancelledError,
   messengerErrorMessage,
   removeMessengerReaction,
   saveMessengerMessage,
   sendMessengerLocation,
-  sendMessengerMedia,
   setMessengerReaction,
   syncMessengerRoomMessages,
   updateMessengerMessage,
@@ -151,12 +156,10 @@ import {
   type MessengerUploadFile,
 } from "../../../services/messengerAttachmentPicker";
 import {
-  beginLocalMessengerMediaUpload,
-  endLocalMessengerMediaUpload,
   prefetchMessengerMedia,
-  seedMessengerMediaCache,
 } from "../../../services/messengerMediaCache";
-import { runManagedMessengerMediaUpload } from "../../../services/messengerMediaUploadManager";
+import { queueMessengerMediaMessage, retryMessengerMediaMessage, subscribeMessengerMediaOutbox } from "../../../services/messengerMediaOutbox";
+import { loadMessengerMediaOutbox } from "../../../features/messenger/mediaOutboxRepository";
 import { warmMessengerBufferedUploadFiles } from "../../../services/messengerMediaUploadWarmup";
 import { saveMessengerMediaToDevice } from "../../../services/messengerMediaSave";
 import { colors } from "../../../styles/commonStyles";
@@ -177,6 +180,8 @@ import {
   trackMessengerAction,
 } from "../../../services/analyticsService";
 
+const KeyboardFrame = Platform.OS === "ios" ? KeyboardAvoidingView : View;
+
 type MessengerAttachmentKind = "camera" | "library" | "file" | "location";
 type InitialAnchorMode = "read_anchor" | "unread_fallback" | "latest";
 type InitialPositionCompletionSource =
@@ -195,11 +200,7 @@ interface AttachmentDraft {
   files: MessengerUploadFile[];
 }
 
-interface MediaUploadRequest extends AttachmentDraft {
-  clientMessageId: string;
-  caption: string;
-  replyTarget: MessengerMessage | null;
-}
+
 
 const MAX_MESSAGE_LENGTH = 5_000;
 const COLLAPSED_MESSAGE_LINES = 30;
@@ -655,6 +656,7 @@ function PendingAttachmentView({
   message: MessengerMessage;
   pending: MessengerPendingAttachment;
 }) {
+  const db = useSQLiteContext();
   const failed = pending.stage === "failed";
   const committed = pending.stage === "committed";
   const [showTransientProgress, setShowTransientProgress] = useState(false);
@@ -684,6 +686,7 @@ function PendingAttachmentView({
                   ? "file"
                   : "image",
             local_uri: pending.local_uri,
+            thumbnail_uri: pending.thumbnail_uri,
             file_name: pending.file_name,
             size_bytes: pending.size_bytes,
           } as const,
@@ -703,9 +706,9 @@ function PendingAttachmentView({
                 { width: albumTileSize, height: albumTileSize },
               ]}
             >
-              {item.kind === "image" ? (
+              {item.kind === "image" || item.thumbnail_uri ? (
                 <Image
-                  source={item.local_uri}
+                  source={item.kind === "image" ? item.local_uri : item.thumbnail_uri}
                   style={styles.pendingAttachmentAlbumImage}
                   contentFit="cover"
                 />
@@ -719,14 +722,21 @@ function PendingAttachmentView({
             </View>
           ))}
         </View>
-      ) : message.kind === "image" && pending.local_uri ? (
-        <Image
-          source={pending.local_uri}
-          style={styles.pendingAttachmentImage}
-          contentFit="cover"
-          transition={120}
-        />
+      ) : (message.kind === "image" || message.kind === "video") && pending.local_uri ? (
+        <View style={styles.pendingAttachmentImage}>
+          {message.kind === "image" || pending.thumbnail_uri ? (
+            <Image source={message.kind === "image" ? pending.local_uri : pending.thumbnail_uri}
+              style={StyleSheet.absoluteFill} contentFit="cover" />
+          ) : null}
+          {message.kind === "video" && <Icon name="play-circle" size={44} color={colors.primary} />}
+        </View>
       ) : null}
+      {failed && pending.source !== "location" && (
+        <TouchableOpacity accessibilityRole="button" onPress={() => {
+          void retryMessengerMediaMessage(db, message.author.id, message.client_message_id)
+            .catch(error => Alert.alert("Не удалось повторить отправку", messengerErrorMessage(error)));
+        }}><Text style={styles.pendingAttachmentLabel}>Отправить заново</Text></TouchableOpacity>
+      )}
       {!committed && (failed || showTransientProgress) && (
         <View style={styles.pendingAttachmentStatus}>
           {failed ? (
@@ -851,6 +861,7 @@ function messageReplyPreview(reply: MessengerReply): string {
 
 interface MessengerMessageListItemProps {
   item: MessengerMessage;
+  navigationViewRef?: React.Ref<View>;
   currentUserId: string | null;
   accessToken: string | null;
   unreadMarker: boolean;
@@ -944,6 +955,7 @@ function ExpandableMessengerMessageText({
  */
 const MessengerMessageListItem = React.memo(function MessengerMessageListItem({
   item,
+  navigationViewRef,
   currentUserId,
   accessToken,
   unreadMarker,
@@ -1003,10 +1015,13 @@ const MessengerMessageListItem = React.memo(function MessengerMessageListItem({
 
   if (item.kind === "system") {
     return (
-      <View collapsable={false}>
+      <View collapsable={false} ref={navigationViewRef}>
         {unreadMarker && <UnreadDivider />}
         <View style={styles.systemMessageRow}>
-          <View style={styles.systemMessage}>
+          <Pressable style={styles.systemMessage} disabled={!item.reply_to}
+            accessibilityRole={item.reply_to ? "button" : undefined}
+            accessibilityHint={item.reply_to ? "Перейти к исходному сообщению" : undefined}
+            onPress={() => { if (item.reply_to) onNavigateToReply(item.reply_to); }}>
             <Text style={styles.systemMessageText}>{body}</Text>
             <Text style={styles.systemMessageTime}>
               {new Date(item.created_at).toLocaleTimeString("ru-RU", {
@@ -1014,14 +1029,14 @@ const MessengerMessageListItem = React.memo(function MessengerMessageListItem({
                 minute: "2-digit",
               })}
             </Text>
-          </View>
+          </Pressable>
         </View>
       </View>
     );
   }
 
   return (
-    <View collapsable={false}>
+    <View collapsable={false} ref={navigationViewRef}>
       {unreadMarker && <UnreadDivider />}
       <SwipeableMessage
         enabled={canWrite && !item.pending && !item.deleted_at}
@@ -1331,6 +1346,9 @@ export default function MessengerRoomScreen() {
   const [sending, setSending] = useState(false);
   const [offline, setOffline] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  // A local navigation failure must never replace the server synchronization status.
+  const [navigationError, setNavigationError] = useState<string | null>(null);
+  const [messageNavigationId, setMessageNavigationId] = useState<string | null>(null);
   const [roomDetailsReady, setRoomDetailsReady] = useState(false);
   const [realtimeConnected, setRealtimeConnected] = useState(
     getMessengerRealtimeConnectionState,
@@ -1397,6 +1415,25 @@ export default function MessengerRoomScreen() {
   const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
   const [listReady, setListReady] = useState(false);
   const [roomScreenActive, setRoomScreenActive] = useState(false);
+  const pins = usePinnedMessages(roomId, session?.user.id, roomScreenActive, canWrite);
+  const actionMessageId = actionMessage?.id;
+  const refreshPins = pins.refresh;
+  useEffect(() => {
+    if (actionMessageId && roomScreenActive) void refreshPins();
+  }, [actionMessageId, roomScreenActive, refreshPins]);
+  const pinIdentity = `${session?.user.id ?? ""}:${roomId}`;
+  const pinSelection = usePinnedMessageSelection(pins.items, pinIdentity, roomScreenActive);
+  const resetPinSelection = pinSelection.resetToLatest;
+  const pinIdentityRef = useRef(pinIdentity);
+  pinIdentityRef.current = pinIdentity;
+  const pinUserScroll = useRef(false);
+  useFocusEffect(useCallback(() => {
+    pinUserScroll.current = false;
+    resetPinSelection();
+  }, [resetPinSelection]));
+  const [pinNavigationBusy, setPinNavigationBusy] = useState(false);
+  const pinNavigationLock = useRef(false);
+  const currentPinId = pinSelection.currentId;
   const [viewableMessageIds, setViewableMessageIds] = useState<Set<string>>(
     new Set(),
   );
@@ -1415,17 +1452,17 @@ export default function MessengerRoomScreen() {
   } | null>(null);
   const [feedHeight, setFeedHeight] = useState(0);
   const listRef = useRef<FlatList<MessengerMessage>>(null);
+  const feedViewportRef = useRef<View>(null);
+  const navigationViewRef = useRef<View>(null);
+  const renderedMessagesRef = useRef<MessengerMessage[]>([]);
+  const renderedNavigationId = useRef<string | null>(null);
+  const renderedListReady = useRef(false);
   const inputRef = useRef<ForwardRichTextInputHandle>(null);
-  const composerShellRef = useRef<View>(null);
-  const {
-    bottomInset: androidKeyboardInset,
-    onNativeKeyboardGeometry: handleNativeKeyboardGeometry,
-    onTargetLayout: handleComposerShellLayout,
-    refresh: refreshAndroidKeyboardAvoidance,
-  } = useAndroidKeyboardAvoidance(composerShellRef);
   const messagesRef = useRef<MessengerMessage[]>([]);
   const roomTypeRef = useRef(roomType);
   const viewableServerMessageIds = useRef<string[]>([]);
+  const focusVisibleServerMessageIds = useRef<string[]>([]);
+  const focusViewabilityUpdatedAt = useRef(0);
   const editingMessageRef = useRef<MessengerMessage | null>(null);
   const refreshRunning = useRef(false);
   const olderMessagesLoading = useRef(false);
@@ -1444,9 +1481,6 @@ export default function MessengerRoomScreen() {
     null,
   );
   const pendingAttachmentRequest = useRef<PendingAttachmentRequest | null>(
-    null,
-  );
-  const keyboardScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
   const keyboardScrollPending = useRef(false);
@@ -1483,6 +1517,7 @@ export default function MessengerRoomScreen() {
     typeof setTimeout
   > | null>(null);
   const nearLatest = useRef(true);
+  const followSentMessage = useRef<string | null>(null);
   const latestVisibleSequence = useRef<string | null>(null);
   const initialReadSequence = useRef(params.lastReadSequence || "0");
   const initialUnreadBoundarySequence = useRef(params.lastReadSequence || "0");
@@ -1499,7 +1534,15 @@ export default function MessengerRoomScreen() {
   const messageNavigationTarget = useRef<{
     messageId: string;
     attempts: number;
+    positioned: boolean;
+    confirmed: boolean;
+    positionRequests: number;
+    lastPositionedAt: number;
+    lastMeasurement: MessengerFocusMeasurement | null;
+    positionError: string | null;
   } | null>(null);
+  const messageNavigationRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messageNavigationGeneration = useRef(0);
   const messageNavigationTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -1516,14 +1559,6 @@ export default function MessengerRoomScreen() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
-
-  useEffect(() => {
-    if (Platform.OS !== "android" || androidKeyboardInset <= 0) return;
-    messengerLog("info", "room.keyboard.overlay_compensated", {
-      room_id: roomId,
-      bottom_inset: androidKeyboardInset,
-    });
-  }, [androidKeyboardInset, roomId]);
 
   useEffect(() => {
     editingMessageRef.current = editingMessage;
@@ -1578,43 +1613,52 @@ export default function MessengerRoomScreen() {
       pendingScrollFallbackTimer.current = null;
     }, 700);
     requestAnimationFrame(() =>
-      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated })),
+      requestAnimationFrame(() => {
+        if (!messageNavigationTarget.current && nearLatest.current) listRef.current?.scrollToEnd({ animated });
+      }),
     );
   }, []);
 
   const beginManualFeedNavigation = useCallback(() => {
     feedManuallyNavigated.current = true;
+    followSentMessage.current = null;
     nearLatest.current = false;
     keyboardScrollPending.current = false;
     clearPendingLatestScroll();
-    if (keyboardScrollTimer.current) {
-      clearTimeout(keyboardScrollTimer.current);
-      keyboardScrollTimer.current = null;
-    }
   }, [clearPendingLatestScroll]);
+
+  const cancelMessageNavigation = useCallback(() => {
+    messageNavigationGeneration.current += 1;
+    messageNavigationTarget.current = null;
+    setMessageNavigationId(null);
+    setNavigationError(null);
+    if (messageNavigationRetryTimer.current) clearTimeout(messageNavigationRetryTimer.current);
+    messageNavigationRetryTimer.current = null;
+    if (messageNavigationTimer.current) clearTimeout(messageNavigationTimer.current);
+    messageNavigationTimer.current = null;
+    setHighlightedMessageId(null);
+  }, []);
 
   const positionMessageNavigationTarget = useCallback(() => {
     const target = messageNavigationTarget.current;
-    if (!target) return;
-    const index = messagesRef.current.findIndex(
-      (message) => message.id === target.messageId,
-    );
+    if (!target || !listRef.current || !renderedListReady.current ||
+        renderedNavigationId.current !== target.messageId || target.attempts > 32) return;
+    // SQLite can contain deleted saved messages or a different author-filter page.
+    // Index only the data committed to this FlatList, not the full cache/ref.
+    const index = renderedMessagesRef.current.findIndex((message) => message.id === target.messageId);
     if (index < 0) return;
-    listRef.current?.scrollToIndex({
-      index,
-      animated: true,
-      viewPosition: 0.45,
-      viewOffset: 0,
-    });
-    setHighlightedMessageId(target.messageId);
-    if (messageNavigationTimer.current) {
-      clearTimeout(messageNavigationTimer.current);
+    target.positioned = true;
+    target.positionRequests += 1;
+    target.lastPositionedAt = Date.now();
+    try {
+      // Repeated animations race each other on variable-height Android media rows.
+      listRef.current.scrollToIndex({ index, animated: false, viewPosition: 0.45, viewOffset: 0 });
+      listRef.current.recordInteraction();
+    } catch (error) {
+      // React/native layout can lag behind the request. Retry after the next commit.
+      target.positioned = false;
+      target.positionError = error instanceof Error ? error.name : "Error";
     }
-    messageNavigationTimer.current = setTimeout(() => {
-      messageNavigationTarget.current = null;
-      messageNavigationTimer.current = null;
-      setHighlightedMessageId(null);
-    }, 2_500);
   }, []);
 
   const navigateToRepliedMessage = useCallback(
@@ -1632,19 +1676,29 @@ export default function MessengerRoomScreen() {
             openedAt: String(Date.now()),
           },
         });
-        return;
+        return true;
       }
+      cancelMessageNavigation();
+      const navigationGeneration = messageNavigationGeneration.current;
+      const identity = pinIdentityRef.current;
+      const currentNavigation = () => messageNavigationGeneration.current === navigationGeneration && pinIdentityRef.current === identity;
       beginManualFeedNavigation();
+      const startedAt = Date.now();
+      messengerLog("debug", "message.navigation.started", {
+        room_id: roomId, message_id: reply.id, platform: Platform.OS,
+      });
       try {
         let sequence = reply.sequence;
         let context = sequence
           ? await loadCachedMessengerMessageContext(db, roomId, sequence, 30)
           : [];
+        if (!currentNavigation()) return false;
         let target =
           messagesRef.current.find((message) => message.id === reply.id) ||
           context.find((message) => message.id === reply.id);
         if (!target) {
           target = await getMessengerMessage(reply.id);
+          if (!currentNavigation()) return false;
           sequence = target.sequence;
           const [before, after] = await Promise.all([
             getMessengerMessages(roomId, {
@@ -1665,6 +1719,12 @@ export default function MessengerRoomScreen() {
           );
           await cacheMessengerMessages(db, context);
         }
+        if (!currentNavigation()) return false;
+        if (target.deleted_at || target.room_id !== roomId) {
+          setNavigationError("Сообщение удалено или недоступно.");
+          messengerLog("warn", "message.navigation.unavailable", { room_id: roomId, message_id: reply.id, platform: Platform.OS });
+          return false;
+        }
         if (context.length) {
           setMessages((current) => {
             const merged = mergeMessengerMessages(
@@ -1679,18 +1739,88 @@ export default function MessengerRoomScreen() {
         messageNavigationTarget.current = {
           messageId: target.id,
           attempts: 0,
+          positioned: false,
+          confirmed: false,
+          positionRequests: 0,
+          lastPositionedAt: 0,
+          lastMeasurement: null,
+          positionError: null,
         };
+        setMessageNavigationId(target.id);
+        const focusTarget = messageNavigationTarget.current;
         requestAnimationFrame(() =>
           requestAnimationFrame(positionMessageNavigationTarget),
         );
+        const reached = await waitForMessengerFocus({
+          isCurrent: () => currentNavigation() && messageNavigationTarget.current === focusTarget,
+          isVisible: async () => {
+            if (!focusTarget.positioned || renderedNavigationId.current !== target.id) return false;
+            const measured = await measureMessengerFocus(
+              feedViewportRef.current, navigationViewRef.current,
+              () => currentNavigation() && messageNavigationTarget.current === focusTarget,
+            );
+            focusTarget.lastMeasurement = measured;
+            // Actual host geometry is authoritative, including when it says "off-screen".
+            // A fresh viewability event is a fallback only when native measurement is absent.
+            return measured ? measured.visible :
+              focusViewabilityUpdatedAt.current >= focusTarget.lastPositionedAt &&
+              focusVisibleServerMessageIds.current.includes(target.id);
+          },
+          onRetry: positionMessageNavigationTarget,
+        });
+        if (!reached) {
+          if (currentNavigation()) {
+            const measured = focusTarget.lastMeasurement;
+            messengerLog("warn", "message.navigation.focus_timeout", {
+              room_id: roomId, message_id: target.id, sequence: target.sequence,
+              platform: Platform.OS, duration_ms: Date.now() - startedAt,
+              attempts: focusTarget.attempts, position_requests: focusTarget.positionRequests,
+              rendered_count: renderedMessagesRef.current.length,
+              rendered_index: renderedMessagesRef.current.findIndex((item) => item.id === target.id),
+              viewability_seen: focusVisibleServerMessageIds.current.includes(target.id),
+              measured_visible: measured?.visible ?? null,
+              relative_top: measured ? Math.round(measured.relativeTop) : null,
+              target_height: measured ? Math.round(measured.targetHeight) : null,
+              viewport_height: measured ? Math.round(measured.viewportHeight) : null,
+              position_error: focusTarget.positionError,
+            });
+            cancelMessageNavigation();
+            setNavigationError("Не удалось перейти к сообщению. Повторите нажатие.");
+          }
+          return false;
+        }
+        if (!currentNavigation()) return false;
+        focusTarget.confirmed = true;
+        setNavigationError(null);
+        messengerLog("debug", "message.navigation.focused", {
+          room_id: roomId, message_id: target.id, platform: Platform.OS,
+          duration_ms: Date.now() - startedAt, position_requests: focusTarget.positionRequests,
+        });
+        setHighlightedMessageId(target.id);
+        messageNavigationTimer.current = setTimeout(() => {
+          if (!currentNavigation()) return;
+          messageNavigationTimer.current = null;
+          setHighlightedMessageId(null);
+          // Keep the layout anchor for delayed media until manual/new navigation.
+        }, 1800);
+        return true;
       } catch (error) {
-        setSyncError(
+        if (!currentNavigation()) return false;
+        cancelMessageNavigation();
+        messengerLog("warn", "message.navigation.failed", {
+          room_id: roomId, message_id: reply.id, platform: Platform.OS,
+          duration_ms: Date.now() - startedAt,
+          error_type: error instanceof Error ? error.name : "Error",
+        });
+        setNavigationError(
           messengerErrorMessage(error, "Не удалось открыть исходное сообщение"),
         );
+        return false;
       }
     },
     [
       beginManualFeedNavigation,
+      cancelMessageNavigation,
       db,
       positionMessageNavigationTarget,
       roomId,
@@ -1789,55 +1919,37 @@ export default function MessengerRoomScreen() {
     };
   }, [params.privateReplyMessageId, roomType]);
 
+  const handleKeyboardTransitionStart = useCallback(() => {
+    keyboardScrollPending.current = nearLatest.current && !messageNavigationTarget.current;
+  }, []);
+
   useEffect(() => {
-    const showEvent =
-      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent =
-      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSubscription = Keyboard.addListener(
-      showEvent,
-      (event: KeyboardEvent) => {
-        if (Platform.OS === "ios") Keyboard.scheduleLayoutAnimation(event);
-        if (!nearLatest.current) return;
-        keyboardScrollPending.current = true;
-        scrollToLatest(true);
-        if (keyboardScrollTimer.current) {
-          clearTimeout(keyboardScrollTimer.current);
-        }
-        keyboardScrollTimer.current = setTimeout(
-          () => {
-            if (nearLatest.current) scrollToLatest(true);
-            keyboardScrollPending.current = false;
-            keyboardScrollTimer.current = null;
-          },
-          Math.max(120, (event.duration || 250) + 80),
-        );
-      },
-    );
-    const hideSubscription = Keyboard.addListener(hideEvent, () => {
-      if (keyboardScrollTimer.current) {
-        clearTimeout(keyboardScrollTimer.current);
-        keyboardScrollTimer.current = null;
-      }
-      keyboardScrollPending.current = false;
-      if (nearLatest.current) scrollToLatest(false);
+    if (Platform.OS !== "ios") return undefined;
+    const show = Keyboard.addListener("keyboardWillShow", (event: KeyboardEvent) => {
+      handleKeyboardTransitionStart();
+      Keyboard.scheduleLayoutAnimation(event);
+    });
+    const hide = Keyboard.addListener("keyboardWillHide", (event: KeyboardEvent) => {
+      handleKeyboardTransitionStart();
+      Keyboard.scheduleLayoutAnimation(event);
     });
     return () => {
-      showSubscription.remove();
-      hideSubscription.remove();
-      if (keyboardScrollTimer.current) {
-        clearTimeout(keyboardScrollTimer.current);
-        keyboardScrollTimer.current = null;
-      }
-      clearPendingLatestScroll();
+      show.remove();
+      hide.remove();
     };
-  }, [clearPendingLatestScroll, scrollToLatest]);
+  }, [handleKeyboardTransitionStart]);
 
   const candidateMessages = authorFilter ? filteredMessages : messages;
   const visibleMessages =
     roomType === "saved"
       ? candidateMessages.filter((message) => !message.deleted_at)
       : candidateMessages;
+  useLayoutEffect(() => {
+    renderedMessagesRef.current = visibleMessages;
+    renderedNavigationId.current = messageNavigationId;
+    renderedListReady.current = listReady;
+    if (messageNavigationId) positionMessageNavigationTarget();
+  }, [visibleMessages, messageNavigationId, listReady, positionMessageNavigationTarget]);
   const waitingForInitialUnread =
     !authorFilter && initialUnreadExpected && !unreadMarkerClientId;
 
@@ -1851,6 +1963,15 @@ export default function MessengerRoomScreen() {
   useEffect(() => {
     roomTypeRef.current = roomType;
   }, [roomType]);
+
+  useEffect(() => subscribeMessengerMediaOutbox(message => {
+    if (message.room_id !== roomId || message.author.id !== session?.user.id) return;
+    setMessages(current => mergeMessengerMessages(
+      message.pending ? current : current.map(item => item.client_message_id === message.client_message_id
+        ? { ...item, pending_attachment: null } : item),
+      [message], reactionMutationIds.current,
+    ));
+  }), [roomId, session?.user.id]);
 
   const flushOutbox = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -2164,13 +2285,14 @@ export default function MessengerRoomScreen() {
           initialUnreadTailSequence.current =
             expectedUnreadCount > 0 ? expectedLatestSequence : null;
           const windowStartedAt = Date.now();
-          const [cached, pending] = await Promise.all([
+          const [cached, pending, mediaPending] = await Promise.all([
             loadCachedMessengerMessageWindow(db, roomId, {
               anchorSequence: initialUnreadBoundarySequence.current,
               hasUnread: expectedUnreadCount > 0,
               limit: 20,
             }),
             loadMessengerOutbox(db, roomId),
+            loadMessengerMediaOutbox(db, session.user.id, roomId),
           ]);
           const windowLoadedAt = Date.now();
           const confirmedClientIds = new Set(
@@ -2193,9 +2315,12 @@ export default function MessengerRoomScreen() {
                 ),
               ),
             );
-          const local = mergeMessengerMessages(cached, pendingMessages);
+          const local = mergeMessengerMessages(cached, [...pendingMessages,
+            ...mediaPending.map(item => item.accepted ?? item.message)
+              .filter(message => !confirmedClientIds.has(message.client_message_id)),
+          ].sort((a, b) => a.created_at.localeCompare(b.created_at)));
           if (local.length) {
-            setMessages(local);
+            setMessages(current => mergeMessengerMessages(local, current.filter(message => message.pending)));
             setLoading(false);
           }
           initialUnreadExpectedRef.current = expectedUnreadCount > 0;
@@ -2697,10 +2822,23 @@ export default function MessengerRoomScreen() {
     [acknowledgeLatest, settleInitialPosition],
   );
 
-  const initialViewabilityConfig = useMemo(
-    () => ({ itemVisiblePercentThreshold: 1 }),
-    [],
-  );
+  // Preserve the 1% read/unread policy; navigation requires a fully visible
+  // short row or at least half of the viewport for a large row.
+  const viewableHandlerRef = useRef(handleViewableItemsChanged);
+  viewableHandlerRef.current = handleViewableItemsChanged;
+  const messageViewabilityPairs = useMemo(() => [
+    {
+      viewabilityConfig: { itemVisiblePercentThreshold: 1 },
+      onViewableItemsChanged: (info: { viewableItems: ViewToken<MessengerMessage>[] }) => viewableHandlerRef.current(info),
+    },
+    {
+      viewabilityConfig: { viewAreaCoveragePercentThreshold: 50, minimumViewTime: 80 },
+      onViewableItemsChanged: ({ viewableItems }: { viewableItems: ViewToken<MessengerMessage>[] }) => {
+        focusVisibleServerMessageIds.current = viewableItems.filter((token) => token.isViewable).map((token) => token.item.id);
+        focusViewabilityUpdatedAt.current = Date.now();
+      },
+    },
+  ], []);
 
   useEffect(() => {
     if (!initialUnreadExpected || unreadMarkerClientId || !session) return;
@@ -2847,15 +2985,21 @@ export default function MessengerRoomScreen() {
     }) => {
       const navigationTarget = messageNavigationTarget.current;
       if (navigationTarget) {
+        const renderedIndex = renderedMessagesRef.current.findIndex((item) => item.id === navigationTarget.messageId);
+        if (renderedNavigationId.current !== navigationTarget.messageId || renderedIndex !== info.index) return;
+        navigationTarget.positioned = false;
         navigationTarget.attempts += 1;
+        // Let the bounded focus wait report failure; do not disguise exhaustion as a user cancel.
+        if (navigationTarget.attempts > 32) return;
         listRef.current?.scrollToOffset({
           offset: Math.max(0, (info.averageItemLength || 72) * info.index),
           animated: false,
         });
-        setTimeout(
-          positionMessageNavigationTarget,
-          Math.min(100 + navigationTarget.attempts * 40, 320),
-        );
+        if (messageNavigationRetryTimer.current) clearTimeout(messageNavigationRetryTimer.current);
+        messageNavigationRetryTimer.current = setTimeout(() => {
+          messageNavigationRetryTimer.current = null;
+          if (messageNavigationTarget.current === navigationTarget) positionMessageNavigationTarget();
+        }, Math.min(100 + navigationTarget.attempts * 40, 320));
         return;
       }
       if (!pendingInitialPosition.current) return;
@@ -2927,7 +3071,18 @@ export default function MessengerRoomScreen() {
         event.nativeEvent;
       const atLatest =
         contentOffset.y + layoutMeasurement.height >= contentSize.height - 120;
-      nearLatest.current = atLatest;
+      nearLatest.current = followSentMessage.current ? true : atLatest;
+      if (pinUserScroll.current && contentOffset.y + layoutMeasurement.height >= contentSize.height - 4 && shouldResetPinAtLatest({
+        distanceFromBottom: contentSize.height - contentOffset.y - layoutMeasurement.height,
+        listReady, userScrolled: pinUserScroll.current, filtered: Boolean(authorFilter),
+        navigating: pinNavigationLock.current,
+        loadedSequence: [...messagesRef.current].reverse().find((message) => !message.pending)?.sequence ?? null,
+        latestSequence: latestKnownSequence.current,
+        hasMoreNewer: remoteHasMoreNewerMessages.current,
+      })) {
+        pinUserScroll.current = false;
+        resetPinSelection();
+      }
       setShowJumpToLatest(!authorFilter && !atLatest);
       feedIsScrolling.current = true;
       setFloatingDate(floatingDateLabelRef.current);
@@ -2953,6 +3108,7 @@ export default function MessengerRoomScreen() {
       if (
         listReady &&
         feedManuallyNavigated.current &&
+        !messageNavigationTarget.current &&
         !pendingInitialPosition.current &&
         olderPageTriggerArmed.current &&
         contentOffset.y <= olderPagePrefetchOffset
@@ -2966,6 +3122,7 @@ export default function MessengerRoomScreen() {
       }
       if (
         !pendingInitialPosition.current &&
+        !messageNavigationTarget.current &&
         contentOffset.y + layoutMeasurement.height >= contentSize.height - 160
       ) {
         void loadNewerMessages();
@@ -2978,6 +3135,7 @@ export default function MessengerRoomScreen() {
       loadNewerMessages,
       loadOlderMessages,
       listReady,
+      resetPinSelection,
     ],
   );
 
@@ -3325,6 +3483,12 @@ export default function MessengerRoomScreen() {
         setRoomScreenActive(false);
         setViewableMessageIds(new Set());
         viewableServerMessageIds.current = [];
+        focusVisibleServerMessageIds.current = [];
+        focusViewabilityUpdatedAt.current = 0;
+        setMessageNavigationId(null);
+        setNavigationError(null);
+        if (messageNavigationRetryTimer.current) clearTimeout(messageNavigationRetryTimer.current);
+        messageNavigationRetryTimer.current = null;
         cancelAnimationFrame(roomDetailsFrame);
         setMessengerActiveRoom(null);
         sendMessengerTyping(roomId, false);
@@ -3354,6 +3518,7 @@ export default function MessengerRoomScreen() {
           pushReactionAnimationTimer.current = null;
         }
         setPushReactionAnimation(null);
+        messageNavigationGeneration.current += 1;
         messageNavigationTarget.current = null;
         pendingMessageAction.current = null;
         pendingAttachmentRequest.current = null;
@@ -3409,6 +3574,8 @@ export default function MessengerRoomScreen() {
       client_message_id: clientMessageId,
       has_reply: Boolean(replyTarget?.id),
     });
+    cancelMessageNavigation();
+    followSentMessage.current = clientMessageId;
     setText("");
     setReplyingTo(null);
     setMessages((current) => mergeMessengerMessages(current, [optimistic]));
@@ -3480,119 +3647,6 @@ export default function MessengerRoomScreen() {
       );
     },
     [],
-  );
-
-  const sendUpload = useCallback(
-    async (request: MediaUploadRequest, signal: AbortSignal) => {
-      assertMessengerUploadLimits(request.files);
-      beginLocalMessengerMediaUpload(request.clientMessageId);
-      try {
-        const totalUploadBytes = request.files.reduce(
-          (total, file) => total + (file.size_bytes ?? 0),
-          0,
-        );
-        const uploadStartedAt = Date.now();
-        messengerLog("info", "media.upload.started", {
-          room_id: roomId,
-          client_message_id: request.clientMessageId,
-          media_count: request.files.length,
-          media_types: request.files.map((file) => file.kind).join(","),
-          upload_size_bytes: totalUploadBytes,
-          upload_size_kb: Math.round(totalUploadBytes / 1024),
-          has_caption: Boolean(request.caption),
-        });
-        let lastShownPercent = -1;
-        const result = await sendMessengerMedia(
-          roomId,
-          request.clientMessageId,
-          request.files,
-          request.caption,
-          request.replyTarget?.id,
-          ({ percent }) => {
-            if (signal.aborted) return;
-            if (
-              percent !== 100 &&
-              lastShownPercent >= 0 &&
-              percent < lastShownPercent + 5
-            ) {
-              return;
-            }
-            lastShownPercent = percent;
-            updatePendingAttachment(request.clientMessageId, (message) => ({
-              ...message,
-              pending_attachment: message.pending_attachment
-                ? {
-                    ...message.pending_attachment,
-                    label: `Загрузка: ${percent}%`,
-                    progress_percent: percent,
-                  }
-                : null,
-            }));
-          },
-          signal,
-        );
-        const serverAcceptedAt = Date.now();
-        messengerLog("info", "media.upload.server_accepted", {
-          room_id: roomId,
-          message_id: result.message.id,
-          duration_ms: serverAcceptedAt - uploadStartedAt,
-        });
-        const confirmedMedia = result.message.media_items?.length
-          ? result.message.media_items
-          : result.message.media
-            ? [result.message.media]
-            : [];
-        for (const [index, media] of confirmedMedia.entries()) {
-          const file = request.files[index];
-          if (!file) continue;
-          try {
-            // Seed before exposing the confirmed attachment. Otherwise the
-            // attachment view starts an unnecessary download of the same file.
-            await seedMessengerMediaCache(media, file.uri);
-          } catch (cacheError) {
-            messengerLog("warn", "media.cache.seed_failed", {
-              asset_id: media.id,
-              message:
-                cacheError instanceof Error
-                  ? cacheError.message
-                  : "Не удалось сохранить локальную копию",
-            });
-          }
-        }
-        // Cache seeding has completed (or explicitly failed), so the next render
-        // can safely switch from the picker URI to the confirmed attachment.
-        updatePendingAttachment(request.clientMessageId, (message) => ({
-          ...message,
-          pending_attachment: null,
-        }));
-        await storeSentMessage(result.message);
-        messengerLog("info", "media.upload.completed", {
-          room_id: roomId,
-          message_id: result.message.id,
-          media_count: confirmedMedia.length,
-          stored_size_bytes: confirmedMedia.reduce(
-            (total, media) => total + media.size_bytes,
-            0,
-          ),
-          cache_seed_duration_ms: Date.now() - serverAcceptedAt,
-        });
-        trackMessengerAction("message_sent", {
-          content_type:
-            request.files.length > 1
-              ? "multiple"
-              : request.files[0]?.kind || "file",
-          attachment_count: request.files.length,
-          attachment_source: request.source,
-          has_text: Boolean(request.caption),
-          has_reply: Boolean(request.replyTarget?.id),
-          room_type: roomType || "unknown",
-          source: "composer",
-        });
-      } finally {
-        endLocalMessengerMediaUpload(request.clientMessageId);
-      }
-    },
-    [roomId, roomType, storeSentMessage, updatePendingAttachment],
   );
 
   const chooseAttachment = useCallback(
@@ -3905,101 +3959,27 @@ export default function MessengerRoomScreen() {
   const sendAttachmentDraft = useCallback(() => {
     if (!attachmentDraft || !roomId || !session || sending) return;
     const clientMessageId = Crypto.randomUUID();
-    const caption = text.trim();
-    const replyTarget = replyingTo;
-    const request: MediaUploadRequest = {
-      ...attachmentDraft,
-      clientMessageId,
-      caption,
-      replyTarget,
-    };
     const optimistic = pendingMessengerAttachmentMessage(
-      roomId,
-      clientMessageId,
-      attachmentDraft.source,
-      caption,
-      session.user,
-      replyTarget ?? undefined,
-      attachmentDraft.files,
+      roomId, clientMessageId, attachmentDraft.source, text.trim(), session.user,
+      replyingTo ?? undefined, attachmentDraft.files,
     );
-    const uploadLabel =
-      attachmentDraft.files.length > 1
-        ? `Отправляем ${attachmentDraft.files.length} вложений…`
-        : attachmentDraft.files[0]?.kind === "image"
-          ? "Отправляем фотографию…"
-          : attachmentDraft.files[0]?.kind === "video"
-            ? "Отправляем видео…"
-            : "Отправляем файл…";
-    optimistic.pending_attachment = optimistic.pending_attachment
-      ? {
-          ...optimistic.pending_attachment,
-          stage: "uploading",
-          label: uploadLabel,
-          progress_percent: null,
-        }
-      : null;
     setText("");
     setReplyingTo(null);
     setAttachmentDraft(null);
-    setSending(true);
-    setMessages((current) => mergeMessengerMessages(current, [optimistic]));
+    cancelMessageNavigation();
+    setAuthorFilter(null);
+    followSentMessage.current = clientMessageId;
     nearLatest.current = true;
-    scrollToLatest(true);
-    // Start the globally owned upload in the same turn as the send tap. It
-    // must not depend on another animation frame that may never run after an
-    // immediate navigation, app switch or screen lock.
-    void runManagedMessengerMediaUpload({
-      roomId,
-      clientMessageId,
-      run: (signal) => sendUpload(request, signal),
-    })
-      .then(() => {
-        setOffline(false);
-        setSyncError(null);
-      })
-      .catch((error) => {
-        if (isMessengerUploadCancelledError(error)) return;
-        reportAnalyticsError("messenger_media_send_failed", error);
-        const message = messengerErrorMessage(
-          error,
-          "Не удалось отправить вложение",
-        );
-        setOffline(isMessengerConnectionError(error));
-        setSyncError(message);
-        updatePendingAttachment(clientMessageId, (pendingMessage) => ({
-          ...pendingMessage,
-          send_error: message,
-          pending_attachment: pendingMessage.pending_attachment
-            ? {
-                ...pendingMessage.pending_attachment,
-                stage: "failed",
-                label: "Вложения не отправлены",
-                progress_percent: null,
-              }
-            : null,
-        }));
-        messengerLog("warn", "media.upload.failed", {
-          room_id: roomId,
-          client_message_id: clientMessageId,
-          media_count: request.files.length,
-          message,
-        });
-        Alert.alert("Ошибка вложения", message);
-      })
-      .finally(() => {
-        setSending(false);
-      });
-  }, [
-    attachmentDraft,
-    replyingTo,
-    roomId,
-    scrollToLatest,
-    sendUpload,
-    sending,
-    session,
-    text,
-    updatePendingAttachment,
-  ]);
+    setMessages(current => mergeMessengerMessages(current, [optimistic]));
+    // SQLite is the first async operation. The application worker owns copying,
+    // poster creation, upload and retries, including after this room unmounts.
+    void queueMessengerMediaMessage(db, optimistic, attachmentDraft.files).catch(error => {
+      const message = messengerErrorMessage(error, "Не удалось сохранить вложение локально");
+      updatePendingAttachment(clientMessageId, item => ({ ...item, send_error: message,
+        pending_attachment: item.pending_attachment ? { ...item.pending_attachment, stage: "failed", label: "Неотправлено" } : null }));
+      setSyncError(message);
+    });
+  }, [attachmentDraft, cancelMessageNavigation, db, replyingTo, roomId, sending, session, text, updatePendingAttachment]);
 
   const retryFailedMessage = useCallback(
     async (failedMessage: MessengerMessage) => {
@@ -4141,125 +4121,16 @@ export default function MessengerRoomScreen() {
         return;
       }
 
-      const sourceItems = pending.items?.length
-        ? pending.items
-        : pending.local_uri && pending.file_name
-          ? [
-              {
-                kind: failedMessage.kind as "image" | "video" | "file",
-                local_uri: pending.local_uri,
-                file_name: pending.file_name,
-                mime_type: fallbackUploadMimeType(
-                  pending.file_name,
-                  failedMessage.kind as "image" | "video" | "file",
-                ),
-                size_bytes: pending.size_bytes,
-                original_size_bytes: pending.size_bytes,
-              },
-            ]
-          : [];
-      const files: MessengerUploadFile[] = sourceItems.map((item) => ({
-        uri: item.local_uri,
-        name: item.file_name,
-        type:
-          item.mime_type || fallbackUploadMimeType(item.file_name, item.kind),
-        kind: item.kind,
-        size_bytes: item.size_bytes,
-        original_size_bytes:
-          item.original_size_bytes ?? item.size_bytes ?? null,
-        width: item.width,
-        height: item.height,
-      }));
-      if (!files.length) {
-        Alert.alert(
-          "Не удалось повторить отправку",
-          "Локальная копия вложения больше недоступна.",
-        );
-        return;
+      try {
+        cancelMessageNavigation();
+        followSentMessage.current = failedMessage.client_message_id;
+        nearLatest.current = true;
+        await retryMessengerMediaMessage(db, session.user.id, failedMessage.client_message_id);
+      } catch (error) {
+        Alert.alert("Не удалось повторить отправку", messengerErrorMessage(error));
       }
-      const request: MediaUploadRequest = {
-        source: pending.source,
-        files,
-        clientMessageId,
-        caption: failedMessage.text,
-        replyTarget,
-      };
-      const optimistic = pendingMessengerAttachmentMessage(
-        roomId,
-        clientMessageId,
-        pending.source,
-        failedMessage.text,
-        session.user,
-        replyTarget ?? undefined,
-        files,
-      );
-      optimistic.reply_to = failedMessage.reply_to;
-      optimistic.pending_attachment = optimistic.pending_attachment
-        ? {
-            ...optimistic.pending_attachment,
-            stage: "uploading",
-            label:
-              files.length > 1
-                ? `Отправляем ${files.length} вложений…`
-                : "Отправляем вложение…",
-            progress_percent: null,
-          }
-        : null;
-      setSending(true);
-      setMessages((current) =>
-        mergeMessengerMessages(
-          current.filter(
-            (message) =>
-              message.client_message_id !== failedMessage.client_message_id,
-          ),
-          [optimistic],
-        ),
-      );
-      nearLatest.current = true;
-      scrollToLatest(true);
-      void runManagedMessengerMediaUpload({
-        roomId,
-        clientMessageId,
-        run: (signal) => sendUpload(request, signal),
-      })
-        .then(() => {
-          setOffline(false);
-          setSyncError(null);
-        })
-        .catch((error) => {
-          if (isMessengerUploadCancelledError(error)) return;
-          const message = messengerErrorMessage(
-            error,
-            "Не удалось отправить вложение",
-          );
-          updatePendingAttachment(clientMessageId, (item) => ({
-            ...item,
-            send_error: message,
-            pending_attachment: item.pending_attachment
-              ? {
-                  ...item.pending_attachment,
-                  stage: "failed",
-                  label: "Вложения не отправлены",
-                  progress_percent: null,
-                }
-              : null,
-          }));
-          setOffline(isMessengerConnectionError(error));
-          setSyncError(message);
-        })
-        .finally(() => setSending(false));
     },
-    [
-      db,
-      flushOutbox,
-      roomId,
-      scrollToLatest,
-      sendUpload,
-      sending,
-      session,
-      storeSentMessage,
-      updatePendingAttachment,
-    ],
+    [cancelMessageNavigation, db, flushOutbox, roomId, scrollToLatest, sending, session, storeSentMessage, updatePendingAttachment],
   );
 
   const requestFailedMessageCancellation = useCallback(
@@ -4309,6 +4180,8 @@ export default function MessengerRoomScreen() {
   );
 
   const send = () => {
+    cancelMessageNavigation();
+    resetPinSelection();
     if (editingMessage) {
       void submitEdit();
       return;
@@ -4612,6 +4485,7 @@ export default function MessengerRoomScreen() {
   const applyAuthorFilter = useCallback(
     (message: MessengerMessage) => {
       if (message.pending || message.kind === "system") return;
+      cancelMessageNavigation();
       const filter = {
         id: message.author.id,
         name: message.author.display_name,
@@ -4628,7 +4502,7 @@ export default function MessengerRoomScreen() {
       });
       void loadFilteredAuthorMessages(filter);
     },
-    [loadFilteredAuthorMessages, roomType],
+    [cancelMessageNavigation, loadFilteredAuthorMessages, roomType],
   );
 
   const clearAuthorFilter = useCallback(() => {
@@ -4644,6 +4518,37 @@ export default function MessengerRoomScreen() {
       room_type: roomType || "unknown",
     });
   }, [roomType]);
+
+  const navigateToPinnedMessage = useCallback(async () => {
+    const pin = pins.items.find((item) => item.message.id === currentPinId);
+    if (!pin || pinNavigationLock.current) return;
+    const selectionRevision = pinSelection.getRevision();
+    pinNavigationLock.current = true;
+    pinUserScroll.current = false;
+    setPinNavigationBusy(true);
+    try {
+      if (authorFilter) clearAuthorFilter();
+      // Let the unfiltered FlatList commit before requesting its target index.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (await navigateToRepliedMessage(pin.message) && pinIdentityRef.current === pinIdentity) {
+        pinSelection.visit(pin.message.id, selectionRevision);
+      }
+    } finally {
+      pinNavigationLock.current = false;
+      setPinNavigationBusy(false);
+    }
+  }, [authorFilter, clearAuthorFilter, currentPinId, navigateToRepliedMessage, pinIdentity, pinSelection, pins.items]);
+
+  const toggleMessagePinned = useCallback(async (message: MessengerMessage) => {
+    const pinned = pins.items.some((item) => item.message.id === message.id);
+    setActionMessage(null);
+    try {
+      await pins.setPinned(message.id, !pinned);
+      if (!pinned && pinIdentityRef.current === pinIdentity) pinSelection.select(message.id);
+    } catch (error) {
+      Alert.alert("Закрепление сообщения", messengerErrorMessage(error, "Не удалось изменить закрепление"));
+    }
+  }, [pinIdentity, pinSelection, pins]);
 
   const openForward = useCallback(async (message: MessengerMessage) => {
     setForwardingMessage(message);
@@ -5086,6 +4991,7 @@ export default function MessengerRoomScreen() {
           )}
           <MessengerMessageListItem
             item={item}
+            navigationViewRef={item.id === messageNavigationId ? navigationViewRef : undefined}
             currentUserId={session?.user.id ?? null}
             accessToken={session?.access_token ?? null}
             unreadMarker={item.client_message_id === unreadMarkerClientId}
@@ -5125,6 +5031,7 @@ export default function MessengerRoomScreen() {
       canReact,
       canWrite,
       highlightedMessageId,
+      messageNavigationId,
       navigateToRepliedMessage,
       openMessageActions,
       pushReactionAnimation,
@@ -5148,13 +5055,7 @@ export default function MessengerRoomScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        // Android is resized by windowSoftInputMode=adjustResize from
-        // app.config.js. Applying a second JS height correction here can
-        // double-shrink the feed on devices where adjustResize works.
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
+      <KeyboardFrame style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.iconButton}
@@ -5229,6 +5130,27 @@ export default function MessengerRoomScreen() {
           </TouchableOpacity>
         </View>
 
+        <PinnedMessagesBanner
+          items={pins.items}
+          messageId={currentPinId}
+          visitedId={pinSelection.visitedId}
+          accessToken={session?.access_token ?? ""}
+          active={roomScreenActive}
+          busy={pinNavigationBusy}
+          onPress={() => void navigateToPinnedMessage()}
+        />
+
+        {navigationError && (
+          <View style={styles.navigationNotice}>
+            <Text style={styles.navigationNoticeText} accessibilityRole="alert" accessibilityLiveRegion="polite">
+              {navigationError}
+            </Text>
+            <TouchableOpacity onPress={() => setNavigationError(null)} style={styles.iconButton} accessibilityLabel="Закрыть уведомление о переходе">
+              <Icon name="close" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        )}
+
         {authorFilter && (
           <View style={styles.authorFilterBanner}>
             <Icon name="funnel" size={18} color={colors.primary} />
@@ -5248,7 +5170,8 @@ export default function MessengerRoomScreen() {
           </View>
         )}
 
-        <View style={styles.iceBackground}>
+        <ChatKeyboardArea onTransitionStart={handleKeyboardTransitionStart}>
+        <View style={styles.iceBackground} ref={feedViewportRef} collapsable={false}>
           <Image
             cachePolicy="memory-disk"
             contentFit="cover"
@@ -5270,10 +5193,13 @@ export default function MessengerRoomScreen() {
             }
             onLayout={(event) => {
               const height = Math.round(event.nativeEvent.layout.height);
-              if (height !== feedHeight) setFeedHeight(height);
-              if (keyboardScrollPending.current) {
-                scrollToLatest(true);
+              if (height === feedHeight) return;
+              setFeedHeight(height);
+              if ((followSentMessage.current || keyboardScrollPending.current || nearLatest.current) && !messageNavigationTarget.current) {
+                // One alignment after actual viewport layout; no show/focus timers.
+                listRef.current?.scrollToEnd({ animated: false });
               }
+              keyboardScrollPending.current = false;
             }}
             // The SQLite viewport contains up to 20 messages. Rendering only
             // 18 here made FlatList measure and scroll to the end, append the
@@ -5291,14 +5217,13 @@ export default function MessengerRoomScreen() {
             }
             keyboardShouldPersistTaps="handled"
             maintainVisibleContentPosition={
-              listReady && !authorFilter ? { minIndexForVisible: 0 } : undefined
+              listReady && !followSentMessage.current && !authorFilter && !messageNavigationId ? { minIndexForVisible: 0 } : undefined
             }
             onScroll={handleListScroll}
-            onScrollBeginDrag={beginManualFeedNavigation}
+            onScrollBeginDrag={() => { pinUserScroll.current = true; cancelMessageNavigation(); beginManualFeedNavigation(); }}
             scrollEventThrottle={80}
             onScrollToIndexFailed={handleScrollToIndexFailed}
-            onViewableItemsChanged={handleViewableItemsChanged}
-            viewabilityConfig={initialViewabilityConfig}
+            viewabilityConfigCallbackPairs={messageViewabilityPairs}
             onContentSizeChange={() => {
               if (!visibleMessages.length) return;
               initialListContentMeasured.current = true;
@@ -5308,6 +5233,10 @@ export default function MessengerRoomScreen() {
               }
               if (messageNavigationTarget.current) {
                 requestAnimationFrame(positionMessageNavigationTarget);
+                return;
+              }
+              if (followSentMessage.current) {
+                listRef.current?.scrollToEnd({ animated: false });
                 return;
               }
               const animated = pendingScrollAnimation.current;
@@ -5388,6 +5317,8 @@ export default function MessengerRoomScreen() {
               onPress={() => {
                 nearLatest.current = true;
                 setShowJumpToLatest(false);
+                cancelMessageNavigation();
+                resetPinSelection();
                 void loadNewerMessages().finally(() => scrollToLatest(true));
               }}
               accessibilityRole="button"
@@ -5628,6 +5559,15 @@ export default function MessengerRoomScreen() {
                       />
                     )}
                     <Text style={styles.messageActionText}>Сохранить</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {actionMessage && pins.canPin && !actionMessage.pending && !actionMessage.deleted_at && actionMessage.kind !== "system" ? (
+                  <TouchableOpacity style={styles.messageAction} disabled={pins.busy}
+                    onPress={() => void toggleMessagePinned(actionMessage)}>
+                    <Icon name="pin-outline" size={21} color={colors.primary} />
+                    <Text style={styles.messageActionText}>
+                      {pins.items.some((item) => item.message.id === actionMessage.id) ? "Открепить сообщение" : "Закрепить сообщение"}
+                    </Text>
                   </TouchableOpacity>
                 ) : null}
                 {actionMessageEditable && actionMessage ? (
@@ -6121,15 +6061,7 @@ export default function MessengerRoomScreen() {
 
         {canWrite ? (
           <View
-            ref={composerShellRef}
-            collapsable={false}
-            onLayout={handleComposerShellLayout}
-            style={[
-              styles.composerShell,
-              Platform.OS === "android" && androidKeyboardInset > 0
-                ? { marginBottom: androidKeyboardInset }
-                : null,
-            ]}
+            style={styles.composerShell}
           >
             {attachmentPreparationLabel && (
               <View style={styles.attachmentPreparation}>
@@ -6358,18 +6290,11 @@ export default function MessengerRoomScreen() {
                 placeholderTextColor={colors.textSecondary}
                 selectionColor={colors.accent}
                 onContentSizeChange={handleComposerContentSizeChange}
-                onKeyboardGeometryChange={handleNativeKeyboardGeometry}
                 onPasteAttachment={(attachment) => {
                   void handlePastedAttachment(attachment);
                 }}
                 onFocus={() => {
                   setComposerFocused(true);
-                  if (Platform.OS === "android") {
-                    refreshAndroidKeyboardAvoidance();
-                  }
-                  if (!nearLatest.current) return;
-                  keyboardScrollPending.current = true;
-                  scrollToLatest(true);
                 }}
                 onBlur={() => setComposerFocused(false)}
               />
@@ -6400,7 +6325,8 @@ export default function MessengerRoomScreen() {
             </Text>
           </View>
         )}
-      </KeyboardAvoidingView>
+        </ChatKeyboardArea>
+      </KeyboardFrame>
     </SafeAreaView>
   );
 }
@@ -6492,6 +6418,8 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   messageList: { padding: 14, paddingBottom: 20 },
+  navigationNotice: { flexDirection: "row", alignItems: "center", paddingLeft: 14, backgroundColor: colors.background, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  navigationNoticeText: { flex: 1, fontSize: 13, color: colors.textSecondary, paddingVertical: 8 },
   dateDivider: {
     alignSelf: "center",
     marginTop: 5,
@@ -6663,6 +6591,9 @@ const styles = StyleSheet.create({
     maxWidth: 248,
   },
   pendingAttachmentImage: {
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
     width: 224,
     height: 164,
     marginBottom: 7,

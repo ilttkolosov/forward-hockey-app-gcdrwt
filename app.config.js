@@ -36,7 +36,7 @@ export default ({ config }) => {
     // to users is restored per platform by withAppDisplayName below.
     name: "ForwardHockey14",
     slug: "Forward",
-    version: "2.4.75",
+    version: "2.4.96",
     // Keep landscape orientations in the native targets so iOS Quick Look can
     // rotate video. The application itself is locked to portrait at runtime.
     orientation: "default",
@@ -51,7 +51,7 @@ export default ({ config }) => {
     ios: {
       supportsTablet: true,
       requireFullScreen: true,
-      buildNumber: "228",
+      buildNumber: "249",
       bundleIdentifier: "com.aleksandrkolosov.forward2014",
       infoPlist: {
         CFBundleDisplayName: "ХК Форвард 14",
@@ -74,15 +74,13 @@ export default ({ config }) => {
       },
     },
     android: {
-      versionCode: 228,
+      versionCode: 249,
       adaptiveIcon: {
         foregroundImage: "./assets/icons/myIcon.png",
         backgroundColor: "#ffffff",
       },
-      // The chat composer must participate in the Activity resize when the
-      // IME opens. Edge-to-edge currently prevents reliable adjustResize on
-      // a number of Android 13-15 vendor firmwares and leaves the composer
-      // underneath the keyboard.
+      // Default for non-chat screens. The chat's KeyboardProvider owns
+      // edge-to-edge system IME insets while its route is active.
       edgeToEdgeEnabled: false,
       softwareKeyboardLayoutMode: "resize",
       package: "com.kolosovaleksandr.Forward2014",

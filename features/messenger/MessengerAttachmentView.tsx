@@ -29,7 +29,7 @@ import { saveMessengerMediaToDevice } from "../../services/messengerMediaSave";
 import { colors } from "../../styles/commonStyles";
 import { getMessengerFilePresentation } from "./filePresentation";
 import MessengerLocationPreview from "./MessengerLocationPreview";
-import MessengerMediaViewer from "./MessengerMediaViewer";
+import MediaLightbox from "./MediaLightbox";
 import MessengerVideoPlayer from "./MessengerVideoPlayer";
 import type { MessengerLocation, MessengerMedia } from "./types";
 
@@ -199,16 +199,6 @@ function MessengerAttachmentView({
       .forEach((item) => void ensureLocal(item).catch(() => undefined));
   }, [deferAutomaticCache, ensureLocal, itemIdentity, items]);
 
-  useEffect(() => {
-    if (viewerIndex === null) return;
-    [viewerIndex - 1, viewerIndex, viewerIndex + 1].forEach((index) => {
-      const item = viewerItems[index];
-      if (item && (index === viewerIndex || item.type === "image")) {
-        void ensureLocal(item).catch(() => undefined);
-      }
-    });
-  }, [ensureLocal, viewerIndex, viewerItems]);
-
   if (location) return <MessengerLocationPreview location={location} />;
   if (!items.length) return null;
 
@@ -298,11 +288,7 @@ function MessengerAttachmentView({
     if (index < 0) return;
     setViewerSession((current) => current + 1);
     setViewerIndex(index);
-    try {
-      await ensureLocal(item);
-    } catch {
-      // The fullscreen viewer keeps a visible retry state.
-    }
+    // The common viewer owns automatic loading for each page, including the first.
   };
 
   const renderAlbum = () => {
@@ -542,7 +528,7 @@ function MessengerAttachmentView({
         </TouchableOpacity>
       )}
 
-      <MessengerMediaViewer
+      <MediaLightbox
         items={viewerItems}
         index={viewerIndex}
         session={viewerSession}

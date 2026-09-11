@@ -50,6 +50,7 @@ import {
   syncMessengerUnreadFromRooms,
 } from "../../services/messengerUnread";
 import { messengerUnreadAuthAction } from "../../services/messengerUnreadPolicy";
+import { requestMessengerMediaOutboxFlush, startMessengerMediaOutbox } from "../../services/messengerMediaOutbox";
 import { requestMessengerOutboxFlush } from "../../services/messengerOutbox";
 import { setMessengerMutedRooms } from "../../services/messengerSounds";
 import { waitForAppInteractive } from "../../services/appInteractive";
@@ -80,6 +81,7 @@ export default function MessengerPersistenceBridge() {
     }
     if (!userId) return;
     beginMessengerUnreadSession(userId);
+    const stopMediaOutbox = startMessengerMediaOutbox(db, userId);
     let active = true;
     let roomsSyncRunning = false;
     let roomsSyncQueued = false;
@@ -321,6 +323,7 @@ export default function MessengerPersistenceBridge() {
       }
       void warmMessengerMediaFileReader();
       requestMessengerOutboxFlush(db);
+      requestMessengerMediaOutboxFlush(db, userId);
       scheduleRoomsSynchronization(true);
       if (remotePushNotificationsSupported) {
         void syncMessengerPushRegistration().catch((error) =>
@@ -428,6 +431,7 @@ export default function MessengerPersistenceBridge() {
       ) {
         void flushMessengerReadReceipts(db);
         requestMessengerOutboxFlush(db);
+      requestMessengerMediaOutboxFlush(db, userId);
         scheduleRoomsSynchronization();
       } else if (event.type === "room.updated") {
         scheduleRoomsSynchronization(true);
@@ -440,6 +444,7 @@ export default function MessengerPersistenceBridge() {
         // chance to suspend JavaScript. A native request already in flight is
         // not tied to the room component.
         requestMessengerOutboxFlush(db);
+      requestMessengerMediaOutboxFlush(db, userId);
         if (state === "active") {
           void warmMessengerMediaFileReader();
           void flushMessengerReadReceipts(db);
@@ -459,6 +464,7 @@ export default function MessengerPersistenceBridge() {
         network.isInternetReachable !== false
       ) {
         requestMessengerOutboxFlush(db);
+      requestMessengerMediaOutboxFlush(db, userId);
       }
     });
     const tokenSubscription = remotePushNotificationsSupported
@@ -482,6 +488,7 @@ export default function MessengerPersistenceBridge() {
         })
       : null;
     return () => {
+      stopMediaOutbox();
       active = false;
       if (roomsSyncTimer) clearTimeout(roomsSyncTimer);
       if (historyWarmupTimer) clearTimeout(historyWarmupTimer);
