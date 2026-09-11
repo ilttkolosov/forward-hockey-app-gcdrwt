@@ -6,24 +6,25 @@ on:
 permissions:
   contents: read
 jobs:
-  source:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  graphics:
+    runs-on: macos-15
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm install --prefix /tmp/viewer-test-modules --no-package-lock --ignore-scripts react@19.1.0 react-test-renderer@19.1.0 typescript@5.9.3
-      - name: Export verified source and test runtime
-        run: |
-          mkdir -p /tmp/viewer-source
-          tar --exclude=.git --exclude=node_modules --exclude=android --exclude=ios --exclude=assets -czf /tmp/viewer-source/source.tgz .
-          tar -czf /tmp/viewer-source/tests.tgz -C /tmp/viewer-test-modules .
+      - run: python3 scripts/update-svg-regression.py
+      - name: Reproduce shipped warning and verify owned bitmap
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: python3 checks/ios-media-lifecycle-smoke.py
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: media-viewer-source
-          path: /tmp/viewer-source
-          retention-days: 2
+          name: svg-owned-bitmap-native
+          path: /tmp/ios-media-lifecycle-results
+          retention-days: 7

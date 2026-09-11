@@ -1,18 +1,62 @@
-diff --git a/node_modules/react-native-svg/apple/RNSVGRenderable.mm b/node_modules/react-native-svg/apple/RNSVGRenderable.mm
---- a/node_modules/react-native-svg/apple/RNSVGRenderable.mm
-+++ b/node_modules/react-native-svg/apple/RNSVGRenderable.mm
-@@ -292,7 +292,13 @@
+diff --git a/node_modules/react-native-svg/apple/Elements/RNSVGSvgView.mm b/node_modules/react-native-svg/apple/Elements/RNSVGSvgView.mm
+--- a/node_modules/react-native-svg/apple/Elements/RNSVGSvgView.mm
++++ b/node_modules/react-native-svg/apple/Elements/RNSVGSvgView.mm
+@@ -9,6 +9,8 @@
+ #import "RNSVGSvgView.h"
+ #import <React/RCTLog.h>
+ #import "RNSVGNode.h"
++#import "RNSVGFilter.h"
++#import "RNSVGRenderUtils.h"
+ #import "RNSVGViewBox.h"
  
-       CIImage *content = [CIImage imageWithCGImage:contentImage];
+ #ifdef RCT_NEW_ARCH_ENABLED
+@@ -22,6 +24,25 @@
+ #if TARGET_OS_OSX // [macOS
+ #import "RNSVGUIKit.h"
+ #endif // macOS]
++
++#if !TARGET_OS_OSX
++// UIKit drawRect may be recording a display list. There is no public, warning-free
++// bitmap type probe: even CGBitmapContextGetBitsPerPixel requires a known bitmap.
++// Only SVGs using filters need a backdrop snapshot. Render those into an image
++// renderer we own, so both SourceGraphic and BackgroundImage have valid pixels.
++static BOOL RNSVGContainsFilter(RNSVGPlatformView *view)
++{
++  if ([view isKindOfClass:[RNSVGFilter class]]) {
++    return YES;
++  }
++  for (RNSVGPlatformView *child in view.subviews) {
++    if (RNSVGContainsFilter(child)) {
++      return YES;
++    }
++  }
++  return NO;
++}
++#endif
  
--      CGImage *backgroundImage = CGBitmapContextCreateImage(context);
-+      // UIKit may supply a display-list context to drawRect, not a bitmap.
-+      // Snapshotting it asks CoreGraphics to create a bitmap with no color space
-+      // and 0 bits/component. SourceGraphic filters (e.g. our Gaussian shadow)
-+      // do not need that backdrop; retain the existing empty-background fallback.
-+      CGImage *backgroundImage = CGBitmapContextGetBitsPerPixel(context) > 0
-+          ? CGBitmapContextCreateImage(context)
-+          : nil;
-       CIImage *background =
-           (backgroundImage != nil) ? [CIImage imageWithCGImage:backgroundImage] : [CIImage emptyImage];
+ @implementation RNSVGSvgView {
+   NSMutableDictionary<NSString *, RNSVGNode *> *_clipPaths;
+@@ -328,6 +349,23 @@
+ #endif
+   CGContextRef context = UIGraphicsGetCurrentContext();
+ 
++#if !TARGET_OS_OSX
++  if (RNSVGContainsFilter(self)) {
++    CGRect bounds = self.bounds;
++    if (CGRectIsEmpty(bounds) || !isfinite(bounds.size.width) || !isfinite(bounds.size.height)) {
++      return;
++    }
++    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
++    format.opaque = NO;
++    format.scale = [RNSVGRenderUtils getScreenScale];
++    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithBounds:bounds format:format];
++    UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *rendererContext) {
++      [self drawToContext:rendererContext.CGContext withRect:bounds];
++    }];
++    [image drawInRect:bounds];
++    return;
++  }
++#endif
+   [self drawToContext:context withRect:[self bounds]];
+ }
  
