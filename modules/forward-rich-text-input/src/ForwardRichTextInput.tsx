@@ -139,6 +139,7 @@ type NativeComponent = React.ComponentType<
 
 let cachedNativeComponent: NativeComponent | null | undefined;
 let cachedNativeKeyboardGeometrySupported = false;
+let cachedNativeDirectKeyboardGeometrySupported = false;
 let cachedNativeContentSizeUsesDp = false;
 
 function getNativeComponent(): NativeComponent | null {
@@ -164,6 +165,8 @@ function getNativeComponent(): NativeComponent | null {
   }
   cachedNativeKeyboardGeometrySupported =
     Number(nativeModule.keyboardGeometryVersion ?? 0) >= 1;
+  cachedNativeDirectKeyboardGeometrySupported =
+    Number(nativeModule.keyboardGeometryVersion ?? 0) >= 2;
   cachedNativeContentSizeUsesDp =
     Number(nativeModule.contentSizeUnitVersion ?? 0) >= 1;
 
@@ -181,6 +184,12 @@ function getNativeComponent(): NativeComponent | null {
     cachedNativeComponent = null;
   }
   return cachedNativeComponent;
+}
+
+// Decide ownership before keyboardDidShow, not after the first native event.
+export function supportsNativeKeyboardGeometry(): boolean {
+  return Platform.OS === "android" && !!getNativeComponent() &&
+    cachedNativeDirectKeyboardGeometrySupported;
 }
 
 export const ForwardRichTextInput = forwardRef<

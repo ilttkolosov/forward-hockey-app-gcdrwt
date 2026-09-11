@@ -118,8 +118,16 @@ class ForwardRichTextInputView(
   private val keyboardEditorLocation = IntArray(2)
   private var keyboardObserverRoot: View? = null
   private var lastKeyboardGeometrySignature: String? = null
+  private var keyboardGeometryDirty = false
   private val keyboardLayoutListener =
-    ViewTreeObserver.OnGlobalLayoutListener { emitKeyboardGeometry() }
+    ViewTreeObserver.OnGlobalLayoutListener { keyboardGeometryDirty = true }
+  private val keyboardPreDrawListener = ViewTreeObserver.OnPreDrawListener {
+    if (keyboardGeometryDirty) {
+      keyboardGeometryDirty = false
+      emitKeyboardGeometry()
+    }
+    true
+  }
 
   private fun enforceImeResize() {
     val window = context.findActivity()?.window ?: return
@@ -137,21 +145,21 @@ class ForwardRichTextInputView(
       keyboardObserverRoot = root
       if (root.viewTreeObserver.isAlive) {
         root.viewTreeObserver.addOnGlobalLayoutListener(keyboardLayoutListener)
+        root.viewTreeObserver.addOnPreDrawListener(keyboardPreDrawListener)
       }
     }
-    for (delay in longArrayOf(0L, 80L, 180L, 320L, 520L, 850L)) {
-      root.postDelayed({
-        if (editor.hasFocus()) emitKeyboardGeometry()
-      }, delay)
-    }
+    keyboardGeometryDirty = true
+    root.invalidate()
   }
 
   private fun stopKeyboardGeometryObservation(emitHidden: Boolean = true) {
     val root = keyboardObserverRoot
     if (root != null && root.viewTreeObserver.isAlive) {
       root.viewTreeObserver.removeOnGlobalLayoutListener(keyboardLayoutListener)
+      root.viewTreeObserver.removeOnPreDrawListener(keyboardPreDrawListener)
     }
     keyboardObserverRoot = null
+    keyboardGeometryDirty = false
     if (emitHidden) emitKeyboardGeometry(forceHidden = true)
   }
 
@@ -176,7 +184,7 @@ private fun emitKeyboardGeometry(forceHidden: Boolean = false) {
     (rootBottomOnScreen - keyboardVisibleFrame.bottom).coerceAtLeast(0)
   val effectiveImeInset = max(frameworkImeInset, visibleFrameInset)
   val visible =
-    !forceHidden && editor.hasFocus() &&
+    !forceHidden && hasWindowFocus() && editor.hasFocus() &&
       ((frameworkImeVisible && frameworkImeInset > 0) ||
         visibleFrameInset >= dp(80))
 
@@ -185,8 +193,19 @@ private fun emitKeyboardGeometry(forceHidden: Boolean = false) {
   // is unsafe on three-button navigation devices because that screen
   // height includes the navigation area while the root inset does not.
   val keyboardTopCandidates = mutableListOf<Int>()
+  // WindowInsets belongs to the window, not a vendor-resized rootView. On
+  // MIUI the root can already end above the IME; subtracting the full inset
+  // from it again invents a second keyboard. Preserve the original root edge
+  // for small navigation-bar differences (the tested MagicOS residual path).
+  val windowBottomOnScreen = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+    context.findActivity()?.windowManager?.currentWindowMetrics?.bounds?.bottom
+      ?: rootBottomOnScreen
+  } else rootBottomOnScreen
+  val insetReferenceBottom =
+    if (windowBottomOnScreen - rootBottomOnScreen >= dp(80)) windowBottomOnScreen
+    else rootBottomOnScreen
   if (visible && frameworkImeVisible && frameworkImeInset > 0) {
-    keyboardTopCandidates.add(rootBottomOnScreen - frameworkImeInset)
+    keyboardTopCandidates.add(insetReferenceBottom - frameworkImeInset)
   }
   if (visible && visibleFrameInset >= dp(80)) {
     keyboardTopCandidates.add(keyboardVisibleFrame.bottom)
@@ -225,6 +244,14 @@ private fun emitKeyboardGeometry(forceHidden: Boolean = false) {
       "$editorKeyboardOverlapPx:$keyboardTopOnScreen:$editorBottomOnScreen"
   if (signature == lastKeyboardGeometrySignature) return
   lastKeyboardGeometrySignature = signature
+  // Opt-in Logcat diagnostics; never log message text, attachments or users.
+  if (android.util.Log.isLoggable("ForwardIME", android.util.Log.DEBUG)) {
+    android.util.Log.d("ForwardIME",
+      "visible=$visible focus=${editor.hasFocus()} windowFocus=${hasWindowFocus()} rootBottom=$rootBottomOnScreen " +
+        "windowBottom=$windowBottomOnScreen frameBottom=${keyboardVisibleFrame.bottom} " +
+        "ime=$frameworkImeInset editorBottom=$editorBottomOnScreen " +
+        "keyboardTop=$keyboardTopOnScreen overlapDp=$editorOverlapDp")
+  }
   onKeyboardGeometryChange(
     mapOf(
       "visible" to visible,
@@ -237,6 +264,18 @@ private fun emitKeyboardGeometry(forceHidden: Boolean = false) {
     )
   )
 }
+
+  override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+    super.onWindowFocusChanged(hasWindowFocus)
+    if (hasWindowFocus && editor.hasFocus()) {
+      enforceImeResize()
+      startKeyboardGeometryObservation()
+    } else if (!hasWindowFocus) {
+      // A system media picker can take window focus without blurring EditText.
+      // Drop its old overlap now; returning gets a fresh pre-draw measurement.
+      emitKeyboardGeometry(forceHidden = true)
+    }
+  }
 
   private val formatMenuIds = mapOf(
     ForwardTextFormat.BOLD to 0x464F0101,

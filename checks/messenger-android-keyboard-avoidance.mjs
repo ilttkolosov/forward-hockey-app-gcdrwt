@@ -1,43 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import vm from "node:vm";
 import {
-  androidImeGeometryMayStillResize,
   calculateAndroidKeyboardInset,
 } from "../features/messenger/androidKeyboardAvoidancePolicy.ts";
-
-// MIUI's first frame can describe the editor before adjustResize and therefore
-// looks like a full keyboard overlay. It must be allowed to settle first.
-assert.equal(
-  androidImeGeometryMayStillResize({
-    visible: true,
-    frameworkImeHeight: 300,
-    visibleFrameInset: 296,
-    editorKeyboardOverlap: 282,
-  }),
-  true,
-);
-
-// Once MIUI has resized the root, the normal zero-inset guard takes over.
-assert.equal(
-  androidImeGeometryMayStillResize({
-    visible: true,
-    frameworkImeHeight: 300,
-    visibleFrameInset: 0,
-    editorKeyboardOverlap: -4,
-  }),
-  false,
-);
-
-// Honor/MagicOS needs its small residual overlap corrected immediately.
-assert.equal(
-  androidImeGeometryMayStillResize({
-    visible: true,
-    frameworkImeHeight: 300,
-    visibleFrameInset: 300,
-    editorKeyboardOverlap: 23.4,
-  }),
-  false,
-);
 
 const overlay = calculateAndroidKeyboardInset({
   targetBottom: 780,
@@ -189,35 +156,9 @@ const hookSource = readFileSync(
   ),
   "utf8",
 );
-assert.match(hookSource, /nativeEditorOverlapRef/);
-assert.match(hookSource, /pendingImeResizeRef/);
-assert.match(hookSource, /IME_RESIZE_SETTLING_MS\s*=\s*650/);
-assert.match(hookSource, /androidImeGeometryMayStillResize\(geometry\)/);
-assert.match(hookSource, /nativeOverlapAppliedInset/);
-assert.match(
-  hookSource,
-  /ALREADY_RESIZED_VISIBLE_FRAME_TOLERANCE_DP\s*=\s*24/,
-);
-assert.match(
-  hookSource,
-  /frameworkImeHeight > 0[\s\S]*visibleFrameInset !== null[\s\S]*editorOverlap !== null[\s\S]*Math\.max\(0, visibleFrameInset\) <=\s*ALREADY_RESIZED_VISIBLE_FRAME_TOLERANCE_DP/,
-);
-assert.match(
-  hookSource,
-  /overlap:\s*rootAlreadyResized \? 0 : editorOverlap/,
-);
-assert.match(
-  hookSource,
-  /appliedInset:\s*rootAlreadyResized \? 0 : appliedInsetRef\.current/,
-);
-assert.match(
-  hookSource,
-  /if \(rootAlreadyResized\) \{[\s\S]*updateInset\(0\);[\s\S]*scheduleMeasurements\(\);[\s\S]*return;/,
-);
-assert.match(
-  hookSource,
-  /if \(directOverlap\) \{[\s\S]*nativeEditorOverlap:\s*directOverlap\.overlap[\s\S]*nativeOverlapAppliedInset:\s*directOverlap\.appliedInset/,
-);
+assert.doesNotMatch(hookSource, /setTimeout|MEASUREMENT_DELAYS|METRICS_PROBE/);
+assert.match(hookSource, /nativeOwnsGeometry \? \[\] :/);
+assert.match(hookSource, /laidOutInsetRef/);
 
 const wrapperSource = readFileSync(
   new URL(
@@ -262,4 +203,124 @@ assert.match(
   /height\.toDouble\(\) \/ density\.toDouble\(\)/,
 );
 
-console.log("Messenger Android keyboard avoidance checks passed.");
+// Execute the actual hook with deterministic frame/event ordering, not just
+// string assertions. These regressions previously escaped pure math tests.
+const require = createRequire(import.meta.url);
+const ts = require("typescript");
+const compiledHook = ts.transpileModule(hookSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText;
+function harness(native = true) {
+  const slots = [];
+  let cursor = 0;
+  let initialized = false;
+  const cleanups = [];
+  const frames = new Map();
+  const listeners = new Map();
+  let frameId = 0;
+  let visible = true;
+  let measurement;
+  const react = {
+    useRef: (value) => slots[cursor++] ??= { current: value },
+    useState: (value) => {
+      const index = cursor++;
+      if (!(index in slots)) slots[index] = value;
+      return [slots[index], (next) => { slots[index] = next; }];
+    },
+    useCallback: (callback) => callback,
+    useEffect: (effect) => { if (!initialized) cleanups.push(effect()); },
+  };
+  const subscribe = (event, callback) => {
+    listeners.set(event, callback);
+    return { remove: () => listeners.delete(event) };
+  };
+  const rn = {
+    Platform: { OS: "android" },
+    Keyboard: {
+      metrics: () => visible ? { screenY: 500, height: 300 } : undefined,
+      isVisible: () => visible,
+      addListener: subscribe,
+    },
+    Dimensions: { get: () => ({ height: 800 }), addEventListener: subscribe },
+  };
+  const exports = {};
+  vm.runInNewContext(compiledHook, {
+    exports,
+    require: (name) => {
+      if (name === "react") return react;
+      if (name === "react-native") return rn;
+      if (name.includes("forward-rich-text-input")) {
+        return { supportsNativeKeyboardGeometry: () => native };
+      }
+      return { calculateAndroidKeyboardInset };
+    },
+    requestAnimationFrame: (callback) => { frames.set(++frameId, callback); return frameId; },
+    cancelAnimationFrame: (id) => frames.delete(id),
+  });
+  const target = { current: { measureInWindow: (callback) => { measurement = callback; } } };
+  return {
+    render: () => {
+      cursor = 0;
+      const controller = exports.useAndroidKeyboardAvoidance(target);
+      initialized = true;
+      return controller;
+    },
+    flush: () => {
+      const pending = [...frames.values()];
+      frames.clear();
+      pending.forEach((callback) => callback());
+    },
+    hide: () => { visible = false; listeners.get("keyboardDidHide")?.(); },
+    completeMeasurement: () => measurement?.(0, 700, 100, 80),
+    dispose: () => cleanups.forEach((cleanup) => cleanup?.()),
+    frames,
+    listeners,
+  };
+}
+const native = harness();
+let controller = native.render();
+assert.equal(native.listeners.size, 0, "RN cannot race native geometry, even before first event");
+const geometry = (overlap, visibleFrameInset = 300) => ({
+  visible: true, imeHeight: 300, frameworkImeHeight: 300,
+  visibleFrameInset, editorKeyboardOverlap: overlap,
+});
+controller.onNativeKeyboardGeometry(geometry(23.4));
+controller.onNativeKeyboardGeometry(geometry(23.4));
+assert.equal(native.frames.size, 1, "coalesce repeated native events");
+native.flush();
+controller = native.render();
+assert.equal(controller.bottomInset, 28, "Honor residual correction retained");
+controller.onTargetLayout({});
+controller.onNativeKeyboardGeometry(geometry(-4.1));
+native.flush();
+controller = native.render();
+assert.equal(controller.bottomInset, 28, "layout feedback must not grow the inset");
+controller.onTargetLayout({});
+controller.refresh();
+assert.equal(native.frames.size, 0, "media/focus/layout cannot replay old native overlap");
+controller.onNativeKeyboardGeometry({ visible: false, imeHeight: 0 });
+controller = native.render();
+assert.equal(controller.bottomInset, 0);
+controller.onTargetLayout({});
+// Reopen without a new focus event; only latest geometry in this frame wins.
+controller.onNativeKeyboardGeometry(geometry(280));
+controller.onNativeKeyboardGeometry(geometry(-4, 0));
+native.flush();
+controller = native.render();
+assert.equal(controller.bottomInset, 0, "MIUI repeat open uses final resized geometry");
+controller.onNativeKeyboardGeometry(geometry(280));
+controller.onNativeKeyboardGeometry({ visible: false, imeHeight: 0 });
+assert.equal(native.frames.size, 0, "hide cancels queued measurements");
+native.dispose();
+
+const legacy = harness(false);
+const oldController = legacy.render();
+oldController.refresh();
+oldController.refresh();
+assert.equal(legacy.frames.size, 1);
+legacy.flush();
+legacy.hide();
+legacy.completeMeasurement();
+assert.equal(legacy.render().bottomInset, 0, "stale legacy callback after hide is rejected");
+legacy.dispose();
+console.log("Messenger Android keyboard math, ownership and lifecycle checks passed.");

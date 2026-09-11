@@ -13,9 +13,6 @@ const OVERLAP_TOLERANCE = 2;
 const KEYBOARD_CLEARANCE = 4;
 const MAX_KEYBOARD_INSET_EXTRA = 40;
 const MAX_KEYBOARD_INSET_SCREEN_RATIO = 0.75;
-const RESIZE_SETTLING_MIN_OVERLAP = 96;
-const RESIZE_SETTLING_OVERLAP_RATIO = 0.6;
-const RESIZED_VISIBLE_FRAME_TOLERANCE = 24;
 
 function finiteNumber(value: number | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -24,41 +21,6 @@ function finiteNumber(value: number | undefined): number | null {
 function positiveNumber(value: number | undefined): number | null {
   const finite = finiteNumber(value);
   return finite !== null && finite > 0 ? finite : null;
-}
-
-export interface AndroidNativeKeyboardGeometry {
-  visible: boolean;
-  frameworkImeHeight?: number;
-  visibleFrameInset?: number;
-  editorKeyboardOverlap?: number;
-}
-
-/**
- * During the opening animation MIUI can briefly report the pre-resize editor
- * position together with the full IME inset. Applying that overlap immediately
- * lifts the composer by almost an entire second keyboard height. Wait only for
- * this large, full-height shape; the small residual overlap used by MagicOS is
- * deliberately outside the predicate and remains immediate.
- */
-export function androidImeGeometryMayStillResize(
-  geometry: AndroidNativeKeyboardGeometry,
-): boolean {
-  if (!geometry.visible) return false;
-  const frameworkImeHeight = positiveNumber(geometry.frameworkImeHeight);
-  const visibleFrameInset = positiveNumber(geometry.visibleFrameInset);
-  const editorOverlap = positiveNumber(geometry.editorKeyboardOverlap);
-  if (
-    frameworkImeHeight === null ||
-    visibleFrameInset === null ||
-    editorOverlap === null ||
-    visibleFrameInset <= RESIZED_VISIBLE_FRAME_TOLERANCE
-  ) {
-    return false;
-  }
-  return (
-    editorOverlap >= RESIZE_SETTLING_MIN_OVERLAP &&
-    editorOverlap >= frameworkImeHeight * RESIZE_SETTLING_OVERLAP_RATIO
-  );
 }
 
 /**

@@ -1946,13 +1946,13 @@ export default function MessengerRoomScreen() {
         if (Platform.OS === "ios") Keyboard.scheduleLayoutAnimation(event);
         if (!nearLatest.current) return;
         keyboardScrollPending.current = true;
-        scrollToLatest(true);
+        scrollToLatest(Platform.OS !== "android");
         if (keyboardScrollTimer.current) {
           clearTimeout(keyboardScrollTimer.current);
         }
         keyboardScrollTimer.current = setTimeout(
           () => {
-            if (nearLatest.current) scrollToLatest(true);
+            if (nearLatest.current) scrollToLatest(Platform.OS !== "android");
             keyboardScrollPending.current = false;
             keyboardScrollTimer.current = null;
           },
@@ -5521,7 +5521,7 @@ export default function MessengerRoomScreen() {
               const height = Math.round(event.nativeEvent.layout.height);
               if (height !== feedHeight) setFeedHeight(height);
               if (keyboardScrollPending.current) {
-                scrollToLatest(true);
+                scrollToLatest(Platform.OS !== "android");
               }
             }}
             // The SQLite viewport contains up to 20 messages. Rendering only
@@ -6628,7 +6628,7 @@ export default function MessengerRoomScreen() {
                   }
                   if (!nearLatest.current) return;
                   keyboardScrollPending.current = true;
-                  scrollToLatest(true);
+                  scrollToLatest(Platform.OS !== "android");
                 }}
                 onBlur={() => setComposerFocused(false)}
               />

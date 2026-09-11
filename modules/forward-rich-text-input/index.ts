@@ -1,5 +1,6 @@
 export {
   ForwardRichTextInput,
+  supportsNativeKeyboardGeometry,
   type ForwardRichTextInputHandle,
   type ForwardRichTextKeyboardGeometry,
   type ForwardRichTextPastedAttachment,
