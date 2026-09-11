@@ -36,8 +36,14 @@ assert.match(svg, /CGColorSpaceRelease\(colorSpace\)/);
 assert.match(svg, /CGImageRelease\(raster\)/);
 assert.match(svg, /\[image drawAtPoint:bounds.origin\]/);
 assert.match(svg, /height > SIZE_MAX \/ bytesPerRow/);
+// getDataURL has its own upstream image renderer; only drawRect is patched.
+const svgDrawRect = svg.slice(
+  svg.indexOf("- (void)drawRect:"),
+  svg.indexOf("- (BOOL)pointInside:"),
+);
+assert.ok(svgDrawRect.includes("RNSVGContainsFilter(self)"));
 assert.doesNotMatch(
-  svg,
+  svgDrawRect,
   /UIGraphicsImageRenderer|CGBitmapContextGetBitsPerPixel\(/,
 );
 assert.doesNotMatch(

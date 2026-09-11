@@ -6,8 +6,6 @@ permissions:
   contents: read
 jobs:
   regression:
-    permissions:
-      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -20,33 +18,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Apply locally verified completion and remove transport files
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import base64, hashlib, json, subprocess, zlib
-          folder = Path('.github/media-viewer-payload')
-          encoded = ''.join(p.read_text().strip() for p in sorted(folder.glob('part*.b64')))
-          encoded = encoded.replace('SC2MtKLBJhb', 'SC2MtKLBhb')
-          data = zlib.decompress(base64.b64decode(encoded, validate=True))
-          assert hashlib.sha256(data).hexdigest() == 'a8a0371dff213dc2085b65165afd8f6e400ab64b20e197a540007eedb19e92a0'
-          assert json.loads(Path('package.json').read_text())['version'] == '2.4.86'
-          payload = json.loads(data)
-          patch = Path('/tmp/media-viewer-completion.patch')
-          patch.write_text(payload['patch'])
-          subprocess.run(['git', 'apply', '--check', '--index', str(patch)], check=True)
-          subprocess.run(['git', 'apply', '--index', str(patch)], check=True)
-          # Workflow cleanup is published separately through the GitHub connector.
-          for p in folder.iterdir(): p.unlink()
-          folder.rmdir()
-          PY
-          node scripts/bump-app-version.mjs patch
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git diff --cached --check
-          git commit -m 'fix: finish shared MediaLightbox and explicit SVG bitmap ownership [versioned]'
-          git push origin HEAD:work/media-viewer-swipe-autoload
       - id: source
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - run: npm ci
