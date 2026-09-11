@@ -283,10 +283,13 @@ export default function MessengerZoomableMedia({
         if (!closing.value) dismissY.value = withTiming(0, { duration: 180 });
         panMode.value = "none";
       });
-    // A horizontal drag fails our pan; downward movement belongs to the page.
+    // Do not make the native pager wait for the photo recognizers. At 1x the
+    // pager and the media gestures observe the same stream: horizontal motion
+    // is handled by FlatList, while a dominant downward motion activates our
+    // dismiss pan. When zoomed, MediaLightbox disables FlatList scrolling.
     if (pagerGesture) {
-      pan.blocksExternalGesture(pagerGesture);
-      pinch.blocksExternalGesture(pagerGesture);
+      pan.simultaneousWithExternalGesture(pagerGesture);
+      pinch.simultaneousWithExternalGesture(pagerGesture);
     }
     const doubleTap = Gesture.Tap()
       .enabled(active && zoomEnabled)

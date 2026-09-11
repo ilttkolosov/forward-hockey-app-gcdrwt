@@ -59,7 +59,9 @@ FLOW = '''appId: com.forward.media.viewer.regression
     start: 80%, 50%
     end: 20%, 50%
     duration: 500
-- assertVisible: "2 из 5"
+- extendedWaitUntil:
+    visible: "2 из 5"
+    timeout: 5000
 - extendedWaitUntil:
     visible:
       id: viewer-image-fixture-1
@@ -95,7 +97,9 @@ FLOW = '''appId: com.forward.media.viewer.regression
     start: 80%, 50%
     end: 20%, 50%
     duration: 500
-- assertVisible: "3 из 5"
+- extendedWaitUntil:
+    visible: "3 из 5"
+    timeout: 5000
 - extendedWaitUntil:
     visible:
       id: viewer-video-fixture-2
@@ -106,7 +110,9 @@ FLOW = '''appId: com.forward.media.viewer.regression
     start: 80%, 40%
     end: 20%, 40%
     duration: 500
-- assertVisible: "4 из 5"
+- extendedWaitUntil:
+    visible: "4 из 5"
+    timeout: 5000
 - extendedWaitUntil:
     visible:
       id: viewer-image-fixture-3

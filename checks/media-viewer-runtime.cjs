@@ -410,8 +410,10 @@ const touch = (x, y, n = 1) => ({
   let pan = gestures.find((x) => x.kind === "pan"),
     tap = gestures.find((x) => x.kind === "tap");
   const pinch = gestures.find((x) => x.kind === "pinch");
-  assert.ok(pan.config.blocksExternalGesture);
-  assert.ok(pinch.config.blocksExternalGesture);
+  assert.ok(pan.config.simultaneousWithExternalGesture);
+  assert.ok(pinch.config.simultaneousWithExternalGesture);
+  assert.equal(pan.config.blocksExternalGesture, undefined);
+  assert.equal(pinch.config.blocksExternalGesture, undefined);
   let pinchFailed = 0;
   const pinchManager = { fail: () => pinchFailed++ };
   // Both recognizers, not only Pan, must release the native horizontal list.
