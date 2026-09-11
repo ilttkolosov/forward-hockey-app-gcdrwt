@@ -20,19 +20,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Materialize and version the native gesture correction
+      - name: Materialize native pager coexistence
         run: |
-          if [ -f .github/media-viewer-gesture.patch ]; then
-            node -e 'if(require("./package.json").version !== "2.4.87") process.exit(1)'
-            git apply --check --index .github/media-viewer-gesture.patch
-            git apply --index .github/media-viewer-gesture.patch
-            rm .github/media-viewer-gesture.patch
+          if [ -f .github/media-viewer-simultaneous.patch ]; then
+            node -e 'if(require("./package.json").version !== "2.4.88") process.exit(1)'
+            git apply --check --index .github/media-viewer-simultaneous.patch
+            git apply --index .github/media-viewer-simultaneous.patch
+            rm .github/media-viewer-simultaneous.patch
             node scripts/bump-app-version.mjs patch
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git add -A
             git diff --cached --check
-            git commit -m 'fix: release waiting pinch for native media paging [versioned]'
+            git commit -m 'fix: let media pager coexist with zoom and dismiss gestures [versioned]'
             git push origin HEAD:work/media-viewer-swipe-autoload
           fi
       - id: source
