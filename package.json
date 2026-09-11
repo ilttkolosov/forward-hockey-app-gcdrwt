@@ -1,6 +1,6 @@
 {
   "name": "Natively",
-  "version": "2.4.85",
+  "version": "2.4.86",
   "main": "index.ts",
   "scripts": {
     "dev": "EXPO_NO_TELEMETRY=1 expo start --tunnel",
@@ -37,7 +37,8 @@
     "check:messenger-ios-registration": "node --no-warnings --experimental-strip-types checks/messenger-ios-registration.mjs",
     "check:messenger-navigation": "node --no-warnings --experimental-strip-types checks/messenger-navigation-runtime.cjs && node --no-warnings --experimental-strip-types checks/messenger-pin-focus.mjs",
     "check:messenger-pin-thumbnail": "node checks/messenger-pin-thumbnail-contract.cjs",
-    "check:ios-media-patches": "node checks/ios-media-patch-contract.cjs"
+    "check:ios-media-patches": "node checks/ios-media-patch-contract.cjs",
+    "check:media-viewer": "node checks/media-viewer-runtime.cjs"
   },
   "dependencies": {
     "@appmetrica/react-native-analytics": "^4.2.0",
