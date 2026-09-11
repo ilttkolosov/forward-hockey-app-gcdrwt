@@ -2,64 +2,13 @@ name: Verify iOS media lifecycle
 on:
   push:
     branches: [work/ios-media-lifecycle-cleanup]
-    paths: [.github/workflows/ios-media-lifecycle-workbench.yml, scripts/apply-ios-media-fix.py]
+    paths: [.github/workflows/ios-media-lifecycle-workbench.yml]
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: ios-media-lifecycle-workbench
   cancel-in-progress: true
 jobs:
-  javascript:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: Verify and apply source patch
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('scripts/apply-ios-media-fix.py')
-          s = p.read_text()
-          for before, after in [('tj015bTQ8x7','tj015bQ8x7'),('TNeKfSEKqko','TNeKfSEqko'),('0Iv1bUPYxr','0Iv1UPYxr'),('OqP3b9dBCen','OqP3b9BCen'),('WITitkolosovFFJL','WITitFFJL'),('+na9sde277du','+na9s277du')]:
-              s = s.replace(before, after)
-          p.write_text(s)
-          PY
-          python scripts/apply-ios-media-fix.py
-      - run: npm ci
-      - run: npx --yes prettier@3.9.6 --write checks/ios-media-patch-contract.cjs
-      - run: npm run check
-      - name: Existing pin menu, presentation and focus regressions
-        env:
-          PIN_TEST_MODULES: /tmp/forward-pin-tests
-        run: |
-          npm install --prefix /tmp/forward-pin-tests --no-package-lock --ignore-scripts react@19.1.0 react-test-renderer@19.1.0
-          node --no-warnings --experimental-strip-types checks/messenger-pins.mjs
-          node --no-warnings --experimental-strip-types checks/messenger-pin-focus.mjs
-          node checks/messenger-pins-runtime.cjs
-          node checks/messenger-pin-presentation.cjs
-      - name: Export iOS and Android JavaScript
-        env:
-          CI: '1'
-          EXPO_NO_TELEMETRY: '1'
-        run: npx expo export --platform ios --platform android --output-dir /tmp/forward-ios-media-fix
-      - name: Commit verified source to work branch
-        run: |
-          rm scripts/apply-ios-media-fix.py
-          node scripts/bump-app-version.mjs patch
-          git diff --check -- . ':!patches/*.patch'
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add patches/expo-video+3.0.16.patch patches/react-native-svg+15.12.1.patch checks/ios-media-lifecycle-smoke.py checks/ios-media-patch-contract.cjs docs/CHAT_PINNING.md package.json package-lock.json app.config.js scripts/apply-ios-media-fix.py
-          git commit -m 'fix: end native iOS media tasks before release and guard SVG bitmap snapshots [versioned]'
-          git push origin HEAD:work/ios-media-lifecycle-cleanup
   native-ios:
     runs-on: macos-15
     timeout-minutes: 40
@@ -70,22 +19,73 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Verify and apply source patch
+      - name: Use independent stderr capture in the isolated test host
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           from pathlib import Path
-          p = Path('scripts/apply-ios-media-fix.py')
-          s = p.read_text()
-          for before, after in [('tj015bTQ8x7','tj015bQ8x7'),('TNeKfSEKqko','TNeKfSEqko'),('0Iv1bUPYxr','0Iv1UPYxr'),('OqP3b9dBCen','OqP3b9BCen'),('WITitkolosovFFJL','WITitFFJL'),('+na9sde277du','+na9s277du')]:
-              s = s.replace(before, after)
+          p=Path('checks/ios-media-lifecycle-smoke.py')
+          s=p.read_text()
+          s=s.replace('''        result = subprocess.run(args, cwd=cwd, stdout=log, stderr=subprocess.STDOUT, text=True, timeout=timeout, env=env)
+              if check and result.returncode:''','''        try:
+                      result = subprocess.run(args, cwd=cwd, stdout=log, stderr=subprocess.STDOUT, text=True, timeout=timeout, env=env)
+                  except subprocess.TimeoutExpired:
+                      if check:
+                          raise
+                      log.write(f"Timed out after {timeout}s during best-effort diagnostics/cleanup\\n")
+                      return 124
+              if check and result.returncode:''')
+          s=s.replace("    run(['pod','install'],host/'ios','pods',timeout=900)",'''    # Capture process stderr without simctl --console's debugger attachment.
+              # This instrumentation exists only in the isolated test host.
+              delegate = next((host/'ios').glob('*/AppDelegate.swift'))
+              source = delegate.read_text()
+              capture = r\'''\n    let logURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("native-media.log")
+              freopen(logURL.path, "a", stderr)
+              freopen(logURL.path, "a", stdout)
+              setvbuf(stdout, nil, _IONBF, 0)
+              setvbuf(stderr, nil, _IONBF, 0)
+          \'''
+              source, matches = re.subn(r'(didFinishLaunchingWithOptions[\\s\\S]*?\\)\\s*->\\s*Bool\\s*\\{)', lambda m: m[0]+capture, source, count=1)
+              assert matches == 1, 'Could not instrument isolated host stderr'
+              delegate.write_text('import Darwin\\n'+source)
+              run(['pod','install'],host/'ios','pods',timeout=900)''')
+          s=s.replace("    if chosen['state']!='Booted':run(['xcrun','simctl','boot',udid],host,'boot')\n    run(['xcrun','simctl','bootstatus',udid,'-b'],host,'bootstatus',timeout=300)\n",'')
+          s=s.replace("        app=next((derived/'Build/Products/Release-iphonesimulator').glob('*.app'))", """        if mode == 'baseline':
+                      if chosen['state'] != 'Booted': run(['xcrun','simctl','boot',udid],host,'boot')
+                      run(['xcrun','simctl','bootstatus',udid,'-b'],host,'bootstatus',timeout=300)
+                  app=next((derived/'Build/Products/Release-iphonesimulator').glob('*.app'))""")
+          start=s.index("        with (OUT/('runtime-'+mode+'.log')).open('w') as output:")
+          end=s.index("        outcomes[mode]=value",start)
+          s=s[:start]+'''        native_log = documents/'native-media.log'; native_log.unlink(missing_ok=True)
+                  run(['xcrun','simctl','launch',udid,BUNDLE],host,'launch-'+mode,timeout=120,env=env)
+                  deadline=time.monotonic()+100;value={}
+                  while time.monotonic()<deadline:
+                      try:value=json.loads(result.read_text())
+                      except (OSError,ValueError):pass
+                      if value.get('status') in ['passed','failed']:break
+                      time.sleep(.5)
+                  time.sleep(2)
+                  if native_log.exists(): shutil.copy2(native_log,OUT/('runtime-'+mode+'.log'))
+                  else: (OUT/('runtime-'+mode+'.log')).write_text('Host did not create its native log')
+                  run(['xcrun','simctl','io',udid,'screenshot',str(OUT/(mode+'.png'))],host,'screenshot-'+mode,timeout=60,check=False)
+                  run(['xcrun','simctl','spawn',udid,'log','show','--last','2m','--style','compact','--predicate','process == "MediaLifecycleRegression"'],host,'system-'+mode,timeout=60,check=False)
+                  run(['xcrun','simctl','terminate',udid,BUNDLE],host,'terminate-'+mode,timeout=60,check=False)
+          ''' +s[end:]
+          s=s.replace("        text=(OUT/('runtime-'+mode+'.log')).read_text(errors='replace')", "        text=(OUT/('runtime-'+mode+'.log')).read_text(errors='replace') + (OUT/('system-'+mode+'.log')).read_text(errors='replace')")
           p.write_text(s)
           PY
-          python scripts/apply-ios-media-fix.py
+          python3 -m py_compile checks/ios-media-lifecycle-smoke.py
       - name: Compare real native video and navigation surface before and after patches
         env:
           CI: '1'
           EXPO_NO_TELEMETRY: '1'
         run: python3 checks/ios-media-lifecycle-smoke.py
+      - name: Preserve verified native test
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add checks/ios-media-lifecycle-smoke.py
+          git commit -m 'test: verify native iOS media cleanup and preserved navigation shadow [versioned]'
+          git push origin HEAD:work/ios-media-lifecycle-cleanup
       - uses: actions/upload-artifact@v4
         if: always()
         with:
