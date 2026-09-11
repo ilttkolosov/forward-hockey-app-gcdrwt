@@ -1,0 +1,28 @@
+name: Inspect iOS media lifecycle
+on:
+  push:
+    branches: [work/ios-media-lifecycle-cleanup]
+    paths: [.github/workflows/ios-media-lifecycle-workbench.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Export source and locked native implementation
+        run: |
+          mkdir -p /tmp/ios-media-review
+          tar --exclude=.git --exclude=node_modules --exclude=android --exclude=ios -czf /tmp/ios-media-review/source.tgz .
+          tar -czf /tmp/ios-media-review/native-source.tgz node_modules/expo-video node_modules/expo-image node_modules/expo-modules-core node_modules/react-native/React node_modules/react-native-screens/ios node_modules/react-native-screens/RNScreens.podspec node_modules/react-native-svg/apple node_modules/@react-navigation/elements node_modules/@react-navigation/native-stack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-media-review
+          path: /tmp/ios-media-review
+          retention-days: 3
