@@ -1,0 +1,29 @@
+name: Media viewer workbench
+on:
+  push:
+    branches: [work/media-viewer-swipe-fix]
+    paths: [.github/workflows/media-viewer-workbench.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm install --prefix /tmp/viewer-test-modules --no-package-lock --ignore-scripts react@19.1.0 react-test-renderer@19.1.0 typescript@5.9.3
+      - name: Export verified source and test runtime
+        run: |
+          mkdir -p /tmp/viewer-source
+          tar --exclude=.git --exclude=node_modules --exclude=android --exclude=ios --exclude=assets -czf /tmp/viewer-source/source.tgz .
+          tar -czf /tmp/viewer-source/tests.tgz -C /tmp/viewer-test-modules .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: media-viewer-source
+          path: /tmp/viewer-source
+          retention-days: 2
