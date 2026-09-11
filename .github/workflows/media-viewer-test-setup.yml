@@ -1,0 +1,32 @@
+name: Preserve viewer test setup
+on:
+  push:
+    branches: [work/media-viewer-swipe-fix]
+    paths: [.github/workflows/media-viewer-test-setup.yml]
+permissions:
+  contents: write
+jobs:
+  preserve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preserve identical native test configuration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('checks/media-viewer-native-smoke.py');s=p.read_text()
+          s=s.replace("        device=next(d for r in sorted(devices,reverse=True) if '.iOS-' in r for d in devices[r] if d['name'].startswith('iPhone'))", "        sdk = subprocess.check_output(['xcrun','--sdk','iphonesimulator','--show-sdk-version'],text=True).strip().split('.')\n        runtime = '.iOS-'+'-'.join(sdk[:2])\n        candidates = [d for r in devices if runtime in r for d in devices[r] if d['name'].startswith('iPhone')]\n        assert candidates, 'No simulator matching active Xcode SDK '+runtime\n        device = candidates[0]\n        (OUT/'simulator.json').write_text(json.dumps(device,indent=2))")
+          s=s.replace("        app=next((derived/'Build/Products/Release-iphonesimulator').glob('*.app'))", "        run(['open','-a','Simulator'],host,'simulator-ui')\n        app=next((derived/'Build/Products/Release-iphonesimulator').glob('*.app'))")
+          s=s.replace('- takeScreenshot: /tmp/media-viewer-native-results/', '- takeScreenshot: ')
+          s=s.replace("'test','--debug-output',OUT/'maestro',OUT/'flow.yaml'", "'test','--test-output-dir',OUT/'maestro','--debug-output',OUT/'maestro',OUT/'flow.yaml'")
+          assert 'babel-preset-expo' in s and '--test-output-dir' in s
+          assert '- takeScreenshot: /tmp/' not in s
+          compile(s, str(p), 'exec')
+          p.write_text(s)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add checks/media-viewer-native-smoke.py
+          git diff --cached --quiet || git commit -m 'test: retain native viewer fixture and driver configuration [versioned]'
+          git push origin HEAD:work/media-viewer-swipe-fix
