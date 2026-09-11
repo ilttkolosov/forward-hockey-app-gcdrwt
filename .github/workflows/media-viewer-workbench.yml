@@ -1,0 +1,25 @@
+name: Media viewer workbench
+on:
+  push:
+    branches: [work/media-viewer-swipe-autoload]
+    paths: [.github/workflows/media-viewer-workbench.yml]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: |
+          mkdir -p /tmp/media-viewer-source
+          tar --exclude=.git --exclude=node_modules --exclude=android --exclude=ios -czf /tmp/media-viewer-source/source.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: media-viewer-source
+          path: /tmp/media-viewer-source
+          retention-days: 3
