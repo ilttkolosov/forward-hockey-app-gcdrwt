@@ -64,7 +64,7 @@ FLOW = '''appId: com.forward.media.viewer.regression
     visible:
       id: viewer-image-fixture-1
     timeout: 15000
-- takeScreenshot: /tmp/media-viewer-native-results/photo-next
+- takeScreenshot: photo-next
 - doubleTapOn:
     point: 50%, 50%
 - swipe:
@@ -97,7 +97,7 @@ FLOW = '''appId: com.forward.media.viewer.regression
     duration: 500
 - assertVisible: "3 из 5"
 - assertNotVisible: "Нажмите, чтобы загрузить"
-- takeScreenshot: /tmp/media-viewer-native-results/profile-video
+- takeScreenshot: profile-video
 - swipe:
     start: 80%, 40%
     end: 20%, 40%
@@ -107,7 +107,7 @@ FLOW = '''appId: com.forward.media.viewer.regression
     visible:
       id: viewer-image-fixture-3
     timeout: 15000
-- takeScreenshot: /tmp/media-viewer-native-results/profile-photo-next
+- takeScreenshot: profile-photo-next
 - swipe:
     start: 50%, 40%
     end: 50%, 85%
@@ -167,9 +167,15 @@ def main():
         workspace=next((host/'ios').glob('*.xcworkspace'));derived=host/'build'
         run(['xcodebuild','-workspace',workspace,'-scheme',workspace.stem,'-configuration','Release','-sdk','iphonesimulator','-destination','generic/platform=iOS Simulator','-derivedDataPath',derived,'CODE_SIGNING_ALLOWED=NO','ONLY_ACTIVE_ARCH=YES','ARCHS='+os.uname().machine,'build'],host,'build',1800)
         devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','-j']))['devices']
-        device=next(d for r in sorted(devices,reverse=True) if '.iOS-' in r for d in devices[r] if d['name'].startswith('iPhone'))
+        sdk = subprocess.check_output(['xcrun','--sdk','iphonesimulator','--show-sdk-version'],text=True).strip().split('.')
+        runtime = '.iOS-'+'-'.join(sdk[:2])
+        candidates = [d for r in devices if runtime in r for d in devices[r] if d['name'].startswith('iPhone')]
+        assert candidates, 'No simulator matching active Xcode SDK '+runtime
+        device = candidates[0]
+        (OUT/'simulator.json').write_text(json.dumps(device,indent=2))
         if device['state']!='Booted':run(['xcrun','simctl','boot',device['udid']],host,'boot')
         run(['xcrun','simctl','bootstatus',device['udid'],'-b'],host,'bootstatus',300)
+        run(['open','-a','Simulator'],host,'simulator-ui')
         app=next((derived/'Build/Products/Release-iphonesimulator').glob('*.app'))
         run(['xcrun','simctl','install',device['udid'],app],host,'install-app')
         device_args=['--device',device['udid']]
@@ -178,7 +184,7 @@ def main():
         apk=next((host/'android/app/build/outputs/apk/release').glob('*.apk'));run(['adb','install','-r',apk],host,'install-app')
         device_args=[]
     maestro=Path.home()/'.maestro/bin/maestro'
-    try:run([maestro,*device_args,'test','--debug-output',OUT/'maestro',OUT/'flow.yaml'],host,'ui-test',600)
+    try:run([maestro,*device_args,'test','--test-output-dir',OUT/'maestro','--debug-output',OUT/'maestro',OUT/'flow.yaml'],host,'ui-test',600)
     finally:
         if args.platform=='android':run(['adb','logcat','-d'],host,'runtime',check=False)
         else:run(['xcrun','simctl','spawn',device['udid'],'log','show','--last','5m','--style','compact','--predicate','process == "ViewerRegression"'],host,'runtime',check=False)
