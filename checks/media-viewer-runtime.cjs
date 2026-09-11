@@ -411,6 +411,30 @@ const touch = (x, y, n = 1) => ({
     tap = gestures.find((x) => x.kind === "tap");
   const pinch = gestures.find((x) => x.kind === "pinch");
   assert.ok(pan.config.blocksExternalGesture);
+  assert.ok(pinch.config.blocksExternalGesture);
+  let pinchFailed = 0;
+  const pinchManager = { fail: () => pinchFailed++ };
+  // Both recognizers, not only Pan, must release the native horizontal list.
+  const waitingPinchDrag = (dx, dy, n = 1) => {
+    pinch.callbacks.onTouchesDown(touch(100, 100), pinchManager);
+    pinch.callbacks.onTouchesMove(touch(100 + dx, 100 + dy, n), pinchManager);
+  };
+  waitingPinchDrag(3, 3);
+  assert.equal(
+    pinchFailed,
+    0,
+    "a stationary first finger allows pinch to start",
+  );
+  waitingPinchDrag(70, 2);
+  assert.equal(
+    pinchFailed,
+    1,
+    "single-finger paging must fail the waiting pinch",
+  );
+  waitingPinchDrag(0, 70);
+  assert.equal(pinchFailed, 2, "downward dismissal does not wait for a pinch");
+  waitingPinchDrag(70, 2, 2);
+  assert.equal(pinchFailed, 2, "two fingers retain pinch ownership");
   let activated = 0,
     failed = 0;
   const manager = { activate: () => activated++, fail: () => failed++ };
@@ -452,6 +476,8 @@ const touch = (x, y, n = 1) => ({
   );
   drag(0, 240);
   assert.equal(animations.length, 0, "zoomed pan does not dismiss");
+  waitingPinchDrag(70, 2);
+  assert.equal(pinchFailed, 2, "zoomed panning may still add a pinch finger");
   await act(async () => {
     tap.callbacks.onEnd({ x: 195, y: 422 }, true);
   });

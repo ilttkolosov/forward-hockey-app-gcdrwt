@@ -51,6 +51,8 @@ export default function MessengerZoomableMedia({
   const dismissY = useSharedValue(0);
   const touchX = useSharedValue(0);
   const touchY = useSharedValue(0);
+  const pinchTouchX = useSharedValue(0);
+  const pinchTouchY = useSharedValue(0);
   const panMode = useSharedValue<"zoom" | "dismiss" | "none">("none");
   const closing = useSharedValue(false);
   const multipleTouches = useSharedValue(false);
@@ -106,8 +108,38 @@ export default function MessengerZoomableMedia({
   const gesture = useMemo(() => {
     const pinch = Gesture.Pinch()
       .enabled(active && zoomEnabled)
-      .onTouchesDown((_event, manager) => {
-        if (closing.value) manager.fail();
+      .onTouchesDown((event, manager) => {
+        if (closing.value) {
+          manager.fail();
+          return;
+        }
+        const touch = event.allTouches[0];
+        if (event.numberOfTouches === 1 && touch) {
+          pinchTouchX.value = touch.absoluteX;
+          pinchTouchY.value = touch.absoluteY;
+        }
+      })
+      .onTouchesMove((event, manager) => {
+        // A waiting pinch also blocks the native pager. Release it once a
+        // single finger commits to a drag, rather than waiting for finger-up.
+        // Keep it pending while stationary so a second finger can begin zoom.
+        if (
+          event.numberOfTouches !== 1 ||
+          pinching.value ||
+          multipleTouches.value ||
+          Math.max(scale.value, startScale.value) > 1.01
+        )
+          return;
+        const touch = event.allTouches[0];
+        if (!touch) return;
+        const intent = mediaPanIntent(
+          touch.absoluteX - pinchTouchX.value,
+          touch.absoluteY - pinchTouchY.value,
+          1,
+          MIN_SCALE,
+          true,
+        );
+        if (intent !== "wait") manager.fail();
       })
       .onStart(() => {
         pinching.value = true;
@@ -307,6 +339,8 @@ export default function MessengerZoomableMedia({
     closing,
     touchX,
     touchY,
+    pinchTouchX,
+    pinchTouchY,
     multipleTouches,
     pinching,
     panMode,

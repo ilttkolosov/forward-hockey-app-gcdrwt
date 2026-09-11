@@ -242,6 +242,7 @@ export default function MediaLightbox({
           )}
           {localUri && item.type === "video" && active && (
             <View
+              testID={`viewer-video-${item.id}`}
               style={[
                 styles.videoStage,
                 { top: videoTop, width, height: videoHeight },

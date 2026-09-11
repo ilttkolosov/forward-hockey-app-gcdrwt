@@ -96,6 +96,10 @@ FLOW = '''appId: com.forward.media.viewer.regression
     end: 20%, 50%
     duration: 500
 - assertVisible: "3 из 5"
+- extendedWaitUntil:
+    visible:
+      id: viewer-video-fixture-2
+    timeout: 15000
 - assertNotVisible: "Нажмите, чтобы загрузить"
 - takeScreenshot: profile-video
 - swipe:
