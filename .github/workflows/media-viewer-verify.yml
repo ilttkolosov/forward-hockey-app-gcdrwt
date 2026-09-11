@@ -6,62 +6,6 @@ on:
 permissions:
   contents: read
 jobs:
-  javascript:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: Apply integrations
-        run: |
-          python3 scripts/update-svg-regression.py
-          python3 scripts/update-media-viewer.py
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          p=Path('package.json');s=json.loads(p.read_text());s['scripts']['check:media-viewer']='node checks/media-viewer-runtime.cjs';p.write_text(json.dumps(s,indent=2)+'\n')
-          PY
-      - run: npm ci
-      - run: npx --yes prettier@3.9.6 --write checks/media-viewer-runtime.cjs checks/ios-media-patch-contract.cjs features/messenger/MessengerZoomableMedia.tsx features/messenger/MessengerMediaViewer.tsx features/messenger/MessengerProfileMediaTab.tsx features/messenger/MessengerAttachmentView.tsx features/messenger/mediaViewerPolicy.ts features/messenger/useMediaViewerLoading.ts
-      - run: npm run check
-      - run: npm install --prefix /tmp/forward-pin-tests --no-package-lock --ignore-scripts react@19.1.0 react-test-renderer@19.1.0
-      - name: Runtime regression tests
-        env:
-          PIN_TEST_MODULES: /tmp/forward-pin-tests
-        run: |
-          npm run check:media-viewer
-          node checks/messenger-pins-runtime.cjs
-          node checks/messenger-pin-presentation.cjs
-      - name: Export both platforms
-        env:
-          CI: '1'
-          EXPO_NO_TELEMETRY: '1'
-        run: npx expo export --platform ios --platform android --output-dir /tmp/viewer-export
-      - name: Commit verified source
-        run: |
-          node scripts/bump-app-version.mjs patch
-          rm scripts/update-media-viewer.py scripts/update-svg-regression.py
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app.config.js package.json package-lock.json checks features/messenger scripts/update-media-viewer.py scripts/update-svg-regression.py
-          git commit -m 'feat: add viewer swipe dismissal and automatic media loading [versioned]'
-          git push origin HEAD:work/media-viewer-swipe-fix
-      - name: Source snapshot
-        if: always()
-        run: |
-          mkdir -p /tmp/viewer-verified
-          tar --exclude=.git --exclude=node_modules --exclude=android --exclude=ios --exclude=assets -czf /tmp/viewer-verified/source.tgz .
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: media-viewer-verified-source
-          path: /tmp/viewer-verified
-          retention-days: 3
   ios:
     runs-on: macos-15
     timeout-minutes: 40
@@ -79,8 +23,15 @@ jobs:
           distribution: temurin
           java-version: '17'
       - run: curl -fsSL https://get.maestro.mobile.dev | bash
-      - run: python3 scripts/update-media-viewer.py
+      - name: Complete isolated host build dependencies
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('checks/media-viewer-native-smoke.py');s=p.read_text().replace("names=['expo',", "names=['@babel/core','babel-preset-expo','expo',");p.write_text(s)
+          PY
       - run: python3 checks/media-viewer-native-smoke.py ios
+      - run: cp checks/media-viewer-native-smoke.py /tmp/media-viewer-native-results/verified-test.py
+        if: always()
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -104,7 +55,12 @@ jobs:
           distribution: temurin
           java-version: '17'
       - run: curl -fsSL https://get.maestro.mobile.dev | bash
-      - run: python3 scripts/update-media-viewer.py
+      - name: Complete isolated host build dependencies
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('checks/media-viewer-native-smoke.py');s=p.read_text().replace("names=['expo',", "names=['@babel/core','babel-preset-expo','expo',");p.write_text(s)
+          PY
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -117,6 +73,8 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: python3 checks/media-viewer-native-smoke.py android
+      - run: cp checks/media-viewer-native-smoke.py /tmp/media-viewer-native-results/verified-test.py
+        if: always()
       - uses: actions/upload-artifact@v4
         if: always()
         with:
