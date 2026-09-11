@@ -10,7 +10,7 @@ import {
   supportsNativeKeyboardGeometry,
   type ForwardRichTextKeyboardGeometry,
 } from "../../modules/forward-rich-text-input";
-import { calculateAndroidKeyboardInset } from "./androidKeyboardAvoidancePolicy";
+import { calculateAndroidKeyboardInset, usesSystemKeyboardResizeOnly } from "./androidKeyboardAvoidancePolicy";
 
 interface AndroidKeyboardAvoidanceController {
   bottomInset: number;
@@ -29,6 +29,11 @@ export function useAndroidKeyboardAvoidance(
 ): AndroidKeyboardAvoidanceController {
   const [bottomInset, setBottomInset] = useState(0);
   const nativeOwnsGeometry = supportsNativeKeyboardGeometry();
+  const systemResizeOnly = Platform.OS === "android" && usesSystemKeyboardResizeOnly(
+    Platform.constants.Manufacturer,
+    Platform.constants.Model,
+    Platform.Version,
+  );
   const appliedInsetRef = useRef(0);
   const laidOutInsetRef = useRef(0);
   const frameRef = useRef<number | null>(null);
@@ -54,7 +59,7 @@ export function useAndroidKeyboardAvoidance(
   }, []);
 
   const measureLegacy = useCallback(() => {
-    if (nativeOwnsGeometry || Platform.OS !== "android") return;
+    if (systemResizeOnly || nativeOwnsGeometry || Platform.OS !== "android") return;
     // At most one measurement per frame, including Dimensions + focus + layout.
     if (frameRef.current !== null) return;
     frameRef.current = requestAnimationFrame(() => {
@@ -78,11 +83,11 @@ export function useAndroidKeyboardAvoidance(
         }));
       });
     });
-  }, [nativeOwnsGeometry, targetRef, updateInset]);
+  }, [systemResizeOnly, nativeOwnsGeometry, targetRef, updateInset]);
 
   const onNativeKeyboardGeometry = useCallback(
     (geometry: ForwardRichTextKeyboardGeometry) => {
-      if (!nativeOwnsGeometry || !mountedRef.current) return;
+      if (systemResizeOnly || !nativeOwnsGeometry || !mountedRef.current) return;
       if (!geometry.visible) {
         cancelMeasurement();
         updateInset(0);
@@ -117,7 +122,7 @@ export function useAndroidKeyboardAvoidance(
         }));
       });
     },
-    [cancelMeasurement, nativeOwnsGeometry, updateInset],
+    [cancelMeasurement, systemResizeOnly, nativeOwnsGeometry, updateInset],
   );
 
   const onTargetLayout = useCallback((_event: LayoutChangeEvent) => {
@@ -130,8 +135,15 @@ export function useAndroidKeyboardAvoidance(
   useEffect(() => {
     mountedRef.current = true;
     if (Platform.OS !== "android") return undefined;
+    if (systemResizeOnly) {
+      console.info("[ForwardIME] system-resize-only", {
+        model: Platform.constants.Model,
+        apiLevel: Platform.Version,
+        bottomInset: 0,
+      });
+    }
     // Register no competing RN keyboard/dimensions listeners in native binaries.
-    const subscriptions = nativeOwnsGeometry ? [] : [
+    const subscriptions = systemResizeOnly || nativeOwnsGeometry ? [] : [
       Keyboard.addListener("keyboardDidShow", measureLegacy),
       Keyboard.addListener("keyboardDidHide", () => {
         cancelMeasurement();
@@ -147,7 +159,7 @@ export function useAndroidKeyboardAvoidance(
       subscriptions.forEach((subscription) => subscription.remove());
       cancelMeasurement();
     };
-  }, [cancelMeasurement, measureLegacy, nativeOwnsGeometry, updateInset]);
+  }, [cancelMeasurement, measureLegacy, systemResizeOnly, nativeOwnsGeometry, updateInset]);
 
   return {
     bottomInset,

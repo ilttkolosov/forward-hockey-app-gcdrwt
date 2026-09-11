@@ -1,3 +1,13 @@
+/** Device-confirmed adjustResize path. Do not generalize to Honor or all Androids. */
+export function usesSystemKeyboardResizeOnly(
+  manufacturer: string,
+  model: string,
+  apiLevel: number,
+): boolean {
+  return manufacturer.trim().toLowerCase() === "xiaomi" &&
+    model.trim().toUpperCase() === "M2101K9AG" && apiLevel === 33;
+}
+
 export interface AndroidKeyboardOverlapMeasurement {
   targetBottom: number;
   appliedInset: number;

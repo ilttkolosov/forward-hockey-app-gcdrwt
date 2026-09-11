@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import vm from "node:vm";
 import {
   calculateAndroidKeyboardInset,
+  usesSystemKeyboardResizeOnly,
 } from "../features/messenger/androidKeyboardAvoidancePolicy.ts";
 
 const overlay = calculateAndroidKeyboardInset({
@@ -210,7 +211,7 @@ const ts = require("typescript");
 const compiledHook = ts.transpileModule(hookSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-function harness(native = true) {
+function harness(native = true, model = "HONOR Magic7 Pro", manufacturer = "HONOR", api = 35) {
   const slots = [];
   let cursor = 0;
   let initialized = false;
@@ -235,7 +236,7 @@ function harness(native = true) {
     return { remove: () => listeners.delete(event) };
   };
   const rn = {
-    Platform: { OS: "android" },
+    Platform: { OS: "android", Version: api, constants: { Model: model, Manufacturer: manufacturer } },
     Keyboard: {
       metrics: () => visible ? { screenY: 500, height: 300 } : undefined,
       isVisible: () => visible,
@@ -246,13 +247,14 @@ function harness(native = true) {
   const exports = {};
   vm.runInNewContext(compiledHook, {
     exports,
+    console: { info: () => {} },
     require: (name) => {
       if (name === "react") return react;
       if (name === "react-native") return rn;
       if (name.includes("forward-rich-text-input")) {
         return { supportsNativeKeyboardGeometry: () => native };
       }
-      return { calculateAndroidKeyboardInset };
+      return { calculateAndroidKeyboardInset, usesSystemKeyboardResizeOnly };
     },
     requestAnimationFrame: (callback) => { frames.set(++frameId, callback); return frameId; },
     cancelAnimationFrame: (id) => frames.delete(id),
@@ -323,4 +325,25 @@ legacy.hide();
 legacy.completeMeasurement();
 assert.equal(legacy.render().bottomInset, 0, "stale legacy callback after hide is rejected");
 legacy.dispose();
+// Device log: every show/media-return applied 282 dp despite native resize.
+// Even stale/full-overlap snapshots must never introduce a second margin here.
+for (const nativeAvailable of [true, false]) {
+  const xiaomi = harness(nativeAvailable, "M2101K9AG", "Xiaomi", 33);
+  let input = xiaomi.render();
+  assert.equal(xiaomi.listeners.size, 0);
+  for (let cycle = 0; cycle < 4; cycle += 1) {
+    input.onNativeKeyboardGeometry(geometry(278));
+    input.refresh();
+    input.onTargetLayout({});
+    xiaomi.flush();
+    input = xiaomi.render();
+    assert.equal(input.bottomInset, 0, "Xiaomi must retain system resize on show/media return");
+    input.onNativeKeyboardGeometry({ visible: false, imeHeight: 0 });
+  }
+  assert.equal(xiaomi.frames.size, 0);
+  xiaomi.dispose();
+}
+assert.equal(usesSystemKeyboardResizeOnly("HONOR", "M2101K9AG", 33), false);
+assert.equal(usesSystemKeyboardResizeOnly("Xiaomi", "another model", 33), false);
+assert.equal(usesSystemKeyboardResizeOnly("Xiaomi", "M2101K9AG", 35), false);
 console.log("Messenger Android keyboard math, ownership and lifecycle checks passed.");
