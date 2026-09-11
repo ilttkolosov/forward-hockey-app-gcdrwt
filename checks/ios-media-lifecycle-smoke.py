@@ -116,7 +116,13 @@ registerRootComponent(App);
 def run(args, cwd, name, timeout=600, check=True, env=None):
     print('RUN', name, ' '.join(map(str,args)), flush=True)
     with (OUT / (name + '.log')).open('w') as log:
-        result = subprocess.run(args, cwd=cwd, stdout=log, stderr=subprocess.STDOUT, text=True, timeout=timeout, env=env)
+        try:
+            result = subprocess.run(args, cwd=cwd, stdout=log, stderr=subprocess.STDOUT, text=True, timeout=timeout, env=env)
+        except subprocess.TimeoutExpired:
+            if check:
+                raise
+            log.write(f"Timed out after {timeout}s during best-effort diagnostics/cleanup\n")
+            return 124
     if check and result.returncode:
         print((OUT / (name + '.log')).read_text()[-18000:], flush=True)
         raise RuntimeError(f'{name} failed: {result.returncode}')
@@ -147,43 +153,57 @@ def main():
         assert json.loads((host/'node_modules'/name/'package.json').read_text())['version']==version
     (OUT/'versions.json').write_text(json.dumps({**deps,'expo-modules-core':core},indent=2))
     run(['npx','expo','prebuild','--platform','ios','--no-install'],host,'prebuild')
+    # Capture process stderr without simctl --console's debugger attachment.
+    # This instrumentation exists only in the isolated test host.
+    delegate = next((host/'ios').glob('*/AppDelegate.swift'))
+    source = delegate.read_text()
+    capture = r'''
+    let logURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("native-media.log")
+    freopen(logURL.path, "a", stderr)
+    freopen(logURL.path, "a", stdout)
+    setvbuf(stdout, nil, _IONBF, 0)
+    setvbuf(stderr, nil, _IONBF, 0)
+'''
+    source, matches = re.subn(r'(didFinishLaunchingWithOptions[\s\S]*?\)\s*->\s*Bool\s*\{)', lambda m: m[0]+capture, source, count=1)
+    assert matches == 1, 'Could not instrument isolated host stderr'
+    delegate.write_text('import Darwin\n'+source)
     run(['pod','install'],host/'ios','pods',timeout=900)
     workspace = next((host/'ios').glob('*.xcworkspace')); derived=host/'build'
     devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','-j']))['devices']
     chosen=next((d for runtime in sorted(devices,reverse=True) if '.iOS-' in runtime for d in devices[runtime] if d['name'].startswith('iPhone')),None)
     assert chosen,'No iPhone simulator'; udid=chosen['udid']
     (OUT/'simulator.json').write_text(json.dumps(chosen,indent=2))
-    if chosen['state']!='Booted':run(['xcrun','simctl','boot',udid],host,'boot')
-    run(['xcrun','simctl','bootstatus',udid,'-b'],host,'bootstatus',timeout=300)
     outcomes={}
     for mode in ['baseline','fixed']:
         if mode=='fixed':
             for patch in PATCHES:
                 run(['git','apply','--unsafe-paths',str(ROOT/'patches'/patch)],host,'apply-'+patch)
         run(['xcodebuild','-workspace',str(workspace),'-scheme',workspace.stem,'-configuration','Release','-sdk','iphonesimulator','-destination','generic/platform=iOS Simulator','-derivedDataPath',str(derived),'CODE_SIGNING_ALLOWED=NO','ONLY_ACTIVE_ARCH=YES','ARCHS='+os.uname().machine,'build'],host,'xcodebuild-'+mode,timeout=1500)
+        if mode == 'baseline':
+            if chosen['state'] != 'Booted': run(['xcrun','simctl','boot',udid],host,'boot')
+            run(['xcrun','simctl','bootstatus',udid,'-b'],host,'bootstatus',timeout=300)
         app=next((derived/'Build/Products/Release-iphonesimulator').glob('*.app'))
         run(['xcrun','simctl','install',udid,str(app)],host,'install-'+mode)
         data=Path(subprocess.check_output(['xcrun','simctl','get_app_container',udid,BUNDLE,'data'],text=True).strip())
         documents=data/'Documents';documents.mkdir(exist_ok=True)
         result=documents/'result.json';result.unlink(missing_ok=True)
         env=dict(os.environ,SIMCTL_CHILD_CG_CONTEXT_SHOW_BACKTRACE='1',SIMCTL_CHILD_CGBITMAP_CONTEXT_LOG_ERRORS='1')
-        with (OUT/('runtime-'+mode+'.log')).open('w') as output:
-            launch=subprocess.Popen(['xcrun','simctl','launch','--console',udid,BUNDLE],cwd=host,stdout=output,stderr=subprocess.STDOUT,env=env)
-            try:
-                deadline=time.monotonic()+100;value={}
-                while time.monotonic()<deadline:
-                    try:value=json.loads(result.read_text())
-                    except (OSError,ValueError):pass
-                    if value.get('status') in ['passed','failed']:break
-                    time.sleep(.5)
-                time.sleep(2)
-                run(['xcrun','simctl','io',udid,'screenshot',str(OUT/(mode+'.png'))],host,'screenshot-'+mode)
-            finally:
-                run(['xcrun','simctl','terminate',udid,BUNDLE],host,'terminate-'+mode,timeout=60,check=False)
-                try:launch.wait(timeout=15)
-                except subprocess.TimeoutExpired:launch.terminate()
+        native_log = documents/'native-media.log'; native_log.unlink(missing_ok=True)
+        run(['xcrun','simctl','launch',udid,BUNDLE],host,'launch-'+mode,timeout=120,env=env)
+        deadline=time.monotonic()+100;value={}
+        while time.monotonic()<deadline:
+            try:value=json.loads(result.read_text())
+            except (OSError,ValueError):pass
+            if value.get('status') in ['passed','failed']:break
+            time.sleep(.5)
+        time.sleep(2)
+        if native_log.exists(): shutil.copy2(native_log,OUT/('runtime-'+mode+'.log'))
+        else: (OUT/('runtime-'+mode+'.log')).write_text('Host did not create its native log')
+        run(['xcrun','simctl','io',udid,'screenshot',str(OUT/(mode+'.png'))],host,'screenshot-'+mode,timeout=60,check=False)
+        run(['xcrun','simctl','spawn',udid,'log','show','--last','2m','--style','compact','--predicate','process == "MediaLifecycleRegression"'],host,'system-'+mode,timeout=60,check=False)
+        run(['xcrun','simctl','terminate',udid,BUNDLE],host,'terminate-'+mode,timeout=60,check=False)
         outcomes[mode]=value
-        text=(OUT/('runtime-'+mode+'.log')).read_text(errors='replace')
+        text=(OUT/('runtime-'+mode+'.log')).read_text(errors='replace') + (OUT/('system-'+mode+'.log')).read_text(errors='replace')
         outcomes[mode]['orphanEvents']=len(re.findall('JS object is no longer associated',text))
         outcomes[mode]['bitmapErrors']=len(re.findall("Unsupported image format 'UNKNOWN'|CGBitmapContextCreate: unsupported|CGDisplayListDrawInContext: invalid|CGBitmapContextCreateImage: invalid",text))
         (OUT/(mode+'-result.json')).write_text(json.dumps(outcomes[mode],indent=2))
