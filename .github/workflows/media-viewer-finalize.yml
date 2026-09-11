@@ -1,0 +1,53 @@
+name: Finalize media viewer verification
+on:
+  push:
+    branches: [work/media-viewer-swipe-fix]
+    paths: [.github/workflows/media-viewer-finalize.yml]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: python3 scripts/finalize-media-viewer.py
+      - run: npm ci
+      - run: npx --yes prettier@3.9.6 --write checks/media-viewer-runtime.cjs features/messenger/MessengerAttachmentView.tsx docs/CHAT_PINNING.md
+      - run: npm run check
+      - run: npm install --prefix /tmp/forward-pin-tests --no-package-lock --ignore-scripts react@19.1.0 react-test-renderer@19.1.0
+      - name: Verify shared viewer and existing pins
+        env:
+          PIN_TEST_MODULES: /tmp/forward-pin-tests
+        run: |
+          npm run check:media-viewer
+          node checks/messenger-pins-runtime.cjs
+          node checks/messenger-pin-presentation.cjs
+      - name: Bundle both clients
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: npx expo export --platform ios --platform android --output-dir /tmp/viewer-export
+      - name: Commit verified code and tests
+        run: |
+          rm scripts/finalize-media-viewer.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add checks/media-viewer-native-smoke.py checks/media-viewer-runtime.cjs features/messenger/MessengerAttachmentView.tsx docs/CHAT_PINNING.md scripts/finalize-media-viewer.py
+          git commit -m 'test: preserve viewer regressions and single loading owner [versioned]'
+          git push origin HEAD:work/media-viewer-swipe-fix
+      - name: Export final source
+        if: always()
+        run: |
+          mkdir -p /tmp/viewer-final
+          tar --exclude=.git --exclude=node_modules --exclude=android --exclude=ios --exclude=assets -czf /tmp/viewer-final/source.tgz .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: media-viewer-final-source
+          path: /tmp/viewer-final
+          retention-days: 3
