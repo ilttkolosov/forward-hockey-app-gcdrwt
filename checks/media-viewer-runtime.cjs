@@ -289,6 +289,39 @@ const touch = (x, y, n = 1) => ({
     await flush();
     tree.unmount();
   });
+  // Both entry points delegate visual-media loading to the common viewer.
+  const attachmentSource = fs.readFileSync(
+    path.resolve(
+      __dirname,
+      "../features/messenger/MessengerAttachmentView.tsx",
+    ),
+    "utf8",
+  );
+  const openItemBody = attachmentSource.slice(
+    attachmentSource.indexOf("const openItem ="),
+    attachmentSource.indexOf("const renderAlbum ="),
+  );
+  assert.doesNotMatch(
+    openItemBody,
+    /await ensureLocal/,
+    "No duplicate initial visual download from the chat tile",
+  );
+  const profileSource = fs.readFileSync(
+    path.resolve(
+      __dirname,
+      "../features/messenger/MessengerProfileMediaTab.tsx",
+    ),
+    "utf8",
+  );
+  const visualOpen = profileSource.slice(
+    profileSource.indexOf("const index = viewerEntries.findIndex"),
+    profileSource.indexOf("const showActions"),
+  );
+  assert.doesNotMatch(
+    visualOpen,
+    /await ensureLocal/,
+    "Profile must open immediately and load via the common viewer",
+  );
   let closes = 0,
     zooms = [];
   const base = {

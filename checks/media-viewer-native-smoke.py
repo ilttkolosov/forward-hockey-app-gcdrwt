@@ -137,7 +137,7 @@ def main():
     parser=argparse.ArgumentParser();parser.add_argument('platform',choices=['ios','android']);args=parser.parse_args()
     OUT.mkdir(parents=True,exist_ok=True);host=Path(tempfile.mkdtemp(prefix='viewer-native-'))
     lock=json.loads((ROOT/'package-lock.json').read_text())['packages']
-    names=['expo','expo-asset','expo-image','expo-video','expo-screen-orientation','expo-status-bar','expo-file-system','react','react-native','react-native-gesture-handler','react-native-reanimated','react-native-worklets','react-native-safe-area-context']
+    names=['@babel/core','babel-preset-expo','expo','expo-asset','expo-image','expo-video','expo-screen-orientation','expo-status-bar','expo-file-system','react','react-native','react-native-gesture-handler','react-native-reanimated','react-native-worklets','react-native-safe-area-context']
     deps={name:lock['node_modules/'+name]['version'] for name in names}
     core=lock['node_modules/expo-modules-core']['version']
     (host/'package.json').write_text(json.dumps({'name':'viewer-native-regression','version':'1.0.0','private':True,'main':'index.js','dependencies':deps,'overrides':{'expo-modules-core':core}},indent=2))

@@ -288,11 +288,7 @@ function MessengerAttachmentView({
     if (index < 0) return;
     setViewerSession((current) => current + 1);
     setViewerIndex(index);
-    try {
-      await ensureLocal(item);
-    } catch {
-      // The fullscreen viewer keeps a visible retry state.
-    }
+    // The common viewer owns automatic loading for each page, including the first.
   };
 
   const renderAlbum = () => {
