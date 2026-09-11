@@ -1,5 +1,11 @@
 import { Image } from "expo-image";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -38,7 +44,9 @@ function mergeMessages(
   current: MessengerMessage[],
   incoming: MessengerMessage[],
 ): MessengerMessage[] {
-  const byId = new Map(current.map((message) => [message.id, message] as const));
+  const byId = new Map(
+    current.map((message) => [message.id, message] as const),
+  );
   for (const message of incoming) byId.set(message.id, message);
   return Array.from(byId.values());
 }
@@ -187,7 +195,10 @@ export default function MessengerProfileMediaTab({
         } catch (openError) {
           Alert.alert(
             "Не удалось открыть файл",
-            messengerErrorMessage(openError, "Можно сохранить файл на устройство"),
+            messengerErrorMessage(
+              openError,
+              "Можно сохранить файл на устройство",
+            ),
             [
               { text: "Отмена", style: "cancel" },
               { text: "Сохранить", onPress: () => void save(entry.media) },
@@ -200,11 +211,7 @@ export default function MessengerProfileMediaTab({
         (candidate) => candidate.key === entry.key,
       );
       if (index < 0) return;
-      try {
-        await ensureLocal(entry.media);
-      } catch {
-        // The viewer keeps its retry control and the concrete error text.
-      }
+      // Load inside the common viewer so closing is possible during download.
       setViewerSession((current) => current + 1);
       setViewerIndex(index);
     },
@@ -312,7 +319,9 @@ export default function MessengerProfileMediaTab({
       {loading ? (
         <View style={styles.backgroundLoading}>
           <ActivityIndicator size="small" color={colors.primary} />
-          <Text style={styles.backgroundLoadingText}>Загружаем старые вложения…</Text>
+          <Text style={styles.backgroundLoadingText}>
+            Загружаем старые вложения…
+          </Text>
         </View>
       ) : null}
       {error ? <Text style={styles.inlineError}>{error}</Text> : null}

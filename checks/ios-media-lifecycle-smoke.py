@@ -17,7 +17,8 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 OUT = Path('/tmp/ios-media-lifecycle-results')
 BUNDLE = 'com.forward.media-lifecycle-regression'
-PATCHES = ['expo-video+3.0.16.patch', 'react-native-svg+15.12.1.patch']
+BASE = '3824b6df875134e0f42d923de9c57da3ac425135'
+GRAPHICS_WARNINGS = r"Unsupported image format 'UNKNOWN'|(?:CGBitmapContext\w*|CGDisplayList\w*): (?:unsupported|invalid context)"
 HARNESS = r'''
 import React, { useEffect, useState } from 'react';
 import { View, Text } from 'react-native';
@@ -173,11 +174,16 @@ def main():
     chosen=next((d for runtime in sorted(devices,reverse=True) if '.iOS-' in runtime for d in devices[runtime] if d['name'].startswith('iPhone')),None)
     assert chosen,'No iPhone simulator'; udid=chosen['udid']
     (OUT/'simulator.json').write_text(json.dumps(chosen,indent=2))
+    # Reproduce the shipped invalid bitmap probe, not just the original warning.
+    old_patch = host/'previous-svg.patch'
+    old_patch.write_bytes(subprocess.check_output(['git','show',BASE+':patches/react-native-svg+15.12.1.patch'],cwd=ROOT))
+    run(['git','apply','--unsafe-paths',str(ROOT/'patches/expo-video+3.0.16.patch')],host,'apply-video')
+    run(['git','apply','--unsafe-paths',str(old_patch)],host,'apply-previous-svg')
     outcomes={}
     for mode in ['baseline','fixed']:
         if mode=='fixed':
-            for patch in PATCHES:
-                run(['git','apply','--unsafe-paths',str(ROOT/'patches'/patch)],host,'apply-'+patch)
+            run(['git','apply','-R','--unsafe-paths',str(old_patch)],host,'remove-previous-svg')
+            run(['git','apply','--unsafe-paths',str(ROOT/'patches/react-native-svg+15.12.1.patch')],host,'apply-owned-svg')
         run(['xcodebuild','-workspace',str(workspace),'-scheme',workspace.stem,'-configuration','Release','-sdk','iphonesimulator','-destination','generic/platform=iOS Simulator','-derivedDataPath',str(derived),'CODE_SIGNING_ALLOWED=NO','ONLY_ACTIVE_ARCH=YES','ARCHS='+os.uname().machine,'build'],host,'xcodebuild-'+mode,timeout=1500)
         if mode == 'baseline':
             if chosen['state'] != 'Booted': run(['xcrun','simctl','boot',udid],host,'boot')
@@ -205,12 +211,13 @@ def main():
         outcomes[mode]=value
         text=(OUT/('runtime-'+mode+'.log')).read_text(errors='replace') + (OUT/('system-'+mode+'.log')).read_text(errors='replace')
         outcomes[mode]['orphanEvents']=len(re.findall('JS object is no longer associated',text))
-        outcomes[mode]['bitmapErrors']=len(re.findall("Unsupported image format 'UNKNOWN'|CGBitmapContextCreate: unsupported|CGDisplayListDrawInContext: invalid|CGBitmapContextCreateImage: invalid",text))
+        outcomes[mode]['bitmapErrors']=len(re.findall(GRAPHICS_WARNINGS,text))
         (OUT/(mode+'-result.json')).write_text(json.dumps(outcomes[mode],indent=2))
     summary={'outcomes':outcomes,'passed':outcomes['fixed'].get('status')=='passed' and outcomes['fixed']['orphanEvents']==0 and outcomes['fixed']['bitmapErrors']==0}
     (OUT/'summary.json').write_text(json.dumps(summary,indent=2))
     print(json.dumps(summary,indent=2),flush=True)
     assert outcomes['baseline'].get('status')=='passed','Baseline probe did not complete'
+    assert outcomes['baseline']['bitmapErrors'] > 0,'Previous invalid bitmap probe was not reproduced'
     assert summary['passed'],'Fixed probe failed or retained media warnings'
 
 

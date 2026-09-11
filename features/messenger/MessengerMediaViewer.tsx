@@ -1,7 +1,13 @@
 import { Image } from "expo-image";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
-import React, { useEffect, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -14,13 +20,18 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
 import { messengerLog } from "../../services/messengerLogger";
 import { colors } from "../../styles/commonStyles";
 import MessengerVideoPlayer from "./MessengerVideoPlayer";
 import MessengerZoomableMedia from "./MessengerZoomableMedia";
+import { useMediaViewerLoading } from "./useMediaViewerLoading";
 import type { MessengerMedia } from "./types";
 
 interface MessengerMediaViewerProps {
@@ -66,6 +77,11 @@ export default function MessengerMediaViewer({
   const { width, height } = useWindowDimensions();
   const [menuVisible, setMenuVisible] = useState(false);
   const [zoomed, setZoomed] = useState(false);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const closing = useRef(false);
+  const pagerGesture = useMemo(() => Gesture.Native(), []);
+  useMediaViewerLoading(items, index, session, onEnsureLocal);
   const visible = index !== null;
   const media = index === null ? null : (items[index] ?? null);
   const headerTop = Math.max(insets.top, 8);
@@ -80,9 +96,7 @@ export default function MessengerMediaViewer({
     void ScreenOrientation.supportsOrientationLockAsync(requestedLock)
       .then((supported) =>
         ScreenOrientation.lockAsync(
-          supported
-            ? requestedLock
-            : ScreenOrientation.OrientationLock.DEFAULT,
+          supported ? requestedLock : ScreenOrientation.OrientationLock.DEFAULT,
         ).then(() => supported),
       )
       .then(async (supported) => {
@@ -122,11 +136,17 @@ export default function MessengerMediaViewer({
     }
   }, [visible]);
 
-  const close = () => {
+  useEffect(() => {
+    closing.current = false;
+    setZoomed(false);
+  }, [visible, session, index]);
+  const close = useCallback(() => {
+    if (closing.current) return;
+    closing.current = true;
     setMenuVisible(false);
     setZoomed(false);
-    onClose();
-  };
+    closeRef.current();
+  }, []);
 
   const runMessageAction = (action?: () => void) => {
     close();
@@ -138,66 +158,70 @@ export default function MessengerMediaViewer({
     const localUri = localUris[item.id];
     const loading = loadingIds.has(item.id);
     const error = errors[item.id];
+    const active = visible && itemIndex === index;
     return (
-      <View style={[styles.page, { width, height }]}>
-        {localUri && item.type === "image" && (
-          <MessengerZoomableMedia
-            width={width}
-            height={height}
-            resetKey={`${session}:${item.id}`}
-            onZoomChange={setZoomed}
-          >
+      <MessengerZoomableMedia
+        width={width}
+        height={height}
+        resetKey={`${session}:${itemIndex}:${item.id}`}
+        active={active}
+        zoomEnabled={Boolean(localUri)}
+        nativeChild={item.type === "video"}
+        pagerGesture={items.length > 1 ? pagerGesture : undefined}
+        onDismiss={close}
+        onZoomChange={(value) => {
+          if (active) setZoomed(value);
+        }}
+      >
+        <View style={[styles.page, { width, height }]}>
+          {localUri && item.type === "image" && (
             <Image
+              testID={`viewer-image-${item.id}`}
               source={localUri}
               style={{ width, height }}
               contentFit="contain"
             />
-          </MessengerZoomableMedia>
-        )}
-        {localUri && item.type === "video" && (
-          <View
-            style={[
-              styles.videoStage,
-              { top: videoTop, width, height: videoHeight },
-            ]}
-          >
-            <MessengerZoomableMedia
-              width={width}
-              height={videoHeight}
-              resetKey={`${session}:${item.id}`}
-              nativeChild
-              onZoomChange={setZoomed}
+          )}
+          {localUri && item.type === "video" && active && (
+            <View
+              style={[
+                styles.videoStage,
+                { top: videoTop, width, height: videoHeight },
+              ]}
             >
               <MessengerVideoPlayer
                 uri={localUri}
                 style={{ width, height: videoHeight }}
-                active={visible && itemIndex === index}
+                active={active}
                 autoPlay
                 fullscreenEnabled={false}
-                onFallback={() => void onEnsureLocal(item)}
+                onFallback={() =>
+                  void onEnsureLocal(item).catch(() => undefined)
+                }
               />
-            </MessengerZoomableMedia>
-          </View>
-        )}
-        {!localUri && (
-          <TouchableOpacity
-            style={styles.loading}
-            onPress={() => void onEnsureLocal(item).catch(() => undefined)}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color={colors.white} size="large" />
-            ) : (
-              <>
-                <Icon name="refresh-outline" size={34} color={colors.white} />
-                <Text style={styles.errorText}>
-                  {error || "Нажмите, чтобы загрузить"}
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
-        )}
-      </View>
+            </View>
+          )}
+          {!localUri && (
+            <TouchableOpacity
+              style={styles.loading}
+              onPress={() => void onEnsureLocal(item).catch(() => undefined)}
+              disabled={loading || !error}
+              accessibilityLabel={
+                error ? "Повторить загрузку вложения" : "Загрузка вложения"
+              }
+            >
+              {loading || !error ? (
+                <ActivityIndicator color={colors.white} size="large" />
+              ) : (
+                <>
+                  <Icon name="refresh-outline" size={34} color={colors.white} />
+                  <Text style={styles.errorText}>{error}</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+      </MessengerZoomableMedia>
     );
   };
 
@@ -216,34 +240,40 @@ export default function MessengerMediaViewer({
           (items.length === 1 ? (
             renderPage(items[0], 0)
           ) : (
-            <FlatList
-              key={`media-viewer-${session}`}
-              data={items}
-              horizontal
-              pagingEnabled
-              scrollEnabled={!zoomed}
-              bounces={false}
-              showsHorizontalScrollIndicator={false}
-              removeClippedSubviews={false}
-              initialScrollIndex={index}
-              keyExtractor={(item) => item.id}
-              getItemLayout={(_data, itemIndex) => ({
-                length: width,
-                offset: width * itemIndex,
-                index: itemIndex,
-              })}
-              onMomentumScrollEnd={(event) => {
-                const nextIndex = Math.round(
-                  event.nativeEvent.contentOffset.x / width,
-                );
-                if (!items[nextIndex]) return;
-                setZoomed(false);
-                onIndexChange(nextIndex);
-              }}
-              renderItem={({ item, index: itemIndex }) =>
-                renderPage(item, itemIndex)
-              }
-            />
+            <GestureDetector gesture={pagerGesture}>
+              <FlatList
+                key={`media-viewer-${session}-${width}-${height}`}
+                testID="media-viewer-pager"
+                data={items}
+                horizontal
+                pagingEnabled
+                scrollEnabled={!zoomed && !menuVisible}
+                bounces={false}
+                showsHorizontalScrollIndicator={false}
+                removeClippedSubviews={false}
+                initialScrollIndex={index}
+                initialNumToRender={3}
+                maxToRenderPerBatch={3}
+                windowSize={3}
+                keyExtractor={(item, itemIndex) => `${itemIndex}:${item.id}`}
+                getItemLayout={(_data, itemIndex) => ({
+                  length: width,
+                  offset: width * itemIndex,
+                  index: itemIndex,
+                })}
+                onMomentumScrollEnd={(event) => {
+                  const nextIndex = Math.round(
+                    event.nativeEvent.contentOffset.x / width,
+                  );
+                  if (!items[nextIndex]) return;
+                  setZoomed(false);
+                  onIndexChange(nextIndex);
+                }}
+                renderItem={({ item, index: itemIndex }) =>
+                  renderPage(item, itemIndex)
+                }
+              />
+            </GestureDetector>
           ))}
 
         <View
@@ -261,6 +291,7 @@ export default function MessengerMediaViewer({
             style={styles.headerButton}
             onPress={close}
             hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+            testID="media-viewer-close"
             accessibilityLabel="Закрыть просмотр"
           >
             <Icon name="chevron-back" size={30} color={colors.white} />

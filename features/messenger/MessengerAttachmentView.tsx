@@ -199,16 +199,6 @@ function MessengerAttachmentView({
       .forEach((item) => void ensureLocal(item).catch(() => undefined));
   }, [deferAutomaticCache, ensureLocal, itemIdentity, items]);
 
-  useEffect(() => {
-    if (viewerIndex === null) return;
-    [viewerIndex - 1, viewerIndex, viewerIndex + 1].forEach((index) => {
-      const item = viewerItems[index];
-      if (item && (index === viewerIndex || item.type === "image")) {
-        void ensureLocal(item).catch(() => undefined);
-      }
-    });
-  }, [ensureLocal, viewerIndex, viewerItems]);
-
   if (location) return <MessengerLocationPreview location={location} />;
   if (!items.length) return null;
 
