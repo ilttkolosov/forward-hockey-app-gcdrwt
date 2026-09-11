@@ -134,6 +134,20 @@ function environment() {
     await e.advance(3000); assert.equal(e.calls.length, 2);
     assert.equal((await e.repo.loadMessengerMediaOutbox(e.db, user.id)).length, 0);
   }
+  // A process killed inside its third attempt resumes that attempt, preserving
+  // the two remaining retries rather than charging an unobserved failure.
+  {
+    const e = environment(), s = e.makeService();
+    await e.repo.enqueueMessengerMedia(e.db, e.pending('interrupted'), files);
+    const [item] = await e.repo.loadMessengerMediaOutbox(e.db, user.id);
+    item.state = 'uploading'; item.attempts = 3; item.prepared = true;
+    await e.repo.saveMessengerMediaOutboxItem(e.db, item);
+    s.startMessengerMediaOutbox(e.db, user.id); await e.drain();
+    assert.equal((await e.repo.loadMessengerMediaOutbox(e.db, user.id))[0].attempts, 3);
+    await e.advance(3000); await e.advance(3000);
+    assert.equal(e.calls.length, 3);
+    assert.equal((await e.repo.loadMessengerMediaOutbox(e.db, user.id))[0].state, 'failed');
+  }
   // An accepted network request followed by a cache failure must not upload again.
   {
     const e = environment(), s = e.makeService(); e.cacheFails(1);

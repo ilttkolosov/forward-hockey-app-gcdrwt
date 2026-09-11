@@ -82,9 +82,11 @@ async function processItem(db: SQLiteDatabase, item: MessengerMediaOutboxItem, a
         item.files = await createMessengerMediaPosters(item.files);
         if (!active()) return;
       }
+      const resumingAttempt = item.state === "uploading";
       item.state = "uploading";
       // An interrupted process replays the same reserved attempt/idempotency key.
-      item.attempts = Math.min(MEDIA_MAX_ATTEMPTS, item.attempts + 1);
+      // Only a recorded transport failure consumes the retry budget.
+      item.attempts = resumingAttempt ? Math.max(1, item.attempts) : Math.min(MEDIA_MAX_ATTEMPTS, item.attempts + 1);
       updateAttachment(item, "Отправляем вложение…", "uploading");
       if (!await saveMessengerMediaOutboxItem(db, item) || !active()) return;
       emit(item.message);

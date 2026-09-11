@@ -1,6 +1,6 @@
 # Android chat keyboard: system insets
 
-Branch: `refactor/native-chat-keyboard`. Test build: 2.4.95 (248).
+Branch: `refactor/native-chat-keyboard`. Test build: 2.4.96 (249).
 
 ## Ownership and coordinates
 
