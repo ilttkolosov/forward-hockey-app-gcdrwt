@@ -27,6 +27,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
   type ViewToken,
@@ -1406,6 +1407,7 @@ export default function MessengerRoomScreen() {
   const [forwardLoading, setForwardLoading] = useState(false);
   const [forwardBusy, setForwardBusy] = useState<string | null>(null);
   const [forwardError, setForwardError] = useState<string | null>(null);
+  const [forwardQuery, setForwardQuery] = useState("");
   const [forwardSelectedKeys, setForwardSelectedKeys] = useState<Set<string>>(
     new Set(),
   );
@@ -4569,6 +4571,7 @@ export default function MessengerRoomScreen() {
     setForwardingMessage(message);
     setForwardLoading(true);
     setForwardError(null);
+    setForwardQuery("");
     setForwardSelectedKeys(new Set());
     try {
       const [roomsResult, contactsResult] = await Promise.all([
@@ -4840,6 +4843,41 @@ export default function MessengerRoomScreen() {
         !contact.direct_room_id || !roomIds.has(contact.direct_room_id),
     );
   }, [forwardContacts, forwardRooms]);
+
+  const normalizedForwardQuery = forwardQuery
+    .trim()
+    .toLocaleLowerCase("ru-RU");
+  const filteredForwardRooms = useMemo(() => {
+    if (!normalizedForwardQuery) return forwardRooms;
+    return forwardRooms.filter((room) =>
+      [
+        room.title,
+        room.team_name,
+        room.peer?.display_name,
+        room.peer?.original_display_name,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase("ru-RU")
+        .includes(normalizedForwardQuery),
+    );
+  }, [forwardRooms, normalizedForwardQuery]);
+  const filteredNewForwardContacts = useMemo(() => {
+    if (!normalizedForwardQuery) return newForwardContacts;
+    return newForwardContacts.filter((contact) =>
+      [
+        contact.display_name,
+        contact.original_display_name,
+        contact.alias,
+        contact.username,
+        contact.team_name,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase("ru-RU")
+        .includes(normalizedForwardQuery),
+    );
+  }, [newForwardContacts, normalizedForwardQuery]);
 
   const typingNames = Object.values(typingByUser);
   const connectionStatus = messengerRoomConnectionStatus({
@@ -5741,6 +5779,39 @@ export default function MessengerRoomScreen() {
                 </TouchableOpacity>
               </View>
 
+              <View style={styles.forwardSearchBox}>
+                <Icon
+                  name="search-outline"
+                  size={20}
+                  color={colors.textSecondary}
+                />
+                <TextInput
+                  style={styles.forwardSearchInput}
+                  value={forwardQuery}
+                  onChangeText={setForwardQuery}
+                  placeholder="Чат или участник"
+                  placeholderTextColor={colors.textSecondary}
+                  autoCorrect={false}
+                  returnKeyType="search"
+                  clearButtonMode="while-editing"
+                  editable={!forwardLoading && !forwardBusy}
+                  accessibilityLabel="Поиск чатов и участников"
+                />
+                {Platform.OS !== "ios" && forwardQuery ? (
+                  <TouchableOpacity
+                    onPress={() => setForwardQuery("")}
+                    disabled={Boolean(forwardBusy)}
+                    accessibilityLabel="Очистить поиск"
+                  >
+                    <Icon
+                      name="close-circle"
+                      size={20}
+                      color={colors.textSecondary}
+                    />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+
               {forwardLoading ? (
                 <View style={styles.forwardLoading}>
                   <ActivityIndicator color={colors.primary} />
@@ -5771,51 +5842,57 @@ export default function MessengerRoomScreen() {
                       </TouchableOpacity>
                     ) : null}
 
-                    <Text style={styles.forwardSectionTitle}>Личное</Text>
-                    <TouchableOpacity
-                      style={[
-                        styles.forwardTarget,
-                        forwardSelectedKeys.has("saved") &&
-                          styles.forwardTargetSelected,
-                      ]}
-                      onPress={() => toggleForwardTarget("saved")}
-                      disabled={Boolean(forwardBusy)}
-                      accessibilityRole="checkbox"
-                      accessibilityState={{
-                        checked: forwardSelectedKeys.has("saved"),
-                      }}
-                    >
-                      <SavedMessagesAvatar
-                        size={44}
-                        userId={session?.user.id}
-                      />
-                      <View style={styles.forwardTargetText}>
-                        <Text style={styles.forwardTargetTitle}>Избранное</Text>
-                        <Text style={styles.forwardTargetSubtitle}>
-                          Сохранить сообщение для себя
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.forwardCheckbox,
-                          forwardSelectedKeys.has("saved") &&
-                            styles.forwardCheckboxSelected,
-                        ]}
-                      >
-                        {forwardSelectedKeys.has("saved") ? (
-                          <Icon
-                            name="checkmark"
-                            size={17}
-                            color={colors.white}
+                    {!normalizedForwardQuery ? (
+                      <>
+                        <Text style={styles.forwardSectionTitle}>Личное</Text>
+                        <TouchableOpacity
+                          style={[
+                            styles.forwardTarget,
+                            forwardSelectedKeys.has("saved") &&
+                              styles.forwardTargetSelected,
+                          ]}
+                          onPress={() => toggleForwardTarget("saved")}
+                          disabled={Boolean(forwardBusy)}
+                          accessibilityRole="checkbox"
+                          accessibilityState={{
+                            checked: forwardSelectedKeys.has("saved"),
+                          }}
+                        >
+                          <SavedMessagesAvatar
+                            size={44}
+                            userId={session?.user.id}
                           />
-                        ) : null}
-                      </View>
-                    </TouchableOpacity>
+                          <View style={styles.forwardTargetText}>
+                            <Text style={styles.forwardTargetTitle}>
+                              Избранное
+                            </Text>
+                            <Text style={styles.forwardTargetSubtitle}>
+                              Сохранить сообщение для себя
+                            </Text>
+                          </View>
+                          <View
+                            style={[
+                              styles.forwardCheckbox,
+                              forwardSelectedKeys.has("saved") &&
+                                styles.forwardCheckboxSelected,
+                            ]}
+                          >
+                            {forwardSelectedKeys.has("saved") ? (
+                              <Icon
+                                name="checkmark"
+                                size={17}
+                                color={colors.white}
+                              />
+                            ) : null}
+                          </View>
+                        </TouchableOpacity>
+                      </>
+                    ) : null}
 
-                    {forwardRooms.length > 0 ? (
+                    {filteredForwardRooms.length > 0 ? (
                       <Text style={styles.forwardSectionTitle}>Чаты</Text>
                     ) : null}
-                    {forwardRooms.map((target) => {
+                    {filteredForwardRooms.map((target) => {
                       const key = `room:${target.id}`;
                       const selected = forwardSelectedKeys.has(key);
                       return (
@@ -5882,12 +5959,12 @@ export default function MessengerRoomScreen() {
                       );
                     })}
 
-                    {newForwardContacts.length > 0 ? (
+                    {filteredNewForwardContacts.length > 0 ? (
                       <Text style={styles.forwardSectionTitle}>
                         Новый личный чат
                       </Text>
                     ) : null}
-                    {newForwardContacts.map((contact) => {
+                    {filteredNewForwardContacts.map((contact) => {
                       const key = `contact:${contact.team_id}:${contact.id}`;
                       const selected = forwardSelectedKeys.has(key);
                       return (
@@ -5946,10 +6023,12 @@ export default function MessengerRoomScreen() {
                     })}
 
                     {!forwardError &&
-                    forwardRooms.length === 0 &&
-                    newForwardContacts.length === 0 ? (
+                    filteredForwardRooms.length === 0 &&
+                    filteredNewForwardContacts.length === 0 ? (
                       <Text style={styles.forwardEmpty}>
-                        Нет доступных получателей
+                        {normalizedForwardQuery
+                          ? "Чаты и участники не найдены"
+                          : "Нет доступных получателей"}
                       </Text>
                     ) : null}
                   </ScrollView>
@@ -7052,6 +7131,22 @@ const styles = StyleSheet.create({
     minHeight: 160,
     alignItems: "center",
     justifyContent: "center",
+  },
+  forwardSearchBox: {
+    height: 44,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    backgroundColor: colors.backgroundAlt,
+  },
+  forwardSearchInput: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 15,
   },
   forwardList: { flexGrow: 0 },
   forwardListContent: { paddingBottom: 12 },

@@ -1,3 +1,4 @@
+import { Asset } from "expo-asset";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -6,7 +7,6 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image as NativeImage,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -173,17 +173,18 @@ export default function MessengerProfileScreen() {
     }
   };
 
-  const choosePresetAvatar = (preset: MessengerPresetAvatar) => {
+  const choosePresetAvatar = async (preset: MessengerPresetAvatar) => {
     try {
-      // Presets are packaged with the application. Resolve the bundled resource
-      // directly instead of calling Asset.downloadAsync(), which can attempt a
-      // network fetch on some Expo/Android combinations and fail offline.
-      const source = NativeImage.resolveAssetSource(preset.source);
-      if (!source?.uri) throw new Error("Локальный ресурс аватара недоступен");
+      // ImageManipulator cannot reliably read Android's asset:/ URI. Expo Asset
+      // materializes the bundled image in the app cache and exposes a file URI.
+      const asset = Asset.fromModule(preset.source);
+      await asset.downloadAsync();
+      const uri = asset.localUri || asset.uri;
+      if (!uri) throw new Error("Локальный ресурс аватара недоступен");
       setSelectedAsset({
-        uri: source.uri,
-        width: source.width || 512,
-        height: source.height || 512,
+        uri,
+        width: asset.width || 512,
+        height: asset.height || 512,
         fileName: `${preset.id}.png`,
         mimeType: "image/png",
       });
@@ -800,7 +801,7 @@ export default function MessengerProfileScreen() {
                 <TouchableOpacity
                   key={preset.id}
                   style={styles.presetAvatarChoice}
-                  onPress={() => choosePresetAvatar(preset)}
+                  onPress={() => void choosePresetAvatar(preset)}
                   accessibilityLabel={`Выбрать аватар ${preset.title}`}
                 >
                   <Image

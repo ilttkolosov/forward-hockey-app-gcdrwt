@@ -21,6 +21,9 @@ const profileSource = readFileSync(
   "utf8",
 );
 assert.match(profileSource, /prepareMessengerAvatarUpload\(\{/);
+assert.match(profileSource, /Asset\.fromModule\(preset\.source\)/);
+assert.match(profileSource, /await asset\.downloadAsync\(\)/);
+assert.match(profileSource, /asset\.localUri \|\| asset\.uri/);
 assert.match(
   profileSource,
   /await uploadMessengerAvatar\(preparedAvatar\)/,
