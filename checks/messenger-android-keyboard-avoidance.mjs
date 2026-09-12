@@ -128,6 +128,8 @@ for (const os of ["android", "ios"]) {
 
 const room = read("app/messenger/room/[id].tsx");
 const area = read("features/messenger/ChatKeyboardArea.android.tsx");
+const forwardModalArea = read("features/messenger/ForwardModalKeyboardArea.android.tsx");
+const forwardModalAreaIos = read("features/messenger/ForwardModalKeyboardArea.tsx");
 const provider = read("features/messenger/AppKeyboardProvider.android.tsx");
 const native = read("modules/forward-rich-text-input/android/src/main/java/com/forwardhockey/richtext/ForwardRichTextInputView.kt");
 let areaTop = 0;
@@ -177,6 +179,11 @@ assert.match(area, /behavior="translate-with-padding"/);
 assert.match(area, /keyboardVerticalOffset=\{top \+ safeTop\}/);
 assert.match(provider, /statusBarTranslucent navigationBarTranslucent/);
 assert.match(provider, /setEnabled\(inChat\)/);
+assert.match(forwardModalArea, /behavior="height"/);
+assert.match(forwardModalArea, /container: \{ flex: 1 \}/);
+assert.match(forwardModalAreaIos, /Platform\.OS === "ios" \? "padding" : undefined/);
+assert.match(room, /<ForwardModalKeyboardArea>[\s\S]*styles\.forwardSheet[\s\S]*<\/ForwardModalKeyboardArea>/);
+assert.match(room, /forwardList: \{ flexShrink: 1, minHeight: 0 \}/);
 assert(room.indexOf("<PinnedMessagesBanner") < room.indexOf("<ChatKeyboardArea"));
 assert(room.indexOf("<ChatKeyboardArea") < room.indexOf("ref={feedViewportRef}"));
 assert(room.indexOf("style={styles.composerShell}") < room.indexOf("</ChatKeyboardArea>"));

@@ -69,6 +69,7 @@ import MessengerLinkPreview, {
 import SavedMessagesAvatar from "../../../features/messenger/SavedMessagesAvatar";
 import { useTypingDots } from "../../../features/messenger/useTypingDots";
 import ChatKeyboardArea from "../../../features/messenger/ChatKeyboardArea";
+import ForwardModalKeyboardArea from "../../../features/messenger/ForwardModalKeyboardArea";
 
 import {
   ForwardRichTextInput,
@@ -5746,19 +5747,20 @@ export default function MessengerRoomScreen() {
             }
           }}
         >
-          <Pressable
-            style={styles.modalBackdrop}
-            onPress={() => {
-              if (!forwardBusy) {
-                setForwardingMessage(null);
-                setForwardSelectedKeys(new Set());
-              }
-            }}
-          >
+          <ForwardModalKeyboardArea>
             <Pressable
-              style={styles.forwardSheet}
-              onPress={(event) => event.stopPropagation()}
+              style={styles.modalBackdrop}
+              onPress={() => {
+                if (!forwardBusy) {
+                  setForwardingMessage(null);
+                  setForwardSelectedKeys(new Set());
+                }
+              }}
             >
+              <Pressable
+                style={styles.forwardSheet}
+                onPress={(event) => event.stopPropagation()}
+              >
               <View style={styles.forwardHeader}>
                 <View>
                   <Text style={styles.forwardTitle}>Переслать сообщение</Text>
@@ -6060,8 +6062,9 @@ export default function MessengerRoomScreen() {
                   </View>
                 </>
               )}
+              </Pressable>
             </Pressable>
-          </Pressable>
+          </ForwardModalKeyboardArea>
         </Modal>
 
         <MessengerReportDialog
@@ -7148,7 +7151,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 15,
   },
-  forwardList: { flexGrow: 0 },
+  forwardList: { flexShrink: 1, minHeight: 0 },
   forwardListContent: { paddingBottom: 12 },
   forwardSectionTitle: {
     marginTop: 12,
