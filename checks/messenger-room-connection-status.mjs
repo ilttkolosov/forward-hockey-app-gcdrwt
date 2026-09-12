@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { messengerRoomConnectionStatus } from "../features/messenger/roomConnectionStatus.ts";
+import {
+  messengerRoomConnectionStatus,
+  shouldShowMessengerRoomSyncError,
+} from "../features/messenger/roomConnectionStatus.ts";
 
 const readyRoom = {
   initialDataReady: true,
@@ -38,6 +41,30 @@ assert.equal(
   messengerRoomConnectionStatus(readyRoom),
   "ready",
   "A fully synchronized room must restore its normal subtitle",
+);
+assert.equal(
+  shouldShowMessengerRoomSyncError({
+    remoteRequestStarted: true,
+    remoteResponseReceived: false,
+  }),
+  true,
+  "A rejected or interrupted server request must expose a sync error",
+);
+assert.equal(
+  shouldShowMessengerRoomSyncError({
+    remoteRequestStarted: true,
+    remoteResponseReceived: true,
+  }),
+  false,
+  "A SQLite failure after a valid response must not impersonate a server sync error",
+);
+assert.equal(
+  shouldShowMessengerRoomSyncError({
+    remoteRequestStarted: false,
+    remoteResponseReceived: false,
+  }),
+  false,
+  "A local cache read failure before networking must not be called a sync error",
 );
 
 console.log("Messenger room connection status checks passed");

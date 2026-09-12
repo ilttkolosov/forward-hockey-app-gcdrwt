@@ -11,6 +11,11 @@ export interface MessengerRoomConnectionStatusInput {
   syncError: string | null;
 }
 
+export interface MessengerRoomSyncFailureInput {
+  remoteRequestStarted: boolean;
+  remoteResponseReceived: boolean;
+}
+
 /**
  * Reconnecting is a normal transport state, including token rotation after
  * the app returns from the background. A previous REST failure must not win
@@ -30,4 +35,11 @@ export function messengerRoomConnectionStatus(
     return "connecting";
   }
   return input.syncError ? "sync_error" : "ready";
+}
+
+/** A local SQLite/cache failure after a valid server response is not a sync error. */
+export function shouldShowMessengerRoomSyncError(
+  input: MessengerRoomSyncFailureInput,
+): boolean {
+  return input.remoteRequestStarted && !input.remoteResponseReceived;
 }

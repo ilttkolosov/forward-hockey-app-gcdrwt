@@ -101,7 +101,10 @@ import {
   replaceMessengerOutboxItem,
 } from "../../../features/messenger/repository";
 import { messengerRoomInitialSyncPlan } from "../../../features/messenger/roomInitialSyncPolicy";
-import { messengerRoomConnectionStatus } from "../../../features/messenger/roomConnectionStatus";
+import {
+  messengerRoomConnectionStatus,
+  shouldShowMessengerRoomSyncError,
+} from "../../../features/messenger/roomConnectionStatus";
 import type {
   MessengerContact,
   MessengerMessage,
@@ -2233,6 +2236,9 @@ export default function MessengerRoomScreen() {
       let reconciliationMessageIds: string[] = [];
       let localSnapshotReady = false;
       let localReadStateFallback: string | null = null;
+      let remoteRequestStarted = false;
+      let remoteResponseReceived = false;
+      let cacheFailureCount = 0;
       let expectedUnreadCount = Number(params.unreadCount || 0);
       if (!Number.isFinite(expectedUnreadCount)) expectedUnreadCount = 0;
       try {
@@ -2459,7 +2465,16 @@ export default function MessengerRoomScreen() {
               ),
             );
           }
-          await cacheMessengerMessages(db, items);
+          try {
+            await cacheMessengerMessages(db, items);
+          } catch (error) {
+            cacheFailureCount += 1;
+            messengerLog("warn", "room.sync.cache_write_deferred", {
+              room_id: roomId,
+              message_count: items.length,
+              message: messengerErrorMessage(error),
+            });
+          }
           void removeMessengerOutboxItems(
             db,
             items.map((message) => message.client_message_id),
@@ -2511,16 +2526,26 @@ export default function MessengerRoomScreen() {
           // latest server window on first entry to make missing PUSH-era
           // messages visible immediately.
           syncDirection = "latest";
+          remoteRequestStarted = true;
           const remote = await getMessengerMessages(roomId, {
             limit: roomSyncPlan.limit,
             priority: "foreground",
           });
+          remoteResponseReceived = true;
           receivedMessageCount = remote.items.length;
           latestSequence = remote.page.latest_sequence;
           remoteHasMoreNewerMessages.current = false;
           await applyRemoteMessages(remote.items, true);
           if (initial && !remote.page.has_more) {
-            await markMessengerRoomHistoryComplete(db, roomId);
+            try {
+              await markMessengerRoomHistoryComplete(db, roomId);
+            } catch (error) {
+              cacheFailureCount += 1;
+              messengerLog("warn", "room.sync.history_marker_deferred", {
+                room_id: roomId,
+                message: messengerErrorMessage(error),
+              });
+            }
           }
         } else {
           // One request advances the SQLite cursor and refreshes the exact
@@ -2528,11 +2553,13 @@ export default function MessengerRoomScreen() {
           // sequence, so they are selected by id rather than by rereading an
           // arbitrary 100-message tail.
           syncDirection = "after";
+          remoteRequestStarted = true;
           const page = await syncMessengerRoomMessages(roomId, {
             afterSequence: roomSyncPlan.afterSequence,
             messageIds: reconciliationMessageIds,
             limit: roomSyncPlan.limit,
           });
+          remoteResponseReceived = true;
           receivedMessageCount = page.items.length;
           reconciledMessageCount = page.reconciled_items.length;
           remoteHasMoreNewerMessages.current = page.page.has_more;
@@ -2545,7 +2572,7 @@ export default function MessengerRoomScreen() {
                 reactionMutationIds.current,
               ),
             );
-            await cacheMessengerMessages(db, page.reconciled_items);
+            await applyRemoteMessages(page.reconciled_items, false);
           }
           if (page.page.latest_sequence) {
             latestSequence = page.page.latest_sequence;
@@ -2567,20 +2594,37 @@ export default function MessengerRoomScreen() {
           reconciled_message_count: reconciledMessageCount,
           latest_sequence: latestSequence,
           direction: syncDirection,
+          cache_failure_count: cacheFailureCount,
           outbox_flush_detached: true,
           duration_ms: Date.now() - startedAt,
         });
       } catch (error) {
-        setSyncError(
-          messengerErrorMessage(error, "Не удалось обновить сообщения"),
-        );
-        console.warn("[Messenger] Показан локальный кэш комнаты:", error);
-        messengerLog("warn", "room.sync.failed", {
-          room_id: roomId,
-          category: isMessengerConnectionError(error) ? "connection" : "server",
-          message: messengerErrorMessage(error),
-          duration_ms: Date.now() - startedAt,
+        const remoteSyncFailed = shouldShowMessengerRoomSyncError({
+          remoteRequestStarted,
+          remoteResponseReceived,
         });
+        if (remoteSyncFailed) {
+          setSyncError(
+            messengerErrorMessage(error, "Не удалось обновить сообщения"),
+          );
+          console.warn("[Messenger] Показан локальный кэш комнаты:", error);
+          messengerLog("warn", "room.sync.failed", {
+            room_id: roomId,
+            category: isMessengerConnectionError(error)
+              ? "connection"
+              : "server",
+            message: messengerErrorMessage(error),
+            duration_ms: Date.now() - startedAt,
+          });
+        } else {
+          setSyncError(null);
+          messengerLog("warn", "room.sync.local_reconciliation_deferred", {
+            room_id: roomId,
+            remote_response_received: remoteResponseReceived,
+            message: messengerErrorMessage(error),
+            duration_ms: Date.now() - startedAt,
+          });
+        }
       } finally {
         if (initial) setInitialDataReady(true);
         setLoading(false);
