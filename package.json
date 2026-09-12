@@ -1,6 +1,6 @@
 {
   "name": "Natively",
-  "version": "2.4.96",
+  "version": "2.4.97",
   "main": "index.ts",
   "scripts": {
     "dev": "EXPO_NO_TELEMETRY=1 expo start --tunnel",
@@ -30,7 +30,7 @@
     "check:messenger-android-keyboard": "node --no-warnings --experimental-strip-types checks/messenger-android-keyboard-avoidance.mjs",
     "check:startup-config": "node --no-warnings --experimental-strip-types checks/startup-config-policy.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "npm run photos:generate && npm run logos:generate && npm run seed:verify && npm run generate:route-types && npm run check:messenger-unread && npm run check:messenger-player-identity && npm run check:messenger-player-avatar && npm run check:messenger-message-mutation && npm run check:messenger-avatar-ime-compat && npm run check:messenger-ios-registration && npm run check:messenger-android-keyboard && npm run check:startup-config && npm run check:messenger-pin-thumbnail && npm run check:messenger-media-outbox && npm run typecheck && npm run lint && npm run check:messenger-navigation && npm run check:ios-media-patches",
+    "check": "npm run photos:generate && npm run logos:generate && npm run seed:verify && npm run generate:route-types && npm run check:messenger-unread && npm run check:messenger-player-identity && npm run check:messenger-player-avatar && npm run check:messenger-message-mutation && npm run check:messenger-avatar-ime-compat && npm run check:messenger-ios-registration && npm run check:messenger-android-keyboard && npm run check:startup-config && npm run check:messenger-pin-thumbnail && npm run check:messenger-media-outbox && npm run check:messenger-room-connection && npm run typecheck && npm run lint && npm run check:messenger-navigation && npm run check:ios-media-patches",
     "prebuild": "expo prebuild",
     "eas-build": "npx --yes eas-cli@21.7.0 build",
     "check:messenger-avatar-ime-compat": "node --no-warnings --experimental-strip-types checks/messenger-avatar-ime-compat.mjs",
@@ -39,7 +39,8 @@
     "check:messenger-pin-thumbnail": "node checks/messenger-pin-thumbnail-contract.cjs",
     "check:ios-media-patches": "node checks/ios-media-patch-contract.cjs",
     "check:media-viewer": "node checks/media-viewer-runtime.cjs",
-    "check:messenger-media-outbox": "node checks/messenger-media-outbox.cjs && node checks/messenger-media-feed.cjs"
+    "check:messenger-media-outbox": "node checks/messenger-media-outbox.cjs && node checks/messenger-media-feed.cjs",
+    "check:messenger-room-connection": "node --no-warnings --experimental-strip-types checks/messenger-room-connection-status.mjs"
   },
   "dependencies": {
     "@appmetrica/react-native-analytics": "^4.2.0",

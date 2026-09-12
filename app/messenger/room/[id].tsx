@@ -101,6 +101,7 @@ import {
   replaceMessengerOutboxItem,
 } from "../../../features/messenger/repository";
 import { messengerRoomInitialSyncPlan } from "../../../features/messenger/roomInitialSyncPolicy";
+import { messengerRoomConnectionStatus } from "../../../features/messenger/roomConnectionStatus";
 import type {
   MessengerContact,
   MessengerMessage,
@@ -1344,7 +1345,6 @@ export default function MessengerRoomScreen() {
   const [composerInputHeight, setComposerInputHeight] = useState(46);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [offline, setOffline] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   // A local navigation failure must never replace the server synchronization status.
   const [navigationError, setNavigationError] = useState<string | null>(null);
@@ -1910,7 +1910,7 @@ export default function MessengerRoomScreen() {
       })
       .catch((error) => {
         if (!active) return;
-        setSyncError(
+        setNavigationError(
           messengerErrorMessage(error, "Не удалось подготовить личный ответ"),
         );
       });
@@ -2000,8 +2000,6 @@ export default function MessengerRoomScreen() {
               reactionMutationIds.current,
             ),
           );
-          setOffline(false);
-          setSyncError(null);
           return;
         }
         setMessages((current) =>
@@ -2011,8 +2009,6 @@ export default function MessengerRoomScreen() {
               : message,
           ),
         );
-        setOffline(isMessengerConnectionError(event.error));
-        setSyncError(event.message);
       }),
     [roomId],
   );
@@ -2444,10 +2440,10 @@ export default function MessengerRoomScreen() {
         // Sending stale/failed outbox items can consume several 8-second
         // attempts. It must never sit on the critical path that opens a room.
         void flushOutbox().catch((error) => {
-          setOffline(isMessengerConnectionError(error));
-          setSyncError(
-            messengerErrorMessage(error, "Не удалось отправить сообщение"),
-          );
+          messengerLog("debug", "room.outbox.flush_deferred", {
+            room_id: roomId,
+            message: messengerErrorMessage(error),
+          });
         });
         const applyRemoteMessages = async (
           items: MessengerMessage[],
@@ -2564,7 +2560,6 @@ export default function MessengerRoomScreen() {
         ) {
           scrollToLatest(false);
         }
-        setOffline(false);
         setSyncError(null);
         messengerLog("info", "room.sync.completed", {
           room_id: roomId,
@@ -2576,7 +2571,6 @@ export default function MessengerRoomScreen() {
           duration_ms: Date.now() - startedAt,
         });
       } catch (error) {
-        setOffline(isMessengerConnectionError(error));
         setSyncError(
           messengerErrorMessage(error, "Не удалось обновить сообщения"),
         );
@@ -3054,7 +3048,7 @@ export default function MessengerRoomScreen() {
           );
         }
       } catch (error) {
-        setSyncError(
+        setNavigationError(
           messengerErrorMessage(error, "Не удалось применить фильтр"),
         );
       } finally {
@@ -3212,9 +3206,7 @@ export default function MessengerRoomScreen() {
         } else if (resolvedRoomType) {
           setRoomMemberCount(members.length);
         }
-        setOffline(false);
       } catch (membersError) {
-        if (isMessengerConnectionError(membersError)) setOffline(true);
         messengerLog("warn", "room.members.sync_failed", {
           room_id: roomId,
           message: messengerErrorMessage(membersError),
@@ -3316,7 +3308,7 @@ export default function MessengerRoomScreen() {
         if (event.type === "connection.state") {
           setRealtimeConnected(event.connected);
           if (event.connected) {
-            setOffline(false);
+            setSyncError(null);
             scheduleConnectionSync();
           }
         } else if (event.type === "presence.updated") {
@@ -3594,10 +3586,10 @@ export default function MessengerRoomScreen() {
           elapsed_since_tap_ms: Date.now() - tappedAt,
         });
         void flushOutbox().catch((error) => {
-          setOffline(isMessengerConnectionError(error));
-          setSyncError(
-            messengerErrorMessage(error, "Не удалось отправить сообщение"),
-          );
+          messengerLog("debug", "room.outbox.flush_deferred", {
+            room_id: roomId,
+            message: messengerErrorMessage(error),
+          });
         });
       } catch (error) {
         const message = messengerErrorMessage(
@@ -3611,7 +3603,6 @@ export default function MessengerRoomScreen() {
               : item,
           ),
         );
-        setSyncError(message);
       }
     })();
   };
@@ -3720,8 +3711,6 @@ export default function MessengerRoomScreen() {
             room_type: roomType || "unknown",
             source: "composer",
           });
-          setOffline(false);
-          setSyncError(null);
           return;
         }
         const files =
@@ -3768,8 +3757,6 @@ export default function MessengerRoomScreen() {
           media_types: files.map((file) => file.kind).join(","),
           preparation_duration_ms: Date.now() - preparationStartedAt,
         });
-        setOffline(false);
-        setSyncError(null);
       } catch (error) {
         const message = messengerErrorMessage(
           error,
@@ -3779,8 +3766,6 @@ export default function MessengerRoomScreen() {
               ? "Не удалось отправить вложение"
               : "Не удалось подготовить вложение",
         );
-        if (contentPrepared) setOffline(isMessengerConnectionError(error));
-        setSyncError(message);
         if (clientMessageId) {
           setReplyingTo((current) => current ?? replyingTo);
           updatePendingAttachment(clientMessageId, (pendingMessage) => ({
@@ -3932,8 +3917,6 @@ export default function MessengerRoomScreen() {
           files: [file],
         });
         void warmMessengerBufferedUploadFiles([file]);
-        setOffline(false);
-        setSyncError(null);
         messengerLog("info", "attachment.clipboard.prepared", {
           room_id: roomId,
           kind: file.kind,
@@ -3945,7 +3928,6 @@ export default function MessengerRoomScreen() {
           error,
           "Не удалось подготовить вложение из буфера обмена",
         );
-        setSyncError(message);
         messengerLog("warn", "attachment.clipboard.failed", {
           room_id: roomId,
           message,
@@ -3977,7 +3959,6 @@ export default function MessengerRoomScreen() {
       const message = messengerErrorMessage(error, "Не удалось сохранить вложение локально");
       updatePendingAttachment(clientMessageId, item => ({ ...item, send_error: message,
         pending_attachment: item.pending_attachment ? { ...item.pending_attachment, stage: "failed", label: "Неотправлено" } : null }));
-      setSyncError(message);
     });
   }, [attachmentDraft, cancelMessageNavigation, db, replyingTo, roomId, sending, session, text, updatePendingAttachment]);
 
@@ -4035,10 +4016,10 @@ export default function MessengerRoomScreen() {
           nearLatest.current = true;
           scrollToLatest(true);
           void flushOutbox().catch((error) => {
-            setOffline(isMessengerConnectionError(error));
-            setSyncError(
-              messengerErrorMessage(error, "Не удалось отправить сообщение"),
-            );
+            messengerLog("debug", "room.outbox.retry_deferred", {
+              room_id: roomId,
+              message: messengerErrorMessage(error),
+            });
           });
         } catch (error) {
           Alert.alert(
@@ -4095,8 +4076,6 @@ export default function MessengerRoomScreen() {
             failedMessage.reply_to?.id,
           );
           await storeSentMessage(result.message);
-          setOffline(false);
-          setSyncError(null);
         } catch (error) {
           const message = messengerErrorMessage(
             error,
@@ -4113,8 +4092,6 @@ export default function MessengerRoomScreen() {
                 }
               : null,
           }));
-          setOffline(isMessengerConnectionError(error));
-          setSyncError(message);
         } finally {
           setSending(false);
         }
@@ -4355,14 +4332,11 @@ export default function MessengerRoomScreen() {
       await cacheUpdatedMessengerMessage(db, result.message);
       setEditingMessage(null);
       setText("");
-      setOffline(false);
-      setSyncError(null);
       trackMessengerAction("message_edited", {
         content_type: target.kind,
         room_type: roomType || "unknown",
       });
     } catch (error) {
-      setOffline(isMessengerConnectionError(error));
       Alert.alert(
         "Сообщение не изменено",
         messengerErrorMessage(error, "Повторите попытку позже"),
@@ -4443,15 +4417,12 @@ export default function MessengerRoomScreen() {
                       setEditingMessage((current) =>
                         current?.id === result.message.id ? null : current,
                       );
-                      setOffline(false);
-                      setSyncError(null);
                       trackMessengerAction("message_deleted", {
                         content_type: message.kind,
                         room_type: roomType || "unknown",
                       });
                     })
                     .catch((error) => {
-                      setOffline(isMessengerConnectionError(error));
                       Alert.alert(
                         "Сообщение не удалено",
                         messengerErrorMessage(error, "Повторите попытку позже"),
@@ -4827,7 +4798,17 @@ export default function MessengerRoomScreen() {
   }, [forwardContacts, forwardRooms]);
 
   const typingNames = Object.values(typingByUser);
-  const typingDots = useTypingDots(typingNames.length > 0);
+  const connectionStatus = messengerRoomConnectionStatus({
+    initialDataReady,
+    roomDetailsReady,
+    roomTypeReady: Boolean(roomType),
+    realtimeConnected,
+    syncError,
+  });
+  const connectingDots = useTypingDots(connectionStatus === "connecting");
+  const typingDots = useTypingDots(
+    connectionStatus === "ready" && typingNames.length > 0,
+  );
   const showTypingNames = Boolean(
     roomType &&
     roomType !== "direct" &&
@@ -4836,21 +4817,19 @@ export default function MessengerRoomScreen() {
     roomMemberCount >= 3,
   );
   const roomSubtitle =
-    typingNames.length > 0
-      ? typingUsersText(typingNames, showTypingNames, typingDots)
-      : !initialDataReady || !roomDetailsReady || !roomType
-        ? "Обновление"
-        : offline || !realtimeConnected
-          ? "Нет соединения с сервером"
-          : syncError
-            ? "Ошибка синхронизации"
-            : roomType === "saved"
-              ? "Ваши сохранённые сообщения"
-              : roomType === "direct"
-                ? peerPresence?.online
-                  ? "В сети"
-                  : lastSeenText(peerPresence?.last_seen_at ?? null)
-                : participantCountText(roomMemberCount);
+    connectionStatus === "connecting"
+      ? `Подключение к серверу${connectingDots}`
+      : connectionStatus === "sync_error"
+        ? "Ошибка синхронизации"
+        : typingNames.length > 0
+          ? typingUsersText(typingNames, showTypingNames, typingDots)
+          : roomType === "saved"
+            ? "Ваши сохранённые сообщения"
+            : roomType === "direct"
+              ? peerPresence?.online
+                ? "В сети"
+                : lastSeenText(peerPresence?.last_seen_at ?? null)
+              : participantCountText(roomMemberCount);
 
   const actionMessageFailed = Boolean(
     actionMessage?.pending && actionMessage.send_error,
@@ -5290,11 +5269,11 @@ export default function MessengerRoomScreen() {
                 >
                   <UnreadDivider />
                   <View style={styles.unreadTailStatus}>
-                    {!offline && <ActivityIndicator color={colors.primary} />}
+                    <ActivityIndicator color={colors.primary} />
                     <Text style={styles.unreadTailStatusText}>
-                      {offline
-                        ? "Новые сообщения появятся после восстановления сети"
-                        : "Загружаем новые сообщения…"}
+                      {realtimeConnected
+                        ? "Загружаем новые сообщения…"
+                        : `Подключение к серверу${connectingDots}`}
                     </Text>
                   </View>
                 </View>
