@@ -12,6 +12,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -40,6 +41,7 @@ import {
   uploadMessengerAvatar,
 } from "../../services/messengerApi";
 import { messengerLog } from "../../services/messengerLogger";
+import { readConnectionDiagnostics } from "../../services/messengerConnectionDiagnostics";
 import { prepareMessengerAvatarUpload } from "../../services/messengerAvatarPreparation";
 import {
   DEFAULT_MESSENGER_QUICK_REACTION,
@@ -553,6 +555,13 @@ export default function MessengerProfileScreen() {
             )}
           </View>
 
+          <TouchableOpacity style={styles.cacheCard} onPress={() => {
+            void readConnectionDiagnostics()
+              .then((message) => Share.share({ message, title: "Диагностика соединения" }))
+              .catch(() => Alert.alert("Диагностика", "Не удалось открыть журнал. Повторите попытку."));
+          }} accessibilityLabel="Поделиться диагностикой соединения">
+            <Text style={styles.cacheTitle}>Поделиться диагностикой соединения</Text>
+          </TouchableOpacity>
           <View style={styles.cacheCard}>
             <View style={styles.cacheIcon}>
               <Icon name="folder-open" size={25} color={colors.primary} />

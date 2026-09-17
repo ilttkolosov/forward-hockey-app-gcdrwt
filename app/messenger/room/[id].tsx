@@ -1351,6 +1351,8 @@ export default function MessengerRoomScreen() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [connectionTimedOut, setConnectionTimedOut] = useState(false);
+  const [connectionRetry, setConnectionRetry] = useState(0);
   // A local navigation failure must never replace the server synchronization status.
   const [navigationError, setNavigationError] = useState<string | null>(null);
   const [messageNavigationId, setMessageNavigationId] = useState<string | null>(null);
@@ -3180,16 +3182,29 @@ export default function MessengerRoomScreen() {
     ],
   );
 
-  const scheduleConnectionSync = useCallback(() => {
+  const scheduleConnectionSync = useCallback((immediate = false) => {
+    const scheduledAt = Date.now();
+    if (immediate && connectionSyncTimer.current) {
+      clearTimeout(connectionSyncTimer.current);
+      connectionSyncTimer.current = null;
+    }
     if (connectionSyncTimer.current) return;
     const run = (): void => {
       const elapsed = Date.now() - lastRoomSyncFinishedAt.current;
       const remaining = 10_000 - elapsed;
-      if (lastRoomSyncFinishedAt.current > 0 && remaining > 0) {
+      if (!immediate && lastRoomSyncFinishedAt.current > 0 && remaining > 0) {
         connectionSyncTimer.current = setTimeout(run, remaining);
         return;
       }
       connectionSyncTimer.current = null;
+      if (immediate && refreshRunning.current) {
+        if (Date.now() - scheduledAt >= 15_000) {
+          messengerLog("warn", "connection.sync_wait_timeout", {});
+          return;
+        }
+        connectionSyncTimer.current = setTimeout(run, 100);
+        return;
+      }
       void flushOutbox().catch(() => undefined);
       void loadMessages(false);
     };
@@ -3356,7 +3371,7 @@ export default function MessengerRoomScreen() {
           setRealtimeConnected(event.connected);
           if (event.connected) {
             setSyncError(null);
-            scheduleConnectionSync();
+            scheduleConnectionSync(true);
           }
         } else if (event.type === "presence.updated") {
           setPeerPresence((current) =>
@@ -3486,11 +3501,9 @@ export default function MessengerRoomScreen() {
           event.type === "connection.ready"
         ) {
           if (event.type === "connection.ready") setRealtimeConnected(true);
-          // A weak connection may emit several reconnect/ready pairs in quick
-          // succession. The live events already update the feed, so one REST
-          // reconciliation per ten seconds is sufficient and prevents the
-          // request cascade visible in the diagnostic log.
-          scheduleConnectionSync();
+          // Restore immediately after authenticated recovery; coalesce duplicate
+          // ready/state events, retaining throttling only for routine invalidation.
+          scheduleConnectionSync(event.type === "connection.ready" || Boolean(event.immediate));
         } else if (event.type === "room.updated" && event.room_id === roomId) {
           if (event.deleted) router.replace("/messenger/rooms");
           else void refreshRoomDetails(true);
@@ -3515,6 +3528,8 @@ export default function MessengerRoomScreen() {
           }
         }
       });
+      // Snapshot after subscribing: ready may have arrived while unfocused.
+      setRealtimeConnected(getMessengerRealtimeConnectionState());
       // Reconciliation is intentionally infrequent: Socket.IO performs normal
       // foreground delivery, while this timer protects against a lost event.
       const timer = setInterval(() => void loadMessages(false), 120_000);
@@ -4889,6 +4904,28 @@ export default function MessengerRoomScreen() {
     syncError,
   });
   const connectingDots = useTypingDots(connectionStatus === "connecting");
+  useEffect(() => {
+    setConnectionTimedOut(false);
+    if (!roomScreenActive || connectionStatus !== "connecting") return;
+    const timer = setTimeout(() => {
+      setConnectionTimedOut(true);
+      messengerLog("warn", "connection.recovery_timeout", { duration_ms: 15_000 });
+    }, 15_000);
+    return () => clearTimeout(timer);
+  }, [connectionStatus, roomScreenActive, connectionRetry]);
+  useEffect(() => {
+    if (!roomScreenActive) return;
+    const startedAt = Date.now();
+    const reasons = [
+      !initialDataReady && "messages",
+      !roomType && "room_identity",
+      !realtimeConnected && "realtime",
+    ].filter(Boolean).join(",");
+    messengerLog("info", "connection.room_status", { status: connectionStatus, reasons });
+    return () => {
+      messengerLog("info", "connection.room_status_ended", { status: connectionStatus, reasons, duration_ms: Date.now() - startedAt });
+    };
+  }, [connectionStatus, initialDataReady, realtimeConnected, roomScreenActive, roomType]);
   const typingDots = useTypingDots(
     connectionStatus === "ready" && typingNames.length > 0,
   );
@@ -4900,7 +4937,9 @@ export default function MessengerRoomScreen() {
     roomMemberCount >= 3,
   );
   const roomSubtitle =
-    connectionStatus === "connecting"
+    connectionTimedOut && connectionStatus === "connecting"
+      ? "Не удалось подключиться"
+      : connectionStatus === "connecting"
       ? `Подключение к серверу${connectingDots}`
       : connectionStatus === "sync_error"
         ? "Ошибка синхронизации"
@@ -5192,6 +5231,22 @@ export default function MessengerRoomScreen() {
           </TouchableOpacity>
         </View>
 
+        {connectionTimedOut && connectionStatus === "connecting" && (
+          <TouchableOpacity
+            style={styles.navigationNotice}
+            accessibilityRole="button"
+            accessibilityLabel="Повторить подключение"
+            onPress={() => {
+              setConnectionRetry((value) => value + 1);
+              setMessengerActiveRoom(roomId);
+              setRealtimeConnected(getMessengerRealtimeConnectionState());
+              void loadMessages(true);
+              void refreshRoomDetails(true);
+            }}
+          >
+            <Text style={styles.navigationNoticeText}>Подключение заняло слишком много времени. Повторить</Text>
+          </TouchableOpacity>
+        )}
         <PinnedMessagesBanner
           items={pins.items}
           messageId={currentPinId}

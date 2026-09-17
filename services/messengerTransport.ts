@@ -61,20 +61,29 @@ async function acquireBackgroundLane(
   signal: AbortSignal | null | undefined,
   generation: number,
 ): Promise<void> {
+  const deadlineAt = Date.now() + 8_000;
   while (foregroundRequests > 0 || backgroundRequestActive) {
+    if (Date.now() >= deadlineAt) throw new MessengerTransportTimeoutError(8_000);
     if (signal?.aborted) throw abortError();
     if (generation !== backgroundGeneration) {
       throw new MessengerBackgroundRequestCancelledError();
     }
     await new Promise<void>((resolve, reject) => {
       const wake = () => {
+        clearTimeout(waitTimeout);
         signal?.removeEventListener("abort", onAbort);
         resolve();
       };
       const onAbort = () => {
+        clearTimeout(waitTimeout);
         backgroundWaiters.delete(wake);
         reject(abortError());
       };
+      const waitTimeout = setTimeout(() => {
+        backgroundWaiters.delete(wake);
+        signal?.removeEventListener("abort", onAbort);
+        reject(new MessengerTransportTimeoutError(8_000));
+      }, Math.max(1, deadlineAt - Date.now()));
       backgroundWaiters.add(wake);
       signal?.addEventListener("abort", onAbort, { once: true });
     });
@@ -111,13 +120,17 @@ export async function runMessengerTransportTask<T>(
   if (options.signal?.aborted) controller.abort();
   if (priority === "background") activeBackgroundControllers.add(controller);
 
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, timeoutMs);
+  let timeout: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      reject(new MessengerTransportTimeoutError(timeoutMs));
+    }, timeoutMs);
+  });
 
   try {
-    return await operation(controller.signal);
+    return await Promise.race([operation(controller.signal), deadline]);
   } catch (error) {
     if (timedOut) throw new MessengerTransportTimeoutError(timeoutMs);
     if (
@@ -130,7 +143,7 @@ export async function runMessengerTransportTask<T>(
     }
     throw error;
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timeout!);
     options.signal?.removeEventListener("abort", onExternalAbort);
     if (priority === "background") {
       activeBackgroundControllers.delete(controller);

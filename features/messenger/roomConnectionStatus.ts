@@ -28,7 +28,6 @@ export function messengerRoomConnectionStatus(
 ): MessengerRoomConnectionStatus {
   if (
     !input.initialDataReady ||
-    !input.roomDetailsReady ||
     !input.roomTypeReady ||
     !input.realtimeConnected
   ) {

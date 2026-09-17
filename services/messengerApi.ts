@@ -186,8 +186,8 @@ export function isMessengerAccessTokenUsable(
   return expiresAt !== null && expiresAt - Date.now() > minimumValidityMs;
 }
 
-async function parseResponse<T>(response: Response): Promise<T> {
-  const payload = (await response.json().catch(() => ({}))) as ApiEnvelope<T> &
+async function parseResponse<T>(response: Response, body?: unknown): Promise<T> {
+  const payload = (body ?? await response.json().catch(() => ({}))) as ApiEnvelope<T> &
     ApiErrorEnvelope;
   if (!response.ok) {
     throw new MessengerApiError(
@@ -228,6 +228,8 @@ function parseUploadResponse<T>(status: number, body: string): T {
 async function refreshMessengerSession(): Promise<MessengerSession> {
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
+    const refreshStartedAt = Date.now();
+    messengerLog("info", "connection.token_refresh_started", {});
     const session = await loadMessengerSession();
     if (!session?.refresh_token) {
       throw new MessengerApiError(
@@ -246,13 +248,13 @@ async function refreshMessengerSession(): Promise<MessengerSession> {
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
       try {
-        const response = await runMessengerTransportTask(
+        const refreshed = await runMessengerTransportTask(
           {
             priority: "foreground",
             timeoutMs: REFRESH_REQUEST_TIMEOUT_MS,
           },
-          (signal) =>
-            fetch(`${MESSENGER_API_BASE_URL}/auth/refresh`, {
+          async (signal) => {
+            const response = await fetch(`${MESSENGER_API_BASE_URL}/auth/refresh`, {
               method: "POST",
               headers: {
                 Accept: "application/json",
@@ -260,17 +262,22 @@ async function refreshMessengerSession(): Promise<MessengerSession> {
               },
               body: JSON.stringify({ refresh_token: session.refresh_token }),
               signal,
-            }),
+            });
+            return parseResponse<MessengerSession>(response);
+          },
         );
-        const refreshed = await parseResponse<MessengerSession>(response);
         await saveMessengerSession(refreshed);
+        messengerLog("info", "connection.token_refresh_completed", { duration_ms: Date.now() - refreshStartedAt });
         return refreshed;
       } catch (error) {
         if (error instanceof MessengerApiError) {
           if (error.status === 401) await clearMessengerSession();
           throw error;
         }
-        if (attempt === REFRESH_RETRY_DELAYS_MS.length - 1) throw error;
+        if (attempt === REFRESH_RETRY_DELAYS_MS.length - 1) {
+          messengerLog("warn", "connection.token_refresh_failed", { duration_ms: Date.now() - refreshStartedAt });
+          throw error;
+        }
         messengerLog("info", "auth.refresh.retry", {
           attempt: attempt + 2,
           reason: "connection_lost",
@@ -359,19 +366,22 @@ export async function messengerRequest<T>(
       signal: externalSignal,
       ...requestInit
     } = options;
-    const response = await runMessengerTransportTask(
+    const { response, body } = await runMessengerTransportTask(
       {
         priority,
         timeoutMs:
           timeoutMs ?? (options.body instanceof FormData ? 120_000 : undefined),
         signal: externalSignal,
       },
-      (signal) =>
-        fetch(`${MESSENGER_API_BASE_URL}${path}`, {
+      async (signal) => {
+        const response = await fetch(`${MESSENGER_API_BASE_URL}${path}`, {
           ...requestInit,
           headers,
           signal,
-        }),
+        });
+        const body: unknown = await response.json().catch(() => ({}));
+        return { response, body };
+      },
     );
     const serverRequestId = response.headers.get("x-request-id") || requestId;
     messengerLog(response.ok ? "info" : "warn", "api.response", {
@@ -400,7 +410,7 @@ export async function messengerRequest<T>(
       }
       return messengerRequest<T>(path, { ...options, noRefresh: true });
     }
-    return await parseResponse<T>(response);
+    return await parseResponse<T>(response, body);
   } catch (error) {
     // A fetch-level failure is an expected offline condition on mobile. Expo
     // turns console.error into a red development overlay (with a synthetic

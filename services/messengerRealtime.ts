@@ -17,7 +17,7 @@ export type MessengerRealtimeEvent =
       room_ids: string[];
     }
   | { type: "connection.state"; connected: boolean; reason?: string }
-  | { type: "sync.required" }
+  | { type: "sync.required"; immediate?: boolean }
   | { type: "message.created"; message: MessengerMessage }
   | { type: "message.updated"; message: MessengerMessage }
   | { type: "room.updated"; room_id: string; deleted?: boolean }
@@ -65,6 +65,15 @@ let presenceRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let appStateSubscription: NativeEventSubscription | null = null;
 let socketReady = false;
 let connectionRejected = false;
+let needsResumeProbe = AppState.currentState !== "active";
+let cancelResumeProbe: (() => void) | null = null;
+let authenticationTimer: ReturnType<typeof setTimeout> | null = null;
+let authenticationFailures = 0;
+
+function clearAuthenticationTimer(): void {
+  if (authenticationTimer) clearTimeout(authenticationTimer);
+  authenticationTimer = null;
+}
 
 function activeRoomIdForServer(): string | null {
   return AppState.currentState === "active" ? visibleRoomId : null;
@@ -117,6 +126,12 @@ function synchronizePresenceRefresh(): void {
 function ensureAppStateSubscription(): void {
   if (appStateSubscription) return;
   appStateSubscription = AppState.addEventListener("change", () => {
+    if (AppState.currentState !== "active") {
+      needsResumeProbe = true;
+      // A probe interrupted by another lock must be retried on the next wake.
+      if (cancelResumeProbe) socketReady = true;
+      cancelResumeProbe?.();
+    }
     // Clear the server marker before Android/iOS suspends the process. If the
     // event cannot leave the device, disconnect cleanup and the Redis TTL are
     // the remaining safeguards.
@@ -128,6 +143,9 @@ function ensureAppStateSubscription(): void {
 }
 
 function publish(event: MessengerRealtimeEvent): void {
+  if (event.type === "connection.state") {
+    messengerLog("info", "connection.state", { connected: event.connected });
+  }
   listeners.forEach((listener) => {
     try {
       listener(event);
@@ -138,6 +156,8 @@ function publish(event: MessengerRealtimeEvent): void {
 }
 
 function closeSocket(reason: string): void {
+  clearAuthenticationTimer();
+  cancelResumeProbe?.();
   if (!socket) return;
   stopActiveRoomRefresh();
   stopPresenceRefresh();
@@ -181,7 +201,7 @@ export function connectMessengerRealtime(accessToken: string): void {
     autoConnect: true,
     forceNew: true,
     reconnection: true,
-    reconnectionAttempts: Infinity,
+    reconnectionAttempts: 5,
     reconnectionDelay: 250,
     reconnectionDelayMax: 3_000,
     randomizationFactor: 0.2,
@@ -190,6 +210,14 @@ export function connectMessengerRealtime(accessToken: string): void {
   socket = nextSocket;
 
   nextSocket.on("connect", () => {
+    clearAuthenticationTimer();
+    authenticationTimer = setTimeout(() => {
+      if (socket !== nextSocket || socketReady) return;
+      messengerLog("warn", "connection.auth_timeout", {});
+      authenticationFailures += 1;
+      nextSocket.disconnect();
+      if (authenticationFailures < 3 && AppState.currentState === "active") nextSocket.connect();
+    }, 4_000);
     socketReady = false;
     connectionRejected = false;
     console.log(
@@ -206,6 +234,8 @@ export function connectMessengerRealtime(accessToken: string): void {
     });
   });
   nextSocket.on("disconnect", (reason) => {
+    clearAuthenticationTimer();
+    cancelResumeProbe?.();
     socketReady = false;
     stopActiveRoomRefresh();
     stopPresenceRefresh();
@@ -215,7 +245,8 @@ export function connectMessengerRealtime(accessToken: string): void {
       reason === "io server disconnect" &&
       !connectionRejected &&
       activeAccessToken &&
-      AppState.currentState === "active"
+      AppState.currentState === "active" &&
+      ++authenticationFailures < 3
     ) {
       setTimeout(() => {
         if (socket === nextSocket && !nextSocket.connected) {
@@ -246,6 +277,11 @@ export function connectMessengerRealtime(accessToken: string): void {
     "connection.ready",
     (payload: { user_id: string; session_id: string; room_ids: string[] }) => {
       socketReady = true;
+      authenticationFailures = 0;
+      clearAuthenticationTimer();
+      needsResumeProbe = false;
+      cancelResumeProbe?.();
+      messengerLog("info", "connection.ready", {});
       connectionRejected = false;
       // The server authenticates inside its connection handler. Re-announce
       // scoped state here so an event emitted immediately on the transport's
@@ -256,7 +292,7 @@ export function connectMessengerRealtime(accessToken: string): void {
       synchronizePresenceRefresh();
       publish({ type: "connection.ready", ...payload });
       publish({ type: "connection.state", connected: true });
-      publish({ type: "sync.required" });
+      publish({ type: "sync.required", immediate: true });
     },
   );
   nextSocket.on(
@@ -269,7 +305,7 @@ export function connectMessengerRealtime(accessToken: string): void {
         `[Messenger realtime] Сервер отклонил соединение: ${reason}`,
       );
       publish({ type: "connection.state", connected: false, reason });
-      if (reason === "temporary_unavailable") {
+      if (reason === "temporary_unavailable" && ++authenticationFailures < 3) {
         const retryAfterMs = Math.min(
           5_000,
           Math.max(250, payload.retry_after_ms ?? 1_000),
@@ -386,6 +422,40 @@ export function disconnectMessengerRealtime(): void {
 /** Called when React Native returns from the background. */
 export function resumeMessengerRealtime(): void {
   if (!socket || !activeAccessToken) return;
+  if (AppState.currentState !== "active") return;
+  if (needsResumeProbe && socket.connected && socketReady && !cancelResumeProbe) {
+    const current = socket;
+    const engine = current.io.engine;
+    const startedAt = Date.now();
+    socketReady = false;
+    publish({ type: "connection.state", connected: false, reason: "resume_probe" });
+    messengerLog("info", "connection.resume_probe", {});
+    // An inbound Engine.IO packet proves the old transport is alive. If none
+    // arrives promptly, replace it rather than waiting for the heartbeat timeout.
+    const onPacket = () => {
+      cancelResumeProbe?.();
+      if (socket !== current || !current.connected) return;
+      needsResumeProbe = false;
+      socketReady = true;
+      messengerLog("info", "connection.resume_verified", { duration_ms: Date.now() - startedAt });
+      publish({ type: "connection.state", connected: true });
+      publish({ type: "sync.required", immediate: true });
+    };
+    const timer = setTimeout(() => {
+      cancelResumeProbe?.();
+      if (socket !== current || AppState.currentState !== "active") return;
+      needsResumeProbe = false;
+      messengerLog("warn", "connection.resume_reconnect", { duration_ms: Date.now() - startedAt });
+      current.disconnect();
+      current.connect();
+    }, 2_000);
+    cancelResumeProbe = () => {
+      clearTimeout(timer);
+      engine.off("packet", onPacket);
+      cancelResumeProbe = null;
+    };
+    engine.on("packet", onPacket);
+  }
   if (!socket.connected) {
     // A network transition must not inherit an old exponential-backoff wait.
     // `open()` asks the Manager to start a transport attempt immediately.
@@ -396,7 +466,7 @@ export function resumeMessengerRealtime(): void {
     synchronizeActiveRoomRefresh();
     announcePresenceActivity();
     synchronizePresenceRefresh();
-    publish({ type: "sync.required" });
+    publish({ type: "sync.required", immediate: needsResumeProbe });
   }
 }
 
@@ -424,6 +494,7 @@ export function setMessengerPresenceActive(active: boolean): void {
 export function setMessengerActiveRoom(roomId: string | null): void {
   visibleRoomId = roomId || null;
   if (visibleRoomId) {
+    authenticationFailures = 0;
     prioritizeMessengerForegroundTransport();
     resumeMessengerRealtime();
   }

@@ -11,6 +11,8 @@ const readyRoom = {
   realtimeConnected: true,
   syncError: null,
 };
+assert.equal(messengerRoomConnectionStatus({ ...readyRoom, roomDetailsReady: false }), "ready",
+  "Members request must not gate a healthy connection");
 
 assert.equal(
   messengerRoomConnectionStatus({

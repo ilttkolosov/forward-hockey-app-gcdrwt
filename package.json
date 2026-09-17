@@ -40,7 +40,7 @@
     "check:ios-media-patches": "node checks/ios-media-patch-contract.cjs",
     "check:media-viewer": "node checks/media-viewer-runtime.cjs",
     "check:messenger-media-outbox": "node checks/messenger-media-outbox.cjs && node checks/messenger-media-feed.cjs",
-    "check:messenger-room-connection": "node --no-warnings --experimental-strip-types checks/messenger-room-connection-status.mjs"
+    "check:messenger-room-connection": "node --no-warnings --experimental-strip-types checks/messenger-room-connection-status.mjs && node checks/messenger-resume-deadlines.cjs"
   },
   "dependencies": {
     "@appmetrica/react-native-analytics": "^4.2.0",

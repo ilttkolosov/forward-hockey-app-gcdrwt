@@ -3,6 +3,8 @@
  * integration has stabilised. Never pass tokens, passwords, message text or
  * media contents to this logger.
  */
+import { recordConnectionDiagnostic } from "./messengerConnectionDiagnostics";
+
 export const MESSENGER_DEBUG_LOGS_ENABLED = true;
 
 type MessengerLogLevel = "debug" | "info" | "warn" | "error";
@@ -22,9 +24,10 @@ export function messengerLog(
   event: string,
   context: MessengerLogContext = {},
 ): void {
+  if (event.startsWith("connection.")) recordConnectionDiagnostic(event, context);
   if (!MESSENGER_DEBUG_LOGS_ENABLED) return;
   const prefix = `[Messenger][${event}]`;
-  const payload = compact(context);
+  const payload = compact({ ...context, timestamp: new Date().toISOString() });
   if (level === "error") console.error(prefix, payload);
   else if (level === "warn") console.warn(prefix, payload);
   else console.log(prefix, payload);
