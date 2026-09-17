@@ -34,7 +34,8 @@ const GAME_DETAIL_STORAGE_PREFIX = '@offline/game-detail/v1/';
 // --- КЭШ ДЛЯ МАСТЕР-ДАННЫХ ПРЕДСТОЯЩИХ ИГР ---
 let upcomingGamesMasterCache: { data: Game[]; timestamp: number } | null = null;
 const UPCOMING_MASTER_CACHE_DURATION = 5 * 60 * 1000; // 5 минут
-const UPCOMING_MASTER_STORAGE_KEY = '@offline/upcoming-master/v1';
+const UPCOMING_MASTER_STORAGE_KEY = '@offline/upcoming-master/v2';
+const LEGACY_UPCOMING_MASTER_STORAGE_KEY = '@offline/upcoming-master/v1';
 let isMasterDataLoading = false; // <-- Флаг загрузки
 let masterDataLoadPromise: Promise<Game[]> | null = null; // <-- Promise для ожидания текущей загрузки
 type UpcomingGamesListener = (games: Game[]) => void;
@@ -789,11 +790,8 @@ function isCacheValid<T>(cache: CachedData<T> | null): boolean {
 //let masterDataLoadPromise: Promise<Game[]> | null = null; // <-- И эта тоже
 const buildUpcomingGamesParams = (): GetGamesParams => {
   const nowDate = new Date();
-  const futureDate = new Date(nowDate);
-  futureDate.setDate(futureDate.getDate() + 137);
   return {
     date_from: nowDate.toISOString().split('T')[0],
-    date_to: futureDate.toISOString().split('T')[0],
     teams: '74',
     useCache: true,
   };
@@ -831,8 +829,14 @@ export async function restoreUpcomingGamesMasterData(): Promise<Game[]> {
   const params = buildUpcomingGamesParams();
   const { useCache: _useCache, ...cacheParams } = params;
   const cacheKey = JSON.stringify(cacheParams);
-  const persistent = await readPersistentCache<Game[]>(UPCOMING_MASTER_STORAGE_KEY)
+  let persistent = await readPersistentCache<Game[]>(UPCOMING_MASTER_STORAGE_KEY)
     || await readPersistentCache<Game[]>(getPersistentGamesKey(cacheKey));
+
+  if (!persistent) {
+    const legacy = await readPersistentCache<Game[]>(LEGACY_UPCOMING_MASTER_STORAGE_KEY);
+    // Старый ограниченный список доступен офлайн, но требует обновления из API.
+    if (legacy) persistent = { ...legacy, savedAt: 0 };
+  }
 
   if (persistent) {
     const data = sortUpcomingGames(await hydrateGamesLogos(persistent.data));
@@ -852,7 +856,7 @@ export async function restoreUpcomingGamesMasterData(): Promise<Game[]> {
 
 /**
 * Мастер-функция для получения всех предстоящих игр команды 74.
-* Делает единственный запрос к API. Диапазон: с сегодня на 137 дней вперёд.
+* Делает единственный запрос к API: с сегодня без верхней границы даты.
 */
 export async function getUpcomingGamesMasterData(forceRefresh = false): Promise<Game[]> {
   // Обычные потребители не ждут уже запущенное фоновое обновление: им сразу
@@ -1063,16 +1067,9 @@ export async function getUpcomingGamesCount(): Promise<number> {
     }
 
     // Если мастер-кэш недоступен по какой-то причине, сделать отдельный вызов
-    const now = new Date();
-    const futureDate = new Date(now);
-    futureDate.setDate(futureDate.getDate() + 37);
-    const todayString = now.toISOString().split('T')[0];
-    const futureDateString = futureDate.toISOString().split('T')[0];
-
+    const { useCache: _useCache, ...params } = buildUpcomingGamesParams();
     const response = await apiService.fetchEvents({
-      date_from: todayString,
-      date_to: futureDateString,
-      teams: '74',
+      ...params,
     });
     const count = response.count || 0;
     console.log('Upcoming games count (from API):', count);
