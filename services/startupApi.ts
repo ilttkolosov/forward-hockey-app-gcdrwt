@@ -1,7 +1,7 @@
 // /services/startupApi.ts
 import { dataAvailability } from './dataAvailability';
 import { readPersistentCache, writePersistentCache } from './persistentCache';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { readOptionalStorageValue } from './optionalStorage';
 import NetInfo from '@react-native-community/netinfo';
 import { getMetadata } from '../database/repository';
 import { waitForAppInteractive } from './appInteractive';
@@ -78,12 +78,13 @@ const validateStartupConfig = (value: unknown): StartupConfig => {
 };
 
 const migrateLegacyStartupConfig = async (): Promise<StartupConfig | null> => {
-  const values = await AsyncStorage.multiGet([
+  const keys = [
     'teams_version',
     'players_version',
     'tournaments_now',
     'tournaments_past',
-  ]);
+  ];
+  const values = await Promise.all(keys.map(async key => [key, await readOptionalStorageValue(key)]));
   const storage = Object.fromEntries(values);
   const parseArray = (raw?: string | null) => {
     try {

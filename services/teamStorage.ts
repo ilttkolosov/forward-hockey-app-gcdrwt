@@ -1,5 +1,6 @@
 // services/teamStorage.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { readCacheValue, writeCacheValue } from './cacheStorage';
 import { ApiTeam } from '../types';
 import * as FileSystem from 'expo-file-system/legacy';
 import { getBundledTeamLogoUri, hasBundledTeamLogo } from '../utils/teamLogos';
@@ -10,7 +11,7 @@ const TEAM_LOGO_PREFIX = '@team_logo_';
 // Сохранить список команд
 export const saveTeamList = async (teams: ApiTeam[]): Promise<void> => {
   try {
-    await AsyncStorage.setItem(TEAM_LIST_KEY, JSON.stringify(teams));
+    await writeCacheValue(TEAM_LIST_KEY, JSON.stringify(teams));
   } catch (error) {
     console.error('Failed to save team list', error);
   }
@@ -19,7 +20,7 @@ export const saveTeamList = async (teams: ApiTeam[]): Promise<void> => {
 // Загрузить список команд
 export const loadTeamList = async (): Promise<ApiTeam[] | null> => {
   try {
-    const json = await AsyncStorage.getItem(TEAM_LIST_KEY);
+    const json = await readCacheValue(TEAM_LIST_KEY);
     return json ? JSON.parse(json) : null;
   } catch (error) {
     console.error('Failed to load team list', error);

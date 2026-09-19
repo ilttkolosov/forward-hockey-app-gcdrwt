@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { readOptionalStorageValue } from './optionalStorage';
 import {
   getReferenceVersion,
   loadTournamentConfigFromDatabase,
@@ -52,7 +52,6 @@ let apiUrl = 'https://www.hc-forward.com/wp-json/app/v1/get-table';
 export const configureTournamentApi = (baseUrl: string): void => {
   apiUrl = `${baseUrl.replace(/\/+$/, '')}/get-table`;
 };
-const CURRENT_TOURNAMENT_DATA_KEY = 'current_tournament_data';
 const CURRENT_TOURNAMENT_CONFIG_KEY = 'current_tournament_config';
 
 const asString = (value: unknown, fallback = ''): string => {
@@ -133,16 +132,6 @@ const parseTournamentConfig = (
   };
 };
 
-const saveLegacyCompatibilityCache = async (
-  tournamentId: string,
-  config: TournamentConfig
-): Promise<void> => {
-  await AsyncStorage.multiSet([
-    [`${CURRENT_TOURNAMENT_CONFIG_KEY}_${tournamentId}`, JSON.stringify(config)],
-    [`${CURRENT_TOURNAMENT_DATA_KEY}_${tournamentId}`, JSON.stringify(config.tables)],
-  ]);
-};
-
 export const getConfiguredTournamentVersion = (config: StartupConfig): number => {
   const value = config.data_versions?.tournaments ?? config.tournaments_version ?? 0;
   const parsed = Number(value);
@@ -193,7 +182,6 @@ export const fetchTournamentConfig = async (
     );
   }
   await saveTournamentConfigToDatabase(tournamentId, config, storedVersion);
-  await saveLegacyCompatibilityCache(tournamentId, config);
 
   console.log(
     `[Турниры] Таблица ${tournamentId}: получено ${config.tables.length} строк, `
@@ -221,7 +209,7 @@ export const getCachedTournamentConfig = async (
 
   const legacyKey = `${CURRENT_TOURNAMENT_CONFIG_KEY}_${tournamentId}`;
   try {
-    const legacy = await AsyncStorage.getItem(legacyKey);
+    const legacy = await readOptionalStorageValue(legacyKey);
     if (!legacy) return null;
     const config = parseTournamentConfig(JSON.parse(legacy), 0);
     await saveTournamentConfigToDatabase(tournamentId, config, config.version ?? 0);

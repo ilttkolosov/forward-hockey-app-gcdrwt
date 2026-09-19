@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { writeOptionalStorageValue } from './optionalStorage';
 import {
   getReferenceVersion,
   loadLeaguesFromDatabase,
@@ -125,15 +125,12 @@ export const initializeReferenceData = async (
     apiService.hydrateReferenceCaches({ teams, venues, leagues, seasons });
     const writes = await Promise.allSettled([
       saveTeamList(teams),
-      AsyncStorage.setItem('teams_version', String(localVersions.teams)),
-      AsyncStorage.setItem('api_venues_cache', JSON.stringify(venues)),
-      AsyncStorage.setItem('api_leagues_cache', JSON.stringify(leagues)),
-      AsyncStorage.setItem('api_seasons_cache', JSON.stringify(seasons)),
+      writeOptionalStorageValue('teams_version', String(localVersions.teams)),
     ]);
     const failedWrites = writes.filter((result) => result.status === 'rejected');
     if (failedWrites.length > 0) {
       console.warn(
-        `[Справочники] ${failedWrites.length} вспомогательных снимков AsyncStorage не сохранено; SQLite остаётся основным источником`,
+        `[Справочники] ${failedWrites.length} вспомогательных снимков не сохранено; SQLite остаётся основным источником`,
       );
     }
   };

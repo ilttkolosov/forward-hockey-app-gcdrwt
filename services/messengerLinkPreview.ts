@@ -1,4 +1,4 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { readCacheValue, writeCacheValue } from './cacheStorage';
 
 export interface MessengerLinkPreview {
   url: string;
@@ -258,7 +258,7 @@ export function getMessengerLinkPreview(
   const promise = (async () => {
     const key = `${CACHE_PREFIX}${hashUrl(normalized)}`;
     try {
-      const raw = await AsyncStorage.getItem(key);
+      const raw = await readCacheValue(key);
       const cached = raw ? (JSON.parse(raw) as CachedPreview) : null;
       const ttl = cached?.preview ? SUCCESS_CACHE_TTL_MS : FAILURE_CACHE_TTL_MS;
       if (
@@ -287,7 +287,7 @@ export function getMessengerLinkPreview(
       savedAt: Date.now(),
       preview,
     };
-    void AsyncStorage.setItem(key, JSON.stringify(cached)).catch(() => undefined);
+    void writeCacheValue(key, JSON.stringify(cached)).catch(() => undefined);
     return preview;
   })().finally(() => {
     inFlight.delete(normalized);

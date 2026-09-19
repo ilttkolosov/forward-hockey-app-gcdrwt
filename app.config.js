@@ -95,6 +95,7 @@ export default ({ config }) => {
       bundler: "metro",
     },
     plugins: [
+      "./plugins/withAsyncStorageCapacity.js",
       "expo-font",
       "expo-router",
       "expo-web-browser",

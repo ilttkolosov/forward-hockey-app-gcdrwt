@@ -18,6 +18,8 @@ import { colors } from '../styles/commonStyles';
 import { playerDownloadService } from '../services/playerDataService';
 import PlayerDataLoadingScreen from '../components/PlayerDataLoadingScreen';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { prepareCacheStorage } from '../services/cacheStorage';
+import { writeOptionalStorageValue } from '../services/optionalStorage';
 import {
   getUpcomingGamesMasterData,
   refreshUpcomingGamesMasterDataIfStale,
@@ -508,6 +510,7 @@ function RootLayoutContent() {
 
     try {
       initializationLog('Запуск приложения');
+      void prepareCacheStorage();
 
       // Аналитика не является условием показа интерфейса. Нативная активация
       // может занимать секунды на iOS, поэтому запускаем её после быстрого
@@ -677,7 +680,7 @@ function RootLayoutContent() {
         }
       }
       localPlayersVersion = await getReferenceVersion('players') || localPlayersVersion;
-      await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(localPlayersVersion));
+      await writeOptionalStorageValue(PLAYERS_VERSION_KEY, String(localPlayersVersion));
       initializationLog(
         `Игроки: подготовлено ${playersList.length} записей за ${elapsedMilliseconds(playersStartedAt)} мс`
       );
@@ -691,7 +694,7 @@ function RootLayoutContent() {
         afterStartupTasks.push(() => {
           void playerDownloadService.refreshPlayersData(playersVersion)
             .then(async freshPlayers => {
-              await AsyncStorage.setItem(PLAYERS_VERSION_KEY, String(playersVersion));
+              await writeOptionalStorageValue(PLAYERS_VERSION_KEY, String(playersVersion));
               publishReferenceDataUpdate(['players'], { players: playersVersion });
               initializationLog(
                 `Игроки: фоновое обновление завершено; записей=${freshPlayers.length}, `

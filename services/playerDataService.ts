@@ -1,5 +1,6 @@
 // services/playerDataService.ts
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { readCacheValue, writeCacheValue } from './cacheStorage';
+import { readOptionalStorageValue, writeOptionalStorageValue } from './optionalStorage';
 import {
   documentDirectory,
   getInfoAsync,
@@ -55,24 +56,28 @@ interface PlayerFullApiResponse extends DatabasePlayer {
 export class PlayerDownloadSystem {
   private baseUrl = 'https://www.hc-forward.com/wp-json/app/v1';
   private bundledPhotoUris = new Map<string, string>();
+  private playersSnapshot: Player[] | null = null;
+  private dataLoaded: boolean | null = null;
 
   configure(baseUrl: string): void {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
   }
 
   async isDataLoaded(): Promise<boolean> {
-    const loaded = await AsyncStorage.getItem(PLAYERS_DATA_LOADED_KEY);
+    if (this.dataLoaded !== null) return this.dataLoaded;
+    const loaded = await readOptionalStorageValue(PLAYERS_DATA_LOADED_KEY);
     return loaded === 'true';
   }
   async arePhotosDownloaded(): Promise<boolean> {
-    const downloaded = await AsyncStorage.getItem(PLAYER_PHOTOS_DOWNLOADED_KEY);
+    const downloaded = await readOptionalStorageValue(PLAYER_PHOTOS_DOWNLOADED_KEY);
     return downloaded === 'true';
   }
   async setDataLoaded(loaded: boolean): Promise<void> {
-    await AsyncStorage.setItem(PLAYERS_DATA_LOADED_KEY, loaded.toString());
+    this.dataLoaded = loaded;
+    await writeOptionalStorageValue(PLAYERS_DATA_LOADED_KEY, loaded.toString());
   }
   async setPhotosDownloadedFlag(downloaded: boolean): Promise<void> {
-    await AsyncStorage.setItem(PLAYER_PHOTOS_DOWNLOADED_KEY, downloaded.toString());
+    await writeOptionalStorageValue(PLAYER_PHOTOS_DOWNLOADED_KEY, downloaded.toString());
   }
 
   async ensurePlayersDirectoryExists(): Promise<void> {
@@ -349,7 +354,7 @@ export class PlayerDownloadSystem {
         return [id, uri] as const;
       }));
       this.bundledPhotoUris = new Map(assets);
-      await AsyncStorage.setItem(BUNDLED_PHOTOS_VERSION_KEY, String(version));
+      await writeOptionalStorageValue(BUNDLED_PHOTOS_VERSION_KEY, String(version));
       await this.setPhotosDownloadedFlag(assets.length > 0);
       console.log(`✅ Подключено ${assets.length} встроенных фото игроков версии ${version}`);
       return assets.length > 0;
@@ -488,12 +493,29 @@ export class PlayerDownloadSystem {
   }
 
   async savePlayersToStorage(players: Player[]): Promise<void> {
-    await AsyncStorage.setItem(PLAYERS_STORAGE_KEY, JSON.stringify(players));
+    this.playersSnapshot = players;
+    try {
+      await writeCacheValue(PLAYERS_STORAGE_KEY, JSON.stringify(players));
+    } catch (error) {
+      // The authoritative roster is already in forward.db; keep the prepared
+      // view in memory so a disposable cache failure cannot block launch.
+      console.warn('[Игроки] Вспомогательный снимок не сохранён:', error);
+    }
   }
 
   async getPlayersFromStorage(): Promise<Player[]> {
-    const data = await AsyncStorage.getItem(PLAYERS_STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
+    if (this.playersSnapshot) return this.playersSnapshot;
+    try {
+      const data = await readCacheValue(PLAYERS_STORAGE_KEY);
+      const players = data ? JSON.parse(data) : null;
+      if (Array.isArray(players) && players.length > 0) {
+        this.playersSnapshot = players;
+        return players;
+      }
+    } catch (error) {
+      console.warn('[Игроки] Снимок недоступен, восстановление из основной базы:', error);
+    }
+    return this.initializeFromDatabase(await getReferenceVersion('players'), false);
   }
 
   async refreshPlayersData(
