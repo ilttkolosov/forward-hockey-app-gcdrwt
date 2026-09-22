@@ -46,26 +46,22 @@ fileprivate final class ForwardAttributedTextView: UITextView {
       action == #selector(formatStrikethrough(_:)) {
       return selectedRange.length > 0
     }
-    if action == #selector(paste(_:)),
-      formattingOwner?.canPasteAttachmentFromPasteboard() == true {
-      return true
-    }
     return super.canPerformAction(action, withSender: sender)
   }
 
   override func paste(_ sender: Any?) {
-    // iOS may put both a textual URL and a preview image on the pasteboard
-    // when copying from Safari or Notes. A messenger composer must preserve
-    // the user's explicit text in that case instead of promoting the preview
-    // to an image attachment.
-    if let text = formattingOwner?.preferredPastedText() {
-      insertText(text)
-      return
-    }
-    if formattingOwner?.pasteAttachmentFromPasteboard() == true {
-      return
-    }
+    // Let UITextView perform the user-requested paste first. This keeps text
+    // and URLs on Apple's native paste path, so merely focusing the composer
+    // never reads UIPasteboard and cannot trigger the iOS paste-permission
+    // prompt. If the system paste cannot consume the payload (for example a
+    // file/movie), fall back to the messenger attachment handler only after
+    // the user has explicitly chosen Paste.
+    let generation = formattingOwner?.textChangeGenerationSnapshot()
     super.paste(sender)
+
+    guard let owner = formattingOwner, let generation else { return }
+    if owner.textChanged(since: generation) { return }
+    _ = owner.pasteAttachmentFromPasteboard()
   }
 
   @objc fileprivate func formatBold(_ sender: Any?) {
@@ -103,6 +99,7 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
   private let placeholderLabel = UILabel()
   private var suppressEvents = false
   private var lastContentHeight: CGFloat = -1
+  private var textChangeGeneration: UInt = 0
 
   var placeholder = "" {
     didSet {
@@ -246,6 +243,7 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
   }
 
   public func textViewDidChange(_ textView: UITextView) {
+    textChangeGeneration &+= 1
     // Memoji stickers and Genmoji are inserted by the iOS text system as an
     // attributed-string attachment, not as ordinary characters. If they are
     // serialized through `textView.text`, only U+FFFC reaches JavaScript and
@@ -462,34 +460,17 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
     ]
   }
 
-  fileprivate func preferredPastedText() -> String? {
-    let pasteboard = UIPasteboard.general
-    if let text = pasteboard.string, !text.isEmpty {
-      return text
-    }
-    if let webURL = pasteboard.urls?.first(where: { !$0.isFileURL }) {
-      return webURL.absoluteString
-    }
-    return nil
+  fileprivate func textChangeGenerationSnapshot() -> UInt {
+    textChangeGeneration
   }
 
-  fileprivate func canPasteAttachmentFromPasteboard() -> Bool {
-    guard pasteAttachmentsEnabled else { return false }
-    let pasteboard = UIPasteboard.general
-    if preferredPastedText() != nil { return false }
-    if pasteboard.hasImages { return true }
-    if pasteboard.itemProviders.contains(where: { provider in
-      provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
-    }) {
-      return true
-    }
-    return pasteboard.itemProviders.contains { preferredAttachmentType(for: $0) != nil }
+  fileprivate func textChanged(since generation: UInt) -> Bool {
+    textChangeGeneration != generation
   }
 
   fileprivate func pasteAttachmentFromPasteboard() -> Bool {
     guard pasteAttachmentsEnabled else { return false }
     let pasteboard = UIPasteboard.general
-    if preferredPastedText() != nil { return false }
 
     if let image = pasteboard.image, let data = image.pngData() {
       cacheAndEmitPastedImageData(
