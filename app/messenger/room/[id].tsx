@@ -3630,6 +3630,7 @@ export default function MessengerRoomScreen() {
     });
     cancelMessageNavigation();
     followSentMessage.current = clientMessageId;
+    inputRef.current?.clear();
     setText("");
     setReplyingTo(null);
     setMessages((current) => mergeMessengerMessages(current, [optimistic]));
@@ -4007,6 +4008,7 @@ export default function MessengerRoomScreen() {
       roomId, clientMessageId, attachmentDraft.source, text.trim(), session.user,
       replyingTo ?? undefined, attachmentDraft.files,
     );
+    inputRef.current?.clear();
     setText("");
     setReplyingTo(null);
     setAttachmentDraft(null);
@@ -4362,6 +4364,7 @@ export default function MessengerRoomScreen() {
 
   const cancelEditing = useCallback(() => {
     setEditingMessage(null);
+    inputRef.current?.clear();
     setText("");
   }, []);
 
@@ -4393,6 +4396,7 @@ export default function MessengerRoomScreen() {
       );
       await cacheUpdatedMessengerMessage(db, result.message);
       setEditingMessage(null);
+      inputRef.current?.clear();
       setText("");
       trackMessengerAction("message_edited", {
         content_type: target.kind,

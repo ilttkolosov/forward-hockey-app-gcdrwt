@@ -555,37 +555,6 @@ export default function MessengerProfileScreen() {
             )}
           </View>
 
-          <TouchableOpacity style={styles.cacheCard} onPress={() => {
-            void readConnectionDiagnostics()
-              .then((message) => Share.share({ message, title: "Диагностика соединения" }))
-              .catch(() => Alert.alert("Диагностика", "Не удалось открыть журнал. Повторите попытку."));
-          }} accessibilityLabel="Поделиться диагностикой соединения">
-            <Text style={styles.cacheTitle}>Поделиться диагностикой соединения</Text>
-          </TouchableOpacity>
-          <View style={styles.cacheCard}>
-            <View style={styles.cacheIcon}>
-              <Icon name="folder-open" size={25} color={colors.primary} />
-            </View>
-            <View style={styles.cacheText}>
-              <Text style={styles.cacheTitle}>Кэш медиа</Text>
-              <Text style={styles.cacheSubtitle}>
-                На устройстве: {formatMessengerBytes(cacheBytes)}. Оригиналы
-                остаются на сервере.
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.cacheButton, cacheBusy && styles.disabled]}
-              onPress={confirmClearCache}
-              disabled={cacheBusy || cacheBytes === 0}
-            >
-              {cacheBusy ? (
-                <ActivityIndicator size="small" color={colors.error} />
-              ) : (
-                <Text style={styles.cacheButtonText}>Очистить</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-
           <TouchableOpacity
             style={styles.quickReactionCard}
             onPress={() => setReactionPickerVisible(true)}
@@ -773,6 +742,55 @@ export default function MessengerProfileScreen() {
                 Удалить профиль
               </Text>
             </TouchableOpacity>
+          </View>
+
+          <View style={styles.profileUtilities}>
+            <TouchableOpacity
+              style={styles.cacheCard}
+              onPress={() => {
+                void readConnectionDiagnostics()
+                  .then((message) =>
+                    Share.share({
+                      message,
+                      title: "Диагностика соединения",
+                    }),
+                  )
+                  .catch(() =>
+                    Alert.alert(
+                      "Диагностика",
+                      "Не удалось открыть журнал. Повторите попытку.",
+                    ),
+                  );
+              }}
+              accessibilityLabel="Поделиться диагностикой соединения"
+            >
+              <Text style={styles.cacheTitle}>
+                Поделиться диагностикой соединения
+              </Text>
+            </TouchableOpacity>
+            <View style={styles.cacheCard}>
+              <View style={styles.cacheIcon}>
+                <Icon name="folder-open" size={25} color={colors.primary} />
+              </View>
+              <View style={styles.cacheText}>
+                <Text style={styles.cacheTitle}>Кэш медиа</Text>
+                <Text style={styles.cacheSubtitle}>
+                  На устройстве: {formatMessengerBytes(cacheBytes)}. Оригиналы
+                  остаются на сервере.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.cacheButton, cacheBusy && styles.disabled]}
+                onPress={confirmClearCache}
+                disabled={cacheBusy || cacheBytes === 0}
+              >
+                {cacheBusy ? (
+                  <ActivityIndicator size="small" color={colors.error} />
+                ) : (
+                  <Text style={styles.cacheButtonText}>Очистить</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -981,6 +999,10 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: 20,
     backgroundColor: colors.surface,
+  },
+  profileUtilities: {
+    marginTop: 14,
+    gap: 14,
   },
   cacheCard: {
     flexDirection: "row",

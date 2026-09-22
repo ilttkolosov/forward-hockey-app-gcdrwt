@@ -23,6 +23,7 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.inputmethod.InputMethodManager
+import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
@@ -252,6 +253,15 @@ class ForwardRichTextInputView(
     editor.clearFocus()
     val inputMethod = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
     inputMethod?.hideSoftInputFromWindow(editor.windowToken, 0)
+  }
+
+  fun clearEditor() {
+    suppressEvents = true
+    BaseInputConnection.removeComposingSpans(editor.text)
+    editor.text.clear()
+    suppressEvents = false
+    clearRecentNativeEchoes()
+    emitContentHeight()
   }
 
   private fun acceptRichContent(content: InputContentInfo, flags: Int): Boolean {

@@ -57,6 +57,10 @@ public final class ForwardRichTextInputModule: Module {
       AsyncFunction("blurEditor") { (view: ForwardRichTextInputView) in
         view.blurEditor()
       }
+
+      AsyncFunction("clearEditor") { (view: ForwardRichTextInputView) in
+        view.clearEditor()
+      }
     }
   }
 }

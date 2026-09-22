@@ -78,11 +78,13 @@ interface NativeForwardRichTextInputProps {
 interface NativeForwardRichTextInputRef {
   focusEditor(): Promise<void>;
   blurEditor(): Promise<void>;
+  clearEditor?: () => Promise<void>;
 }
 
 export interface ForwardRichTextInputHandle {
   focus(): void;
   blur(): void;
+  clear(): void;
 }
 
 export interface ForwardRichTextInputProps {
@@ -192,6 +194,10 @@ export const ForwardRichTextInput = forwardRef<
       blur() {
         if (NativeView) void nativeRef.current?.blurEditor();
         else fallbackRef.current?.blur();
+      },
+      clear() {
+        if (NativeView) void nativeRef.current?.clearEditor?.();
+        else fallbackRef.current?.clear();
       },
     }),
     [NativeView],

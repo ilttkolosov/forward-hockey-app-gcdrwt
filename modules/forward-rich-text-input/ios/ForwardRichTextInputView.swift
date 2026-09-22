@@ -54,6 +54,14 @@ fileprivate final class ForwardAttributedTextView: UITextView {
   }
 
   override func paste(_ sender: Any?) {
+    // iOS may put both a textual URL and a preview image on the pasteboard
+    // when copying from Safari or Notes. A messenger composer must preserve
+    // the user's explicit text in that case instead of promoting the preview
+    // to an image attachment.
+    if let text = formattingOwner?.preferredPastedText() {
+      insertText(text)
+      return
+    }
     if formattingOwner?.pasteAttachmentFromPasteboard() == true {
       return
     }
@@ -202,6 +210,27 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
 
   func blurEditor() {
     editor.resignFirstResponder()
+  }
+
+  func clearEditor() {
+    // Commit/drop any active autocorrection/marked-text transaction before
+    // clearing the backing UITextView. Otherwise iOS can commit the marked
+    // last word after React has already set value="", restoring the text of
+    // the message that was just sent.
+    suppressEvents = true
+    editor.unmarkText()
+    editor.attributedText = NSAttributedString(
+      string: "",
+      attributes: [
+        .font: UIFont.systemFont(ofSize: fontSize),
+        .foregroundColor: editorTextColor
+      ]
+    )
+    editor.selectedRange = NSRange(location: 0, length: 0)
+    suppressEvents = false
+    updateTypingAttributes()
+    updatePlaceholder()
+    emitContentHeight()
   }
 
   public func textViewDidBeginEditing(_ textView: UITextView) {
@@ -433,9 +462,21 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
     ]
   }
 
+  fileprivate func preferredPastedText() -> String? {
+    let pasteboard = UIPasteboard.general
+    if let text = pasteboard.string, !text.isEmpty {
+      return text
+    }
+    if let webURL = pasteboard.urls?.first(where: { !$0.isFileURL }) {
+      return webURL.absoluteString
+    }
+    return nil
+  }
+
   fileprivate func canPasteAttachmentFromPasteboard() -> Bool {
     guard pasteAttachmentsEnabled else { return false }
     let pasteboard = UIPasteboard.general
+    if preferredPastedText() != nil { return false }
     if pasteboard.hasImages { return true }
     if pasteboard.itemProviders.contains(where: { provider in
       provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
@@ -448,6 +489,7 @@ public final class ForwardRichTextInputView: ExpoView, UITextViewDelegate {
   fileprivate func pasteAttachmentFromPasteboard() -> Bool {
     guard pasteAttachmentsEnabled else { return false }
     let pasteboard = UIPasteboard.general
+    if preferredPastedText() != nil { return false }
 
     if let image = pasteboard.image, let data = image.pngData() {
       cacheAndEmitPastedImageData(
