@@ -50,18 +50,20 @@ fileprivate final class ForwardAttributedTextView: UITextView {
   }
 
   override func paste(_ sender: Any?) {
-    // Let UITextView perform the user-requested paste first. This keeps text
-    // and URLs on Apple's native paste path, so merely focusing the composer
-    // never reads UIPasteboard and cannot trigger the iOS paste-permission
-    // prompt. If the system paste cannot consume the payload (for example a
-    // file/movie), fall back to the messenger attachment handler only after
-    // the user has explicitly chosen Paste.
+    // Let UITextView perform the user-requested paste first. Text/URL paste can
+    // complete its delegate callbacks slightly after paste(_:) returns on iOS.
+    // Deferring the attachment fallback prevents the same Safari/Notes payload
+    // from being interpreted twice: once as text and again as a generic .bin
+    // attachment. The pasteboard is still never read merely on focus/menu
+    // discovery; fallback runs only after the user explicitly chose Paste.
     let generation = formattingOwner?.textChangeGenerationSnapshot()
     super.paste(sender)
 
     guard let owner = formattingOwner, let generation else { return }
-    if owner.textChanged(since: generation) { return }
-    _ = owner.pasteAttachmentFromPasteboard()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak owner] in
+      guard let owner, !owner.textChanged(since: generation) else { return }
+      _ = owner.pasteAttachmentFromPasteboard()
+    }
   }
 
   @objc fileprivate func formatBold(_ sender: Any?) {
