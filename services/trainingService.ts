@@ -106,22 +106,15 @@ export const loadCachedTrainings = async (query = getTrainingSyncWindow()): Prom
  * Локальный набор возвращается даже при сетевой ошибке. Замена окна SQLite
  * происходит только после полностью успешного и валидного ответа сервера.
  */
-export const synchronizeTrainings = async (
-  canUseNetwork = true,
-  force = false
-): Promise<TrainingSyncResult> => {
+export const synchronizeTrainings = async (): Promise<TrainingSyncResult> => {
   if (synchronizationPromise) return synchronizationPromise;
 
   const query = getTrainingSyncWindow();
   const task = (async (): Promise<TrainingSyncResult> => {
     const cached = await loadCachedTrainings(query);
     console.log(`[Тренировки] В SQLite найдено занятий: ${cached.length}`);
-    if (!canUseNetwork) {
-      console.log('[Тренировки] Сетевая синхронизация пропущена: интернет недоступен');
-      void rescheduleTrainingNotifications();
-      return { trainings: cached, source: 'database', updated: false };
-    }
-
+    // NetInfo can report no internet while the WordPress API is reachable.
+    // Let the bounded request decide; keep SQLite if it actually fails.
     const startedAt = Date.now();
     let failureStage: NonNullable<TrainingSyncResult['failureStage']> = 'network';
     try {

@@ -157,6 +157,7 @@ export default function TrainingsScreen() {
   const { isOffline } = useNetworkStatus();
   const [trainings, setTrainings] = useState<Training[]>([]);
   const [loading, setLoading] = useState(true);
+  const [checkingSchedule, setCheckingSchedule] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [networkError, setNetworkError] = useState<string | null>(null);
   const [showPastTrainings, setShowPastTrainings] = useState(false);
@@ -165,20 +166,23 @@ export default function TrainingsScreen() {
   const selectedWeek = useMemo(() => getWeekRange(weekOffset), [weekOffset]);
 
   const loadSchedule = useCallback(async (forceNetwork = false) => {
+    setCheckingSchedule(true);
+    console.log(`[Тренировки] Проверяем сервер; NetInfo=${isOffline ? 'offline' : 'online'}`);
     try {
       const local = await loadCachedTrainings(getTrainingSyncWindow());
       setTrainings(local);
       setLoading(false);
       console.log(`[Тренировки] Экран открыт из SQLite: ${local.length} занятий`);
 
-      const result = await synchronizeTrainings(!isOffline, forceNetwork);
+      const result = await synchronizeTrainings();
       setTrainings(result.trainings);
+      const cachedSuffix = result.trainings.length > 0 ? ' Показаны сохранённые данные.' : '';
       setNetworkError(result.error
         ? result.failureStage === 'database'
           ? 'Расписание получено, но не удалось сохранить его на устройстве.'
           : result.failureStage === 'validation'
-            ? 'Сервер вернул некорректное расписание. Показаны сохранённые данные.'
-            : 'Не удалось получить расписание с сервера. Показаны сохранённые данные.'
+            ? `Сервер вернул некорректное расписание.${cachedSuffix}`
+            : `Не удалось получить расписание с сервера.${cachedSuffix}`
         : null);
       if (forceNetwork) {
         trackScheduleAction('manual_refresh', {
@@ -200,6 +204,7 @@ export default function TrainingsScreen() {
       }
     } finally {
       setLoading(false);
+      setCheckingSchedule(false);
       setRefreshing(false);
     }
   }, [isOffline]);
@@ -339,27 +344,31 @@ export default function TrainingsScreen() {
             </TouchableOpacity>
           </View>
 
-          {(isOffline || networkError) && (
+          {networkError && (
             <View accessibilityRole="alert" style={styles.warning}>
               <Icon
-                name={isOffline ? 'cloud-offline-outline' : 'warning-outline'}
+                name="warning-outline"
                 size={20}
                 color={colors.warning}
               />
-              <Text style={styles.warningText}>
-                {isOffline
-                  ? 'Нет подключения к интернету. Показано сохранённое расписание.'
-                  : networkError}
-              </Text>
+              <Text style={styles.warningText}>{networkError}</Text>
             </View>
           )}
 
           {sections.length === 0 ? (
             <View style={styles.empty}>
               <Icon name="calendar-outline" size={44} color={colors.textSecondary} />
-              <Text style={styles.emptyTitle}>Расписание пока не опубликовано</Text>
+              <Text style={styles.emptyTitle}>
+                {checkingSchedule
+                  ? 'Проверяем расписание…'
+                  : networkError
+                    ? 'Не удалось загрузить расписание'
+                    : 'Расписание пока не опубликовано'}
+              </Text>
               <Text style={styles.emptyText}>
-                Потяните экран вниз, чтобы проверить обновления.
+                {checkingSchedule
+                  ? 'Ожидаем ответ сервера.'
+                  : 'Потяните экран вниз, чтобы проверить обновления.'}
               </Text>
             </View>
           ) : sections.map(section => (

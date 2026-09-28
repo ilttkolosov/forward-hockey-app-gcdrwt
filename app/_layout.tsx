@@ -713,7 +713,7 @@ function RootLayoutContent() {
       afterStartupTasks.push(() => {
         const trainingsStartedAt = Date.now();
         initializationLog('Фоновая синхронизация расписания тренировок запущена');
-        void synchronizeTrainings(canUseNetwork)
+        void synchronizeTrainings()
           .then(result => {
             initializationLog(
               `Расписание тренировок подготовлено за ${elapsedMilliseconds(trainingsStartedAt)} мс: `
