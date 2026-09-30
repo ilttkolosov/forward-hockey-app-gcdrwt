@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Forward — расписание тренировок
  * Description: Безопасный импорт JSON/XML в The Events Calendar и API для мобильного приложения.
- * Version: 1.1.6
+ * Version: 1.1.7
  * Author: HC Forward
  *
  * Рекомендуемое размещение:
@@ -23,6 +23,138 @@ const FORWARD_TRAINING_DEFAULT_TEAM_NAME = 'Динамо-Форвард 2014';
 
 add_action('rest_api_init', 'forward_training_register_rest_routes');
 add_action('admin_menu', 'forward_training_register_admin_page');
+add_action('add_meta_boxes_tribe_events', 'forward_training_register_event_meta_box');
+add_action('save_post_tribe_events', 'forward_training_save_event_meta_box', 10, 2);
+
+/**
+ * The mobile API reads these fields from post meta, not from post_content.
+ * Only bot/import-created events have a UID and appear in the mobile schedule.
+ */
+function forward_training_register_event_meta_box($post) {
+    if ((string) get_post_meta($post->ID, '_forward_training_uid', true) === '') return;
+    add_meta_box(
+        'forward-training-mobile',
+        'Расписание в мобильном приложении',
+        'forward_training_render_event_meta_box',
+        'tribe_events',
+        'normal',
+        'high'
+    );
+}
+
+function forward_training_manual_fields($event_id) {
+    $saved = get_post_meta($event_id, '_forward_training_manual_fields', true);
+    return is_array($saved) ? $saved : array();
+}
+
+function forward_training_render_event_meta_box($post) {
+    wp_nonce_field('forward_training_save_event', 'forward_training_event_nonce');
+    $type = (string) get_post_meta($post->ID, '_forward_training_type', true);
+    $team_name = (string) get_post_meta($post->ID, '_forward_training_team_name', true);
+    $location = (string) get_post_meta($post->ID, '_forward_training_location', true);
+    $note = (string) get_post_meta($post->ID, '_forward_training_note', true);
+    $manual_fields = forward_training_manual_fields($post->ID);
+    ?>
+    <p>Название для приложения задаётся заголовком мероприятия, дата и время — полями календаря.
+       Тип, команда, место и примечание берутся из полей ниже. Изменение текста в основном редакторе
+       не меняет эти данные в приложении.</p>
+    <input type="hidden" name="forward_training_original_title" value="<?php echo esc_attr($post->post_title); ?>">
+    <p><label for="forward-training-mobile-type"><strong>Тип занятия</strong></label><br>
+        <select id="forward-training-mobile-type" name="forward_training_mobile[type]">
+            <option value="ice" <?php selected($type, 'ice'); ?>>Лед</option>
+            <option value="ofp" <?php selected($type, 'ofp'); ?>>ОФП</option>
+            <option value="game" <?php selected($type, 'game'); ?>>Игра</option>
+        </select></p>
+    <p><label for="forward-training-mobile-team"><strong>Команда</strong></label><br>
+        <input id="forward-training-mobile-team" type="text" class="widefat"
+               name="forward_training_mobile[team_name]" value="<?php echo esc_attr($team_name); ?>"></p>
+    <p><label for="forward-training-mobile-location"><strong>Место</strong></label><br>
+        <input id="forward-training-mobile-location" type="text" class="widefat"
+               name="forward_training_mobile[location]" value="<?php echo esc_attr($location); ?>"></p>
+    <p><label for="forward-training-mobile-note"><strong>Примечание в приложении</strong></label><br>
+        <textarea id="forward-training-mobile-note" class="widefat" rows="3"
+                  name="forward_training_mobile[note]"><?php echo esc_textarea($note); ?></textarea></p>
+    <?php if ($manual_fields) : ?>
+        <p><label><input type="checkbox" name="forward_training_reset_manual" value="1">
+            Разрешить Джимми боту заменить ручные правки при следующем импорте</label></p>
+    <?php endif; ?>
+    <p>Измените нужные поля и нажмите «Обновить». Ручные правки сохранятся при повторном импорте;
+       дату и время бот по-прежнему может обновлять.</p>
+    <?php
+}
+
+function forward_training_save_event_meta_box($event_id, $post) {
+    if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
+    if (wp_is_post_revision($event_id) || wp_is_post_autosave($event_id)) return;
+    if (!current_user_can('edit_post', $event_id)) return;
+    if ((string) get_post_meta($event_id, '_forward_training_uid', true) === '') return;
+    if (!isset($_POST['forward_training_event_nonce'])
+        || !is_string($_POST['forward_training_event_nonce'])
+        || !wp_verify_nonce(wp_unslash($_POST['forward_training_event_nonce']), 'forward_training_save_event')) return;
+    if (!isset($_POST['forward_training_mobile']) || !is_array($_POST['forward_training_mobile'])) return;
+
+    $input = wp_unslash($_POST['forward_training_mobile']);
+    foreach (array('type', 'team_name', 'location', 'note') as $field) {
+        if (!isset($input[$field]) || !is_string($input[$field])) return;
+    }
+    $type = sanitize_key($input['type']);
+    if (!in_array($type, array('ice', 'ofp', 'game'), true)) return;
+    $values = array(
+        'type' => $type,
+        'team_name' => sanitize_text_field($input['team_name']),
+        'location' => sanitize_text_field($input['location']),
+        'note' => sanitize_textarea_field($input['note']),
+    );
+    if ($values['team_name'] === '') return;
+
+    $meta_keys = array(
+        'type' => '_forward_training_type',
+        'team_name' => '_forward_training_team_name',
+        'location' => '_forward_training_location',
+        'note' => '_forward_training_note',
+    );
+    $manual_fields = forward_training_manual_fields($event_id);
+    $changed = false;
+    foreach ($meta_keys as $field => $key) {
+        if ((string) get_post_meta($event_id, $key, true) !== $values[$field]) {
+            update_post_meta($event_id, $key, $values[$field]);
+            $manual_fields[$field] = true;
+            $changed = true;
+        }
+    }
+    $original_title = isset($_POST['forward_training_original_title'])
+        && is_string($_POST['forward_training_original_title'])
+        ? sanitize_text_field(wp_unslash($_POST['forward_training_original_title'])) : '';
+    if ($changed || ($original_title !== '' && $post->post_title !== $original_title)) {
+        // Pin a previously corrected title when the editor is used to fix other fields.
+        $manual_fields['title'] = true;
+    }
+    if (!empty($_POST['forward_training_reset_manual'])) {
+        delete_post_meta($event_id, '_forward_training_manual_fields');
+    } elseif ($manual_fields) {
+        update_post_meta($event_id, '_forward_training_manual_fields', $manual_fields);
+    }
+}
+
+function forward_training_apply_manual_fields($event_id, array $event) {
+    if (!$event_id) return $event;
+    $manual_fields = forward_training_manual_fields($event_id);
+    $meta_keys = array(
+        'type' => '_forward_training_type',
+        'team_name' => '_forward_training_team_name',
+        'location' => '_forward_training_location',
+        'note' => '_forward_training_note',
+    );
+    foreach ($meta_keys as $field => $key) {
+        if (!empty($manual_fields[$field])) {
+            $event[$field] = (string) get_post_meta($event_id, $key, true);
+        }
+    }
+    if (!empty($manual_fields['title'])) {
+        $event['title'] = (string) get_post_field('post_title', $event_id);
+    }
+    return $event;
+}
 
 function forward_training_register_rest_routes() {
     register_rest_route('app/v1', '/get-trainings', array(
@@ -519,6 +651,7 @@ function forward_training_upsert_event(array $event, $dry_run = false) {
     $existing_id = forward_training_find_source_event($event['source_id'], $event['team_id']);
     if (is_wp_error($existing_id)) return $existing_id;
     if (!$existing_id) $existing_id = forward_training_find_event_by_uid($event['uid']);
+    $event = forward_training_apply_manual_fields($existing_id, $event);
     if ($dry_run) {
         return array(
             'action' => $existing_id ? 'update' : 'create',
@@ -692,6 +825,7 @@ function forward_training_verify_import(array $schedule, array $result, $dry_run
                     . ') имеет статус «' . $actual_status . '», ожидался publish.'
             );
         }
+        $event = forward_training_apply_manual_fields($event_id, $event);
         $expected = array(
             '_forward_training_uid' => $uid,
             '_forward_training_type' => $event['type'],
