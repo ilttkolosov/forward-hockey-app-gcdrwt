@@ -96,6 +96,7 @@ export default ({ config }) => {
     },
     plugins: [
       "./plugins/withAsyncStorageCapacity.js",
+      "./plugins/withAndroidFirebaseGuard.js",
       "expo-font",
       "expo-router",
       "expo-web-browser",
