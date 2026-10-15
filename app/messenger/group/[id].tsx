@@ -71,7 +71,7 @@ export default function MessengerGroupSettingsScreen() {
     teamId?: string;
     avatarUrl?: string;
   }>();
-  const { session, isAuthenticated } = useMessengerAuth();
+  const { session, isAuthenticated, status: authStatus } = useMessengerAuth();
   const roomId = params.id;
   const [settings, setSettings] = useState<MessengerRoomSettings | null>(null);
   const [participants, setParticipants] = useState<GroupParticipant[]>([]);
@@ -126,7 +126,7 @@ export default function MessengerGroupSettingsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated, roomId]);
+  }, [authStatus, isAuthenticated, roomId]);
 
   useEffect(() => {
     if (!session?.user.id || !roomId) return;
@@ -137,12 +137,13 @@ export default function MessengerGroupSettingsScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (authStatus === "loading") return;
       if (!isAuthenticated) {
         router.replace("/messenger/register");
         return;
       }
       void load();
-    }, [isAuthenticated, load, router]),
+    }, [authStatus, isAuthenticated, load, router]),
   );
 
   const memberIds = useMemo(

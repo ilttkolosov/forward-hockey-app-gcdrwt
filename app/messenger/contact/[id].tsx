@@ -78,7 +78,7 @@ export default function MessengerContactProfileScreen() {
     lastSeenAt?: string;
     openedAt?: string;
   }>();
-  const { session, isAuthenticated } = useMessengerAuth();
+  const { session, isAuthenticated, status: authStatus } = useMessengerAuth();
   const roomId = params.roomId || "";
   const scrollRef = useRef<ScrollView>(null);
   const [profile, setProfile] = useState<MessengerContactProfile | null>(null);
@@ -184,6 +184,7 @@ export default function MessengerContactProfileScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (authStatus === "loading") return;
       if (!isAuthenticated) {
         router.replace("/messenger/register");
         return;
@@ -197,7 +198,7 @@ export default function MessengerContactProfileScreen() {
         if (event.last_seen_at) setLastSeenAt(event.last_seen_at);
       });
       return unsubscribe;
-    }, [isAuthenticated, load, params.id, router]),
+    }, [authStatus, isAuthenticated, load, params.id, router]),
   );
 
   useEffect(() => {

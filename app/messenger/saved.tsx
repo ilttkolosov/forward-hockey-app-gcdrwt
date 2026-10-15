@@ -26,12 +26,13 @@ import { colors } from "../../styles/commonStyles";
 export default function MessengerSavedProfileScreen() {
   const router = useRouter();
   const bottomNavigationInset = usePersistentBottomNavigationInset();
-  const { session, isAuthenticated } = useMessengerAuth();
+  const { session, isAuthenticated, status: authStatus } = useMessengerAuth();
   const [appearance, setAppearance] =
     useState<MessengerSavedAppearance>(DEFAULT_SAVED_APPEARANCE);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (authStatus === "loading") return;
     if (!isAuthenticated) {
       router.replace("/messenger/register");
       return;
@@ -48,7 +49,7 @@ export default function MessengerSavedProfileScreen() {
     return () => {
       active = false;
     };
-  }, [isAuthenticated, router, session?.user.id]);
+  }, [authStatus, isAuthenticated, router, session?.user.id]);
 
   if (!session) return null;
 

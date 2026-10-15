@@ -34,7 +34,7 @@ export default function CreateMessengerGroupScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
   const bottomNavigationInset = usePersistentBottomNavigationInset();
-  const { session, isAuthenticated } = useMessengerAuth();
+  const { session, isAuthenticated, status: authStatus } = useMessengerAuth();
   const [contacts, setContacts] = useState<MessengerContact[]>([]);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -57,16 +57,17 @@ export default function CreateMessengerGroupScreen() {
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [authStatus, isAuthenticated]);
 
   useFocusEffect(
     useCallback(() => {
+      if (authStatus === "loading") return;
       if (!isAuthenticated) {
         router.replace("/messenger/register");
         return;
       }
       void load();
-    }, [isAuthenticated, load, router]),
+    }, [authStatus, isAuthenticated, load, router]),
   );
 
   const teams = useMemo<TeamOption[]>(() => {
