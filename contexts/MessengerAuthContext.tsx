@@ -110,9 +110,14 @@ async function recoverMessengerTransport(force = false): Promise<void> {
 async function loadPersistedMessengerSession(): Promise<MessengerSession | null> {
   const immediate = await loadMessengerSession();
   if (immediate) return immediate;
-  if (!(await hasMessengerSessionMarker())) return null;
 
-  const delays = [120, 350, 1_000, 2_500, 5_000] as const;
+  // Existing installations from builds before SESSION_PRESENT_KEY do not have
+  // the marker yet. Give SecureStore/Keychain a bounded recovery window once,
+  // then use the marker for the longer trusted-device recovery path.
+  const knownSession = await hasMessengerSessionMarker();
+  const delays = knownSession
+    ? ([120, 350, 1_000, 2_500, 5_000] as const)
+    : ([120, 350, 1_000, 2_500] as const);
   for (const delay of delays) {
     await new Promise((resolve) => setTimeout(resolve, delay));
     const stored = await loadMessengerSession();
