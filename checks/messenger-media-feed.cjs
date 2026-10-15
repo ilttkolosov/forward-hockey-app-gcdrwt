@@ -50,6 +50,7 @@ const send = execute(handler, {
   text: 'caption', replyingTo: null, Crypto: { randomUUID: () => 'stable-id' },
   pendingMessengerAttachmentMessage: (room, id, source, text, user, reply, files) => ({ room_id: room, client_message_id: id, pending: true, text, files }),
   setText: () => {}, setReplyingTo: () => {}, setAttachmentDraft: () => {}, setAuthorFilter: () => {},
+  inputRef: { current: { clear: () => {} } },
   cancelMessageNavigation: () => { navigationCancelled = true; }, followSentMessage: sentId, nearLatest: near,
   setMessages: fn => { visible = fn(visible); }, mergeMessengerMessages: (current, incoming) => [...current, ...incoming],
   queueMessengerMediaMessage: async (...args) => { queued.push(args); }, db: 'sqlite',
