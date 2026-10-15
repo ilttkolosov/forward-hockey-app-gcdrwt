@@ -81,7 +81,7 @@ export default function MessengerSearchScreen() {
     roomTitle?: string;
     initialQuery?: string;
   }>();
-  const { session, isAuthenticated } = useMessengerAuth();
+  const { session, isAuthenticated, status: authStatus } = useMessengerAuth();
   const scopedRoomId = params.roomId || undefined;
   const [query, setQuery] = useState(params.initialQuery || "");
   const [dateFrom, setDateFrom] = useState<Date | null>(null);
@@ -96,6 +96,7 @@ export default function MessengerSearchScreen() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (authStatus === "loading") return;
     if (!isAuthenticated) {
       router.replace("/messenger/register");
       return;

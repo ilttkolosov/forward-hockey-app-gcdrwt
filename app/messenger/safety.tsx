@@ -54,7 +54,7 @@ function blockedAtText(value: string): string {
 export default function MessengerSafetyScreen() {
   const router = useRouter();
   const bottomNavigationInset = usePersistentBottomNavigationInset();
-  const { session, isAuthenticated } = useMessengerAuth();
+  const { session, isAuthenticated, status: authStatus } = useMessengerAuth();
   const [blockedUsers, setBlockedUsers] = useState<MessengerBlockedUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
@@ -77,10 +77,11 @@ export default function MessengerSafetyScreen() {
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [authStatus, isAuthenticated]);
 
   useFocusEffect(
     useCallback(() => {
+      if (authStatus === "loading") return;
       if (!isAuthenticated) {
         router.replace("/messenger/register");
         return;
@@ -88,7 +89,7 @@ export default function MessengerSafetyScreen() {
       trackScreenView("messenger_safety");
       trackMessengerAction("safety_center_opened");
       void load();
-    }, [isAuthenticated, load, router]),
+    }, [authStatus, isAuthenticated, load, router]),
   );
 
   const unblock = (user: MessengerBlockedUser) => {

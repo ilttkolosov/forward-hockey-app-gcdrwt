@@ -76,7 +76,7 @@ export default function MessengerProfileScreen() {
   const router = useRouter();
   const bottomNavigationInset = usePersistentBottomNavigationInset();
   const params = useLocalSearchParams<{ firstRun?: string }>();
-  const { session, isAuthenticated, refreshUser, logout } = useMessengerAuth();
+  const { session, isAuthenticated, refreshUser, logout, status: authStatus } = useMessengerAuth();
   const [displayName, setDisplayName] = useState(
     session?.user.display_name || "",
   );
@@ -104,8 +104,9 @@ export default function MessengerProfileScreen() {
   const [reactionPickerVisible, setReactionPickerVisible] = useState(false);
 
   useEffect(() => {
+    if (authStatus === "loading") return;
     if (!isAuthenticated) router.replace("/messenger/register");
-  }, [isAuthenticated, router]);
+  }, [authStatus, isAuthenticated, router]);
 
   useEffect(() => {
     setDisplayName(session?.user.display_name || "");
@@ -160,7 +161,7 @@ export default function MessengerProfileScreen() {
     return () => {
       active = false;
     };
-  }, [isAuthenticated]);
+  }, [authStatus, isAuthenticated]);
 
   const chooseAvatar = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
