@@ -111,8 +111,13 @@ export default function MessengerRegistrationScreen() {
     token?: string;
     sharePending?: string;
   }>();
-  const { isAuthenticated, passwordChange, login, register } =
-    useMessengerAuth();
+  const {
+    status: authStatus,
+    isAuthenticated,
+    passwordChange,
+    login,
+    register,
+  } = useMessengerAuth();
   const authenticatedDestination =
     params.sharePending === "1" ? "/messenger/share" : "/messenger/rooms";
   const [mode, setMode] = useState<ScreenMode>("invite");
@@ -453,6 +458,17 @@ export default function MessengerRegistrationScreen() {
     }
   };
 
+  if (authStatus === "loading") {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+        <View style={styles.authRestoring}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.authRestoringText}>Восстанавливаем вход…</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <>
       <SafeAreaView style={styles.safeArea} edges={["top"]}>
@@ -749,6 +765,13 @@ export default function MessengerRegistrationScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
+  authRestoring: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+  },
+  authRestoringText: { color: colors.textSecondary, fontSize: 14 },
   flex: { flex: 1 },
   content: { padding: 20, paddingBottom: 44 },
   header: { flexDirection: "row", alignItems: "center", marginBottom: 24 },

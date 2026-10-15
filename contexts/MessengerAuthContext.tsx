@@ -33,6 +33,7 @@ import {
 } from "../services/messengerApi";
 import {
   clearMessengerPasswordChange,
+  hasMessengerSessionMarker,
   loadMessengerSession,
   loadMessengerPasswordChange,
   saveMessengerSession,
@@ -107,9 +108,13 @@ async function recoverMessengerTransport(force = false): Promise<void> {
 }
 
 async function loadPersistedMessengerSession(): Promise<MessengerSession | null> {
-  const delays = [0, 120, 350] as const;
+  const immediate = await loadMessengerSession();
+  if (immediate) return immediate;
+  if (!(await hasMessengerSessionMarker())) return null;
+
+  const delays = [120, 350, 1_000, 2_500, 5_000] as const;
   for (const delay of delays) {
-    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+    await new Promise((resolve) => setTimeout(resolve, delay));
     const stored = await loadMessengerSession();
     if (stored) return stored;
   }
@@ -230,6 +235,24 @@ export function MessengerAuthProvider({ children }: React.PropsWithChildren) {
         } catch (error) {
           console.warn("[Messenger] Фоновая проверка сессии отложена:", error);
         }
+        return;
+      }
+      if (await hasMessengerSessionMarker()) {
+        setStatus("loading");
+        const retry = async () => {
+          while (active) {
+            await new Promise((resolve) => setTimeout(resolve, 5_000));
+            const restored = await loadMessengerSession();
+            if (!active || !restored) continue;
+            await prepareMessengerAliases(restored.user.id);
+            if (!active) return;
+            setSession(restored);
+            setPasswordChange(null);
+            setStatus("authenticated");
+            return;
+          }
+        };
+        void retry();
         return;
       }
       setPasswordChange(pendingPasswordChange);

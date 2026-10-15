@@ -160,6 +160,54 @@ let refreshPromise: Promise<MessengerSession> | null = null;
 const REFRESH_RETRY_DELAYS_MS = [0, 300] as const;
 const ACCESS_TOKEN_MIN_VALIDITY_MS = 45_000;
 const REFRESH_REQUEST_TIMEOUT_MS = 6_000;
+const TERMINAL_REFRESH_ERROR_CODES = new Set([
+  "invalid_refresh_token",
+  "refresh_token_expired",
+  "refresh_token_reuse_detected",
+  "account_unavailable",
+]);
+
+function shouldClearSessionAfterRefreshError(error: unknown): boolean {
+  return (
+    error instanceof MessengerApiError &&
+    TERMINAL_REFRESH_ERROR_CODES.has(error.code)
+  );
+}
+
+async function requestMessengerRefresh(
+  refreshToken: string,
+  signal: AbortSignal,
+): Promise<MessengerSession> {
+  const context = await sessionContext();
+  const request = async (includeDeviceContext: boolean) => {
+    const response = await fetch(`${MESSENGER_API_BASE_URL}/auth/refresh`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        refresh_token: refreshToken,
+        ...(includeDeviceContext ? context : {}),
+      }),
+      signal,
+    });
+    return parseResponse<MessengerSession>(response);
+  };
+  try {
+    return await request(true);
+  } catch (error) {
+    if (
+      error instanceof MessengerApiError &&
+      error.status === 400 &&
+      error.code === "validation_failed"
+    ) {
+      messengerLog("info", "auth.refresh.legacy_fallback", {});
+      return request(false);
+    }
+    throw error;
+  }
+}
 
 function accessTokenExpiryMs(accessToken: string): number | null {
   try {
@@ -253,25 +301,17 @@ async function refreshMessengerSession(): Promise<MessengerSession> {
             priority: "foreground",
             timeoutMs: REFRESH_REQUEST_TIMEOUT_MS,
           },
-          async (signal) => {
-            const response = await fetch(`${MESSENGER_API_BASE_URL}/auth/refresh`, {
-              method: "POST",
-              headers: {
-                Accept: "application/json",
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ refresh_token: session.refresh_token }),
-              signal,
-            });
-            return parseResponse<MessengerSession>(response);
-          },
+          async (signal) =>
+            requestMessengerRefresh(session.refresh_token, signal),
         );
         await saveMessengerSession(refreshed);
         messengerLog("info", "connection.token_refresh_completed", { duration_ms: Date.now() - refreshStartedAt });
         return refreshed;
       } catch (error) {
         if (error instanceof MessengerApiError) {
-          if (error.status === 401) await clearMessengerSession();
+          if (shouldClearSessionAfterRefreshError(error)) {
+            await clearMessengerSession();
+          }
           throw error;
         }
         if (attempt === REFRESH_RETRY_DELAYS_MS.length - 1) {

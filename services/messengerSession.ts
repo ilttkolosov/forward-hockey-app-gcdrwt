@@ -7,6 +7,8 @@ import type {
 } from "../features/messenger/types";
 
 const SESSION_KEY = "forward_messenger_session_v1";
+const SESSION_RECOVERY_KEY = "forward_messenger_session_recovery_v1";
+const SESSION_PRESENT_KEY = "forward_messenger_session_present_v1";
 const PASSWORD_CHANGE_KEY = "forward_messenger_password_change_v1";
 const DEVICE_ID_KEY = "forward_messenger_device_id_v1";
 // Give the original registration callback time to finish before the recovery
@@ -96,39 +98,90 @@ async function writeValue(key: string, value: string | null): Promise<void> {
   else await AsyncStorage.setItem(key, value);
 }
 
+function parseStoredSession(value: string | null): MessengerSession | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as MessengerSession;
+    if (
+      !parsed?.access_token ||
+      !parsed?.refresh_token ||
+      !parsed?.refresh_token_expires_at ||
+      !parsed?.user?.id
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function sessionExpiry(session: MessengerSession | null): number {
+  if (!session) return 0;
+  const value = Date.parse(session.refresh_token_expires_at);
+  return Number.isFinite(value) ? value : 0;
+}
+
+async function markSessionPresent(userId: string | null): Promise<void> {
+  try {
+    if (userId) await AsyncStorage.setItem(SESSION_PRESENT_KEY, userId);
+    else await AsyncStorage.removeItem(SESSION_PRESENT_KEY);
+  } catch (error) {
+    console.warn("[Messenger] Не удалось обновить маркер сессии:", error);
+  }
+}
+
+export async function hasMessengerSessionMarker(): Promise<boolean> {
+  if (memorySession) return true;
+  try {
+    return Boolean(await AsyncStorage.getItem(SESSION_PRESENT_KEY));
+  } catch {
+    return false;
+  }
+}
+
 export async function loadMessengerSession(): Promise<MessengerSession | null> {
   if (memorySession !== undefined) return memorySession;
   if (sessionReadPromise) return sessionReadPromise;
 
   sessionReadPromise = (async () => {
     try {
-      const stored = await readValue(SESSION_KEY);
-      if (!stored) {
-        // iOS Keychain can transiently return no value during process wake-up,
-        // including a foreground transition initiated by a notification.
-        // Do not cache that absence: only an explicit logout may make the
-        // in-memory session definitively null.
-        return null;
-      }
+      const [primaryValue, recoveryValue] = await Promise.all([
+        readValue(SESSION_KEY),
+        readValue(SESSION_RECOVERY_KEY),
+      ]);
+      const primary = parseStoredSession(primaryValue);
+      const recovery = parseStoredSession(recoveryValue);
+      const parsed =
+        primary && recovery
+          ? sessionExpiry(recovery) >= sessionExpiry(primary)
+            ? recovery
+            : primary
+          : recovery ?? primary;
 
-      const parsed = JSON.parse(stored) as MessengerSession;
+      if (!parsed) return null;
+
       memorySession = parsed;
       schedulePlayerAvatarReconciliation(parsed);
+      void markSessionPresent(parsed.user.id);
+
+      const serialized = JSON.stringify(parsed);
       try {
-        // Re-save sessions written by older builds with the background-safe
-        // accessibility level. This is a storage migration, not a rotation.
-        await writeValue(SESSION_KEY, stored);
+        if (recoveryValue !== serialized) {
+          await writeValue(SESSION_RECOVERY_KEY, serialized);
+        }
+        if (primaryValue !== serialized) {
+          await writeValue(SESSION_KEY, serialized);
+        }
       } catch (migrationError) {
         console.warn(
-          "[Messenger] Не удалось обновить режим хранения сессии:",
+          "[Messenger] Не удалось восстановить резервную копию сессии:",
           migrationError,
         );
       }
       return parsed;
     } catch (error) {
       console.warn("[Messenger] Не удалось прочитать защищённую сессию:", error);
-      // Never turn a temporary Keychain failure into an in-memory logout.
-      // Keeping the value undefined makes the next foreground call retry.
       return memorySession ?? null;
     }
   })().finally(() => {
@@ -141,7 +194,12 @@ export async function loadMessengerSession(): Promise<MessengerSession | null> {
 export async function saveMessengerSession(
   session: MessengerSession,
 ): Promise<void> {
-  await writeValue(SESSION_KEY, JSON.stringify(session));
+  const serialized = JSON.stringify(session);
+  // Recovery first: if the OS kills JS after a refresh response, the newest
+  // credential is already durable before the primary copy is replaced.
+  await writeValue(SESSION_RECOVERY_KEY, serialized);
+  await writeValue(SESSION_KEY, serialized);
+  await markSessionPresent(session.user.id);
   memorySession = session;
   listeners.forEach((listener) => listener(session));
   schedulePlayerAvatarReconciliation(session);
@@ -150,7 +208,11 @@ export async function saveMessengerSession(
 
 export async function clearMessengerSession(): Promise<void> {
   try {
-    await writeValue(SESSION_KEY, null);
+    await Promise.all([
+      writeValue(SESSION_KEY, null),
+      writeValue(SESSION_RECOVERY_KEY, null),
+      markSessionPresent(null),
+    ]);
   } finally {
     memorySession = null;
     schedulePlayerAvatarReconciliation(null);
