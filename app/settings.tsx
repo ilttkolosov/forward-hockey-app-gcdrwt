@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -12,9 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Constants from 'expo-constants';
 import Icon from '../components/Icon';
 import { commonStyles, colors } from '../styles/commonStyles';
 import {
@@ -27,17 +24,12 @@ import { usePersistentBottomNavigationInset } from '../components/PersistentBott
 import {
   disableMessengerPush,
   enableMessengerPush,
-  getProjectExpoPushToken,
   messengerPushStatus,
 } from '../services/messengerPush';
-import {
-  REMOTE_PUSH_UNAVAILABLE_MESSAGE,
-  remotePushNotificationsSupported,
-} from '../services/runtimeEnvironment';
-import { getConfiguredApiUrl, useStartupFeature } from '../services/startupConfigRuntime';
+import { remotePushNotificationsSupported } from '../services/runtimeEnvironment';
+import { useStartupFeature } from '../services/startupConfigRuntime';
+import { disableMatchPush, enableMatchPush, getMatchPushSettings, MATCH_PUSH_ENABLED_KEY } from '../services/matchPush';
 
-const PUSH_ENABLED_KEY = 'push_notifications_enabled';
-const OPERATION_TIMEOUT_MS = 6_000;
 const LEAD_OPTIONS = [15, 30, 60, 120, 180] as const;
 
 const formatLead = (minutes: number): string => {
@@ -45,108 +37,6 @@ const formatLead = (minutes: number): string => {
   if (minutes === 120) return '2 часа';
   if (minutes === 180) return '3 часа';
   return `${minutes} мин`;
-};
-
-const sendTokenToYourServer = async (token: string) => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), OPERATION_TIMEOUT_MS);
-
-  try {
-    const osVersion = Platform.Version?.toString() || 'unknown';
-    const deviceModel = Constants.deviceName || 'Unknown device';
-    const appVersion = Constants.expoConfig?.version || '1.0.0';
-    const deviceInfo = `${Platform.OS} ${osVersion}, ${deviceModel}, v${appVersion}`;
-
-    const response = await fetch(getConfiguredApiUrl('/push-token'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token,
-        subscriptions: ['team:74'],
-        device_info: deviceInfo,
-      }),
-      signal: controller.signal,
-    });
-
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Не удалось сохранить токен');
-  } catch (error: unknown) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('Превышено время ожидания');
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-};
-
-const deleteTokenFromServer = async (token: string) => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), OPERATION_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(getConfiguredApiUrl('/push-token'), {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
-      signal: controller.signal,
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Не удалось удалить токен');
-  } catch (error: unknown) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('Превышено время ожидания');
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-};
-
-const ensurePushPermissions = async (): Promise<boolean> => {
-  if (!remotePushNotificationsSupported) {
-    throw new Error(REMOTE_PUSH_UNAVAILABLE_MESSAGE);
-  }
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
-  if (existingStatus !== 'granted') {
-    const requested = await Notifications.requestPermissionsAsync();
-    finalStatus = requested.status;
-  }
-  if (finalStatus !== 'granted') return false;
-
-  const token = await getProjectExpoPushToken();
-  await sendTokenToYourServer(token);
-  await AsyncStorage.setItem('expo_push_token', token);
-  return true;
-};
-
-const getMatchPushSubscriptionStatus = async (): Promise<boolean> => {
-  if (!remotePushNotificationsSupported) return false;
-  const permission = await Notifications.getPermissionsAsync();
-  if (permission.status !== 'granted') return false;
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), OPERATION_TIMEOUT_MS);
-  try {
-    const token = await getProjectExpoPushToken();
-    const response = await fetch(
-      getConfiguredApiUrl('/push-subscription'),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
-        signal: controller.signal,
-      },
-    );
-    const result = await response.json();
-    if (!response.ok || result.status !== 'success') {
-      throw new Error(result.error || 'Не удалось проверить подписку');
-    }
-    return result.data?.is_subscribed === true;
-  } finally {
-    clearTimeout(timeoutId);
-  }
 };
 
 const errorMessage = (error: unknown, fallback: string): string => (
@@ -164,6 +54,7 @@ export default function SettingsScreen() {
   const [trainingNotificationsEnabled, setTrainingNotificationsState] = useState(false);
   const [trainingLeadMinutes, setTrainingLeadState] = useState(60);
   const [isChecking, setIsChecking] = useState(true);
+  const [matchChecking, setMatchChecking] = useState(true);
   const [messengerChecking, setMessengerChecking] = useState(true);
   const [trainingOperation, setTrainingOperation] = useState(false);
   const [messengerOperation, setMessengerOperation] = useState(false);
@@ -176,7 +67,7 @@ export default function SettingsScreen() {
     const loadLocalSettings = async () => {
       try {
         const [pushValue, trainingSettings] = await Promise.all([
-          AsyncStorage.getItem(PUSH_ENABLED_KEY),
+          AsyncStorage.getItem(MATCH_PUSH_ENABLED_KEY),
           getTrainingNotificationSettings(),
         ]);
         if (!active) return;
@@ -203,7 +94,8 @@ export default function SettingsScreen() {
     if (!pushFeatureEnabled) {
       setMessengerNotificationsEnabled(false);
       setMessengerChecking(false);
-      void AsyncStorage.setItem(PUSH_ENABLED_KEY, 'false');
+      setMatchChecking(false);
+      void AsyncStorage.setItem(MATCH_PUSH_ENABLED_KEY, 'false');
       return () => { active = false; };
     }
     void messengerPushStatus()
@@ -219,13 +111,17 @@ export default function SettingsScreen() {
       .finally(() => {
         if (active) setMessengerChecking(false);
       });
-    void getMatchPushSubscriptionStatus()
-      .then(async (enabled) => {
-        await AsyncStorage.setItem(PUSH_ENABLED_KEY, String(enabled));
+    setMatchChecking(true);
+    void getMatchPushSettings()
+      .then(async ({ enabled }) => {
+        await AsyncStorage.setItem(MATCH_PUSH_ENABLED_KEY, String(enabled));
         if (active) setMatchNotificationsEnabled(enabled);
       })
       .catch((error) => {
         console.warn('[Настройки] Проверка подписки на матчи отложена:', error);
+      })
+      .finally(() => {
+        if (active) setMatchChecking(false);
       });
     return () => {
       active = false;
@@ -246,40 +142,20 @@ export default function SettingsScreen() {
   };
 
   const toggleMatchNotifications = async (value: boolean) => {
-    if (!pushFeatureEnabled || !remotePushNotificationsSupported) {
-      setMatchNotificationsEnabled(false);
-      await AsyncStorage.setItem(PUSH_ENABLED_KEY, 'false');
-      return;
-    }
-    if (value) {
-      setMatchNotificationsEnabled(true);
-      showOperation('Включение уведомлений о матчах…');
-      try {
-        const success = await ensurePushPermissions();
-        setModalVisible(false);
-        setMatchNotificationsEnabled(success);
-        await AsyncStorage.setItem(PUSH_ENABLED_KEY, String(success));
-      } catch (error) {
-        showOperationError(error, 'Не удалось включить уведомления');
-        setMatchNotificationsEnabled(false);
-        await AsyncStorage.setItem(PUSH_ENABLED_KEY, 'false');
-      }
-      return;
-    }
-
-    setMatchNotificationsEnabled(false);
-    showOperation('Отключение уведомлений о матчах…');
+    if (!pushFeatureEnabled || !remotePushNotificationsSupported) return;
+    showOperation(value ? 'Включение уведомлений о матчах…' : 'Отключение уведомлений о матчах…');
     try {
-      const token = await AsyncStorage.getItem('expo_push_token');
-      if (token) {
-        await deleteTokenFromServer(token);
-        await AsyncStorage.removeItem('expo_push_token');
+      let enabled = false;
+      if (value) {
+        enabled = await enableMatchPush();
+      } else {
+        await disableMatchPush();
       }
-      await AsyncStorage.setItem(PUSH_ENABLED_KEY, 'false');
+      setMatchNotificationsEnabled(enabled);
+      await AsyncStorage.setItem(MATCH_PUSH_ENABLED_KEY, String(enabled));
       setModalVisible(false);
     } catch (error) {
-      showOperationError(error, 'Не удалось отключить уведомления');
-      await AsyncStorage.setItem(PUSH_ENABLED_KEY, 'false');
+      showOperationError(error, 'Не удалось изменить подписку на матчи');
     }
   };
 
@@ -422,11 +298,11 @@ export default function SettingsScreen() {
                 {!pushFeatureEnabled
                   ? 'Временно отключены стартовой конфигурацией'
                   : remotePushNotificationsSupported
-                  ? 'Получать серверные уведомления о предстоящих и текущих играх команды'
+                  ? 'Получать уведомления об изменениях счёта'
                   : 'Недоступны в Expo Go — используйте development или preview-сборку'}
               </Text>
             </View>
-            {isChecking ? (
+            {isChecking || matchChecking ? (
               <ActivityIndicator color={colors.primary} />
             ) : (
               <Switch
@@ -439,6 +315,18 @@ export default function SettingsScreen() {
               />
             )}
           </View>
+
+          {pushFeatureEnabled && remotePushNotificationsSupported && (
+            <TouchableOpacity
+              accessibilityRole="button"
+              onPress={() => router.push('/match-notifications')}
+              style={styles.matchSelectionLink}
+              disabled={modalVisible}
+            >
+              <Text style={styles.matchSelectionText}>Выбрать матчи</Text>
+              <Icon name="chevron-forward" size={18} color={colors.primary} />
+            </TouchableOpacity>
+          )}
 
           <View style={styles.divider} />
 
@@ -534,6 +422,8 @@ const styles = StyleSheet.create({
   settingTitle: { fontSize: 16, fontWeight: '600', color: colors.text, marginBottom: 4 },
   settingSubtitle: { fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
   divider: { height: 1, backgroundColor: colors.border, marginVertical: 18 },
+  matchSelectionLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, minHeight: 44 },
+  matchSelectionText: { fontSize: 14, fontWeight: '600', color: colors.primary },
   leadBlock: { marginTop: 18 },
   leadLabel: { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 10 },
   leadOptions: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4 },
