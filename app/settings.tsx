@@ -270,16 +270,15 @@ export default function SettingsScreen() {
     setMatchNotificationsEnabled(false);
     showOperation('Отключение уведомлений о матчах…');
     try {
-      const token = await AsyncStorage.getItem('expo_push_token');
-      if (token) {
-        await deleteTokenFromServer(token);
-        await AsyncStorage.removeItem('expo_push_token');
-      }
+      const token = await AsyncStorage.getItem('expo_push_token') || await getProjectExpoPushToken();
+      await deleteTokenFromServer(token);
+      await AsyncStorage.removeItem('expo_push_token');
       await AsyncStorage.setItem(PUSH_ENABLED_KEY, 'false');
       setModalVisible(false);
     } catch (error) {
       showOperationError(error, 'Не удалось отключить уведомления');
-      await AsyncStorage.setItem(PUSH_ENABLED_KEY, 'false');
+      setMatchNotificationsEnabled(true);
+      await AsyncStorage.setItem(PUSH_ENABLED_KEY, 'true');
     }
   };
 
@@ -439,6 +438,13 @@ export default function SettingsScreen() {
               />
             )}
           </View>
+          {pushFeatureEnabled && remotePushNotificationsSupported && matchNotificationsEnabled && (
+            <TouchableOpacity accessibilityRole="button" style={styles.settingItem}
+              onPress={() => router.push('/match-notifications')}>
+              <Text style={styles.settingTitle}>По каким командам присылать счёт</Text>
+              <Icon name="chevron-forward" size={20} color={colors.primary} />
+            </TouchableOpacity>
+          )}
 
           <View style={styles.divider} />
 

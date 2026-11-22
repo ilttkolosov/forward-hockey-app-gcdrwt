@@ -348,6 +348,10 @@ function RootLayoutContent() {
       return;
     }
     const data = response.notification.request.content.data;
+    if (data?.type === 'match.score' && /^\d{1,10}$/.test(String(data.event_id)) && Number(data.event_id) > 0) {
+      router.push({ pathname: '/game/[id]', params: { id: String(data.event_id) } });
+      return;
+    }
     const messengerPush = normalizeMessengerPushPayload(data);
     const opensMessengerRoom =
       messengerPush?.type === 'messenger.message'
