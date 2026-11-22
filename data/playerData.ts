@@ -84,7 +84,7 @@ export const getMassiv3 = (): Player[] => {
  */
 export async function getPlayers(): Promise<Player[]> {
   try {
-    const players = await playerDownloadService.getPlayersFromStorage();
+    const players = await playerDownloadService.getCurrentPlayersFromStorage();
     if (players.length > 0) {
       splitPlayersIntoGroups(players);
       return players;
@@ -156,13 +156,13 @@ export async function getPlayers(): Promise<Player[]> {
 export async function getPlayerById(playerId: string): Promise<Player | null> {
   try {
     //console.log('Data/playerData: Attempting to get player by ID:', playerId);
-    const players = await getPlayers();
-    const player = players.find(p => p.id === playerId);
+    const players = await playerDownloadService.getPlayersFromStorage();
+    const player = players.find(p => p.id === String(playerId));
     if (player) {
       //console.log('Data/playerData: Player found:', player.name);
       return player;
     }
-    console.log('Data/playerData: Player not found');
+    console.log('Data/playerData: Player not found', { id: playerId });
     return null;
   } catch (error) {
     console.error('Data/playerData: Error fetching player by ID:', error);

@@ -36,6 +36,9 @@ jobs:
       - name: Typecheck and lint
         run: npm run check
 
+      - name: Verify the player directory migration
+        run: node checks/player-directory-runtime.mjs
+
       - name: Verify pinned message ordering and previews
         run: node --no-warnings --experimental-strip-types checks/messenger-pins.mjs
 

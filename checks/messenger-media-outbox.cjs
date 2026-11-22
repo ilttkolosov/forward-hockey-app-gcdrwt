@@ -25,8 +25,9 @@ function environment() {
   const sql = new DatabaseSync(':memory:');
   sql.exec('CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT); CREATE TABLE messenger_messages (client_message_id TEXT PRIMARY KEY, raw_json TEXT); PRAGMA user_version = 12;');
   const migrations = JSON.parse(fs.readFileSync(path.join(root, 'database/migrations.json')));
-  assert.equal(migrations.schemaVersion, 13);
-  sql.exec(migrations.migrations.find(m => m.version === 13).sql);
+  const mediaOutboxMigration = migrations.migrations.find(m => m.version === 13);
+  assert.ok(mediaOutboxMigration);
+  sql.exec(mediaOutboxMigration.sql);
   const db = {
     runAsync: async (query, ...params) => sql.prepare(query).run(...params),
     getAllAsync: async (query, ...params) => sql.prepare(query).all(...params),

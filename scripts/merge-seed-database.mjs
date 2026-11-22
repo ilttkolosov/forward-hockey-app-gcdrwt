@@ -13,6 +13,13 @@ const SQL = await initSqlJs({
 });
 const base = new SQL.Database(await fs.readFile(basePath));
 const update = new SQL.Database(await fs.readFile(updatePath));
+const migrationConfig = JSON.parse(await fs.readFile(path.join(projectRoot, 'database/migrations.json'), 'utf8'));
+const baseVersion = Number(base.exec('PRAGMA user_version')[0].values[0][0]);
+for (const migration of migrationConfig.migrations) {
+  if (migration.version <= baseVersion) continue;
+  base.run(migration.sql);
+  base.run(`PRAGMA user_version = ${migration.version}`);
+}
 
 function rows(db, table, where = '') {
   const result = db.exec(`SELECT * FROM ${table}${where}`)[0];
@@ -61,8 +68,14 @@ try {
   upsert('leagues', rows(update, 'leagues'), 'id');
   upsert('seasons', rows(update, 'seasons'), 'id');
 
-  base.run('DELETE FROM players');
-  upsert('players', rows(update, 'players'), 'id');
+  const players = rows(update, 'players');
+  insertRelations('players', players);
+  if (players.length) {
+    const hasRoster = update.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'current_players'").length > 0;
+    const currentPlayers = hasRoster ? rows(update, 'current_players') : players.map(player => ({ player_id: player.id }));
+    base.run('DELETE FROM current_players');
+    insertRelations('current_players', currentPlayers);
+  }
   upsert('tournament_configs', rows(update, 'tournament_configs'), 'tournament_id');
   upsert('sync_versions', rows(update, 'sync_versions'), 'entity');
 

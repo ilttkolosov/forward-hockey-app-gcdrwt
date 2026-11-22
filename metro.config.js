@@ -9,6 +9,9 @@ const config = getDefaultConfig(__dirname);
 if (!config.resolver.assetExts.includes('wasm')) {
   config.resolver.assetExts.push('wasm');
 }
+if (!config.resolver.assetExts.includes('zip')) {
+  config.resolver.assetExts.push('zip');
+}
 
 // Use turborepo to restore the cache when possible
 config.cacheStores = [
