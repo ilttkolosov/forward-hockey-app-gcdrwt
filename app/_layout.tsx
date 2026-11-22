@@ -318,7 +318,7 @@ function RootLayoutContent() {
     const data = response.notification.request.content.data;
     const matchId = matchPushEventId(data);
     if (matchId) {
-      router.push({ pathname: '/game/[id]', params: { id: matchId } });
+      router.push({ pathname: '/game/[id]', params: { id: matchId, notificationId: identifier } });
       return;
     }
 

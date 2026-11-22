@@ -19,6 +19,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import { Game } from '../../types';
 import { getGameById, getVenueById, getGames, gameDetailsCache } from '../../data/gameData';
+import { apiService } from '../../services/apiService';
 import { colors, commonStyles } from '../../styles/commonStyles';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
@@ -251,33 +252,49 @@ const formatTimeSeconds = (secondsStr: string): string => {
 
 // 🔥 ЛОГИКА ПЕРИОДОВ
 const getPeriodLabel = (timeStr: string, protocol: any): string => {
-  if (!timeStr || !/^\d{2}:\d{2}$/.test(timeStr)) return 'other';
+  if (!timeStr || !/^\d{1,3}:[0-5]\d$/.test(timeStr)) return 'other';
   const [minutesStr, secondsStr] = timeStr.split(':');
   const minutes = parseInt(minutesStr, 10);
   const seconds = parseInt(secondsStr, 10);
   if (isNaN(minutes) || isNaN(seconds)) return 'other';
   const maintime = parseInt(protocol.maintime || '60', 10);
-  if (minutes < maintime) {
+  if (minutes * 60 + seconds <= maintime * 60) {
     const periodLength = maintime / 3;
     if (minutes < periodLength) return 'period1';
     if (minutes < periodLength * 2) return 'period2';
     return 'period3';
   }
   if (protocol.overtime) {
-    const otMinutes = parseInt(protocol.overtime, 10) || 0;
-    if (minutes <= maintime + otMinutes) return 'overtime';
+    const [otMinutes, otSeconds] = String(protocol.overtime).split(':').map(Number);
+    if (minutes * 60 + seconds <= (maintime + otMinutes) * 60 + (otSeconds || 0)) return 'overtime';
   }
   if (protocol.pms) return 'shootout';
   return 'other';
 };
 
+const protocolPlayerId = (entry: unknown): string => {
+  const id = entry && typeof entry === 'object' && 'id' in entry ? entry.id : entry;
+  return (typeof id === 'string' || typeof id === 'number') && /^[1-9]\d*$/.test(String(id)) ? String(id) : '';
+};
+
+async function lookupProtocolPlayers(protocol: Game['protocol']) {
+  const ids = new Set<string>();
+  for (const event of protocol?.events ?? []) {
+    for (const entry of event.players ?? []) {
+      const id = protocolPlayerId(entry);
+      if (id) ids.add(id);
+    }
+  }
+  return Object.fromEntries(await Promise.all([...ids].map(async id => [id, await getPlayerById(id)] as const)));
+}
 
 // === РЕНДЕР ПРОТОКОЛА ===
 const renderProtocolByPeriods = (
   protocol: any,
   gameDetails: Game,
   protocolPlayers: Record<string, any>,
-  onVideoPress: (url: string) => void
+  onVideoPress: (url: string) => void,
+  finished: boolean,
 ) => {
   const { homeTeamLogo, awayTeamLogo } = gameDetails;
 
@@ -291,9 +308,12 @@ const renderProtocolByPeriods = (
   };
 
   protocol.events?.forEach((event: any) => {
-    const periodKey = getPeriodLabel(event.time, protocol);
+    const periodKey = protocol.pms && Number(event.period) === 5 ? 'shootout' : getPeriodLabel(event.time, protocol);
     if (periods[periodKey]) {
-      periods[periodKey].push(event);
+      periods[periodKey].push({
+        ...event,
+        players: (event.players ?? []).map(protocolPlayerId).filter(Boolean),
+      });
     }
   });
 
@@ -323,7 +343,7 @@ const renderProtocolByPeriods = (
         const [bMin, bSec] = b.time.split(':').map(Number);
         return (bMin * 60 + bSec) - (aMin * 60 + aSec);
       });
-    decisiveShootoutGoal = shootoutGoals[0] || null;
+    decisiveShootoutGoal = periods.shootout.find(event => Number(event.period) === 5) || shootoutGoals[0] || null;
   }
 
   // === СЧЁТ ДО БУЛЛИТОВ ===
@@ -407,14 +427,14 @@ const renderProtocolByPeriods = (
     }
   }
 
-  // Финальная строка — строго из gameDetails
-  const finalEvent = {
-    type: 'final',
-    title: `Матч окончен. Счет ${gameDetails.homeScore} : ${gameDetails.awayScore}.`,
-    icon: 'whistle-outline',
-    key: 'final-event',
-  };
-  allEvents.push(finalEvent);
+  if (finished) {
+    allEvents.push({
+      type: 'final',
+      title: `Матч окончен. Счет ${gameDetails.homeScore} : ${gameDetails.awayScore}.`,
+      icon: 'whistle-outline',
+      key: 'final-event',
+    });
+  }
 
   // === РЕНДЕР ===
   return (
@@ -597,7 +617,7 @@ const renderPlayerStatsTable = (
 
 // === ОСНОВНОЙ КОМПОНЕНТ ===
 export default function GameDetailsScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, notificationId } = useLocalSearchParams<{ id: string; notificationId?: string }>();
   const router = useRouter();
   const f2fEnabled = useStartupFeature('f2f');
   const liveScoresEnabled = useStartupFeature('live_scores');
@@ -645,6 +665,7 @@ export default function GameDetailsScreen() {
     team2_third: '0',
   });
   const [isGameStarted, setIsGameStarted] = useState(false);
+  const [isFederationLive, setIsFederationLive] = useState(false);
 
   const f2fLoadedRef = useRef(false);
   const [videoModalUrl, setVideoModalUrl] = useState<string | null>(null);
@@ -721,26 +742,7 @@ export default function GameDetailsScreen() {
         setError('Игра не найдена');
         return;
       }
-      // Игроки для протокола
-      const newProtocolPlayers: Record<string, any> = {};
-      if (gameData.protocol?.events) {
-        const playerIds = new Set<string>();
-        gameData.protocol.events.forEach((event: any) => {
-          if (event.players) {
-            event.players.forEach((id: string) => playerIds.add(id));
-          }
-        });
-        const playersArray = await Promise.all(
-          Array.from(playerIds).map(async (playerId) => {
-            const player = await getPlayerById(playerId);
-            return { id: playerId, player };
-          })
-        );
-        playersArray.forEach(({ id, player }) => {
-          newProtocolPlayers[id] = player;
-        });
-        setProtocolPlayers(newProtocolPlayers);
-      }
+      setProtocolPlayers(await lookupProtocolPlayers(gameData.protocol));
       // Игроки для статистики
       const newStatsPlayers: Record<string, any> = {};
       if (gameData.player_stats) {
@@ -829,9 +831,9 @@ export default function GameDetailsScreen() {
 
   useEffect(() => {
     if (id) {
-      loadGameData();
+      loadGameData(Boolean(notificationId));
     }
-  }, [id, loadGameData]);
+  }, [id, loadGameData, notificationId]);
 
   // === ОТСЛЕЖИВАНИЕ СТАРТА ИГРЫ ===
   useEffect(() => {
@@ -865,7 +867,7 @@ export default function GameDetailsScreen() {
   // ✅ Инициализация счёта: если игра ещё не началась — оставляем как есть,
   // если началась — берём данные из gameDetails
   useEffect(() => {
-    if (!gameDetails) return;
+    if (!gameDetails || isFederationLive) return;
 
     const now = new Date();
     const gameStart = new Date(gameDetails.event_date);
@@ -900,7 +902,7 @@ export default function GameDetailsScreen() {
         team2_third: '0',
       });
     }
-  }, [gameDetails, isGameStarted]);
+  }, [gameDetails, isGameStarted, isFederationLive]);
 
 
   useEffect(() => {
@@ -923,32 +925,35 @@ export default function GameDetailsScreen() {
   useEffect(() => {
     if (!liveScoresEnabled || !liveGameId || !liveGameDate) return;
 
-    // Функция обновления счёта
+    let showFederationScore = false;
+    let active = true;
+    let requestInProgress = false;
+    let protocolRevision: string | null = null;
     const updateLiveScore = async () => {
-      // --- ПЕРЕНОСИМ ПРОВЕРКУ СЮДА ---
-      const gameStart = new Date(liveGameDate);
-      const gameEnd = new Date(gameStart.getTime() + 100 * 60 * 1000); // +100 минут
-      const now = new Date();
-      const isGameLive = isGameStarted && now <= gameEnd;
+      const elapsed = Date.now() - new Date(liveGameDate).getTime();
+      if (!isGameStarted || requestInProgress || elapsed > 3 * 60 * 60 * 1000) return;
 
-      if (!isGameLive) {
-        return; // Ничего не делаем
-      }
-      // --- КОНЕЦ ПЕРЕНОСА ---
-
+      requestInProgress = true;
       try {
-        const freshGame = await getGameById(liveGameId, false);
-        if (!freshGame) return;
+        const live = await apiService.fetchLiveScore(String(liveGameId)).catch(() => null);
+        if (!active || (!live && !showFederationScore && elapsed > 100 * 60 * 1000)) return;
+        const freshGame = live ? null : await getGameById(liveGameId, false);
+        if (!active || (!live && !freshGame)) return;
+        if (live) {
+          showFederationScore = true;
+          setIsFederationLive(true);
+        }
+        if (showFederationScore && !live && (!freshGame?.team1_outcome || freshGame.team1_outcome === 'unknown')) return;
 
-        const newHome = String(freshGame.homeScore ?? '0');
-        const newAway = String(freshGame.awayScore ?? '0');
+        const newHome = String(live?.score[0] ?? freshGame?.homeScore ?? '0');
+        const newAway = String(live?.score[1] ?? freshGame?.awayScore ?? '0');
         const newPeriods = {
-          team1_first: String(freshGame.team1_first ?? '0'),
-          team1_second: String(freshGame.team1_second ?? '0'),
-          team1_third: String(freshGame.team1_third ?? '0'),
-          team2_first: String(freshGame.team2_first ?? '0'),
-          team2_second: String(freshGame.team2_second ?? '0'),
-          team2_third: String(freshGame.team2_third ?? '0'),
+          team1_first: String(live?.periods[0]?.[0] ?? freshGame?.team1_first ?? '0'),
+          team1_second: String(live?.periods[1]?.[0] ?? freshGame?.team1_second ?? '0'),
+          team1_third: String(live?.periods[2]?.[0] ?? freshGame?.team1_third ?? '0'),
+          team2_first: String(live?.periods[0]?.[1] ?? freshGame?.team2_first ?? '0'),
+          team2_second: String(live?.periods[1]?.[1] ?? freshGame?.team2_second ?? '0'),
+          team2_third: String(live?.periods[2]?.[1] ?? freshGame?.team2_third ?? '0'),
         };
 
         setLiveScore((currentScore) => {
@@ -972,8 +977,29 @@ export default function GameDetailsScreen() {
           console.log('🔄 Live period scores updated');
           return newPeriods;
         });
+        if (live?.protocolRevision && live.protocolRevision !== protocolRevision) {
+          const updated = await getGameById(liveGameId, false);
+          if (updated?.protocol?.events) {
+            const players = await lookupProtocolPlayers(updated.protocol);
+            if (active) {
+              setProtocolPlayers(players);
+              setGameDetails(current => current?.id === liveGameId ? { ...current, protocol: updated.protocol } : current);
+              protocolRevision = live.protocolRevision;
+            }
+          }
+        } else if (!live && showFederationScore && freshGame) {
+          const players = await lookupProtocolPlayers(freshGame.protocol);
+          if (active) {
+            showFederationScore = false;
+            setProtocolPlayers(players);
+            setGameDetails(freshGame);
+            setIsFederationLive(false);
+          }
+        }
       } catch (err) {
         console.warn('⚠️ Failed to update live score:', err);
+      } finally {
+        requestInProgress = false;
       }
     };
 
@@ -984,7 +1010,10 @@ export default function GameDetailsScreen() {
     const intervalId = setInterval(updateLiveScore, 2 * 60 * 1000);
 
     // Очистка при размонтировании
-    return () => clearInterval(intervalId);
+    return () => {
+      active = false;
+      clearInterval(intervalId);
+    };
   }, [isGameStarted, liveGameDate, liveGameId, liveScoresEnabled]);
 
 
@@ -1394,7 +1423,8 @@ export default function GameDetailsScreen() {
                       finalUrl += (embedUrl.includes('?') ? '&' : '?') + `t=${timeParamMatch[1]}`;
                     }
                     setVideoModalUrl(finalUrl);
-                  }
+                  },
+                  !isFederationLive && gameDetails.status === 'finished',
                 )}
               </View>
             )}

@@ -166,7 +166,7 @@ export async function loadMatchPushTeams(): Promise<MatchPushTeam[]> {
 }
 
 export function matchPushEventId(data: Record<string, unknown> | undefined): string | null {
-  if (data?.type !== 'match.score') return null;
+  if (data?.type !== 'match.score' && data?.type !== 'match.event') return null;
   const id = data.event_id;
   return (typeof id === 'number' || typeof id === 'string') && /^[1-9]\d*$/.test(String(id))
     ? String(id)
