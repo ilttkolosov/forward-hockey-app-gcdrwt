@@ -388,6 +388,12 @@ export const loadPlayersFromDatabase = async (): Promise<DatabasePlayer[]> => {
   return parseRows<DatabasePlayer>(await db.getAllAsync<RawJsonRow>('SELECT raw_json FROM players ORDER BY number, name'));
 };
 
+export const loadCurrentPlayerIds = async (): Promise<Set<string>> => {
+  const db = await getDatabase();
+  return new Set((await db.getAllAsync<{ player_id: string }>('SELECT player_id FROM current_players'))
+    .map(row => row.player_id));
+};
+
 export const replaceTeams = async (items: ApiTeam[], version: number): Promise<void> => {
   const db = await getDatabase();
   await withExclusiveDatabaseWrite(db, async tx => {
@@ -453,21 +459,51 @@ export const replaceSeasons = async (items: ApiSeason[], version: number): Promi
   });
 };
 
-export const replacePlayers = async (items: DatabasePlayer[], version: number): Promise<void> => {
+export const PLAYER_DISTRIBUTION_RECEIPT = 'player_distribution_sha256';
+
+export const mergePlayerDirectory = async (
+  items: DatabasePlayer[],
+  currentIds: number[],
+  version: number,
+  distribution?: { sha256: string; generatedAt: string },
+): Promise<void> => {
   const db = await getDatabase();
   await withExclusiveDatabaseWrite(db, async tx => {
-    await tx.runAsync('DELETE FROM players');
+    const installed = await tx.getFirstAsync<{ version: number; synced_at: string | null }>(
+      "SELECT version, synced_at FROM sync_versions WHERE entity = 'players'",
+    );
+    const installedVersion = installed?.version ?? 0;
+    if (distribution) {
+      const receipt = await tx.getFirstAsync<ValueRow>('SELECT value FROM metadata WHERE key = ?', PLAYER_DISTRIBUTION_RECEIPT);
+      if (receipt?.value === distribution.sha256) return;
+    } else if (version < installedVersion) {
+      return;
+    }
     for (const item of items) {
       await tx.runAsync(
         `INSERT INTO players
           (id, name, nationality, number, position, birth_date, metrics_json, photo_url, updated_at, raw_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
         String(item.id), item.name || '', item.nationality || '', item.number ?? null,
         item.position || '', item.birth_date || '', JSON.stringify(item.metrics || {}),
         item.photo_url || '', nowIso(), JSON.stringify(item)
       );
     }
-    await setReferenceVersion(tx, 'players', version);
+    const archiveTime = distribution ? Date.parse(distribution.generatedAt) : 0;
+    const lastSyncTime = installed?.synced_at ? Date.parse(installed.synced_at) : 0;
+    if (!distribution || version > installedVersion || (version === installedVersion && archiveTime >= lastSyncTime)) {
+      await tx.runAsync('DELETE FROM current_players');
+      for (const id of currentIds) {
+        await tx.runAsync('INSERT INTO current_players (player_id) VALUES (?) ON CONFLICT(player_id) DO NOTHING', String(id));
+      }
+      await setReferenceVersion(tx, 'players', version);
+    }
+    if (distribution) {
+      await tx.runAsync(
+        'INSERT INTO metadata (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+        PLAYER_DISTRIBUTION_RECEIPT, distribution.sha256,
+      );
+    }
   });
 };
 

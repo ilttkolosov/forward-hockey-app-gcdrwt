@@ -43,3 +43,5 @@ google-services.json
 
 # Reconstructed from versioned chunks by npm postinstall
 assets/database/forward_seed.db
+assets/player-distribution/players-distribution.zip
+assets/player-distribution/bundled.ts

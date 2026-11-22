@@ -237,6 +237,7 @@ async function main() {
         item.position || '', item.birth_date || '', json(item.metrics, {}), item.photo_url || '', json(item, {}),
       ])
     );
+    db.run('INSERT INTO current_players (player_id) SELECT id FROM players');
     insertRows(
       db,
       'INSERT INTO leagues (id, name, slug, raw_json) VALUES (?, ?, ?, ?)',

@@ -658,18 +658,17 @@ function RootLayoutContent() {
       initializationLog(
         `Игроки: подготовлено ${playersList.length} записей за ${elapsedMilliseconds(playersStartedAt)} мс`
       );
-      const playerPhotoArchiveMissing = await playerDownloadService.needsPhotoArchiveRefresh(playersVersion);
-      if (canUseNetwork && (localPlayersVersion !== playersVersion || playerPhotoArchiveMissing)) {
-        const playerRefreshStartedAt = Date.now();
-        initializationLog(
-          `Игроки: версия ${localPlayersVersion}/${playersVersion}, `
-          + `архив фото=${playerPhotoArchiveMissing ? 'отсутствует' : 'готов'}, обновление запущено в фоне`
-        );
+      if (canUseNetwork) {
         afterStartupTasks.push(() => {
-          void playerDownloadService.refreshPlayersData(playersVersion)
-            .then(async freshPlayers => {
-              await writeOptionalStorageValue(PLAYERS_VERSION_KEY, String(playersVersion));
-              publishReferenceDataUpdate(['players'], { players: playersVersion });
+          void effectiveConfigPromise
+            .then(async effectiveConfig => {
+              const currentVersion = await getReferenceVersion('players');
+              const targetVersion = Math.max(currentVersion, getConfiguredReferenceVersion(effectiveConfig, 'players'));
+              if (targetVersion === currentVersion && !(await playerDownloadService.needsPhotoArchiveRefresh())) return;
+              const playerRefreshStartedAt = Date.now();
+              const freshPlayers = await playerDownloadService.refreshPlayersData(targetVersion);
+              await writeOptionalStorageValue(PLAYERS_VERSION_KEY, String(targetVersion));
+              publishReferenceDataUpdate(['players'], { players: targetVersion });
               initializationLog(
                 `Игроки: фоновое обновление завершено; записей=${freshPlayers.length}, `
                 + `${elapsedMilliseconds(playerRefreshStartedAt)} мс`

@@ -1,0 +1,49 @@
+node_modules/
+
+.git/
+.expo/
+
+dist/
+web-build/
+expo-env.d.ts
+
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+.metro-health-check*
+
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+.DS_Store
+*.pem
+
+.env*.local
+
+*.tsbuildinfo
+
+.natively/
+
+/android/
+/ios/
+
+# Generated Android outputs for local Expo modules
+modules/*/android/build/
+
+netlify.toml
+.netlify/
+
+# Firebase credentials
+google-services.json
+
+# Reconstructed from versioned chunks by npm postinstall
+assets/database/forward_seed.db
+assets/player-distribution/bundled.ts
+
+# The administrator export is uploaded only with the EAS build context.
+!assets/player-distribution/players-distribution.zip

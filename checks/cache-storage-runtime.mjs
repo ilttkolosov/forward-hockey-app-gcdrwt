@@ -190,8 +190,10 @@ function harness(initialLegacy = {}) {
       fflate: {}, buffer: {}, 'expo-asset': { Asset: {} }, './httpClient': {},
       '../assets/player-photos/seed-manifest.json': { default: { version: -1 } },
       '../assets/player-photos/generated': { PLAYER_PHOTO_ASSETS: {} },
+      '../assets/player-distribution/bundled': { playerDistributionAsset: null, playerDistributionDigest: null },
       '../database/repository': {
         getReferenceVersion: async () => 1,
+        loadCurrentPlayerIds: async () => new Set(['7']),
         loadPlayersFromDatabase: async () => [{ id: 7, name: 'Игрок', number: 7, metrics: {}, photo_url: '' }],
       },
       '../features/messenger/playerIdentity': { replaceMessengerPlayerNumbers() {} },
