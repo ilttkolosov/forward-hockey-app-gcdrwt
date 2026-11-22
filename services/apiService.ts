@@ -39,6 +39,17 @@ export interface ApiTeam {
   logo_url: string; // может быть пустой строкой
 }
 
+export type ApiLiveScore = {
+  score: [number, number];
+  periods: [number, number][];
+  protocolRevision: string | null;
+};
+
+const isScorePair = (value: unknown): value is [number, number] => (
+  Array.isArray(value) && value.length === 2
+  && value.every(item => Number.isSafeInteger(item) && item >= 0)
+);
+
 interface ApiPlayerDetailsResponse {
   id: string;
   name: string;
@@ -187,6 +198,20 @@ async fetchEvents(params: {
       console.error('API Service: Error fetching event by ID:', error);
       throw error;
     }
+  }
+
+  async fetchLiveScore(id: string): Promise<ApiLiveScore | null> {
+    if (!/^[1-9]\d*$/.test(id)) return null;
+    const response = await fetchWithTimeout(`${this.baseUrl}/live-score/${id}`, undefined, 6_000);
+    if (!response.ok) return null;
+    const { data } = await response.json() as { data?: { score?: unknown; periods?: unknown; protocol_revision?: unknown } | null };
+    if (!isScorePair(data?.score) || !Array.isArray(data?.periods) || !data.periods.every(isScorePair)) return null;
+    return {
+      score: data.score,
+      periods: data.periods,
+      protocolRevision: typeof data.protocol_revision === 'string' && /^[a-f0-9]{64}$/.test(data.protocol_revision)
+        ? data.protocol_revision : null,
+    };
   }
 
   /**

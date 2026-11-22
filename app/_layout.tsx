@@ -58,18 +58,16 @@ import {
   type ReferenceDataLocalState,
 } from '../services/referenceDataService';
 import { syncCompletedHistoricalGames } from '../services/historicalSync';
-import { applyStartupConfig, getConfiguredApiUrl } from '../services/startupConfigRuntime';
+import { applyStartupConfig } from '../services/startupConfigRuntime';
+import { getMatchPushSettings, MATCH_PUSH_ENABLED_KEY, matchPushEventId } from '../services/matchPush';
 import { synchronizeTrainings } from '../services/trainingService';
 import { startTrainingNotificationCleanup } from '../services/trainingNotificationService';
 import {
-  getProjectExpoPushToken,
-  messengerNotificationPermissionGranted,
   normalizeMessengerPushPayload,
   processMessengerPushPayload,
 } from '../services/messengerPush';
 import {
   isExpoGo,
-  remotePushNotificationsSupported,
 } from '../services/runtimeEnvironment';
 import { getMessengerActiveRoomId } from '../services/messengerRealtime';
 import { publishReferenceDataUpdate } from '../services/referenceDataUpdates';
@@ -334,43 +332,13 @@ const progressStyles = StyleSheet.create({
  * Фоновая проверка статуса push-уведомлений и обновление локального флага
  */
 const syncPushSubscriptionStatus = async () => {
-  if (!remotePushNotificationsSupported) {
-    await AsyncStorage.setItem('push_notifications_enabled', 'false');
-    return;
-  }
   try {
-    const permission = await Notifications.getPermissionsAsync();
-    if (!messengerNotificationPermissionGranted(permission)) {
-      await AsyncStorage.setItem('push_notifications_enabled', 'false');
-      console.log('[Инициализация] Push отключены: разрешение пользователя не выдано');
-      return;
-    }
-
-    const token = await getProjectExpoPushToken();
-
-    // Отправляем запрос на проверку подписки
-    const response = await fetch(getConfiguredApiUrl('/push-subscription'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
-    });
-
-    const result = await response.json();
-
-    if (!response.ok || result.status !== 'success') {
-      throw new Error(result.error || 'Неизвестная ошибка');
-    }
-
-    const isEnabled = result.data.is_subscribed;
-    await AsyncStorage.setItem('push_notifications_enabled', String(isEnabled));
-    console.log(
-      `[Инициализация] Статус push-подписки синхронизирован: ${isEnabled ? 'включена' : 'отключена'}`
-    );
+    const { enabled } = await getMatchPushSettings();
+    await AsyncStorage.setItem(MATCH_PUSH_ENABLED_KEY, String(enabled));
   } catch (error) {
     console.warn('[Инициализация] Не удалось синхронизировать push-подписку:', error);
   }
 };
-
 
 // --- ОСНОВНОЙ КОМПОНЕНТ ---
 function RootLayoutContent() {
@@ -403,6 +371,12 @@ function RootLayoutContent() {
       return;
     }
     const data = response.notification.request.content.data;
+    const matchId = matchPushEventId(data);
+    if (matchId) {
+      router.push({ pathname: '/game/[id]', params: { id: matchId, notificationId: identifier } });
+      return;
+    }
+
     const messengerPush = normalizeMessengerPushPayload(data);
     const opensMessengerRoom =
       messengerPush?.type === 'messenger.message'
@@ -539,7 +513,7 @@ function RootLayoutContent() {
       // Push is controlled remotely as well as by the user's local preference.
       afterStartupTasks.push(() => {
         if (config.features?.push_notifications === false) {
-          void AsyncStorage.setItem('push_notifications_enabled', 'false');
+          void AsyncStorage.setItem(MATCH_PUSH_ENABLED_KEY, 'false');
           return;
         }
         void syncPushSubscriptionStatus();
@@ -851,6 +825,7 @@ function RootLayoutContent() {
           <Stack.Screen name="index" options={{ gestureEnabled: false }} />
           <Stack.Screen name="players" />
           <Stack.Screen name="trainings" />
+          <Stack.Screen name="match-notifications" />
           <Stack.Screen name="player/[id]" />
           <Stack.Screen name="upcoming" />
           <Stack.Screen name="game/[id]" />
