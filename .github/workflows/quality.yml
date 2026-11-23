@@ -33,6 +33,9 @@ jobs:
           EXPO_NO_TELEMETRY: '1'
         run: npx expo export --platform android --output-dir /tmp/forward-hockey-export
 
+      - name: Verify the bundled player archive
+        run: node checks/player-distribution-bundle.mjs /tmp/forward-hockey-export android
+
       - name: Typecheck and lint
         run: npm run check
 

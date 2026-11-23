@@ -1,6 +1,10 @@
 const { getDefaultConfig } = require('expo/metro-config');
 const { FileStore } = require('metro-cache');
+const { execFileSync } = require('node:child_process');
 const path = require('path');
+
+// Refresh the archive reference for builds that reuse installed dependencies.
+execFileSync(process.execPath, [path.join(__dirname, 'scripts/player-distribution-assets.mjs'), 'restore'], { stdio: 'inherit' });
 
 const config = getDefaultConfig(__dirname);
 
