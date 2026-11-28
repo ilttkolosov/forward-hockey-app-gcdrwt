@@ -22,6 +22,7 @@ import {
   ApiVenuesResponse 
 } from '../types/apiTypes';
 import { fetchWithTimeout } from './httpClient';
+import { readMatchSnapshot, type MatchSnapshot } from './matchState';
 import type { TrainingQuery, TrainingResponse } from '../types/training';
 
 // --- Старые интерфейсы для игроков (оставлены для совместимости) ---
@@ -38,17 +39,6 @@ export interface ApiTeam {
   name: string;
   logo_url: string; // может быть пустой строкой
 }
-
-export type ApiLiveScore = {
-  score: [number, number];
-  periods: [number, number][];
-  protocolRevision: string | null;
-};
-
-const isScorePair = (value: unknown): value is [number, number] => (
-  Array.isArray(value) && value.length === 2
-  && value.every(item => Number.isSafeInteger(item) && item >= 0)
-);
 
 interface ApiPlayerDetailsResponse {
   id: string;
@@ -183,7 +173,7 @@ async fetchEvents(params: {
   async fetchEventById(id: string): Promise<ApiEvent | null> {
     console.log('API Service: Fetching event by ID via /get-events?event_id=', id);
     try {
-      const response = await fetchWithTimeout(`${this.baseUrl}/get-events?event_id=${id}`);
+      const response = await fetchWithTimeout(`${this.baseUrl}/get-events?event_id=${id}`, { headers: { 'Cache-Control': 'no-cache' } });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -200,18 +190,11 @@ async fetchEvents(params: {
     }
   }
 
-  async fetchLiveScore(id: string): Promise<ApiLiveScore | null> {
+  async fetchMatchSnapshot(id: string): Promise<MatchSnapshot | null> {
     if (!/^[1-9]\d*$/.test(id)) return null;
     const response = await fetchWithTimeout(`${this.baseUrl}/live-score/${id}`, undefined, 6_000);
     if (!response.ok) return null;
-    const { data } = await response.json() as { data?: { score?: unknown; periods?: unknown; protocol_revision?: unknown } | null };
-    if (!isScorePair(data?.score) || !Array.isArray(data?.periods) || !data.periods.every(isScorePair)) return null;
-    return {
-      score: data.score,
-      periods: data.periods,
-      protocolRevision: typeof data.protocol_revision === 'string' && /^[a-f0-9]{64}$/.test(data.protocol_revision)
-        ? data.protocol_revision : null,
-    };
+    return readMatchSnapshot(await response.json());
   }
 
   /**

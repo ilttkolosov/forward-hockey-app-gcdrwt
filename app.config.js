@@ -36,7 +36,7 @@ export default ({ config }) => {
     // to users is restored per platform by withAppDisplayName below.
     name: "ForwardHockey14",
     slug: "Forward",
-    version: "2.4.121",
+    version: "2.4.122",
     // Keep landscape orientations in the native targets so iOS Quick Look can
     // rotate video. The application itself is locked to portrait at runtime.
     orientation: "default",
@@ -51,7 +51,7 @@ export default ({ config }) => {
     ios: {
       supportsTablet: true,
       requireFullScreen: true,
-      buildNumber: "274",
+      buildNumber: "275",
       bundleIdentifier: "com.aleksandrkolosov.forward2014",
       infoPlist: {
         CFBundleDisplayName: "ХК Форвард 14",
@@ -74,7 +74,7 @@ export default ({ config }) => {
       },
     },
     android: {
-      versionCode: 274,
+      versionCode: 275,
       adaptiveIcon: {
         foregroundImage: "./assets/icons/myIcon.png",
         backgroundColor: "#ffffff",

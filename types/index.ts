@@ -1,6 +1,7 @@
 // types/index.ts
 
 import { ApiSeason, ApiVenue } from './apiTypes'; // Импортируем типы из apiTypes.ts
+import type { MatchState } from '../services/matchState';
 
 export interface Game {
   id: string;
@@ -50,6 +51,8 @@ export interface Game {
   league_name?: string; // ← Добавлено
   protocol?: any;
   player_stats?: any;
+  matchState?: MatchState;
+  hasScore?: boolean;
 }
 
 

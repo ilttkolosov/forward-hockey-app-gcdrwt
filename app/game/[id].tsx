@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   View,
   Text,
   ScrollView,
@@ -16,11 +17,15 @@ import {
   Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import * as Notifications from 'expo-notifications';
 import { WebView } from 'react-native-webview';
 import { Game } from '../../types';
-import { getGameById, getVenueById, getGames, gameDetailsCache } from '../../data/gameData';
+import { getCachedGameById, getVenueById, getGames, gameDetailsCache, refreshGameDetails } from '../../data/gameData';
 import { apiService } from '../../services/apiService';
+import { hasMatchOutcome, hasMatchProtocol, matchPhaseForGame, needsMatchDetails, parseForwardKickoff, type MatchSnapshot } from '../../services/matchState';
+import { matchPushEventId } from '../../services/matchPush';
+import { remotePushNotificationsSupported } from '../../services/runtimeEnvironment';
 import { colors, commonStyles } from '../../styles/commonStyles';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ErrorMessage from '../../components/ErrorMessage';
@@ -191,18 +196,6 @@ const getYouTubeEmbedUrl = (url: string): string => {
 };
 
 
-// Проверяет, заполнен ли протокол игры
-const isProtocolFilled = (protocol: any): boolean => {
-  if (!protocol) return false;
-  const maintime = protocol.maintime;
-  // Считаем протокол незаполненным, если maintime пустой, null, undefined, "00:00" или "0"
-  return maintime !== null &&
-         maintime !== undefined &&
-         maintime !== '' &&
-         maintime !== '00:00' &&
-         maintime !== '0';
-};
-
   // Проверяет, есть ли непустая статистика для хотя бы одной команды
   const hasPlayerStats = (player_stats: any): boolean => {
     if (!player_stats || typeof player_stats !== 'object') return false;
@@ -235,12 +228,6 @@ const extractNameFromEntity = (entity: any): string | undefined => {
     return entity.name;
   }
   return undefined;
-};
-
-const isGameFinished = (game: Game): boolean => {
-  const now = new Date();
-  const gameDate = new Date(game.event_date);
-  return now.getTime() - gameDate.getTime() > 3 * 60 * 60 * 1000;
 };
 
 const formatTimeSeconds = (secondsStr: string): string => {
@@ -280,7 +267,8 @@ const protocolPlayerId = (entry: unknown): string => {
 
 async function lookupProtocolPlayers(protocol: Game['protocol']) {
   const ids = new Set<string>();
-  for (const event of protocol?.events ?? []) {
+  const events = Array.isArray(protocol?.events) ? protocol.events : [];
+  for (const event of events) {
     for (const entry of event.players ?? []) {
       const id = protocolPlayerId(entry);
       if (id) ids.add(id);
@@ -296,6 +284,7 @@ const renderProtocolByPeriods = (
   protocolPlayers: Record<string, any>,
   onVideoPress: (url: string) => void,
   finished: boolean,
+  finalScore: { home: string; away: string } | null,
 ) => {
   const { homeTeamLogo, awayTeamLogo } = gameDetails;
 
@@ -308,7 +297,8 @@ const renderProtocolByPeriods = (
     shootout: [],
   };
 
-  protocol.events?.forEach((event: any) => {
+  const events = Array.isArray(protocol?.events) ? protocol.events : [];
+  events.forEach((event: any) => {
     const periodKey = protocol.pms && Number(event.period) === 5 ? 'shootout' : getPeriodLabel(event.time, protocol);
     if (periods[periodKey]) {
       periods[periodKey].push({
@@ -329,9 +319,9 @@ const renderProtocolByPeriods = (
 
   // === ОПРЕДЕЛЕНИЕ РЕШАЮЩЕГО ГОЛА В БУЛЛИТАХ ===
   let decisiveShootoutGoal: any = null;
-  if (protocol.pms) {
+  if (protocol?.pms) {
     const maintime = parseInt(protocol.maintime || '60', 10);
-    const shootoutGoals = protocol.events
+    const shootoutGoals = events
       .filter((ev: any) => {
         if (ev.type !== 'g') return false;
         const [minStr] = ev.time.split(':');
@@ -387,7 +377,7 @@ const renderProtocolByPeriods = (
   const scoreBeforeShootout = { ...currentScore };
 
   // Обрабатываем буллиты
-  if (protocol.pms && periods.shootout.length > 0) {
+  if (protocol?.pms && periods.shootout.length > 0) {
     allEvents.push({
       type: 'periodHeader',
       title: `${periodLabels.shootout} ${scoreBeforeShootout.home} – ${scoreBeforeShootout.away}`,
@@ -431,7 +421,7 @@ const renderProtocolByPeriods = (
   if (finished) {
     allEvents.push({
       type: 'final',
-      title: `Матч окончен. Счет ${gameDetails.homeScore} : ${gameDetails.awayScore}.`,
+      title: finalScore ? `Матч окончен. Счёт ${finalScore.home} : ${finalScore.away}.` : 'Матч окончен.',
       icon: 'whistle-outline',
       key: 'final-event',
     });
@@ -629,44 +619,31 @@ export default function GameDetailsScreen() {
     'seasons',
     'players',
   ]);
-  const [gameDetails, setGameDetails] = useState<Game | null>(null);
+  const [loadedGame, setGameDetails] = useState<Game | null>(null);
+  const [loadedSnapshot, setSnapshot] = useState<{ id: string; data: MatchSnapshot } | null>(null);
+  const gameDetails = loadedGame?.id === id ? loadedGame : null;
+  const snapshot = loadedSnapshot?.id === id ? loadedSnapshot.data : null;
+  const latestGameRef = useRef<Game | null>(null);
+  const latestSnapshotRef = useRef<typeof loadedSnapshot>(null);
+  const refreshMatchRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
+  const handledMatchNotification = useRef<string | undefined>(undefined);
   const [protocolPlayers, setProtocolPlayers] = useState<Record<string, any>>({});
   const [statsPlayers, setStatsPlayers] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [tabIndex, setTabIndex] = useState(0);
+  const [selectedTab, setSelectedTab] = useState('Протокол');
   const [f2fGames, setF2fGames] = useState<Game[]>([]);
   const [f2fLoading, setF2fLoading] = useState(false);
   
  
-  // Динамически формируем список вкладок
-  // const baseTabs = ['Арена', 'Статистика', 'F2F'];
-  // Динамически формируем список вкладок в нужном порядке
-  const visibleTabs = [];
-  if (gameDetails && isProtocolFilled(gameDetails.protocol)) {
-    visibleTabs.push('Протокол');
-  }
+  const tabs = ['Протокол'];
   if (gameDetails && hasPlayerStats(gameDetails.player_stats)) {
-    visibleTabs.push('Статистика');
+    tabs.push('Статистика');
   }
-  visibleTabs.push('Арена');
-  if (f2fEnabled) visibleTabs.push('F2F');
-
-  const tabs = visibleTabs;
-  //////////
-
-  const [liveScore, setLiveScore] = useState({ home: '0', away: '0' });
-  const [periodScores, setPeriodScores] = useState({
-    team1_first: '0',
-    team1_second: '0',
-    team1_third: '0',
-    team2_first: '0',
-    team2_second: '0',
-    team2_third: '0',
-  });
-  const [isGameStarted, setIsGameStarted] = useState(false);
-  const [isFederationLive, setIsFederationLive] = useState(false);
+  tabs.push('Арена');
+  if (f2fEnabled) tabs.push('F2F');
+  const tabIndex = Math.max(0, tabs.indexOf(selectedTab));
 
   const f2fLoadedRef = useRef(false);
   const [videoModalUrl, setVideoModalUrl] = useState<string | null>(null);
@@ -731,54 +708,31 @@ export default function GameDetailsScreen() {
     gameInfoHeight.current = height;
   }, []);
 
-  // === ЗАГРУЗКА ДАННЫХ ИГРЫ ===
-  const loadGameData = useCallback(async (forceRefresh = false) => {
-    void referenceRevision;
-    try {
-      console.log('Loading game data for ID:', id, { forceRefresh });
-      setLoading(true);
-      setError(null);
-      const gameData = await getGameById(id, !forceRefresh);
-      if (!gameData) {
-        setError('Игра не найдена');
-        return;
-      }
-      setProtocolPlayers(await lookupProtocolPlayers(gameData.protocol));
-      // Игроки для статистики
-      const newStatsPlayers: Record<string, any> = {};
-      if (gameData.player_stats) {
-        const statsPlayerIds = new Set<string>();
-        Object.values(gameData.player_stats).forEach(teamStats => {
-          if (Array.isArray(teamStats)) {
-            teamStats.forEach(({ player_id }) => {
-              if (player_id) {
-                statsPlayerIds.add(player_id);
-              }
-            });
-          }
-        });
-        if (statsPlayerIds.size > 0) {
-          const statsPlayersArray = await Promise.all(
-            Array.from(statsPlayerIds).map(async (playerId) => {
-              const player = await getPlayerById(playerId);
-              return { id: playerId, player };
-            })
-          );
-          statsPlayersArray.forEach(({ id, player }) => {
-            newStatsPlayers[id] = player;
-          });
+  const loadGameData = useCallback(() => refreshMatchRef.current(true), []);
+
+  const gameProtocol = gameDetails?.protocol;
+  const gamePlayerStats = gameDetails?.player_stats;
+  useEffect(() => {
+    let active = true;
+    const statsIds = new Set<string>();
+    for (const teamStats of Object.values(gamePlayerStats ?? {})) {
+      if (Array.isArray(teamStats)) {
+        for (const row of teamStats) {
+          if (row.player_id) statsIds.add(String(row.player_id));
         }
       }
-      setStatsPlayers(newStatsPlayers);
-      setGameDetails(gameData);
-    } catch (err) {
-      console.error('Error loading game ', err);
-      setError('Не удалось загрузить данные игры');
-    } finally {
-      setLoading(false);
-      if (forceRefresh) setRefreshing(false);
     }
-  }, [id, referenceRevision]);
+    void Promise.all([
+      lookupProtocolPlayers(gameProtocol),
+      Promise.all([...statsIds].map(async playerId => [playerId, await getPlayerById(playerId)] as const)),
+    ]).then(([players, stats]) => {
+      if (active) {
+        setProtocolPlayers(players);
+        setStatsPlayers(Object.fromEntries(stats));
+      }
+    }).catch(error => console.warn('Не удалось загрузить игроков матча', error));
+    return () => { active = false; };
+  }, [id, gameProtocol, gamePlayerStats, referenceRevision]);
 
   // === ЗАГРУЗКА F2F ===
   const loadF2fGames = useCallback(async (currentGame: Game) => {
@@ -828,195 +782,124 @@ export default function GameDetailsScreen() {
   useEffect(() => {
     f2fLoadedRef.current = false;
     setF2fGames([]);
-  }, [referenceRevision]);
+  }, [id, referenceRevision]);
 
-  useEffect(() => {
-    if (id) {
-      loadGameData(Boolean(notificationId));
-    }
-  }, [id, loadGameData, notificationId]);
-
-  // === ОТСЛЕЖИВАНИЕ СТАРТА ИГРЫ ===
-  useEffect(() => {
-    if (!gameDetails || isGameStarted) return;
-
-    const gameStart = new Date(gameDetails.event_date);
-    const now = new Date();
-
-    // Если игра уже началась, ничего не делаем (всё уже обработано)
-    if (now >= gameStart) {
-      setIsGameStarted(true);
-      return;
-    }
-
-    // Запускаем таймер, который проверяет каждые 5 секунд, началась ли игра
-    const checkGameStartInterval = setInterval(() => {
-      const now = new Date();
-      if (now >= gameStart) {
-        console.log('🎮 Game has started! Initializing live score.');
-        setIsGameStarted(true);
-        clearInterval(checkGameStartInterval);
-      }
-    }, 5000); // Проверяем каждые 5 секунд
-
-    // Очистка при размонтировании
-    return () => clearInterval(checkGameStartInterval);
-  }, [gameDetails, isGameStarted]);
-
-
-
-  // ✅ Инициализация счёта: если игра ещё не началась — оставляем как есть,
-  // если началась — берём данные из gameDetails
-  useEffect(() => {
-    if (!gameDetails || isFederationLive) return;
-
-    const now = new Date();
-    const gameStart = new Date(gameDetails.event_date);
-    const gameHasStarted = now >= gameStart;
-
-    if (gameHasStarted) {
-      // Игра уже идёт или прошла — берём реальный счёт
-      setLiveScore({
-        home: String(gameDetails.homeScore ?? '0'),
-        away: String(gameDetails.awayScore ?? '0'),
-      });
-      setPeriodScores({
-        team1_first: String(gameDetails.team1_first ?? '0'),
-        team1_second: String(gameDetails.team1_second ?? '0'),
-        team1_third: String(gameDetails.team1_third ?? '0'),
-        team2_first: String(gameDetails.team2_first ?? '0'),
-        team2_second: String(gameDetails.team2_second ?? '0'),
-        team2_third: String(gameDetails.team2_third ?? '0'),
-      });
-      if (!isGameStarted) {
-        setIsGameStarted(true);
-      }
-    } else {
-      // Игра ещё не началась — сбрасываем счёт на 0:0 (на случай, если данные пришли с прошлой игры)
-      setLiveScore({ home: '0', away: '0' });
-      setPeriodScores({
-        team1_first: '0',
-        team1_second: '0',
-        team1_third: '0',
-        team2_first: '0',
-        team2_second: '0',
-        team2_third: '0',
-      });
-    }
-  }, [gameDetails, isGameStarted, isFederationLive]);
-
+  useEffect(() => setSelectedTab('Протокол'), [id]);
 
   useEffect(() => {
     if (f2fEnabled && gameDetails && !f2fLoadedRef.current) {
-      loadF2fGames(gameDetails);
+      void loadF2fGames(gameDetails);
     }
   }, [f2fEnabled, gameDetails, loadF2fGames]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadGameData(true);
-    setRefreshing(false);
+    try {
+      await loadGameData();
+    } finally {
+      setRefreshing(false);
+    }
   };
 
-
-  // === ФОНОВОЕ ОБНОВЛЕНИЕ СЧЁТА ВО ВРЕМЯ ИГРЫ ===
-  const liveGameId = gameDetails?.id;
-  const liveGameDate = gameDetails?.event_date;
-
-  useEffect(() => {
-    if (!liveScoresEnabled || !liveGameId || !liveGameDate) return;
-
-    let showFederationScore = false;
+  useFocusEffect(useCallback(() => {
+    if (!id) return;
     let active = true;
-    let requestInProgress = false;
-    let protocolRevision: string | null = null;
-    const updateLiveScore = async () => {
-      const elapsed = Date.now() - new Date(liveGameDate).getTime();
-      if (!isGameStarted || requestInProgress || elapsed > 3 * 60 * 60 * 1000) return;
+    let initialized = false;
+    let loadedDetails = false;
+    let inFlight: Promise<void> | null = null;
+    let game = latestGameRef.current?.id === id ? latestGameRef.current : null;
+    let recentSnapshot = latestSnapshotRef.current?.id === id ? latestSnapshotRef.current.data : null;
+    let legacyRevision: string | null = recentSnapshot?.live?.protocolRevision ?? null;
 
-      requestInProgress = true;
-      try {
-        const live = await apiService.fetchLiveScore(String(liveGameId)).catch(() => null);
-        if (!active || (!live && !showFederationScore && elapsed > 100 * 60 * 1000)) return;
-        const freshGame = live ? null : await getGameById(liveGameId, false);
-        if (!active || (!live && !freshGame)) return;
-        if (live) {
-          showFederationScore = true;
-          setIsFederationLive(true);
-        }
-        if (showFederationScore && !live && (!freshGame?.team1_outcome || freshGame.team1_outcome === 'unknown')) return;
-
-        const newHome = String(live?.score[0] ?? freshGame?.homeScore ?? '0');
-        const newAway = String(live?.score[1] ?? freshGame?.awayScore ?? '0');
-        const newPeriods = {
-          team1_first: String(live?.periods[0]?.[0] ?? freshGame?.team1_first ?? '0'),
-          team1_second: String(live?.periods[1]?.[0] ?? freshGame?.team1_second ?? '0'),
-          team1_third: String(live?.periods[2]?.[0] ?? freshGame?.team1_third ?? '0'),
-          team2_first: String(live?.periods[0]?.[1] ?? freshGame?.team2_first ?? '0'),
-          team2_second: String(live?.periods[1]?.[1] ?? freshGame?.team2_second ?? '0'),
-          team2_third: String(live?.periods[2]?.[1] ?? freshGame?.team2_third ?? '0'),
-        };
-
-        setLiveScore((currentScore) => {
-          if (newHome === currentScore.home && newAway === currentScore.away) {
-            return currentScore;
-          }
-          console.log('🔄 Live score updated');
-          return { home: newHome, away: newAway };
-        });
-
-        setPeriodScores((currentPeriods) => {
-          const periodsChanged =
-            newPeriods.team1_first !== currentPeriods.team1_first ||
-            newPeriods.team1_second !== currentPeriods.team1_second ||
-            newPeriods.team1_third !== currentPeriods.team1_third ||
-            newPeriods.team2_first !== currentPeriods.team2_first ||
-            newPeriods.team2_second !== currentPeriods.team2_second ||
-            newPeriods.team2_third !== currentPeriods.team2_third;
-
-          if (!periodsChanged) return currentPeriods;
-          console.log('🔄 Live period scores updated');
-          return newPeriods;
-        });
-        if (live?.protocolRevision && live.protocolRevision !== protocolRevision) {
-          const updated = await getGameById(liveGameId, false);
-          if (updated?.protocol?.events) {
-            const players = await lookupProtocolPlayers(updated.protocol);
-            if (active) {
-              setProtocolPlayers(players);
-              setGameDetails(current => current?.id === liveGameId ? { ...current, protocol: updated.protocol } : current);
-              protocolRevision = live.protocolRevision;
-            }
-          }
-        } else if (!live && showFederationScore && freshGame) {
-          const players = await lookupProtocolPlayers(freshGame.protocol);
-          if (active) {
-            showFederationScore = false;
-            setProtocolPlayers(players);
-            setGameDetails(freshGame);
-            setIsFederationLive(false);
-          }
-        }
-      } catch (err) {
-        console.warn('⚠️ Failed to update live score:', err);
-      } finally {
-        requestInProgress = false;
-      }
+    const showGame = (current: Game) => {
+      latestGameRef.current = current;
+      setGameDetails(current);
+      setLoading(false);
+      setError(null);
+    };
+    const showSnapshot = (data: MatchSnapshot) => {
+      recentSnapshot = data;
+      latestSnapshotRef.current = { id, data };
+      setSnapshot(latestSnapshotRef.current);
     };
 
-    // Запускаем первое обновление немедленно
-    updateLiveScore();
+    const sync = (force = false): Promise<void> => {
+      if (!active) return Promise.resolve();
+      if (inFlight) return force ? inFlight.then(() => sync(true)) : inFlight;
 
-    // Запускаем интервал каждые 2 минуты
-    const intervalId = setInterval(updateLiveScore, 2 * 60 * 1000);
+      const update = async () => {
+        try {
+          if (!initialized) {
+            initialized = true;
+            game ??= await getCachedGameById(id, true).catch(() => null);
+            if (!active) return;
+            if (game) showGame(game);
+          }
 
-    // Очистка при размонтировании
+          const next = await apiService.fetchMatchSnapshot(id).catch(() => null);
+          if (!active) return;
+          const legacyFinal = next && !next.state && !next.live && recentSnapshot?.live;
+          if (next?.state || next?.live) showSnapshot(next);
+          const nextLegacyRevision = next?.live?.protocolRevision;
+          const legacyProtocolChanged = !next?.state && nextLegacyRevision && nextLegacyRevision !== legacyRevision;
+          if (force || needsMatchDetails(game, next, loadedDetails) || legacyFinal || legacyProtocolChanged) {
+            const fresh = await refreshGameDetails(id, next?.state ?? undefined);
+            if (!active) return;
+            if (!fresh) {
+              if (!game) setError('Матч не найден');
+              return;
+            }
+            game = fresh;
+            loadedDetails = true;
+            legacyRevision = nextLegacyRevision ?? null;
+            showGame(fresh);
+            if (legacyFinal && hasMatchOutcome(fresh) && next) showSnapshot(next);
+          }
+        } catch (error) {
+          if (active && !game) setError('Не удалось загрузить данные игры');
+          if (active) console.warn('Не удалось обновить данные матча', error);
+        } finally {
+          if (active) setLoading(false);
+        }
+      };
+      inFlight = update().finally(() => { inFlight = null; });
+      return inFlight;
+    };
+
+    refreshMatchRef.current = sync;
+    if (!game) {
+      setLoading(true);
+      setError(null);
+    }
+    const openedFromPush = Boolean(notificationId && notificationId !== handledMatchNotification.current);
+    handledMatchNotification.current = notificationId;
+    void sync(openedFromPush);
+
+    const appState = AppState.addEventListener('change', state => {
+      if (state === 'active') void sync();
+    });
+    const matchNotifications = liveScoresEnabled && remotePushNotificationsSupported
+      ? Notifications.addNotificationReceivedListener(notification => {
+        const data = notification.request.content.data;
+        if (data.test !== true && matchPushEventId(data) === id) void sync();
+      }) : null;
+    const interval = liveScoresEnabled ? setInterval(() => {
+      if (AppState.currentState !== 'active' || !game) return;
+      const state = recentSnapshot?.state ?? game.matchState;
+      const kickoff = state ? state.startsAt : parseForwardKickoff(game.event_date);
+      const elapsed = kickoff === null ? null : Date.now() - kickoff;
+      if (elapsed === null ? state?.status === 'live' : elapsed >= -5 * 60_000 && elapsed <= 3 * 60 * 60_000) {
+        void sync();
+      }
+    }, 15_000) : null;
+
     return () => {
       active = false;
-      clearInterval(intervalId);
+      appState.remove();
+      matchNotifications?.remove();
+      if (interval !== null) clearInterval(interval);
     };
-  }, [isGameStarted, liveGameDate, liveGameId, liveScoresEnabled]);
-
+  }, [id, liveScoresEnabled, notificationId]));
 
   // === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ОТОБРАЖЕНИЯ ===
   const getOutcomeText = (outcome: string): string => {
@@ -1101,7 +984,6 @@ export default function GameDetailsScreen() {
     homeTeamId,
     awayTeamId,
     protocol,
-    player_stats,
   } = gameDetails;
 
   const homeTeamName = homeTeam?.name || 'Команда 1';
@@ -1110,13 +992,22 @@ export default function GameDetailsScreen() {
   const seasonName = extractNameFromEntity(season) || season_name;
   const hideTime = formattedTime === '00:00';
   const displayDateTime = hideTime ? formattedDate : `${formattedDate} • ${formattedTime}`;
-  const now = new Date();
-  const gameDate = new Date(event_date);
-  //const isGameStarted = now >= gameDate;
-  const scoreDisplay = isGameStarted ? `${liveScore.home} : ${liveScore.away}` : 'VS';
-  const showPeriodScores = isGameStarted;
-  const homeOutcomeText = extractOutcome(homeOutcome);
-  const awayOutcomeText = extractOutcome(awayOutcome);
+  const matchState = snapshot?.state ?? gameDetails.matchState;
+  const confirmedOutcome = hasMatchOutcome(gameDetails);
+  const matchPhase = matchPhaseForGame(gameDetails, snapshot);
+  const kickoff = matchState ? matchState.startsAt : parseForwardKickoff(event_date);
+  const kickoffReached = kickoff !== null && Date.now() >= kickoff;
+  const reportedScore = snapshot?.state?.score ?? snapshot?.live?.score ?? matchState?.score;
+  const reportedPeriods = snapshot?.state?.periods ?? snapshot?.live?.periods ?? matchState?.periods;
+  const recordedScore = (gameDetails.hasScore ?? confirmedOutcome) && homeScore !== undefined && awayScore !== undefined
+    ? { home: String(homeScore), away: String(awayScore) } : null;
+  const federationScore = reportedScore ? { home: String(reportedScore[0]), away: String(reportedScore[1]) } : null;
+  const liveScore = matchPhase === 'live' ? federationScore ?? recordedScore
+    : matchPhase === 'finished' ? (confirmedOutcome ? recordedScore ?? federationScore : federationScore) : null;
+  const periodScores = matchPhase === 'live' || !confirmedOutcome ? reportedPeriods : null;
+  const scoreDisplay = liveScore ? `${liveScore.home} : ${liveScore.away}` : 'VS';
+  const homeOutcomeText = matchPhase === 'finished' ? extractOutcome(homeOutcome) : '';
+  const awayOutcomeText = matchPhase === 'finished' ? extractOutcome(awayOutcome) : '';
   const venueData = venueId ? getVenueById(venueId) : null;
   const gameVideoUrl = sp_video?.trim() || '';
   const shareGameVideo = async () => {
@@ -1162,7 +1053,7 @@ export default function GameDetailsScreen() {
           ) : (
             <View style={[styles.headerLogo, { backgroundColor: colors.border }]} />
           )}
-          <Text style={[styles.headerScore, !isGameStarted && styles.vsText]}>{scoreDisplay}</Text>
+          <Text style={[styles.headerScore, !liveScore && styles.vsText]}>{scoreDisplay}</Text>
           {awayTeamLogo ? (
             <Image source={{ uri: awayTeamLogo }} style={styles.headerLogo} />
           ) : (
@@ -1211,7 +1102,8 @@ export default function GameDetailsScreen() {
               )}
             </View>
             <View style={styles.scoreContainer}>
-              <Text style={[styles.score, !isGameStarted && styles.vsText]}>{scoreDisplay}</Text>
+              <Text style={[styles.score, !liveScore && styles.vsText]}>{scoreDisplay}</Text>
+              {matchPhase === 'live' && <Text style={styles.gameDate}>Идёт матч</Text>}
             </View>
             <View style={styles.teamColumn}>
               {awayTeamLogo ? (
@@ -1246,7 +1138,7 @@ export default function GameDetailsScreen() {
             <View style={styles.videoFrame}>
               <WebView
                 key={`game-video-${id}-${videoWebViewGeneration}`}
-                source={{ uri: getVKEmbedUrl(gameVideoUrl, !isGameFinished(gameDetails)) }}
+                source={{ uri: getVKEmbedUrl(gameVideoUrl, matchPhase !== 'finished') }}
                 style={[
                   styles.webview,
                   videoPlayerState !== 'ready' && styles.webviewHidden,
@@ -1393,7 +1285,7 @@ export default function GameDetailsScreen() {
         )}
 
         {/* Period Scores */}
-        {showPeriodScores && (
+        {liveScore && (
           <View style={styles.periodScores}>
             <View style={styles.periodTable}>
               <View style={styles.periodHeaderTable}>
@@ -1405,16 +1297,16 @@ export default function GameDetailsScreen() {
               </View>
               <View style={styles.periodRow}>
                 <Text style={styles.periodTeam}>{homeTeamName}</Text>
-                <Text style={styles.periodScore}>{periodScores.team1_first}</Text>
-                <Text style={styles.periodScore}>{periodScores.team1_second}</Text>
-                <Text style={styles.periodScore}>{periodScores.team1_third}</Text>
+                <Text style={styles.periodScore}>{String(periodScores?.[0]?.[0] ?? team1_first ?? '–')}</Text>
+                <Text style={styles.periodScore}>{String(periodScores?.[1]?.[0] ?? team1_second ?? '–')}</Text>
+                <Text style={styles.periodScore}>{String(periodScores?.[2]?.[0] ?? team1_third ?? '–')}</Text>
                 <Text style={styles.periodTotal}>{liveScore.home}</Text>
               </View>
               <View style={styles.periodRow}>
                 <Text style={styles.periodTeam}>{awayTeamName}</Text>
-                <Text style={styles.periodScore}>{periodScores.team2_first}</Text>
-                <Text style={styles.periodScore}>{periodScores.team2_second}</Text>
-                <Text style={styles.periodScore}>{periodScores.team2_third}</Text>
+                <Text style={styles.periodScore}>{String(periodScores?.[0]?.[1] ?? team2_first ?? '–')}</Text>
+                <Text style={styles.periodScore}>{String(periodScores?.[1]?.[1] ?? team2_second ?? '–')}</Text>
+                <Text style={styles.periodScore}>{String(periodScores?.[2]?.[1] ?? team2_third ?? '–')}</Text>
                 <Text style={styles.periodTotal}>{liveScore.away}</Text>
               </View>
             </View>
@@ -1427,7 +1319,7 @@ export default function GameDetailsScreen() {
           <SegmentedControl
             values={tabs}
             selectedIndex={tabIndex}
-            onChange={(event) => setTabIndex(event.nativeEvent.selectedSegmentIndex)}
+            onChange={(event) => setSelectedTab(tabs[event.nativeEvent.selectedSegmentIndex] ?? 'Протокол')}
             tintColor={colors.primary}
             fontStyle={{ fontSize: 14, fontWeight: '600', color: colors.text }}
             activeFontStyle={{ 
@@ -1437,10 +1329,10 @@ export default function GameDetailsScreen() {
             backgroundColor={colors.surface}
           />
           <View style={styles.tabContent}>
-            {tabs[tabIndex] === 'Протокол' && gameDetails?.protocol && (
+            {tabs[tabIndex] === 'Протокол' && (
               <View style={styles.protocolTab}>
-                {renderProtocolByPeriods(
-                  gameDetails.protocol,
+                {matchPhase === 'finished' || ((matchPhase === 'live' || kickoffReached) && hasMatchProtocol(protocol)) ? renderProtocolByPeriods(
+                  protocol,
                   gameDetails,
                   protocolPlayers,
                   (url) => {
@@ -1453,7 +1345,13 @@ export default function GameDetailsScreen() {
                     }
                     setVideoModalUrl(finalUrl);
                   },
-                  !isFederationLive && gameDetails.status === 'finished',
+                  matchPhase === 'finished',
+                  liveScore,
+                ) : (
+                  <Text style={styles.gameDate}>
+                    {matchPhase === 'live' ? 'Ожидаем первые события протокола'
+                      : kickoffReached ? 'Ожидаем подтверждение начала матча' : 'Матч ещё не начался'}
+                  </Text>
                 )}
               </View>
             )}
