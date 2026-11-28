@@ -2,6 +2,7 @@
 
 import { Game, Team } from '../types'; // Импортируем основные типы из существующего types/index.ts
 import { apiService } from '../services/apiService';
+import type { MatchState } from '../services/matchState';
 import { ApiEvent, ApiGameDetailsResponse, ApiVenue} from '../types/apiTypes'; // Импортируем новые типы
 import { loadTeamLogo } from '../services/teamStorage';
 import { dataAvailability } from '../services/dataAvailability';
@@ -238,14 +239,17 @@ const convertApiEventToGame = async (
   let homeScoreRaw = '0';
   let awayScoreRaw = '0';
   let homeOutcome, awayOutcome;
+  let hasScore = false;
   let team1_first, team1_second, team1_third;
   let team2_first, team2_second, team2_third;
 
-  if (hasResults && homeTeamInfo && awayTeamInfo) {
-    const homeTeamResults = (apiEvent.results as any)[homeTeamInfo.id];
-    const awayTeamResults = (apiEvent.results as any)[awayTeamInfo.id];
+  if (hasResults) {
+    const homeTeamResults = (apiEvent.results as Record<string, any>)[teamIds[0]];
+    const awayTeamResults = (apiEvent.results as Record<string, any>)[teamIds[1]];
 
     if (homeTeamResults && awayTeamResults) {
+      hasScore = [homeTeamResults.goals, awayTeamResults.goals]
+        .every(score => /^\d+[Бб]?$/.test(String(score ?? '')));
       homeScoreRaw = homeTeamResults.goals?.toString() || '0';
       awayScoreRaw = awayTeamResults.goals?.toString() || '0';
 
@@ -286,6 +290,7 @@ const convertApiEventToGame = async (
     // Результаты — ВСЕ КАК СТРОКИ
     homeScore: homeScoreRaw,
     awayScore: awayScoreRaw,
+    hasScore,
     homeGoals: extractNumericScore(homeScoreRaw),
     awayGoals: extractNumericScore(awayScoreRaw),
     homeOutcome,
@@ -654,110 +659,82 @@ export async function getPastGamesForTeam74(force = false): Promise<Game[]> {
 }
 
 
-/**
- * Получает одну игру по ID с детальной информацией и кэшированием.
- * Сначала ищет в кэше общих игр (gamesCache и upcomingGamesMasterCache),
- * и только при отсутствии — запрашивает через event-by-id.
- * Если useCache = false — игнорирует ВСЕ кэши и всегда идёт в API.
- */
-export const getGameById = async (id: string, useCache = true): Promise<Game | null> => {
+export const getCachedGameById = async (id: string, preferVerifiedDetails = false): Promise<Game | null> => {
   const now = Date.now();
-  console.log(`🔍 getGameById called for ID ${id}, useCache=${useCache}`);
+  const cached = gameDetailsCache[id];
+  if (preferVerifiedDetails && cached?.data.matchState) return cached.data;
+  const persistent = preferVerifiedDetails
+    ? await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`) : null;
+  if (persistent?.data.matchState) {
+    const hydrated = await hydrateGameReferences(persistent.data);
+    gameDetailsCache[id] = { data: hydrated, timestamp: persistent.savedAt };
+    return hydrated;
+  }
+  if (cached && now - cached.timestamp < GAME_DETAILS_CACHE_DURATION) return cached.data;
 
-  // 🔥 Если useCache = false — пропускаем ВСЕ кэши и идём сразу в API
-  if (!useCache) {
-    console.log(`🚀 Bypassing all caches for ID ${id} (force refresh)`);
-  } else {
-    // 1. Проверяем кэш деталей (gameDetailsCache)
-    if (gameDetailsCache[id]) {
-      const cached = gameDetailsCache[id];
-      if (now - cached.timestamp < GAME_DETAILS_CACHE_DURATION) {
-        console.log(`✅ Game details for ID ${id} returned from gameDetailsCache`);
-        return cached.data;
-      }
-    }
-
-    // 2. Ищем игру в ОБЩЕМ кэше игр (gamesCache). Списки матчей могут
-    // содержать более свежий счёт и протокол, чем ранее записанный снимок БД.
-    for (const cacheKey in gamesCache) {
-      const entry = gamesCache[cacheKey];
-      if (entry && now - entry.timestamp < GAMES_CACHE_DURATION) {
-        const found = entry.data.find(g => g.id === id);
-        if (found) {
-          console.log(`✅ Game ID ${id} found in gamesCache (key: ${cacheKey})`);
-          gameDetailsCache[id] = { data: found, timestamp: now };
-          return found;
-        }
-      }
-    }
-
-    // 3. Ищем в мастер-кэше предстоящих игр
-    if (upcomingGamesMasterCache && now - upcomingGamesMasterCache.timestamp < UPCOMING_MASTER_CACHE_DURATION) {
-      const found = upcomingGamesMasterCache.data.find(g => g.id === id);
+  for (const entry of Object.values(gamesCache)) {
+    if (now - entry.timestamp < GAMES_CACHE_DURATION) {
+      const found = entry.data.find(game => game.id === id);
       if (found) {
-        console.log(`✅ Game ID ${id} found in upcomingGamesMasterCache`);
-        gameDetailsCache[id] = { data: found, timestamp: now };
+        primeGameDetailsCache(found);
         return found;
       }
     }
+  }
 
-    // 4. SQLite — основной офлайн-источник, если экран-источник не передал
-    // более свежий снимок игры через память.
-    const localEvent = await getEventFromDatabase(id);
-    if (localEvent) {
-      await Promise.all([loadLeagues(), loadSeasons(), loadVenues(), loadTeams()]);
-      const localGame = await convertApiEventToGame(localEvent);
-      gameDetailsCache[id] = { data: localGame, timestamp: now };
-      console.log(`✅ Game ID ${id} loaded from SQLite`);
-      return localGame;
-    }
-
-    const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
-    if (persistent) {
-      const hydratedGame = await hydrateGameReferences(persistent.data);
-      gameDetailsCache[id] = { data: hydratedGame, timestamp: persistent.savedAt };
-      dataAvailability.markCachedDataUsed();
-      return hydratedGame;
+  if (upcomingGamesMasterCache && now - upcomingGamesMasterCache.timestamp < UPCOMING_MASTER_CACHE_DURATION) {
+    const found = upcomingGamesMasterCache.data.find(game => game.id === id);
+    if (found) {
+      primeGameDetailsCache(found);
+      return found;
     }
   }
 
-  // 5. Загружаем из API (либо потому что useCache=false, либо потому что не нашли в кэшах)
+  const localEvent = await getEventFromDatabase(id);
+  if (localEvent) {
+    await Promise.all([loadLeagues(), loadSeasons(), loadVenues(), loadTeams()]);
+    const localGame = await convertApiEventToGame(localEvent);
+    primeGameDetailsCache(localGame);
+    return localGame;
+  }
+
+  const stored = persistent ?? await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
+  if (!stored) return null;
+  const hydrated = await hydrateGameReferences(stored.data);
+  gameDetailsCache[id] = { data: hydrated, timestamp: stored.savedAt };
+  dataAvailability.markCachedDataUsed();
+  return hydrated;
+};
+
+/** Возвращает свежий ответ API. При сбое вызывающий код сохраняет свою текущую версию. */
+export async function refreshGameDetails(id: string, matchState?: MatchState, cache = true): Promise<Game | null> {
+  const [event] = await Promise.all([
+    apiService.fetchEventById(id), loadLeagues(), loadSeasons(), loadVenues(), loadTeams(),
+  ]);
+  if (!event || String(event.id) !== id) return null;
+  const game = await convertApiEventToGame(event);
+  if (matchState) game.matchState = matchState;
+  await upsertEvents([event]);
+  if (cache) {
+    gameDetailsCache[id] = { data: game, timestamp: Date.now() };
+    await writePersistentCache(`${GAME_DETAIL_STORAGE_PREFIX}${id}`, game);
+  }
+  return game;
+}
+
+export const getGameById = async (id: string, useCache = true): Promise<Game | null> => {
+  if (useCache) {
+    const cached = await getCachedGameById(id);
+    if (cached) return cached;
+  }
   try {
-    await loadLeagues();
-    await loadSeasons();
-    await loadVenues();
-    await loadTeams();
-
-    const apiGameDetails = await apiService.fetchEventById(id);
-    if (!apiGameDetails) {
-      const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
-      return persistent ? await hydrateGameReferences(persistent.data) : null;
-    }
-    await upsertEvents([apiGameDetails]);
-    const game = await convertApiEventToGame(apiGameDetails);
-
-    // Сохраняем в кэш только если useCache !== false
-    if (useCache) {
-      gameDetailsCache[id] = { data: game, timestamp: now };
-      await writePersistentCache(`${GAME_DETAIL_STORAGE_PREFIX}${id}`, game);
-      console.log(`💾 Game details for ID ${id} saved to memory cache (from API)`);
-    } else {
-      console.log(`💾 Game details for ID ${id} loaded from API (not cached due to useCache=false)`);
-    }
-    return game;
+    return await refreshGameDetails(id, undefined, useCache) ?? await getCachedGameById(id);
   } catch (error) {
     console.error(`❌ Failed to get game by ID ${id} from API:`, error);
-    const localEvent = await getEventFromDatabase(id);
-    if (localEvent) {
-      await Promise.all([loadLeagues(), loadSeasons(), loadVenues(), loadTeams()]);
-      const localGame = await convertApiEventToGame(localEvent);
+    const cached = await getCachedGameById(id);
+    if (cached) {
       dataAvailability.markCachedDataUsed('Не удалось обновить данные матча');
-      return localGame;
-    }
-    const persistent = await readPersistentCache<Game>(`${GAME_DETAIL_STORAGE_PREFIX}${id}`);
-    if (persistent) {
-      dataAvailability.markCachedDataUsed('Не удалось обновить данные матча');
-      return await hydrateGameReferences(persistent.data);
+      return cached;
     }
     throw error;
   }
@@ -769,6 +746,7 @@ export const getGameById = async (id: string, useCache = true): Promise<Game | n
  * открытием экрана, пока фоновая синхронизация ещё дописывает матч.
  */
 export const primeGameDetailsCache = (game: Game): void => {
+  if (!game.matchState && gameDetailsCache[game.id]?.data.matchState) return;
   gameDetailsCache[game.id] = { data: game, timestamp: Date.now() };
 };
 
